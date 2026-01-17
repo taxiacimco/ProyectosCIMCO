@@ -1,81 +1,91 @@
-/* Variables CSS para consistencia en colores, espaciados y sombras */
+/* ======================================================
+   🔹 INTEGRACIÓN DE TAILWIND CSS + ESTILOS PERSONALIZADOS TAXIA CIMCO
+   ====================================================== */
+
+/* --- Tailwind base utilities --- */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ======================================================
+   🔹 VARIABLES GLOBALES DE ESTILO
+   ====================================================== */
 :root {
     --color-primario: #FFC107; /* Amarillo de TAXIA */
     --color-secundario: #0D47A1; /* Azul oscuro corporativo */
-    --color-texto-oscuro: #333; /* Texto principal oscuro */
-    --color-texto-claro: #f0f0f0; /* Texto para fondos oscuros */
-    --color-fondo-claro: #ffffff; /* Fondo para la mayoría de las secciones */
-    --color-fondo-intermedio: #e9ecef; /* Un gris muy claro para alternar secciones */
-    --color-fondo-oscuro: #2c3e50; /* Gris azulado oscuro para header y footer */
-    --padding-seccion: 60px 20px; /* Padding por defecto para secciones */
-    --borde-redondeado: 8px; /* Radio de borde uniforme */
-    --sombra-suave: 0 4px 12px rgba(0, 0, 0, 0.08); /* Sombra más pronunciada pero suave */
-    --sombra-btn: 0 3px 6px rgba(0, 0, 0, 0.2); /* Sombra para botones */
+    --color-texto-oscuro: #333;
+    --color-texto-claro: #f0f0f0;
+    --color-fondo-claro: #ffffff;
+    --color-fondo-intermedio: #e9ecef;
+    --color-fondo-oscuro: #2c3e50;
+    --padding-seccion: 60px 20px;
+    --borde-redondeado: 8px;
+    --sombra-suave: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --sombra-btn: 0 3px 6px rgba(0, 0, 0, 0.2);
 }
 
-/* --------------------------------------------------- */
-/* REINICIO BÁSICO Y ESTILOS GLOBALES */
-/* --------------------------------------------------- */
+/* ======================================================
+   🔹 REINICIO Y ESTILOS BASE
+   ====================================================== */
 * {
     margin: 0;
     padding: 0;
-    box-sizing: border-box; /* Incluye padding y border en el ancho/alto total */
+    box-sizing: border-box;
 }
 
 html {
-    scroll-behavior: smooth; /* Permite desplazamiento suave al hacer clic en enlaces de anclaje */
+    scroll-behavior: smooth;
 }
 
 body {
-    font-family: 'Montserrat', sans-serif; /* Fuente principal */
-    line-height: 1.6; /* Altura de línea para mejor legibilidad */
+    font-family: 'Montserrat', sans-serif;
+    line-height: 1.6;
     color: var(--color-texto-oscuro);
-    background-color: #f4f7f6; /* Un gris muy claro para el fondo general del cuerpo */
-    overflow-x: hidden; /* Previene scroll horizontal indeseado */
+    background-color: #f4f7f6;
+    overflow-x: hidden;
 }
 
 a {
-    text-decoration: none; /* Elimina el subrayado de los enlaces */
+    text-decoration: none;
     color: var(--color-secundario);
 }
 
 img {
-    max-width: 100%; /* Asegura que las imágenes no se desborden de su contenedor */
-    height: auto; /* Mantiene la proporción de la imagen */
-    display: block; /* Elimina espacio extra bajo las imágenes */
+    max-width: 100%;
+    height: auto;
+    display: block;
 }
 
-/* --------------------------------------------------- */
-/* UTILIDADES Y COMPONENTES REUTILIZABLES */
-/* --------------------------------------------------- */
+/* ======================================================
+   🔹 COMPONENTES BÁSICOS
+   ====================================================== */
 .container {
-    max-width: 1200px; /* Ancho máximo para el contenido principal */
-    margin: 0 auto; /* Centra el contenedor */
-    padding: 0 20px; /* Padding lateral para evitar que el contenido toque los bordes */
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
 }
 
 .btn {
-    display: inline-block; /* Permite aplicar padding y margin */
+    display: inline-block;
     background-color: var(--color-primario);
     color: var(--color-texto-oscuro);
     padding: 12px 25px;
     border-radius: var(--borde-redondeado);
-    transition: background-color 0.3s ease, transform 0.2s ease; /* Transiciones suaves al hover */
+    transition: background-color 0.3s ease, transform 0.2s ease;
     font-weight: 700;
     box-shadow: var(--sombra-btn);
-    text-transform: uppercase; /* Texto en mayúsculas */
-    letter-spacing: 0.5px; /* Espaciado entre letras */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
-
 .btn:hover {
-    background-color: #fdd835; /* Amarillo un poco más claro al pasar el ratón */
-    transform: translateY(-3px); /* Efecto de "levantamiento" */
-    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25); /* Sombra más grande al hover */
+    background-color: #fdd835;
+    transform: translateY(-3px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.25);
 }
 
-/* --------------------------------------------------- */
-/* ENCABEZADO (HEADER) */
-/* --------------------------------------------------- */
+/* ======================================================
+   🔹 HEADER
+   ====================================================== */
 header {
     background-color: var(--color-fondo-oscuro);
     color: var(--color-texto-claro);
@@ -83,24 +93,23 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    position: sticky; /* El header se mantiene fijo al hacer scroll */
+    position: sticky;
     top: 0;
-    z-index: 1000; /* Asegura que esté siempre encima de otros elementos */
+    z-index: 1000;
     box-shadow: var(--sombra-suave);
-    flex-wrap: wrap; /* Permite que los elementos se envuelvan en pantallas pequeñas */
+    flex-wrap: wrap;
 }
 
 header h1 {
-    margin: 0;
     font-size: 1.8em;
     color: var(--color-primario);
     font-weight: 800;
 }
 
 header nav ul {
-    list-style: none; /* Elimina los puntos de lista */
-    display: flex; /* Muestra los elementos en línea */
-    gap: 25px; /* Espacio entre los elementos del menú */
+    list-style: none;
+    display: flex;
+    gap: 25px;
 }
 
 header nav a {
@@ -108,14 +117,11 @@ header nav a {
     font-weight: 600;
     padding: 5px 0;
     transition: color 0.3s ease;
-    position: relative; /* Para el efecto de subrayado al hover */
+    position: relative;
 }
-
 header nav a:hover {
     color: var(--color-primario);
 }
-
-/* Efecto de subrayado animado para el menú */
 header nav a::after {
     content: '';
     position: absolute;
@@ -126,60 +132,13 @@ header nav a::after {
     left: 0;
     transition: width 0.3s ease-in-out;
 }
-
 header nav a:hover::after {
     width: 100%;
 }
 
-/* Botón de menú hamburguesa (inicialmente oculto en desktop) */
-.menu-toggle {
-    display: none; /* Oculto por defecto */
-    font-size: 2em; /* Tamaño del icono */
-    cursor: pointer;
-    color: var(--color-texto-claro);
-    background: none;
-    border: none;
-    padding: 5px;
-}
-
-/* --------------------------------------------------- */
-/* SECCIÓN HERO (INICIO) */
-/* --------------------------------------------------- */
-.hero {
-    /* Fondo con imagen y superposición oscura para que el texto sea legible */
-    background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url('img/fondo2.png') no-repeat center center/cover;
-    color: var(--color-texto-claro);
-    text-align: center;
-    padding: var(--padding-seccion);
-    display: flex;
-    flex-direction: column; /* Apila los elementos verticalmente */
-    justify-content: center;
-    min-height: 600px; /* Altura mínima para una sección impactante */
-    gap: 20px; /* Espacio entre los elementos internos */
-    border-bottom-left-radius: var(--borde-redondeado);
-    border-bottom-right-radius: var(--borde-redondeado);
-}
-
-.hero h1 {
-    font-size: 3.5em; /* Tamaño de fuente grande para el título principal */
-    margin-bottom: 10px;
-    font-weight: 800;
-    line-height: 1.2;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4); /* Sombra para el texto */
-}
-
-.hero p {
-    font-size: 1.3em;
-    margin-bottom: 30px;
-    max-width: 800px; /* Limita el ancho del párrafo */
-    margin-left: auto;
-    margin-right: auto;
-    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
-}
-
-/* --------------------------------------------------- */
-/* SECCIONES GENERALES */
-/* --------------------------------------------------- */
+/* ======================================================
+   🔹 SECCIONES
+   ====================================================== */
 section {
     padding: var(--padding-seccion);
     text-align: center;
@@ -190,399 +149,47 @@ section {
     box-shadow: var(--sombra-suave);
     transition: all 0.3s ease;
 }
-
-/* Alterna el color de fondo para secciones pares */
 section:nth-of-type(even) {
     background-color: var(--color-fondo-intermedio);
 }
 
-/* --------------------------------------------------- */
-/* ESTILOS ESPECÍFICOS PARA LA SECCIÓN "¿QUIÉNES SOMOS?" */
-/* --------------------------------------------------- */
-#quienes-somos {
-    /* *** PROPIEDADES PARA LA IMAGEN DE FONDO *** */
-    background-image: url('img/fondo1.png'); /* <<-- ¡CAMBIA ESTA RUTA POR LA DE TU IMAGEN! -->> */
-    background-size: cover;          /* La imagen cubrirá todo el espacio del contenedor */
-    background-repeat: no-repeat;    /* Evita que la imagen se repita en mosaico */
-    background-position: center center; /* Centra la imagen en el contenedor */
-    background-attachment: scroll;   /* La imagen se desplaza con el contenido. (Usa 'fixed' para efecto de paralaje) */
-
-    /* *** SUPERPOSICIÓN (OVERLAY) PARA LEGIBILIDAD DEL TEXTO (RECOMENDADO) *** */
-    /* Estas dos líneas crean una capa semitransparente sobre la imagen */
-    /* para asegurar que el texto sea fácil de leer, especialmente si la imagen es muy brillante. */
-    background-blend-mode: overlay; /* Combina el color de fondo con la imagen */
-    background-color: rgba(0, 0, 0, 0.39); /* Capa negra semi-transparente (ajusta la opacidad 0.1 a 0.9) */
-    /* Si tu imagen es clara y quieres oscurecerla un poco, usa rgba(0,0,0,X) */
-    /* Si tu imagen es oscura y quieres aclararla un poco, usa rgba(255,255,255,X) */
-
-
-    /* *** AJUSTE DEL COLOR DE TEXTO PARA CONTRASTAR CON EL FONDO *** */
-    color: var(--color-texto-claro); /* Cambia el color del texto principal a blanco/gris claro */
-
-    /* Asegúrate de que el título H2 dentro de esta sección también contraste */
-    /* Aunque ya tienes un estilo general para h2, este lo sobrescribirá para esta sección */
-    /* Si ya tienes un #quienes-somos h2 abajo, podrías quitarlo de aquí */
-    /* #quienes-somos h2 {
-        color: var(--color-primario); /* Ejemplo: Haz el título amarillo para que resalte */
-    /* } */
-
-
-    /* *** ESTILOS GENERALES (Mantenidos o ajustados de 'section') *** */
-    /* Puedes mantener estos o eliminarlos si ya están definidos en la regla 'section'
-       y no necesitas un valor diferente para esta sección específica. */
-    /* padding: var(--padding-seccion); */
-    /* text-align: center; */
-    /* margin: 20px auto; */
-    /* max-width: 1200px; */
-    /* border-radius: var(--borde-redondeado); */
-    /* box-shadow: var(--sombra-suave); */
-    /* transition: all 0.3s ease; */
-}
-
-/* *** AJUSTES PARA EL TÍTULO Y PÁRRAFOS DENTRO DE #quienes-somos *** */
-/* Es crucial asegurar que el H2 y los P sean legibles sobre el fondo */
-/* Si ya tienes estos estilos definidos para #quienes-somos, revísalos */
-
-#quienes-somos h2 {
-    color: var(--color-primario); /* Por ejemplo, el amarillo de TAXIA para el título */
-    /* Mantener otros estilos de h2 si los quieres diferentes del global */
-    /* font-size, margin-bottom, font-weight, position, padding-bottom, etc. */
-}
-
-#quienes-somos h2::after {
-    background-color: var(--color-primario); /* Asegura que el subrayado del título también contraste */
-}
-
-#quienes-somos p {
-    color: var(--color-texto-claro); /* Asegura que los párrafos también sean de un color claro */
-    /* Mantener otros estilos de p si los quieres diferentes del global */
-    /* font-size, max-width, margin, etc. */
-}
-
-/* --------------------------------------------------- */
-/* Continúa con el resto de tu CSS (SECCIÓN SERVICIOS, etc.) */
-/* --------------------------------------------------- */
-
-/* Alterna el color de fondo para secciones pares */
-section:nth-of-type(even) {
-    background-color: var(--color-fondo-intermedio);
-}
-
-section h2 {
-    font-size: 2.8em;
-    margin-bottom: 35px;
-    color: var(--color-secundario);
-    font-weight: 700;
-    position: relative;
-    padding-bottom: 10px; /* Espacio para el subrayado */
-}
-
-/* Subrayado animado para títulos de sección */
-section h2::after {
-    content: '';
-    position: absolute;
-    width: 80px; /* Ancho inicial del subrayado */
-    height: 4px;
-    background-color: var(--color-primario);
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%); /* Centrar el subrayado */
-    border-radius: 2px;
-}
-
-section p {
-    font-size: 1.1em;
-    max-width: 800px;
-    margin: 0 auto 20px auto;
-}
-
-/* --------------------------------------------------- */
-/* SECCIÓN SERVICIOS */
-/* --------------------------------------------------- */
-.servicios-grid {
-    display: grid;
-    /* Columnas responsivas: mínimo 280px, máximo 1fr (distribución igual) */
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 30px; /* Espacio entre los ítems de servicio */
-    margin-top: 40px;
-}
-
-.servicio-item {
-    background-color: var(--color-fondo-claro);
-    padding: 30px;
-    border-radius: var(--borde-redondeado);
-    box-shadow: var(--sombra-suave);
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+/* ======================================================
+   🔹 HERO
+   ====================================================== */
+.hero {
+    background: linear-gradient(rgba(0,0,0,0.7), rgba(0,0,0,0.7)), url('../img/fondo2.png') center/cover no-repeat;
+    color: var(--color-texto-claro);
+    text-align: center;
+    padding: var(--padding-seccion);
     display: flex;
     flex-direction: column;
-    align-items: center; /* Centra el contenido horizontalmente */
-    text-align: center; /* Asegura el centrado del texto */
-    border: 1px solid #eee; /* Borde sutil */
+    justify-content: center;
+    min-height: 600px;
+    gap: 20px;
+    border-bottom-left-radius: var(--borde-redondeado);
+    border-bottom-right-radius: var(--borde-redondeado);
 }
 
-.servicio-item:hover {
-    transform: translateY(-8px); /* Efecto de levantamiento más pronunciado */
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15); /* Sombra más intensa al hover */
-}
-
-.servicio-item i {
-    font-size: 4em; /* Iconos más grandes */
-    color: var(--color-primario);
-    margin-bottom: 25px;
-    animation: bounceIn 0.8s forwards; /* Animación al cargar */
-}
-
-.servicio-item h3 {
-    font-size: 1.6em;
-    margin-bottom: 15px;
-    color: var(--color-secundario);
-}
-
-.servicio-item p {
-    font-size: 1em;
-    color: var(--color-texto-oscuro);
-    margin: 0; /* Reinicia el margen auto de la sección general */
-    flex-grow: 1; /* Permite que el párrafo ocupe el espacio restante */
-}
-
-/* --------------------------------------------------- */
-/* FORMULARIO DE AFILIACIÓN */
-/* --------------------------------------------------- */
-#afiliacion form {
-    max-width: 650px; /* Ancho ligeramente mayor para el formulario */
-    margin: 40px auto;
-    padding: 35px;
-    background-color: var(--color-fondo-claro);
-    border-radius: var(--borde-redondeado);
-    box-shadow: var(--sombra-suave);
-    text-align: left;
-    border: 1px solid #e0e0e0;
-}
-
-#afiliacion label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 600;
-    color: var(--color-texto-oscuro);
-    font-size: 1.05em;
-}
-
-#afiliacion input[type="text"],
-#afiliacion input[type="tel"],
-#afiliacion input[type="email"],
-#afiliacion select,
-#afiliacion textarea {
+/* ======================================================
+   🔹 FORMULARIOS
+   ====================================================== */
+form input, form select, form textarea {
     width: 100%;
-    padding: 14px;
-    margin-bottom: 20px;
-    border: 1px solid #ccc;
+    padding: 12px;
     border-radius: var(--borde-redondeado);
-    font-size: 1.05em;
+    border: 1px solid #ccc;
+    margin-bottom: 15px;
     font-family: 'Montserrat', sans-serif;
-    outline: none; /* Elimina el contorno azul al enfocar */
     transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
-
-#afiliacion input:focus,
-#afiliacion select:focus,
-#afiliacion textarea:focus {
+form input:focus, form select:focus, form textarea:focus {
     border-color: var(--color-secundario);
-    box-shadow: 0 0 0 3px rgba(13, 71, 161, 0.2); /* Sombra de enfoque */
+    box-shadow: 0 0 0 3px rgba(13,71,161,0.2);
 }
 
-#afiliacion textarea {
-    resize: vertical; /* Permite redimensionar solo verticalmente */
-    min-height: 120px;
-}
-
-#afiliacion button[type="submit"] {
-    width: 100%;
-    padding: 16px;
-    background-color: var(--color-secundario);
-    color: var(--color-texto-claro);
-    border: none;
-    border-radius: var(--borde-redondeado);
-    font-size: 1.2em;
-    font-weight: 700;
-    cursor: pointer;
-    transition: background-color 0.3s ease, transform 0.2s ease, box-shadow 0.2s ease;
-    box-shadow: var(--sombra-btn);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-#afiliacion button[type="submit"]:hover {
-    background-color: #0b3a8c; /* Azul un poco más oscuro */
-    transform: translateY(-3px);
-    box-shadow: 0 6px 10px rgba(0, 0, 0, 0.25);
-}
-
-#afiliacion button[type="submit"]:disabled {
-    background-color: #cccccc;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-}
-
-/* Estilos para los mensajes de validación de JS */
-#mensajeValidacion {
-    margin-top: 25px;
-    padding: 12px 18px;
-    border-radius: var(--borde-redondeado);
-    font-weight: 600;
-    text-align: center;
-    border: 1px solid transparent;
-    display: none; /* Oculto por defecto, JS lo muestra */
-    font-size: 1em;
-    animation: fadeIn 0.5s ease-out; /* Animación al aparecer */
-}
-
-.success-message {
-    background-color: rgba(0, 128, 0, 0.15);
-    color: green;
-    border-color: green;
-}
-
-.error-message {
-    background-color: rgba(255, 0, 0, 0.15);
-    color: red;
-    border-color: red;
-}
-
-.warning-message {
-    background-color: rgba(255, 165, 0, 0.15);
-    color: orange;
-    border-color: orange;
-}
-
-/* --------------------------------------------------- */
-/* SECCIÓN GALERÍA */
-/* --------------------------------------------------- */
-.galeria-contenedor {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); /* 300px mínimo para las imágenes */
-    gap: 25px;
-    margin-top: 40px;
-}
-
-.imagen-galeria {
-    position: relative;
-    overflow: hidden;
-    border-radius: var(--borde-redondeado);
-    box-shadow: var(--sombra-suave);
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.imagen-galeria:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
-}
-
-.imagen-galeria img {
-    width: 100%;
-    height: 280px; /* Altura fija para uniformidad en las imágenes */
-    object-fit: cover; /* Asegura que la imagen cubra el espacio sin distorsión */
-    display: block;
-    transition: transform 0.5s ease;
-}
-
-.imagen-galeria:hover img {
-    transform: scale(1.08); /* Ligeramente más grande al pasar el ratón */
-}
-
-.galeria-overlay {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    /* Degradado para el overlay, de transparente a oscuro */
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
-    color: var(--color-texto-claro);
-    padding: 20px;
-    text-align: left;
-    transform: translateY(100%); /* Inicialmente fuera de la vista */
-    transition: transform 0.4s ease-out; /* Animación de entrada */
-}
-
-.imagen-galeria:hover .galeria-overlay {
-    transform: translateY(0); /* Desliza el overlay hacia arriba al hover */
-}
-
-.galeria-overlay h3 {
-    margin-top: 0;
-    margin-bottom: 8px;
-    font-size: 1.4em;
-    color: var(--color-primario);
-}
-
-.galeria-overlay p {
-    font-size: 1em;
-    margin: 0;
-    color: rgba(255, 255, 255, 0.9);
-}
-
-/* --------------------------------------------------- */
-/* SECCIÓN CONTACTO */
-/* --------------------------------------------------- */
-.contact-buttons {
-    display: flex;
-    flex-wrap: wrap; /* Permite que los botones salten de línea en pantallas pequeñas */
-    justify-content: center;
-    gap: 20px; /* Espacio entre los botones de contacto */
-    margin-top: 35px;
-    margin-bottom: 40px;
-}
-
-.btn-social {
-    display: flex;
-    align-items: center;
-    gap: 10px; /* Espacio entre icono y texto */
-    padding: 14px 25px;
-    border-radius: var(--borde-redondeado);
-    font-weight: 600;
-    color: var(--color-texto-claro);
-    transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
-    box-shadow: var(--sombra-btn);
-    min-width: 180px; /* Ancho mínimo para los botones */
-    justify-content: center; /* Centra el contenido dentro del botón */
-}
-
-.btn-social i {
-    font-size: 1.3em;
-}
-
-/* Colores y hover para cada botón social */
-.btn-social.whatsapp { background-color: #25D366; }
-.btn-social.whatsapp:hover { background-color: #1DA851; transform: translateY(-3px); box-shadow: 0 5px 10px rgba(37, 211, 102, 0.4); }
-
-.btn-social.messenger { background-color: #0084FF; }
-.btn-social.messenger:hover { background-color: #006AD5; transform: translateY(-3px); box-shadow: 0 5px 10px rgba(0, 132, 255, 0.4); }
-
-.btn-social.telegram { background-color: #0088CC; }
-.btn-social.telegram:hover { background-color: #006C9F; transform: translateY(-3px); box-shadow: 0 5px 10px rgba(0, 136, 204, 0.4); }
-
-.btn-social.instagram { background: linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%); }
-.btn-social.instagram:hover { transform: translateY(-3px); box-shadow: 0 5px 10px rgba(220, 39, 67, 0.4); }
-
-.contact-info {
-    margin-top: 25px;
-    font-size: 1.15em;
-    color: var(--color-texto-oscuro);
-    font-weight: 500;
-}
-
-.contact-info a {
-    font-weight: 600;
-    color: var(--color-secundario);
-    transition: color 0.3s ease;
-}
-.contact-info a:hover {
-    color: var(--color-primario);
-}
-
-/* --------------------------------------------------- */
-/* PIE DE PÁGINA (FOOTER) */
-/* --------------------------------------------------- */
+/* ======================================================
+   🔹 FOOTER
+   ====================================================== */
 footer {
     background-color: var(--color-fondo-oscuro);
     color: var(--color-texto-claro);
@@ -591,355 +198,61 @@ footer {
     margin-top: 30px;
     border-top-left-radius: var(--borde-redondeado);
     border-top-right-radius: var(--borde-redondeado);
-    box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 -4px 10px rgba(0,0,0,0.1);
 }
 
-footer p {
-    margin-bottom: 15px;
-    font-size: 0.95em;
-    opacity: 0.9;
-}
-
-.social-icons {
-    margin-top: 20px;
-}
-
-.social-icons a {
-    color: var(--color-texto-claro);
-    font-size: 1.6em;
-    margin: 0 15px;
-    transition: color 0.3s ease, transform 0.3s ease;
-}
-
-.social-icons a:hover {
-    color: var(--color-primario);
-    transform: scale(1.2); /* Iconos más grandes al hover */
-}
-
-/* --------------------------------------------------- */
-/* BOTONES FLOTANTES DE REDES SOCIALES */
-/* --------------------------------------------------- */
+/* ======================================================
+   🔹 BOTONES SOCIALES FLOTANTES
+   ====================================================== */
 .floating-social {
-    position: fixed; /* Fijo en la pantalla */
-    bottom: 25px; /* Separación del borde inferior */
-    left: 25px; /* Separación del borde izquierdo */
+    position: fixed;
+    bottom: 25px;
+    left: 25px;
     display: flex;
-    flex-direction: column; /* Apilados verticalmente */
-    gap: 12px; /* Espacio entre los botones */
-    z-index: 1100; /* Asegura que estén por encima de todo */
+    flex-direction: column;
+    gap: 12px;
+    z-index: 1100;
 }
-
 .social-float {
+    width: 55px;
+    height: 55px;
+    border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 55px; /* Ancho y alto para que sean círculos perfectos */
-    height: 55px;
-    border-radius: 50%; /* Forma circular */
     color: white;
-    font-size: 2em; /* Tamaño del icono */
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35); /* Sombra para profundidad */
-    transition: transform 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease;
-    animation: popIn 0.6s ease-out forwards; /* Animación al cargar */
-    opacity: 0; /* Oculto inicialmente para la animación */
+    font-size: 2em;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+    transition: transform 0.3s ease, background-color 0.3s ease;
 }
-
 .social-float:hover {
-    transform: scale(1.15); /* Más grande al pasar el ratón */
-    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.45);
+    transform: scale(1.15);
 }
 
-/* Retraso de animación para cada botón para un efecto escalonado */
-.social-float:nth-child(1) { animation-delay: 0.1s; }
-.social-float:nth-child(2) { animation-delay: 0.2s; }
-.social-float:nth-child(3) { animation-delay: 0.3s; }
-.social-float:nth-child(4) { animation-delay: 0.4s; }
-.social-float:nth-child(5) { animation-delay: 0.5s; }
-
-
-/* Colores específicos para cada botón flotante */
-.social-float.whatsapp { background-color: #25D366; } /* Verde WhatsApp */
-.social-float.whatsapp:hover { background-color: #1DA851; }
-
-.social-float.facebook { background-color: #1877F2; } /* Azul Facebook */
-.social-float.facebook:hover { background-color: #145CB3; }
-
-.social-float.telegram { background-color: #0088CC; } /* Azul Telegram */
-.social-float.telegram:hover { background-color: #006C9F; }
-
-.social-float.instagram { /* Gradiente Instagram */
-    background: radial-gradient(circle at 30% 107%, #fdf497 0%, #fdf497 5%, #fd5949 45%, #d6249f 60%, #285AEB 90%);
-}
-.social-float.instagram:hover {
-    filter: brightness(1.15); /* Hace que el gradiente sea un poco más brillante */
-}
-
-.social-float.messenger { background-color: #0084FF; } /* Azul Messenger */
-.social-float.messenger:hover { background-color: #006AD5; }
-
-
-/* --------------------------------------------------- */
-/* ANIMACIONES KEYFRAMES */
-/* --------------------------------------------------- */
+/* ======================================================
+   🔹 ANIMACIONES
+   ====================================================== */
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes popIn {
     0% { transform: scale(0.5) translateY(20px); opacity: 0; }
-    80% { transform: scale(1.05) translateY(-5px); opacity: 1; }
     100% { transform: scale(1) translateY(0); opacity: 1; }
 }
 
-@keyframes bounceIn {
-    0% { transform: scale(0.1); opacity: 0; }
-    60% { transform: scale(1.2); opacity: 1; }
-    100% { transform: scale(1); }
-}
-
-
-/* --------------------------------------------------- */
-/* MEDIA QUERIES PARA RESPONSIVE DESIGN */
-/* --------------------------------------------------- */
-
-/* Tabletas y móviles grandes (máx. 992px) */
-@media (max-width: 992px) {
-    header nav ul {
-        gap: 15px; /* Reduce el espacio entre ítems en tabletas */
-    }
-
-    .hero h1 {
-        font-size: 2.8em;
-    }
-
-    .hero p {
-        font-size: 1.1em;
-    }
-
-    section h2 {
-        font-size: 2.2em;
-    }
-
-    .servicios-grid {
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); /* Más pequeñas en tabletas */
-        gap: 25px;
-    }
-
-    .servicio-item i {
-        font-size: 3.5em;
-    }
-
-    .galeria-contenedor {
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 20px;
-    }
-}
-
-/* Móviles (máx. 768px) */
+/* ======================================================
+   🔹 MEDIA QUERIES
+   ====================================================== */
 @media (max-width: 768px) {
     header {
-        flex-direction: column; /* Apila el título y la navegación */
-        align-items: flex-start; /* Alinea a la izquierda para el logo */
-        padding: 15px;
-        position: relative; /* Para posicionar el menú toggle */
-    }
-
-    header h1 {
-        width: 100%;
-        text-align: center; /* Centra el logo */
-        margin-bottom: 15px;
-        font-size: 1.6em;
-    }
-
-    header nav {
-        width: 100%;
-        display: none; /* Oculta el menú de navegación por defecto */
         flex-direction: column;
-        text-align: center;
-        background-color: var(--color-fondo-oscuro);
-        padding: 10px 0;
-        position: absolute; /* Para que el menú ocupe todo el ancho bajo el header */
-        top: 100%; /* Justo debajo del header */
-        left: 0;
-        box-shadow: var(--sombra-suave);
-        border-bottom-left-radius: var(--borde-redondeado);
-        border-bottom-right-radius: var(--borde-redondeado);
+        align-items: flex-start;
     }
-
-    header nav.active {
-        display: flex; /* Muestra el menú cuando tiene la clase 'active' */
-    }
-
-    header nav ul {
-        flex-direction: column; /* Elementos del menú apilados */
-        gap: 0; /* Elimina el espacio entre ítems */
-        width: 100%;
-    }
-
-    header nav li {
-        width: 100%;
-    }
-
-    header nav a {
-        display: block; /* Cada enlace ocupa el ancho completo */
-        padding: 12px 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1); /* Separador sutil */
-        font-size: 1.1em;
-    }
-
-    header nav li:last-child a {
-        border-bottom: none; /* Sin borde en el último elemento */
-    }
-
-    header nav a::after { /* Oculta el subrayado animado en el menú móvil */
-        display: none;
-    }
-
-    .menu-toggle {
-        display: block; /* Muestra el botón de hamburguesa */
-        position: absolute;
-        top: 20px; /* Ajusta la posición si es necesario */
-        right: 20px;
-    }
-
     .hero {
         min-height: 450px;
-        padding: 40px 15px;
     }
-
-    .hero h1 {
-        font-size: 2em;
-    }
-
-    .hero p {
-        font-size: 1em;
-        margin-bottom: 25px;
-    }
-
     section {
-        padding: 40px 15px; /* Menos padding en móviles */
-        margin: 15px auto; /* Menos margen entre secciones */
-    }
-
-    section h2 {
-        font-size: 2em;
-        margin-bottom: 25px;
-    }
-
-    section h2::after {
-        width: 60px; /* Ancho de subrayado más pequeño */
-    }
-
-    .servicios-grid {
-        grid-template-columns: 1fr; /* Una sola columna en móviles */
-        gap: 20px;
-    }
-
-    .servicio-item {
-        padding: 20px;
-    }
-
-    .servicio-item i {
-        font-size: 3em;
-    }
-
-    #afiliacion form {
-        padding: 25px;
-        margin: 20px auto;
-    }
-
-    #afiliacion input, #afiliacion select, #afiliacion textarea {
-        padding: 12px;
-        font-size: 1em;
-    }
-
-    #afiliacion button[type="submit"] {
-        padding: 14px;
-        font-size: 1.1em;
-    }
-
-    .galeria-contenedor {
-        grid-template-columns: 1fr; /* Una columna en móviles */
-        gap: 15px;
-    }
-
-    .imagen-galeria img {
-        height: 220px; /* Altura más pequeña para imágenes en móvil */
-    }
-
-    .btn-social {
-        width: 95%; /* Hace los botones un poco más anchos */
-        font-size: 0.95em;
-        padding: 12px 15px;
-    }
-
-    .btn-social i {
-        font-size: 1.1em;
-    }
-
-    .contact-info {
-        font-size: 1em;
-    }
-
-    footer {
-        padding: 20px 15px;
-    }
-
-    .social-icons a {
-        font-size: 1.3em;
-        margin: 0 10px;
-    }
-
-    /* Ajuste para los botones flotantes en móviles */
-    .floating-social {
-        bottom: 15px;
-        left: 15px;
-        gap: 10px;
-    }
-    .social-float {
-        width: 48px;
-        height: 48px;
-        font-size: 1.7em;
-    }
-}
-
-/* Móviles muy pequeños (máx. 480px) */
-@media (max-width: 480px) {
-    .hero h1 {
-        font-size: 1.8em;
-    }
-    .hero p {
-        font-size: 0.9em;
-    }
-    section h2 {
-        font-size: 1.8em;
-    }
-    .btn {
-        padding: 10px 20px;
-        font-size: 0.9em;
-    }
-    #afiliacion label {
-        font-size: 0.95em;
-    }
-    #afiliacion input, #afiliacion select, #afiliacion textarea {
-        font-size: 0.95em;
-    }
-    .contact-buttons {
-        gap: 10px;
-    }
-    .btn-social {
-        min-width: unset; /* Permite que los botones sean más flexibles */
-        width: 100%;
-    }
-    .floating-social {
-        bottom: 10px;
-        left: 10px;
-        gap: 8px;
-    }
-    .social-float {
-        width: 42px;
-        height: 42px;
-        font-size: 1.5em;
+        padding: 40px 15px;
     }
 }

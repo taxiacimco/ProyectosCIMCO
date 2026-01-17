@@ -1,10 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es" class="scroll-smooth">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Detalle Viaje - TAXIA CIMCO</title>
-  <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <style>
@@ -22,6 +21,15 @@
       box-shadow: 0 6px 20px -5px #00F0FF;
     }
   </style>
+  <link rel="stylesheet" href="./css/output.css" />`r`n
+<!-- Firebase PRODUCCIÓN exclusivo para ADMIN (insertado automáticamente) -->
+
+
+    <script>
+        <!-- Define el entorno de la aplicación. 'dev' (Desarrollo) es el valor por defecto. -->
+        <!-- CÁMBIALO MANUALMENTE A 'prod' solo antes de desplegar en producción. -->
+        const APP_ENV = 'dev'; 
+    </script>
 </head>
 <body class="bg-slate-900 text-gray-200">
 
@@ -43,7 +51,7 @@
 
       <!-- Info principal del viaje -->
       <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-        <h2 class="text-2xl font-bold mb-4">InformaciÃ³n del Viaje</h2>
+        <h2 class="text-2xl font-bold mb-4">Información del Viaje</h2>
         <div id="infoViaje" class="space-y-2">
           <p id="estadoViaje" class="text-lg font-bold">Estado: Cargando...</p>
           <p id="origenViaje" class="text-lg text-gray-400">Origen: ...</p>
@@ -55,21 +63,21 @@
 
       <!-- Info del pasajero -->
       <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-        <h2 class="text-2xl font-bold mb-4">InformaciÃ³n del Pasajero</h2>
+        <h2 class="text-2xl font-bold mb-4">Información del Pasajero</h2>
         <div id="infoPasajero" class="space-y-2">
           <p id="nombrePasajero" class="text-lg text-white">Nombre: ...</p>
           <p id="idPasajero" class="text-lg text-gray-400">ID: ...</p>
-          <p id="telefonoPasajero" class="text-lg text-gray-400">TelÃ©fono: ...</p>
+          <p id="telefonoPasajero" class="text-lg text-gray-400">Teléfono: ...</p>
         </div>
       </div>
 
       <!-- Info del conductor -->
       <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-        <h2 class="text-2xl font-bold mb-4">InformaciÃ³n del Conductor</h2>
+        <h2 class="text-2xl font-bold mb-4">Información del Conductor</h2>
         <div id="infoConductor" class="space-y-2">
           <p id="nombreConductor" class="text-lg text-white">Nombre: ...</p>
           <p id="idConductor" class="text-lg text-gray-400">ID: ...</p>
-          <p id="telefonoConductor" class="text-lg text-gray-400">TelÃ©fono: ...</p>
+          <p id="telefonoConductor" class="text-lg text-gray-400">Teléfono: ...</p>
           <p id="saldoConductor" class="text-lg text-green-400">Saldo actual: ...</p>
         </div>
       </div>
@@ -84,11 +92,8 @@
     </div>
   </footer>
 
-  <!-- Firebase + lÃ³gica -->
+  <!-- Firebase + lógica -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
@@ -147,12 +152,12 @@
       // Info pasajero
       nombrePasajeroEl.textContent = "Nombre: " + (data.pasajeroNombre || "-");
       idPasajeroEl.textContent = "ID: " + (data.pasajeroId || "-");
-      telPasajeroEl.textContent = "TelÃ©fono: " + (data.pasajeroTelefono || "-");
+      telPasajeroEl.textContent = "Teléfono: " + (data.pasajeroTelefono || "-");
 
       // Info conductor
       nombreConductorEl.textContent = "Nombre: " + (data.conductorNombre || "-");
       idConductorEl.textContent = "ID: " + (data.conductorId || "-");
-      telConductorEl.textContent = "TelÃ©fono: " + (data.conductorTelefono || "-");
+      telConductorEl.textContent = "Teléfono: " + (data.conductorTelefono || "-");
       saldoConductorEl.textContent = "Saldo actual: " + (data.conductorSaldo ? formatearCOP(data.conductorSaldo) : "-");
     }
 
@@ -164,7 +169,7 @@
       await cargarDetalleViaje();
     });
   </script>
-<!--  Botón oculto solo para desarrollo -->
+<!--  Bot�n oculto solo para desarrollo -->
 <button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
 <script>
 document.addEventListener("keydown", async (e) => {
@@ -173,13 +178,24 @@ document.addEventListener("keydown", async (e) => {
     for (const reg of regs) await reg.unregister();
     const names = await caches.keys();
     for (const n of names) await caches.delete(n);
-    alert(" Caché y Service Workers eliminados.\nRecarga la página (Ctrl + F5).");
+    alert(" Cach� y Service Workers eliminados.\nRecarga la p�gina (Ctrl + F5).");
   }
 });
 </script>
 <script src="/js/version-footer.js"></script>
+
+<script src="/js/firebase/firebase-loader.js"></script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
 
 
 

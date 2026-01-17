@@ -1,0 +1,113 @@
+<script type="module" src="/js/firebase/firebase-loader.js"></script>
+
+<script type="module">
+  // Importamos la función de rastreo que ya configuramos
+  import { iniciarRastreoGPS } from "/interconductor/js/inter-tracking.js";
+
+  // Variables de interfaz
+  const estadoTxt = document.getElementById("estado");
+  const btnAceptar = document.getElementById("btnAceptar");
+  const btnFinalizar = document.getElementById("btnFinalizar");
+  const toggleTrackingBtn = document.getElementById("toggleTracking");
+
+  // Configuración de Mapa Leaflet
+  let map = L.map("map").setView([9.56, -73.62], 13);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
+
+  let conductorMarker = null;
+  let pasajeroMarker = null;
+  let routeControl = null;
+  let viajeAsignado = null;
+  let trackingActive = false;
+
+  // Esperar a que Firebase cargue para iniciar
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      if (window.auth) {
+        inicializarPanel();
+      }
+    }, 1000);
+  });
+
+  function inicializarPanel() {
+    const { auth, db, firebaseUtils } = window;
+    const { onAuthStateChanged, collection, query, where, onSnapshot, doc, updateDoc, signOut } = firebaseUtils;
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        window.location.href = "/interconductor/login-interconductor.html";
+        return;
+      }
+
+      estadoTxt.textContent = "Conectado como " + user.email;
+      
+      // ✅ ACTIVAMOS EL RASTREO BLINDADO
+      iniciarRastreoGPS();
+
+      // Escuchar viajes asignados
+      const q = query(collection(db, "viajes"), where("conductorId", "==", user.uid));
+      onSnapshot(q, (snap) => {
+        if (snap.empty) {
+          estadoTxt.textContent = "📭 Sin viajes asignados";
+          viajeAsignado = null;
+          actualizarEstadoBotones("finalizado");
+          return;
+        }
+        const docViaje = snap.docs[0];
+        viajeAsignado = { id: docViaje.id, ...docViaje.data() };
+        estadoTxt.textContent = `🚖 Viaje: ${viajeAsignado.origen} → ${viajeAsignado.destino}`;
+        actualizarEstadoBotones(viajeAsignado.estado);
+
+        // Ubicación pasajero
+        if (viajeAsignado.lat && viajeAsignado.lng) {
+          if (!pasajeroMarker) {
+            pasajeroMarker = L.marker([viajeAsignado.lat, viajeAsignado.lng]).addTo(map).bindPopup("📍 Pasajero");
+          } else {
+            pasajeroMarker.setLatLng([viajeAsignado.lat, viajeAsignado.lng]);
+          }
+        }
+      });
+
+      // Actualizar marcador del conductor en el mapa local según la DB
+      onSnapshot(doc(db, "conductores", user.uid), (snap) => {
+        const data = snap.data();
+        if (data?.ubicacion) {
+          const pos = [data.ubicacion.lat, data.ubicacion.lng];
+          if (!conductorMarker) {
+            conductorMarker = L.marker(pos).addTo(map).bindPopup("🚐 Tu ubicación");
+          } else {
+            conductorMarker.setLatLng(pos);
+          }
+          if (trackingActive) map.setView(pos, 15);
+        }
+      });
+    });
+
+    // Lógica de Botones
+    btnAceptar.onclick = async () => {
+      if (viajeAsignado) await updateDoc(doc(db, "viajes", viajeAsignado.id), { estado: "aceptado" });
+    };
+
+    btnFinalizar.onclick = async () => {
+      if (viajeAsignado) await updateDoc(doc(db, "viajes", viajeAsignado.id), { estado: "finalizado" });
+    };
+
+    document.getElementById("logoutBtn").onclick = async () => {
+      await signOut(auth);
+      window.location.href = "/interconductor/login-interconductor.html";
+    };
+  }
+
+  function actualizarEstadoBotones(estado) {
+    btnAceptar.classList.toggle("hidden", estado !== "pendiente");
+    btnFinalizar.classList.toggle("hidden", !["aceptado", "en_ruta"].includes(estado));
+  }
+
+  toggleTrackingBtn.onclick = () => {
+    trackingActive = !trackingActive;
+    toggleTrackingBtn.classList.toggle("bg-green-500", trackingActive);
+  };
+</script>

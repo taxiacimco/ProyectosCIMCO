@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mis Viajes Asignados - Conductor</title>
+  <link rel="stylesheet" href="../../styles/style.css">
+  <style>
+    .viaje-card {
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 15px;
+      margin: 10px 0;
+      background: #f9f9f9;
+    }
+    .viaje-card h3 {
+      margin: 0 0 10px 0;
+    }
+    .viaje-card button {
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .viaje-card button:hover {
+      background: #0056b3;
+    }
+  </style>
+
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
+<script>
+  window.APP_ENV = "prod";
+</script>
+<script type="module" src="/js/firebase/firebase-mode-manager.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>ðŸš– Mis Viajes Asignados</h1>
+    <p>Conductor: <span id="userEmail"></span></p>
+
+    <div id="viajesContainer"></div>
+
+    <button onclick="window.location.href='panel-conductor.html'">â¬…ï¸ Volver</button>
+    <button id="logoutBtn" class="logout-btn">Cerrar SesiÃ³n</button>
+  </div>
+
+  <script type="module">
+    import { getAuth, onAuthStateChanged, signOut }
+    import {
+      getFirestore, collection, query, where, onSnapshot, doc, updateDoc
+    import { app } from "../../../public/js/firebase-config-conductor.js";
+
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    const viajesContainer = document.getElementById("viajesContainer");
+    const userEmailEl = document.getElementById("userEmail");
+
+    let currentUser = null;
+
+    // ðŸ”¹ Verificar sesiÃ³n
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        currentUser = user;
+        userEmailEl.textContent = user.email;
+        cargarViajes();
+      } else {
+        window.location.href = "login-conductor.html";
+      }
+    });
+
+    // ðŸ”¹ Cargar viajes del conductor en tiempo real
+    function cargarViajes() {
+      const q = query(
+        collection(db, "viajes"),
+        where("conductorId", "==", currentUser.uid)
+      );
+
+      onSnapshot(q, (snapshot) => {
+        viajesContainer.innerHTML = "";
+        if (snapshot.empty) {
+          viajesContainer.innerHTML = "<p>No tienes viajes asignados.</p>";
+          return;
+        }
+
+        snapshot.forEach((docSnap) => {
+          const viaje = docSnap.data();
+          const viajeId = docSnap.id;
+
+          const card = document.createElement("div");
+          card.className = "viaje-card";
+          card.innerHTML = `
+            <h3>ðŸ›£ï¸ Viaje</h3>
+            <p><strong>Pasajero:</strong> ${viaje.emailPasajero}</p>
+            <p><strong>Origen:</strong> ${viaje.origen}</p>
+            <p><strong>Destino:</strong> ${viaje.destino}</p>
+            <p><strong>Estado:</strong> ${viaje.estado}</p>
+            ${
+              viaje.estado === "Asignado"
+                ? `<button data-id="${viajeId}">ðŸš€ Iniciar Viaje</button>`
+                : viaje.estado === "En curso"
+                ? `<button data-id="${viajeId}">âœ… Finalizar Viaje</button>`
+                : ""
+            }
+          `;
+
+          // BotÃ³n iniciar/finalizar viaje
+          const btn = card.querySelector("button");
+          if (btn) {
+            btn.addEventListener("click", async () => {
+              try {
+                if (viaje.estado === "Asignado") {
+                  await updateDoc(doc(db, "viajes", viajeId), {
+                    estado: "En curso"
+                  });
+                  alert("ðŸš€ Viaje iniciado.");
+                } else if (viaje.estado === "En curso") {
+                  await updateDoc(doc(db, "viajes", viajeId), {
+                    estado: "Finalizado"
+                  });
+                  alert("âœ… Viaje finalizado.");
+                }
+              } catch (error) {
+                console.error("Error al actualizar viaje:", error);
+                alert("âŒ Error al actualizar viaje.");
+              }
+            });
+          }
+
+          viajesContainer.appendChild(card);
+        });
+      });
+    }
+
+    // ðŸ”¹ Logout
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login-conductor.html";
+    });
+  </script>
+<!--  Botón oculto solo para desarrollo -->
+<button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
+<script>
+document.addEventListener("keydown", async (e) => {
+  if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "l") {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const reg of regs) await reg.unregister();
+    const names = await caches.keys();
+    for (const n of names) await caches.delete(n);
+    alert(" Caché y Service Workers eliminados.\nRecarga la página (Ctrl + F5).");
+  }
+});
+</script>
+<script src="/js/version-footer.js"></script>
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+

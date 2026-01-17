@@ -1,0 +1,116 @@
+﻿[2025-10-27 14:44:39] === Inicio del mantenimiento UTF-8 ===
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\admin\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\admin\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\backups\backup-20251027-144349\admin\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\asignar-viajes.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\despachadorinter.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\login-despachador.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\monitoreo.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\panel-despachador.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\registro-despachador.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\interconductor\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\interconductor\panel-interconductor.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\motocarga\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\motocarga\panel-motocarga.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\motoparrillero\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\motoparrillero\panel-parrillero.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\mototaxi\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\mototaxi\mototaxi-panel.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\historial.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\login-conductor.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\panel-conductor.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\registro-conductor.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\viajes-asignados.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\historial-viajes.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\login-pasajero.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\panel-pasajero.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\registro-pasajero.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\solicitar-viaje.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\asignar-viajes.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\despachadorinter.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\login-despachador.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\monitoreo.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\panel-despachador.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\registro-despachador.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\interconductor\index.html
+[2025-10-27 14:44:40] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\interconductor\panel-interconductor.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\motocarga\index.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\motocarga\panel-motocarga.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\motoparrillero\index.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\motoparrillero\panel-parrillero.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\mototaxi\index.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\mototaxi\mototaxi-panel.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\historial.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\login-conductor.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\panel-conductor.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\registro-conductor.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\viajes-asignados.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\historial-viajes.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\index.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\login-pasajero.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\panel-pasajero.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\registro-pasajero.html
+[2025-10-27 14:44:41] BOM detectado en C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\solicitar-viaje.html
+[2025-10-27 14:44:41] Correctos: 81 | Con BOM: 55
+[2025-10-27 14:44:41] Corrigiendo archivos...
+[2025-10-27 14:44:41] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\admin\index.html
+[2025-10-27 14:44:41] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\admin\index.html
+[2025-10-27 14:44:41] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\backups\backup-20251027-144349\admin\index.html
+[2025-10-27 14:44:41] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\asignar-viajes.html
+[2025-10-27 14:44:41] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\despachadorinter.html
+[2025-10-27 14:44:41] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\index.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\login-despachador.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\monitoreo.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\panel-despachador.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\despachador\registro-despachador.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\interconductor\index.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\interconductor\panel-interconductor.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\motocarga\index.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\motocarga\panel-motocarga.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\motoparrillero\index.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\motoparrillero\panel-parrillero.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\mototaxi\index.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\mototaxi\mototaxi-panel.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\historial.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\login-conductor.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\panel-conductor.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\registro-conductor.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\otros-servicio\viajes-asignados.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\historial-viajes.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\index.html
+[2025-10-27 14:44:42] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\login-pasajero.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\panel-pasajero.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\registro-pasajero.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\backups\backup-20251027-144349\pasajero\solicitar-viaje.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\asignar-viajes.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\despachadorinter.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\index.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\login-despachador.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\monitoreo.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\panel-despachador.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\despachador\registro-despachador.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\interconductor\index.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\interconductor\panel-interconductor.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\motocarga\index.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\motocarga\panel-motocarga.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\motoparrillero\index.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\motoparrillero\panel-parrillero.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\mototaxi\index.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\mototaxi\mototaxi-panel.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\historial.html
+[2025-10-27 14:44:43] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\login-conductor.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\panel-conductor.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\registro-conductor.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\otros-servicio\viajes-asignados.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\historial-viajes.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\index.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\login-pasajero.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\panel-pasajero.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\registro-pasajero.html
+[2025-10-27 14:44:44] Reparado: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\pasajero\solicitar-viaje.html
+[2025-10-27 14:46:42] Correctos: 136 | Con BOM: 55 | Reparados: 55
+[2025-10-27 14:46:42] === Fin del mantenimiento UTF-8 ===
+

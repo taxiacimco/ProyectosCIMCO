@@ -1,10 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es" class="scroll-smooth">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Detalle Conductor - TAXIA CIMCO</title>
-  <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -32,6 +31,15 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
+  <link rel="stylesheet" href="./css/output.css" />`r`n
+<!-- Firebase PRODUCCIÓN exclusivo para ADMIN (insertado automáticamente) -->
+
+
+    <script>
+        <!-- Define el entorno de la aplicación. 'dev' (Desarrollo) es el valor por defecto. -->
+        <!-- CÁMBIALO MANUALMENTE A 'prod' solo antes de desplegar en producción. -->
+        const APP_ENV = 'dev'; 
+    </script>
 </head>
 <body class="bg-slate-900 text-gray-200">
 
@@ -53,7 +61,7 @@
 
       <!-- Info del conductor -->
       <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-        <h2 class="text-2xl font-bold mb-4">InformaciÃ³n del Conductor</h2>
+        <h2 class="text-2xl font-bold mb-4">Información del Conductor</h2>
         <div id="infoConductor" class="space-y-2">
           <p id="nombreConductor" class="text-lg text-white">Nombre: Cargando...</p>
           <p id="idConductor" class="text-lg text-gray-400">ID: ...</p>
@@ -71,14 +79,14 @@
         </button>
       </div>
 
-      <!-- GrÃ¡fico -->
+      <!-- Gráfico -->
       <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
         <div class="flex flex-col md:flex-row justify-between items-center mb-4 space-y-2 md:space-y-0">
           <h2 class="text-2xl font-bold">Movimientos Financieros</h2>
           <select id="filtroFechas" class="bg-slate-700 text-white p-2 rounded-md focus:outline-none focus:ring-2 focus:ring-neon-cyan">
-            <option value="7">Ãšltima semana</option>
-            <option value="30">Ãšltimo mes</option>
-            <option value="365">Ãšltimo aÃ±o</option>
+            <option value="7">Última semana</option>
+            <option value="30">Último mes</option>
+            <option value="365">Último año</option>
             <option value="all">Todos</option>
           </select>
         </div>
@@ -98,7 +106,7 @@
               <tr>
                 <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Monto</th>
                 <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Tipo</th>
-                <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">DescripciÃ³n</th>
+                <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Descripción</th>
                 <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Fecha</th>
               </tr>
             </thead>
@@ -139,11 +147,8 @@
     </div>
   </footer>
 
-  <!-- Firebase + lÃ³gica -->
+  <!-- Firebase + lógica -->
   <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, getDoc, collection, addDoc, query, where, orderBy, getDocs, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
@@ -314,7 +319,7 @@
       await cargarViajes();
     });
   </script>
-<!--  Botón oculto solo para desarrollo -->
+<!--  Bot�n oculto solo para desarrollo -->
 <button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
 <script>
 document.addEventListener("keydown", async (e) => {
@@ -323,13 +328,24 @@ document.addEventListener("keydown", async (e) => {
     for (const reg of regs) await reg.unregister();
     const names = await caches.keys();
     for (const n of names) await caches.delete(n);
-    alert(" Caché y Service Workers eliminados.\nRecarga la página (Ctrl + F5).");
+    alert(" Cach� y Service Workers eliminados.\nRecarga la p�gina (Ctrl + F5).");
   }
 });
 </script>
 <script src="/js/version-footer.js"></script>
+
+<script src="/js/firebase/firebase-loader.js"></script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Detalle Viaje - TAXIA CIMCO</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    html { scroll-behavior: smooth; }
+    .text-neon-cyan { color: #00F0FF; }
+    .btn-neon {
+      background: linear-gradient(to right, #B300F2, #00F0FF);
+      color: white;
+      transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+      box-shadow: 0 4px 15px -5px #B300F2;
+    }
+    .btn-neon:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px -5px #00F0FF;
+    }
+  </style>
+  <link rel="stylesheet" href="./css/output.css" />`r`n</head>
+<body class="bg-slate-900 text-gray-200">
+
+  <!-- Header -->
+  <header class="bg-slate-800 shadow-lg fixed top-0 w-full z-50">
+    <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+      <a href="listado-viajes.html" class="flex items-center space-x-2 transition-transform duration-200 hover:scale-105">
+        <i class="fas fa-arrow-left text-2xl text-neon-cyan"></i>
+        <h1 class="text-xl font-extrabold text-white hidden md:block">Volver al Listado</h1>
+      </a>
+      <h1 class="text-2xl font-extrabold text-white text-center flex-grow">Detalle del Viaje</h1>
+      <div class="w-10"></div>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="py-24 px-4 md:px-8">
+    <div class="container mx-auto max-w-5xl space-y-10">
+
+      <!-- Info principal del viaje -->
+      <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
+        <h2 class="text-2xl font-bold mb-4">Información del Viaje</h2>
+        <div id="infoViaje" class="space-y-2">
+          <p id="estadoViaje" class="text-lg font-bold">Estado: Cargando...</p>
+          <p id="origenViaje" class="text-lg text-gray-400">Origen: ...</p>
+          <p id="destinoViaje" class="text-lg text-gray-400">Destino: ...</p>
+          <p id="fechaViaje" class="text-lg text-gray-400">Fecha: ...</p>
+          <p id="costoViaje" class="text-lg text-green-400 font-bold">Costo: ...</p>
+        </div>
+      </div>
+
+      <!-- Info del pasajero -->
+      <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
+        <h2 class="text-2xl font-bold mb-4">Información del Pasajero</h2>
+        <div id="infoPasajero" class="space-y-2">
+          <p id="nombrePasajero" class="text-lg text-white">Nombre: ...</p>
+          <p id="idPasajero" class="text-lg text-gray-400">ID: ...</p>
+          <p id="telefonoPasajero" class="text-lg text-gray-400">Teléfono: ...</p>
+        </div>
+      </div>
+
+      <!-- Info del conductor -->
+      <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
+        <h2 class="text-2xl font-bold mb-4">Información del Conductor</h2>
+        <div id="infoConductor" class="space-y-2">
+          <p id="nombreConductor" class="text-lg text-white">Nombre: ...</p>
+          <p id="idConductor" class="text-lg text-gray-400">ID: ...</p>
+          <p id="telefonoConductor" class="text-lg text-gray-400">Teléfono: ...</p>
+          <p id="saldoConductor" class="text-lg text-green-400">Saldo actual: ...</p>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-slate-800 text-gray-400 py-8 px-4 mt-12">
+    <div class="container mx-auto text-center">
+      <p>&copy; 2025 TAXIA CIMCO. Todos los derechos reservados.</p>
+    </div>
+  </footer>
+
+  <!-- Firebase + lógica -->
+  <script type="module">
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
+      authDomain: "pelagic-chalice-467818-e1.firebaseapp.com",
+      projectId: "pelagic-chalice-467818-e1",
+      storageBucket: "pelagic-chalice-467818-e1.appspot.com",
+      messagingSenderId: "191106268804",
+      appId: "1:191106268804:web:8b2aa9689abaa35c880cd1",
+      measurementId: "G-CPWSCLGKP2"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    const params = new URLSearchParams(window.location.search);
+    const viajeId = params.get("id");
+
+    const estadoEl = document.getElementById("estadoViaje");
+    const origenEl = document.getElementById("origenViaje");
+    const destinoEl = document.getElementById("destinoViaje");
+    const fechaEl = document.getElementById("fechaViaje");
+    const costoEl = document.getElementById("costoViaje");
+
+    const nombrePasajeroEl = document.getElementById("nombrePasajero");
+    const idPasajeroEl = document.getElementById("idPasajero");
+    const telPasajeroEl = document.getElementById("telefonoPasajero");
+
+    const nombreConductorEl = document.getElementById("nombreConductor");
+    const idConductorEl = document.getElementById("idConductor");
+    const telConductorEl = document.getElementById("telefonoConductor");
+    const saldoConductorEl = document.getElementById("saldoConductor");
+
+    const formatearCOP = (valor) =>
+      valor.toLocaleString("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 });
+
+    async function cargarDetalleViaje() {
+      if (!viajeId) return;
+
+      const viajeRef = doc(db, "viajes", viajeId);
+      const snap = await getDoc(viajeRef);
+      if (!snap.exists()) {
+        estadoEl.textContent = "Viaje no encontrado.";
+        return;
+      }
+
+      const data = snap.data();
+
+      // Info viaje
+      estadoEl.textContent = "Estado: " + (data.estado || "desconocido");
+      origenEl.textContent = "Origen: " + (data.origen || "-");
+      destinoEl.textContent = "Destino: " + (data.destino || "-");
+      fechaEl.textContent = "Fecha: " + (data.fecha?.toDate ? data.fecha.toDate().toLocaleString("es-CO") : "-");
+      costoEl.textContent = "Costo: " + (data.costo ? formatearCOP(data.costo) : "Pendiente");
+
+      // Info pasajero
+      nombrePasajeroEl.textContent = "Nombre: " + (data.pasajeroNombre || "-");
+      idPasajeroEl.textContent = "ID: " + (data.pasajeroId || "-");
+      telPasajeroEl.textContent = "Teléfono: " + (data.pasajeroTelefono || "-");
+
+      // Info conductor
+      nombreConductorEl.textContent = "Nombre: " + (data.conductorNombre || "-");
+      idConductorEl.textContent = "ID: " + (data.conductorId || "-");
+      telConductorEl.textContent = "Teléfono: " + (data.conductorTelefono || "-");
+      saldoConductorEl.textContent = "Saldo actual: " + (data.conductorSaldo ? formatearCOP(data.conductorSaldo) : "-");
+    }
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        window.location.href = "../index.html";
+        return;
+      }
+      await cargarDetalleViaje();
+    });
+  </script>
+<!--  Bot�n oculto solo para desarrollo -->
+<button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
+<script>
+document.addEventListener("keydown", async (e) => {
+  if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "l") {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const reg of regs) await reg.unregister();
+    const names = await caches.keys();
+    for (const n of names) await caches.delete(n);
+    alert(" Cach� y Service Workers eliminados.\nRecarga la p�gina (Ctrl + F5).");
+  }
+});
+</script>
+<script src="/js/version-footer.js"></script>
+
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+

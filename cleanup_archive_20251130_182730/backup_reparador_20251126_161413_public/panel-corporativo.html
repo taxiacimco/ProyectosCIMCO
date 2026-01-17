@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Panel Corporativo - TAXIA CIMCO</title>
+
+  <!-- Tailwind y Leaflet -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- Manifest y PWA -->
+  <link rel="manifest" href="./manifest-corporativo.webmanifest" />
+
+  <script>
+    // ✅ Registro del Service Worker Corporativo
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/pasajero-corporativo/service-worker-corporativo.js")
+        .then(() => console.log("✅ Service Worker corporativo registrado"))
+        .catch((err) => console.error("❌ Error al registrar el Service Worker:", err));
+    }
+  </script>
+
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
+<script>
+  window.APP_ENV = "prod";
+</script>
+<script type="module" src="/js/firebase/firebase-mode-manager.js"></script>
+</head>
+
+<body class="bg-slate-900 text-gray-200">
+  <!-- 🔹 Encabezado -->
+  <header class="p-4 bg-slate-800 flex justify-between items-center shadow">
+    <h1 class="text-xl font-bold text-cyan-400">🚖 TAXIA CIMCO - Corporativo</h1>
+    <div class="flex items-center gap-3">
+      <span id="empresaInfo" class="text-sm text-gray-300"></span>
+      <button id="logoutBtn" class="bg-red-600 px-3 py-2 rounded hover:bg-red-700">Salir</button>
+    </div>
+  </header>
+
+  <!-- 🔹 Contenido principal -->
+  <main class="p-6 space-y-4">
+    <!-- Sección de ubicación -->
+    <section class="bg-slate-800 p-4 rounded-xl">
+      <h2 class="font-semibold text-green-400 mb-2">📍 Ubicación actual</h2>
+      <div id="map" class="w-full h-[400px] rounded-lg"></div>
+    </section>
+
+    <!-- Sección de solicitud -->
+    <section class="bg-slate-800 p-4 rounded-xl">
+      <h2 class="font-semibold text-cyan-400">🛵 Solicitar servicio</h2>
+      <button
+        id="solicitarBtn"
+        class="bg-green-500 py-3 mt-3 w-full rounded-lg font-bold hover:bg-green-600 transition">
+        Solicitar transporte empresarial
+      </button>
+    </section>
+  </main>
+
+  <!-- 🔹 Scripts principales -->
+  
+  <script type="module" src="./js/corporativo-panel.js"></script>
+  <script type="module" src="./js/corporativo-gps.js"></script>
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+

@@ -1,50 +1,47 @@
-# ============================================================
-# 🛠️ BUILD (salida de TypeScript / Vite / React)
-# ============================================================
-lib/**/*.js
-lib/**/*.js.map
-dist/
-build/
-.cache/
-out/
+============================================================
 
-# ============================================================
-# 📦 DEPENDENCIAS
-# ============================================================
-node_modules/
-.pnp.*
-.pnp.js
+🛠️ TaxiA-CIMCO – Functions (Backend) .gitignore
 
-# ============================================================
-# ⚠️ ARCHIVOS SENSIBLES
-# ============================================================
+============================================================
+
+--- ARCHIVOS SENSIBLES (EXTREMA SEGURIDAD) ---
+
+Ignora el archivo de variables de entorno del backend
+
 .env
 .env.local
+.env.production
 .env.*.local
-.env.example         # <-- OPCIONAL: si quieres que este sí suba, elimina esta línea
+
+Ignora las credenciales de la cuenta de servicio (JSON de Google)
+
 serviceAccount.json
 serviceAccountKey.json
 *.pem
 *.key
 
-# ============================================================
-# 🔍 LOGS DE DEBUGGING (Firebase / Node)
-# ============================================================
+--- BUILD Y SALIDA ---
+
+lib/
+node_modules/
+dist/
+build/
+.cache/
+out/
+*.tsbuildinfo
+
+--- LOGS DE FIREBASE Y DEBUG ---
+
 firebase-debug.log
 firestore-debug.log
-npm-debug.log
-yarn-debug.log
-yarn-error.log
-*-debug.log
+pubsub-debug.log
+ui-debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# ============================================================
-# 📂 TIPADO ANTIGUO (si existiera)
-# ============================================================
-typings/
+--- SISTEMA Y EDITORES ---
 
-# ============================================================
-# 💻 SISTEMA / EDITORES
-# ============================================================
 .DS_Store
 Thumbs.db
 .vscode/
@@ -52,14 +49,8 @@ Thumbs.db
 *.swp
 *.swo
 
-# ============================================================
-# 📱 FRONTEND (React / Vite / PWA)
-# ============================================================
-*.local
-*.cache
-*.tsbuildinfo
+--- EXCEPCIONES ---
 
-# ============================================================
-# 🔥 FIREBASE
-# ============================================================
-.firebaserc
+Si decides crear un ejemplo sin datos reales, puedes permitirlo:
+
+! .env.example

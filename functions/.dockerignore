@@ -1,0 +1,39 @@
+Archivos y Directorios excluidos del contexto de construcción de Docker.
+
+Directorios de dependencias generadas (se instalan limpiamente en Docker)
+
+node_modules
+dist
+lib
+logs
+
+Archivos de Git
+
+.git
+.gitignore
+
+Archivos de IDE/Editor
+
+.vscode
+.DS_Store
+
+Archivos de registro, depuración y entorno local
+
+.log
+npm-debug.log
+.env
+.env.
+serviceAccount.json
+
+Archivos de pruebas
+
+coverage
+*.test.js
+*.spec.js
+
+Excluir carpetas de respaldo y frontend
+
+frontend/
+backups/
+_backup_ts_migration/
+_respaldos_backend/

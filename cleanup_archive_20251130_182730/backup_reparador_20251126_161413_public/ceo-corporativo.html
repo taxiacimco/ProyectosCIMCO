@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CEO Corporativo - TAXIA CIMCO</title>
+
+  <!-- Tailwind CSS -->
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="./css/output.css" />`r`n</head>
+
+<body class="bg-slate-900 text-gray-100 min-h-screen">
+  <header class="flex justify-between items-center bg-slate-800 p-4 shadow">
+    <h1 class="text-xl font-bold text-cyan-400">🚖 TAXIA CIMCO - CEO Corporativo</h1>
+    <button id="logoutBtn" class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded">Cerrar sesión</button>
+  </header>
+
+  <main class="p-6 space-y-6">
+    <!-- MAPA -->
+    <section class="bg-slate-800 p-4 rounded-xl shadow-lg">
+      <h2 class="text-lg font-semibold text-green-400 mb-3">🌍 Mapa general</h2>
+      <div id="map" class="w-full h-[450px] rounded-lg"></div>
+    </section>
+
+    <!-- TABLA DE VIAJES -->
+    <section class="bg-slate-800 p-4 rounded-xl shadow-lg">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-semibold text-cyan-400">📊 Viajes corporativos activos</h2>
+        <button id="refreshBtn" class="bg-cyan-600 hover:bg-cyan-700 px-4 py-2 rounded">
+          🔄 Actualizar
+        </button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-700 text-gray-200 uppercase text-xs">
+            <tr>
+              <th class="p-2 text-left">Empresa</th>
+              <th class="p-2 text-left">Correo</th>
+              <th class="p-2 text-left">Estado</th>
+              <th class="p-2 text-left">Ubicación</th>
+              <th class="p-2 text-left">Última actualización</th>
+            </tr>
+          </thead>
+          <tbody id="tablaViajes" class="divide-y divide-slate-700"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Firebase + JS CEO -->
+  
+  <script type="module" src="./js/ceo-corporativo.js"></script>
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+

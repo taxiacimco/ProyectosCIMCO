@@ -1,204 +1,108 @@
 ﻿<!DOCTYPE html>
-<html lang="es" class="scroll-smooth">
+<html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Panel de Control CEO - TAXIA CIMCO</title>
+  <title>CEO Control Center - TAXIA CIMCO</title>
+  
+  <link rel="icon" href="/icons/icon-ceo.jpeg" />
   <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
   <style>
-    body { font-family: 'Inter', sans-serif; }
-    .text-neon-cyan { color: #00F0FF; }
-    .text-neon-purple { color: #B300F2; }
-    .bg-gradient-to-r-neon { background-image: linear-gradient(to right, #B300F2, #00F0FF); }
-    .btn-neon-gradient {
-      background-image: linear-gradient(to right, #B300F2, #00F0FF);
-      transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
-      box-shadow: 0 4px 15px -5px #B300F2;
-    }
-    .btn-neon-gradient:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px -5px #00F0FF;
-    }
-
-    /* 🌈 PANEL DE VERSIÓN MODERNO */
-    #version-panel {
-      position: fixed;
-      bottom: 14px;
-      right: 14px;
-      background: linear-gradient(135deg, #00bcd4, #3f51b5, #9c27b0);
-      background-size: 300% 300%;
-      animation: gradienteFlujo 6s ease infinite;
-      color: white;
-      font-family: 'Segoe UI', sans-serif;
-      font-size: 13px;
-      padding: 8px 14px;
-      border-radius: 10px;
-      cursor: pointer;
-      box-shadow: 0 0 8px rgba(0, 255, 255, 0.6);
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
-      z-index: 9999;
-    }
-    #version-panel:hover {
-      transform: scale(1.05);
-      box-shadow: 0 0 16px rgba(0, 255, 255, 0.8);
-    }
-    @keyframes gradienteFlujo {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
-
-    /* Modal informativo */
-    #version-modal {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.7);
-      z-index: 10000;
-      align-items: center;
-      justify-content: center;
-    }
-    #version-modal .content {
-      background: #fff;
-      padding: 20px;
-      border-radius: 12px;
-      width: 350px;
-      box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
-      text-align: center;
-      font-family: 'Segoe UI', sans-serif;
-    }
-    #version-modal button {
-      background: #3f51b5;
-      color: white;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      margin-top: 10px;
-    }
-    #version-modal button:hover {
-      background: #283593;
-    }
+    body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f1f5f9; }
+    .glass-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(51, 65, 85, 0.5); }
+    .neon-border-cyan { border-left: 4px solid #06b6d4; box-shadow: -5px 0 15px rgba(6, 182, 212, 0.2); }
+    .neon-border-green { border-left: 4px solid #10b981; box-shadow: -5px 0 15px rgba(16, 185, 129, 0.2); }
+    .neon-border-orange { border-left: 4px solid #f59e0b; box-shadow: -5px 0 15px rgba(245, 158, 11, 0.2); }
+    #notificationsPanel { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
   </style>
 </head>
 
-<body class="bg-slate-900 text-gray-200">
+<body class="flex min-h-screen">
+  <aside id="sidebar" class="fixed top-0 left-0 h-full w-64 bg-slate-900 border-r border-slate-800 text-gray-300 transition-transform duration-300 z-50 overflow-y-auto">
+    <div class="p-6 border-b border-slate-800">
+      <h2 class="text-xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">TAXIA CEO</h2>
+    </div>
 
-  <!-- Header -->
-  <header class="bg-slate-800 shadow-lg fixed top-0 w-full z-50">
-    <div class="container mx-auto px-4 py-4 flex justify-between items-center">
-      <a href="ceo-panel.html" class="flex items-center space-x-2">
-        <i class="fas fa-chart-line text-4xl text-neon-cyan"></i>
-        <h1 class="text-2xl font-extrabold text-white">Panel de CEO</h1>
+    <nav class="p-4 space-y-2">
+      <a href="/admin/ceo-panel.html" class="flex items-center space-x-3 p-3 rounded-xl bg-cyan-600/10 text-cyan-400 border border-cyan-600/20"><i class="fas fa-th-large"></i> <span class="font-bold">Dashboard</span></a>
+      <a href="/admin/ceo-mapa.html" class="flex items-center space-x-3 p-3 rounded-xl hover:bg-slate-800 transition"><i class="fas fa-map-marked-alt"></i> <span>Mapa Live</span></a>
+      <a href="/admin/listado-viajes.html" class="flex items-center justify-between p-3 rounded-xl hover:bg-slate-800 transition">
+        <div class="flex items-center space-x-3"><i class="fas fa-route"></i> <span>Historial Viajes</span></div>
+        <span id="viajes-badge" class="bg-red-500 text-[10px] font-black px-2 py-0.5 rounded-full text-white">0</span>
       </a>
-      <nav class="flex space-x-8 text-gray-400 font-semibold">
-        <a href="ceo-mapa.html" class="hover:text-neon-cyan">Mapa de Flota</a>
-        <a href="panel-credito.html" class="hover:text-neon-cyan">Créditos</a>
-        <a href="panel-whats.html" class="hover:text-neon-cyan">WhatsApp</a>
-        <a href="qr-generador.html" class="hover:text-neon-cyan">Generar QR</a>
-        <a href="#" onclick="signOutUser()" class="hover:text-neon-cyan">Cerrar Sesión</a>
-      </nav>
-    </div>
-  </header>
+      <a href="/admin/panel-credito.html" class="flex items-center space-x-3 p-3 rounded-xl hover:bg-slate-800 transition"><i class="fas fa-wallet"></i> <span>Gestión Créditos</span></a>
+      
+      <div class="pt-10 pb-4 px-3 text-[10px] font-black uppercase text-slate-500 tracking-[0.2em]">Configuración</div>
+      <button id="logoutBtn" class="flex items-center space-x-3 p-3 w-full rounded-xl text-red-400 hover:bg-red-400/10 transition"><i class="fas fa-sign-out-alt"></i> <span>Cerrar Sistema</span></button>
+    </nav>
+  </aside>
 
-  <!-- Main -->
-  <main class="py-24 px-4 md:px-8">
-    <div class="container mx-auto max-w-7xl text-center">
-      <h2 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r-neon mb-8">
-        Resumen de Operaciones
-      </h2>
-
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-12">
-        <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-          <div class="flex items-center space-x-4">
-            <i class="fas fa-taxi text-4xl text-neon-cyan"></i>
-            <div>
-              <p class="text-gray-400">Conductores Registrados</p>
-              <h3 id="totalConductores" class="text-3xl font-bold text-white">0</h3>
-            </div>
-          </div>
-        </div>
-        <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-          <div class="flex items-center space-x-4">
-            <i class="fas fa-users text-4xl text-yellow-400"></i>
-            <div>
-              <p class="text-gray-400">Pasajeros Registrados</p>
-              <h3 id="totalPasajeros" class="text-3xl font-bold text-white">0</h3>
-            </div>
-          </div>
-        </div>
+  <main class="flex-1 p-6 md:ml-64 transition-all duration-300">
+    <header class="flex justify-between items-center glass-card p-4 rounded-2xl shadow-2xl">
+      <div>
+        <h1 class="text-2xl font-black text-white italic">Centro de Control <span class="text-cyan-500">Live</span></h1>
+        <p class="text-[10px] text-slate-400 uppercase font-bold tracking-widest" id="modeLabel">Modo Producción</p>
       </div>
 
-      <!-- Tabla -->
-      <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-        <h3 class="text-2xl font-bold text-white mb-6">Usuarios Pendientes de Aprobación</h3>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left border-collapse">
-            <thead>
-              <tr class="text-gray-400 border-b border-slate-700">
-                <th class="p-3">Nombre</th>
-                <th class="p-3">Rol</th>
-                <th class="p-3">Email</th>
-                <th class="p-3">Teléfono</th>
-                <th class="p-3">Estado</th>
-                <th class="p-3 text-center">Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="usuariosTabla" class="text-gray-300">
-              <tr><td colspan='6' class='p-3 text-center text-gray-500'>Cargando usuarios...</td></tr>
-            </tbody>
-          </table>
+      <div class="flex items-center gap-6">
+        <label class="flex items-center cursor-pointer gap-2">
+          <input type="checkbox" id="modeSwitch" class="sr-only peer">
+          <div class="w-10 h-5 bg-slate-700 peer-checked:bg-orange-600 rounded-full relative transition-all">
+            <div class="absolute left-1 top-1 bg-white w-3 h-3 rounded-full transition-all peer-checked:translate-x-5"></div>
+          </div>
+        </label>
+
+        <div class="relative">
+          <button id="notifyBell" class="text-slate-400 hover:text-cyan-400 transition"><i class="fas fa-bell text-xl"></i></button>
+          <div id="notificationsPanel" class="hidden absolute right-0 mt-4 w-80 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-50">
+            <div class="p-4 border-b border-slate-800 font-bold text-xs uppercase tracking-widest text-cyan-500">Alertas del Sistema</div>
+            <ul id="notificationsList" class="max-h-60 overflow-y-auto p-2 space-y-2 text-[11px]"></ul>
+          </div>
+        </div>
+
+        <div class="h-8 w-[1px] bg-slate-700"></div>
+        <div class="flex items-center gap-3">
+            <span id="ceoEmail" class="text-xs font-bold text-slate-300 tracking-tight">Cargando...</span>
+            <div class="w-8 h-8 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center font-black">C</div>
         </div>
       </div>
-    </div>
+    </header>
+
+    <section class="mt-8 grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div class="glass-card p-6 rounded-2xl neon-border-cyan">
+        <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Conductores Online</h3>
+        <p id="count-conductores" class="text-4xl font-black text-white">0</p>
+      </div>
+      <div class="glass-card p-6 rounded-2xl neon-border-green">
+        <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Recaudado (Total)</h3>
+        <p id="total-money" class="text-4xl font-black text-green-400">$0</p>
+      </div>
+      <div class="glass-card p-6 rounded-2xl neon-border-orange">
+        <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Viajes Activos</h3>
+        <p id="count-viajes" class="text-4xl font-black text-orange-400">0</p>
+      </div>
+      <div class="glass-card p-6 rounded-2xl border-l-4 border-purple-500">
+        <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pasajeros Hoy</h3>
+        <p id="count-pasajeros" class="text-4xl font-black text-white">0</p>
+      </div>
+    </section>
+
+    <section class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="glass-card p-6 rounded-2xl h-[350px]">
+        <h3 class="text-xs font-black uppercase mb-4 text-cyan-500 tracking-widest">Distribución de Gremios</h3>
+        <canvas id="gremiosChart"></canvas>
+      </div>
+      <div class="glass-card p-6 rounded-2xl h-[350px]">
+        <h3 class="text-xs font-black uppercase mb-4 text-green-500 tracking-widest">Ingresos Mensuales</h3>
+        <canvas id="revenueChart"></canvas>
+      </div>
+    </section>
   </main>
 
-  <!-- Footer -->
-  <footer class="bg-slate-800 text-gray-400 py-8 px-4 mt-12 text-center">
-    <p>&copy; 2025 TAXIA CIMCO. Todos los derechos reservados.</p>
-  </footer>
-
-  <!-- 🌈 Panel de versión -->
-  <div id="version-panel" onclick="mostrarInfoVersion()">
-    🚀 TAXIA-CIMCO — <span id="version-info">Cargando...</span>
-  </div>
-
-  <!-- Modal informativo -->
-  <div id="version-modal">
-    <div class="content">
-      <h3>Información del Despliegue</h3>
-      <p id="modal-version"></p>
-      <p id="modal-fecha"></p>
-      <p id="modal-entorno"></p>
-      <p id="modal-notas"></p>
-      <button onclick="cerrarInfoVersion()">Cerrar</button>
-    </div>
-  </div>
-
-  <!-- Script Modal -->
-  <script>
-  async function mostrarInfoVersion() {
-    const modal = document.getElementById("version-modal");
-    try {
-      const versionData = await fetch("/version.json").then(r => r.json());
-      document.getElementById("modal-version").innerText = "Versión: " + versionData.version;
-      document.getElementById("modal-fecha").innerText = "Fecha: " + versionData.fecha;
-      document.getElementById("modal-entorno").innerText = "Entorno: Producción";
-      document.getElementById("modal-notas").innerText = "Último despliegue automático exitoso.";
-      document.getElementById("version-info").innerText = versionData.version;
-    } catch (e) {
-      document.getElementById("version-info").innerText = "Error al cargar versión";
-    }
-    modal.style.display = "flex";
-  }
-  function cerrarInfoVersion() {
-    document.getElementById("version-modal").style.display = "none";
-  }
-  </script>
-
-<script src="/js/version-footer.js"></script>
+  <script type="module" src="/admin/js/ceo-dashboard.js"></script>
 </body>
 </html>
-

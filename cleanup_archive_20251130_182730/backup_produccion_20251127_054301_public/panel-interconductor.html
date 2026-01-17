@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel Conductor Intermunicipal - TAXIA CIMCO</title>
+  <link rel="icon" href="../icons/conductor-192.png" />
+
+  <!-- 🌈 Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- 🗺️ Leaflet y Routing Machine -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+  <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+
+  <style>
+    body { background-color: #0f172a; font-family: 'Inter', sans-serif; }
+    #map { height: 400px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.4); }
+  </style>
+
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
+<script>
+  window.APP_ENV = "prod";
+</script>
+
+</head>
+
+<body class="text-gray-100">
+  <!-- 🔹 Encabezado -->
+  <header class="p-4 bg-slate-800 flex justify-between items-center">
+    <h1 class="text-lg font-bold text-cyan-400">🚐 Conductor Intermunicipal</h1>
+    <button id="logoutBtn" class="bg-red-600 px-4 py-2 rounded-lg hover:bg-red-700">Salir</button>
+  </header>
+
+  <!-- 🔹 Contenido principal -->
+  <main class="p-6 space-y-6">
+    <!-- Estado de conexión -->
+    <section class="bg-slate-800 p-4 rounded-xl shadow">
+      <h2 class="text-lg font-semibold text-green-300">📡 Estado de conexión</h2>
+      <p id="estado" class="text-sm text-gray-400">Esperando ubicación...</p>
+    </section>
+
+    <!-- Mapa -->
+    <section class="bg-slate-800 p-4 rounded-xl shadow">
+      <div id="map" class="w-full"></div>
+    </section>
+
+    <!-- Botones de control -->
+    <section class="flex gap-4 justify-center">
+      <button id="btnAceptar" class="bg-green-500 px-4 py-2 rounded-lg hover:bg-green-600 font-semibold">
+        ✅ Aceptar viaje
+      </button>
+      <button id="btnFinalizar" class="bg-blue-500 px-4 py-2 rounded-lg hover:bg-blue-600 font-semibold hidden">
+        🏁 Finalizar viaje
+      </button>
+    </section>
+  </main>
+
+  <!-- 🔊 Sonido -->
+  <audio id="gpsSound" src="../js/sounds/notify.mp3"></audio>
+
+  <!-- ========================================================= -->
+  <!-- 🔐 Scripts principales -->
+  <script type="module">
+    import { auth, db } from "./js/firebase-config-inter.js";
+
+    const estadoTxt = document.getElementById("estado");
+    const btnAceptar = document.getElementById("btnAceptar");
+    const btnFinalizar = document.getElementById("btnFinalizar");
+    const gpsSound = document.getElementById("gpsSound");
+
+    // ==========================
+    // 🗺️ Inicializar mapa
+    // ==========================
+    const map = L.map("map").setView([9.56, -73.62], 13);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    let conductorMarker = null;
+    let pasajeroMarker = null;
+    let routeControl = null;
+    let viajeAsignado = null;
+
+    // ==========================
+    // 🔄 Obtener viaje asignado
+    // ==========================
+    const conductorId = localStorage.getItem("interConductorId");
+
+    if (!conductorId) {
+      estadoTxt.textContent = "⚠️ No se detectó sesión activa.";
+    } else {
+      const refViaje = doc(db, "viajes_asignados", conductorId);
+
+      onSnapshot(refViaje, (snap) => {
+        if (snap.exists()) {
+          viajeAsignado = snap.data();
+          estadoTxt.textContent = `🚖 Viaje pendiente de ${viajeAsignado.emailPasajero}`;
+          btnAceptar.classList.remove("hidden");
+          gpsSound.play().catch(() => {});
+        } else {
+          estadoTxt.textContent = "📭 Sin viajes asignados";
+        }
+      });
+    }
+
+    // ==========================
+    // 📍 Actualizar ubicación
+    // ==========================
+    if (navigator.geolocation) {
+      navigator.geolocation.watchPosition(
+        async (pos) => {
+          const { latitude, longitude } = pos.coords;
+
+          if (!conductorMarker) {
+            conductorMarker = L.marker([latitude, longitude], {
+              icon: L.divIcon({
+                html: `<div style="background:#00FFFF;width:16px;height:16px;border-radius:50%;border:2px solid white"></div>`,
+                className: ""
+              })
+            }).addTo(map).bindPopup("Tu posición");
+          } else {
+            conductorMarker.setLatLng([latitude, longitude]);
+          }
+
+          map.setView([latitude, longitude], 14);
+
+          // Si hay un viaje aceptado, actualizamos Firestore
+          if (viajeAsignado && viajeAsignado.estado === "en_ruta") {
+            await updateDoc(doc(db, "viajes", viajeAsignado.id), {
+              latConductor: latitude,
+              lngConductor: longitude,
+            });
+          }
+        },
+        (err) => console.warn("Error GPS:", err),
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    }
+
+    // ==========================
+    // ✅ Aceptar viaje
+    // ==========================
+    btnAceptar.addEventListener("click", async () => {
+      if (!viajeAsignado) return alert("No hay viaje asignado.");
+
+      await updateDoc(doc(db, "viajes", viajeAsignado.id), {
+        estado: "aceptado",
+      });
+
+      estadoTxt.textContent = "🟢 Viaje aceptado. Dirígete al pasajero.";
+      btnAceptar.classList.add("hidden");
+      btnFinalizar.classList.remove("hidden");
+
+      // Mostrar ruta hacia pasajero
+      if (viajeAsignado.lat && viajeAsignado.lng) {
+        pasajeroMarker = L.marker([viajeAsignado.lat, viajeAsignado.lng]).addTo(map).bindPopup("📍 Pasajero");
+
+        routeControl = L.Routing.control({
+          waypoints: [
+            L.latLng(conductorMarker.getLatLng()),
+            L.latLng(viajeAsignado.lat, viajeAsignado.lng)
+          ],
+          lineOptions: { styles: [{ color: "#00FFFF", weight: 4 }] },
+          createMarker: () => null
+        }).addTo(map);
+      }
+    });
+
+    // ==========================
+    // 🏁 Finalizar viaje
+    // ==========================
+    btnFinalizar.addEventListener("click", async () => {
+      if (!viajeAsignado) return;
+      await updateDoc(doc(db, "viajes", viajeAsignado.id), { estado: "finalizado" });
+      estadoTxt.textContent = "🏁 Viaje finalizado con éxito.";
+      btnFinalizar.classList.add("hidden");
+      if (routeControl) map.removeControl(routeControl);
+    });
+
+    // ==========================
+    // 🔐 Cerrar sesión
+    // ==========================
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await signOut(auth);
+      localStorage.removeItem("interConductorId");
+      window.location.href = "./login-inter.html";
+    });
+  </script>
+
+  <!-- 🔁 Sincronización general de viajes -->
+  <script type="module" src="/js/realtime-sync.js"></script>
+<script src="/interconductor/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+
+

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Panel Motocarga - TAXIA CIMCO</title>
+  <link rel="manifest" href="/motocarga/manifest-motocarga.webmanifest">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+    #map { height: 70vh; border-radius: 10px; }
+  </style>
+
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
+<script>
+  window.APP_ENV = "prod";
+</script>
+
+</head>
+
+<body>
+  <header class="bg-green-700 text-white p-4 flex justify-between items-center">
+    <h1 class="text-xl font-bold">Motocarga - Panel</h1>
+    <div class="flex items-center gap-3">
+      <span id="userEmail" class="text-sm"></span>
+      <button id="logoutBtn" class="bg-red-600 px-3 py-1 rounded">Salir</button>
+    </div>
+  </header>
+
+  <main class="p-6">
+    <div class="mb-4 flex gap-3">
+      <button id="toggleTracking" class="px-4 py-2 rounded bg-green-600 text-white font-semibold">Activar seguimiento</button>
+    </div>
+
+    <div id="map" class="w-full"></div>
+
+    <section class="mt-6 bg-white p-4 rounded shadow">
+      <h2 class="font-semibold text-slate-700">Viaje asignado</h2>
+      <div id="assignedInfo" class="text-sm text-slate-600 mt-2">No tienes viajes asignados.</div>
+      <div class="mt-4 flex gap-2">
+        <button id="acceptBtn" class="hidden bg-green-600 text-white px-3 py-2 rounded">Aceptar</button>
+        <button id="startBtn" class="hidden bg-indigo-600 text-white px-3 py-2 rounded">Iniciar</button>
+        <button id="finishBtn" class="hidden bg-gray-700 text-white px-3 py-2 rounded">Finalizar</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./js/carga-panel.js"></script>
+  <script type="module" src="./js/carga-tracking.js"></script>
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+

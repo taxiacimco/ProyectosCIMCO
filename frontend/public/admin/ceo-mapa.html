@@ -1,318 +1,85 @@
-﻿<!DOCTYPE html>
-<html lang="es" class="scroll-smooth">
+<!DOCTYPE html>
+<html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mapa de Flota - TAXIA CIMCO</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-  <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <style>
-    body { font-family: 'Inter', sans-serif; }
-    html { scroll-behavior: smooth; }
-    .text-neon-cyan { color: #00F0FF; }
-    .text-neon-purple { color: #B300F2; }
-    .bg-gradient-to-r-neon { background-image: linear-gradient(to right, #B300F2, #00F0FF); }
-    .map-container {
-      height: 70vh;
-      width: 100%;
-      border-radius: 12px;
-      box-shadow: 0 4px 15px -5px rgba(0, 0, 0, 0.5);
-      overflow: hidden;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CEO Mapa de Monitoreo - TAXIA CIMCO</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #map-canvas { height: 70vh; width: 100%; }
+        .leaflet-container { border-radius: 0.75rem; }
+    </style>
+
+    <script>
+        const APP_ENV = 'dev'; 
+    </script>
 </head>
-<body class="bg-slate-900 text-gray-200">
+<body class="bg-gray-100 min-h-screen flex flex-col">
 
-  <!-- Header -->
-  <header class="bg-slate-800 shadow-lg fixed top-0 w-full z-50">
-    <div class="container mx-auto px-4 py-4 flex justify-between items-center">
-      <a href="ceo-panel.html" class="flex items-center space-x-2">
-        <i class="fas fa-chart-line text-4xl text-neon-cyan"></i>
-        <h1 class="text-2xl font-extrabold text-white">Panel de CEO</h1>
-      </a>
-      <nav class="flex space-x-8 text-gray-400 font-semibold">
-        <a href="ceo-panel.html" class="hover:text-neon-cyan transition duration-300">Resumen</a>
-        <a href="ceo-mapa.html" class="hover:text-neon-cyan transition duration-300 font-bold">Mapa de Flota</a>
-        <a href="panel-credito.html" class="hover:text-neon-cyan transition duration-300">CrÃ©ditos</a>
-        <a href="../index.html" class="hover:text-neon-cyan transition duration-300">Cerrar SesiÃ³n</a>
-      </nav>
-    </div>
-  </header>
-
-  <!-- Main -->
-  <main class="py-24 px-4 md:px-8">
-    <div class="container mx-auto max-w-7xl">
-      <h2 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r-neon mb-8 text-center">
-        Mapa de Flota en Vivo
-      </h2>
-      <p class="text-center text-gray-400 mb-6">
-        Visualiza en tiempo real la ubicaciÃ³n de los vehÃ­culos, su rol y estado.
-      </p>
-
-      <div id="map" class="map-container"></div>
-
-      <!-- EstadÃ­sticas -->
-      <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-          <h3 class="text-2xl font-bold text-white mb-2">VehÃ­culos Disponibles</h3>
-          <p id="disponibles" class="text-4xl font-extrabold text-neon-cyan">0</p>
+    <header class="bg-indigo-700 text-white p-4 shadow-lg">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold flex items-center gap-2">
+                <span>🛰️</span> CEO: Mapa Global de Flota
+            </h1>
+            <nav class="hidden md:flex gap-4">
+                <a href="ceo-dashboard.html" class="hover:bg-indigo-600 p-2 rounded-lg transition">Dashboard</a>
+                <a href="ceo-centro-control.html" class="hover:bg-indigo-600 p-2 rounded-lg transition">Control</a>
+                <a href="logout-ceo.html" class="bg-red-500 px-4 py-2 rounded-lg hover:bg-red-600 transition">Cerrar Sesión</a>
+            </nav>
         </div>
-        <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-          <h3 class="text-2xl font-bold text-white mb-2">VehÃ­culos en Servicio</h3>
-          <p id="enServicio" class="text-4xl font-extrabold text-neon-purple">0</p>
-        </div>
-        <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-          <h3 class="text-2xl font-bold text-white mb-2">VehÃ­culos Inactivos</h3>
-          <p id="inactivos" class="text-4xl font-extrabold text-red-400">0</p>
-        </div>
-      </div>
-    </div>
-  </main>
+    </header>
 
-  <!-- Footer -->
-  <footer class="bg-slate-800 text-gray-400 py-8 px-4 mt-12">
-    <div class="container mx-auto text-center">
-      <p>Â© 2025 TAXIA CIMCO. Todos los derechos reservados.</p>
-    </div>
-  </footer>
+    <main class="container mx-auto p-4 flex-grow">
+        <div id="map-canvas" class="bg-white rounded-xl shadow-2xl border-4 border-indigo-500">
+            </div>
 
-  <!-- Firebase + Leaflet -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-    const firebaseConfig = {
-      apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
-      authDomain: "pelagic-chalice-467818-e1.firebaseapp.com",
-      projectId: "pelagic-chalice-467818-e1",
-      storageBucket: "pelagic-chalice-467818-e1.appspot.com",
-      messagingSenderId: "191106268804",
-      appId: "1:191106268804:web:8b2aa9689abaa35c880cd1",
-      measurementId: "G-CPWSCLGKP2"
-    };
-
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-
-    // Inicializar Leaflet
-    const map = L.map('map').setView([9.5649, -73.3345], 13); // La Jagua de Ibirico
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: 'Â© OpenStreetMap'
-    }).addTo(map);
-
-    let markers = {};
-
-    // Iconos personalizados
-    function elegirIcono(status) {
-      switch (status) {
-        case "available": return L.icon({ iconUrl: "https://maps.google.com/mapfiles/ms/icons/green-dot.png", iconSize: [32, 32] });
-        case "on-trip": return L.icon({ iconUrl: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png", iconSize: [32, 32] });
-        default: return L.icon({ iconUrl: "https://maps.google.com/mapfiles/ms/icons/red-dot.png", iconSize: [32, 32] });
-      }
-    }
-
-    // Escuchar en Firestore
-    const driversCollectionRef = collection(db, "conductores");
-    onSnapshot(driversCollectionRef, (snapshot) => {
-      let disponibles = 0, enServicio = 0, inactivos = 0;
-
-      const activeIds = snapshot.docs.map(doc => doc.id);
-      Object.keys(markers).forEach(docId => {
-        if (!activeIds.includes(docId)) {
-          map.removeLayer(markers[docId]);
-          delete markers[docId];
-        }
-      });
-
-      snapshot.forEach((doc) => {
-        const driver = doc.data();
-        if (driver.location && driver.location.lat && driver.location.lng) {
-          const position = [driver.location.lat, driver.location.lng];
-
-          if (driver.status === "available") disponibles++;
-          else if (driver.status === "on-trip") enServicio++;
-          else inactivos++;
-
-          if (markers[doc.id]) {
-            markers[doc.id].setLatLng(position);
-          } else {
-            markers[doc.id] = L.marker(position, { icon: elegirIcono(driver.status) })
-              .addTo(map)
-              .bindPopup(\`
-                <div class="text-slate-900 font-sans">
-                  <h1 class="text-lg font-bold">\${driver.name || 'Conductor'}</h1>
-                  <p>Rol: \${driver.rol || 'N/A'}</p>
-                  <p>Estado: <span class="font-semibold">\${driver.status || 'Sin estado'}</span></p>
+        <div id="status-panel" class="mt-4 p-4 bg-white rounded-xl shadow-xl">
+            <h2 class="text-xl font-semibold text-indigo-700 mb-3">Resumen Global en Tiempo Real</h2>
+            <div id="fleet-summary" class="grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+                <div class="p-3 bg-green-100 rounded-lg border border-green-200">
+                    <p class="text-2xl font-bold text-green-700" id="count-online">0</p>
+                    <p class="text-xs text-green-600 uppercase font-bold">En Línea</p>
                 </div>
-              \`);
-          }
-        }
-      });
+                <div class="p-3 bg-yellow-100 rounded-lg border border-yellow-200">
+                    <p class="text-2xl font-bold text-yellow-700" id="count-busy">0</p>
+                    <p class="text-xs text-yellow-600 uppercase font-bold">Ocupados</p>
+                </div>
+                <div class="p-3 bg-blue-100 rounded-lg border border-blue-200">
+                    <p class="text-2xl font-bold text-blue-700" id="count-total">0</p>
+                    <p class="text-xs text-blue-600 uppercase font-bold">Total Flota</p>
+                </div>
+                <div class="col-span-2 p-3 bg-gray-50 rounded-lg border border-gray-200 flex items-center justify-around">
+                    <span class="text-xs font-bold text-gray-500">TIPOS ACTIVOS:</span>
+                    <div class="flex gap-2" id="active-types-icons">
+                        </div>
+                </div>
+            </div>
+        </div>
+    </main>
 
-      document.getElementById("disponibles").textContent = disponibles;
-      document.getElementById("enServicio").textContent = enServicio;
-      document.getElementById("inactivos").textContent = inactivos;
-    });
-    <!-- Dentro del script de ceo-mapa.html -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-  import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script type="module" src="/js/firebase/firebase-loader.js"></script>
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
-    authDomain: "pelagic-chalice-467818-e1.firebaseapp.com",
-    projectId: "pelagic-chalice-467818-e1",
-    storageBucket: "pelagic-chalice-467818-e1.appspot.com",
-    messagingSenderId: "191106268804",
-    appId: "1:191106268804:web:8b2aa9689abaa35c880cd1",
-    measurementId: "G-CPWSCLGKP2"
-  };
+    <script type="module">
+        import { inicializarMapaSeguimiento } from "./js/ceo-mapa.js";
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-
-  let map;
-  let markers = {};
-
-  // Inicializar Google Maps
-  window.initMap = function() {
-    const mapContainer = document.getElementById("map");
-    mapContainer.innerHTML = '';
-
-    map = new google.maps.Map(mapContainer, {
-      center: { lat: 9.5649, lng: -73.3345 }, // La Jagua de Ibirico
-      zoom: 13,
-      styles: [{ elementType: "geometry", stylers: [{ color: "#1d2c4d" }] }]
-    });
-
-    cargarConductores();
-  };
-
-  // Escuchar conductores en Firestore
-  function cargarConductores() {
-    const driversCollectionRef = collection(db, "conductores");
-
-    onSnapshot(driversCollectionRef, (snapshot) => {
-      let disponibles = 0, enServicio = 0, inactivos = 0;
-
-      const activeIds = snapshot.docs.map(doc => doc.id);
-      Object.keys(markers).forEach(docId => {
-        if (!activeIds.includes(docId)) {
-          markers[docId].setMap(null);
-          delete markers[docId];
-        }
-      });
-
-      snapshot.forEach((doc) => {
-        const driver = doc.data();
-        if (driver.location && driver.location.lat && driver.location.lng) {
-          const position = { lat: driver.location.lat, lng: driver.location.lng };
-
-          if (driver.status === "available") disponibles++;
-          else if (driver.status === "on-trip") enServicio++;
-          else inactivos++;
-
-          // Popup con botÃ³n al detalle
-          const info = new google.maps.InfoWindow({
-            content: `
-              <div class="text-slate-900 font-sans">
-                <h1 class="text-lg font-bold">${driver.name || 'Conductor'}</h1>
-                <p>Rol: ${driver.rol || 'N/A'}</p>
-                <p>Estado: <span class="font-semibold">${driver.status || 'Sin estado'}</span></p>
-                <a href="detalle-conductor.html?uid=${doc.id}"
-                   class="mt-2 inline-block bg-indigo-600 text-white px-3 py-1 rounded-lg text-sm font-semibold hover:bg-indigo-700 transition">
-                  Ver Detalle
-                </a>
-              </div>
-            `
-          });
-
-          if (markers[doc.id]) {
-            markers[doc.id].setPosition(position);
-          } else {
-            markers[doc.id] = new google.maps.Marker({
-              position,
-              map,
-              title: `${driver.name} - ${driver.status}`,
-              icon: {
-                url: elegirIcono(driver.status),
-                scaledSize: new google.maps.Size(32, 32)
-              }
-            });
-            markers[doc.id].addListener("click", () => {
-              info.open({ anchor: markers[doc.id], map });
-            });
-          }
-        }
-      });
-
-      document.getElementById("disponibles").textContent = disponibles;
-      document.getElementById("enServicio").textContent = enServicio;
-      document.getElementById("inactivos").textContent = inactivos;
-    });
-  }
-
-  // Iconos personalizados
-  function elegirIcono(status) {
-    switch (status) {
-      case "available": return "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
-      case "on-trip": return "http://maps.google.com/mapfiles/ms/icons/blue-dot.png";
-      default: return "http://maps.google.com/mapfiles/ms/icons/red-dot.png";
-    }
-  }
-  </script>
-<!--  Botón oculto solo para desarrollo -->
-<button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
-<script>
-document.addEventListener("keydown", async (e) => {
-  if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "l") {
-    const regs = await navigator.serviceWorker.getRegistrations();
-    for (const reg of regs) await reg.unregister();
-    const names = await caches.keys();
-    for (const n of names) await caches.delete(n);
-    alert(" Caché y Service Workers eliminados.\nRecarga la página (Ctrl + F5).");
-  }
-});
-</script>
-<script src="/js/version-footer.js"></script>
-<!-- Panel de versiÃ³n -->
-<div id="version-panel" style="position:fixed; bottom:10px; right:10px; background:#222; color:#fff; font-size:12px; padding:8px 14px; border-radius:8px; opacity:0.85; cursor:pointer; z-index:9999;" onclick="mostrarInfoVersion()">
-  <strong>TAXIA-CIMCO</strong> - <span id="version-info">VersiÃ³n actual</span>
-</div>
-
-<!-- Modal informativo -->
-<div id="version-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; align-items:center; justify-content:center;">
-  <div style="background:white; padding:20px; border-radius:10px; max-width:400px; text-align:center;">
-    <h3>InformaciÃ³n de despliegue</h3>
-    <p id="modal-version"></p>
-    <p id="modal-fecha"></p>
-    <p id="modal-entorno"></p>
-    <p id="modal-notas"></p>
-    <button onclick="cerrarInfoVersion()">Cerrar</button>
-  </div>
-</div>
-
-<script>
-async function mostrarInfoVersion() {
-  const modal = document.getElementById("version-modal");
-  const versionData = await fetch("/version.json").then(r => r.json());
-  document.getElementById("modal-version").innerText = "VersiÃ³n: " + versionData.version;
-  document.getElementById("modal-fecha").innerText = "Fecha: " + versionData.fecha;
-  document.getElementById("modal-entorno").innerText = "Entorno: ProducciÃ³n";
-  document.getElementById("modal-notas").innerText = "Ãšltimo despliegue automÃ¡tico.";
-  modal.style.display = "flex";
-}
-function cerrarInfoVersion() {
-  document.getElementById("version-modal").style.display = "none";
-}
-</script>
+        // Esperar a que el Loader de Firebase exponga los objetos en window
+        window.addEventListener('load', () => {
+            const checkFirebase = setInterval(() => {
+                if (window.db && window.firebaseUtils) {
+                    clearInterval(checkFirebase);
+                    console.log("✅ Firebase detectado. Inicializando Mapa Global...");
+                    inicializarMapaSeguimiento();
+                }
+            }, 500); // Reintenta cada 500ms
+        });
+    </script>
 </body>
 </html>
-
-
-
-

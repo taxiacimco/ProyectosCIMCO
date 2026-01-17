@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Firebase Check — CEO CIMCO</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.4/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="./css/output.css" />`r`n</head>
+<body class="bg-slate-900 text-white flex flex-col items-center justify-center min-h-screen">
+  <div class="bg-slate-800 p-8 rounded-2xl shadow-lg text-center w-[420px]">
+    <h1 class="text-2xl font-bold mb-4">Diagnóstico Firebase — CEO CIMCO</h1>
+    <div id="modoActual" class="mb-2 text-cyan-400"></div>
+    <div id="estado" class="mb-4 text-gray-300">Conectando...</div>
+    <button id="btnCambiar" class="px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 rounded-lg font-semibold">
+      Cambiar Modo
+    </button>
+    <footer class="mt-6 text-sm text-gray-500">
+      &copy; 2025 TAXIA CIMCO — Diagnóstico de entorno
+    </footer>
+  </div>
+
+  <script type="module">
+    import { loadFirebaseEnvironment, aplicarEstiloModo, toggleFirebaseMode } from "./js/firebase-manager-ceo.js";
+
+    const estado = document.getElementById("estado");
+    const modoTexto = document.getElementById("modoActual");
+
+    aplicarEstiloModo(null, modoTexto, null);
+
+    loadFirebaseEnvironment()
+      .then(({ app }) => {
+        console.log("✅ Firebase cargado:", app.name);
+        estado.textContent = "✅ Conectado correctamente a Firebase";
+      })
+      .catch((e) => {
+        console.error("❌ Error al iniciar Firebase:", e);
+        estado.textContent = "❌ Error al conectar con Firebase";
+      });
+
+    document.getElementById("btnCambiar").addEventListener("click", () => {
+      toggleFirebaseMode();
+    });
+  </script>
+</body>
+</html>
+
+
+<script type="module" src="/js/firebase/firebase-loader.js"></script>

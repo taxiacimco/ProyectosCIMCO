@@ -1,44 +1,8 @@
-﻿<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Historial de Viajes - TAXIA CIMCO</title>
-  <link rel="stylesheet" href="../../styles/style.css">
-  <style>
-    .viaje-card {
-      border: 1px solid #ccc;
-      border-radius: 10px;
-      padding: 15px;
-      margin: 10px 0;
-      background: #f9f9f9;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .viaje-card h3 {
-      margin: 0 0 10px;
-    }
-    .viaje-card p {
-      margin: 5px 0;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>ðŸ“œ Historial de Viajes</h1>
-    <p>Bienvenido, <span id="userEmail"></span></p>
-
-    <div id="viajesList"></div>
-
-    <button onclick="window.location.href='panel-pasajero.html'">â¬…ï¸ Volver</button>
-    <button id="logoutBtn" class="logout-btn">Cerrar SesiÃ³n</button>
-  </div>
-
-  <script type="module">
-    import { getAuth, onAuthStateChanged, signOut } 
-      from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-    import { getFirestore, collection, query, where, getDocs } 
-      from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-    import { app } from "../../../public/js/firebase-config-pasajero.js";
+<script type="module">
+    // Corrección de sintaxis de importación
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+    import { getFirestore, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+    import { app } from "../js/firebase-config-pasajero.js"; // Asegúrate de que la ruta sea correcta
 
     const auth = getAuth(app);
     const db = getFirestore(app);
@@ -46,64 +10,38 @@
     const viajesList = document.getElementById("viajesList");
     const userEmailEl = document.getElementById("userEmail");
 
-    // Verificar sesiÃ³n activa
     onAuthStateChanged(auth, async (user) => {
       if (user) {
         userEmailEl.textContent = user.email;
+        // Cambiado "viajes" a "rides" para que coincida con tu backend actual si es necesario
+        const q = query(collection(db, "rides"), where("pasajeroId", "==", user.uid));
+        const snapshot = await getDocs(q);
 
-        // Consultar viajes en Firestore para este pasajero
-        const q = query(
-          collection(db, "viajes"),
-          where("pasajeroId", "==", user.uid)
-        );
-
-        const querySnapshot = await getDocs(q);
-
-        if (querySnapshot.empty) {
-          viajesList.innerHTML = "<p>No tienes viajes registrados aÃºn ðŸš–</p>";
-        } else {
-          querySnapshot.forEach((doc) => {
-            const viaje = doc.data();
-            const card = document.createElement("div");
-            card.classList.add("viaje-card");
-            card.innerHTML = `
-              <h3>ðŸ“ Viaje</h3>
-              <p><strong>Origen:</strong> ${viaje.origen}</p>
-              <p><strong>Destino:</strong> ${viaje.destino}</p>
-              <p><strong>Fecha:</strong> ${viaje.fecha || "Sin fecha"}</p>
-              <p><strong>Estado:</strong> ${viaje.estado || "Pendiente"}</p>
-            `;
-            viajesList.appendChild(card);
-          });
+        if (snapshot.empty) {
+          viajesList.innerHTML = "<p class='text-center text-gray-400'>No tienes viajes registrados 🚖</p>";
+          return;
         }
 
+        viajesList.innerHTML = ""; // Limpiar antes de llenar
+        snapshot.forEach((docu) => {
+          const v = docu.data();
+          const card = document.createElement("div");
+          card.className = "bg-slate-800 p-4 rounded-lg shadow mb-3 border border-slate-700";
+          card.innerHTML = `
+            <p><b>📍 Origen:</b> ${v.origen}</p>
+            <p><b>🏁 Destino:</b> ${v.destino}</p>
+            <p><b>📅 Fecha:</b> ${v.fecha || "Reciente"}</p>
+            <p><b>🔄 Estado:</b> <span class="text-cyan-400">${v.status || "Pendiente"}</span></p>
+          `;
+          viajesList.appendChild(card);
+        });
       } else {
-        window.location.href = "login-pasajero.html";
+        window.location.href = "../login.html";
       }
     });
 
-    // Cerrar sesiÃ³n
     document.getElementById("logoutBtn").addEventListener("click", async () => {
       await signOut(auth);
-      window.location.href = "login-pasajero.html";
+      window.location.href = "../login.html";
     });
-  </script>
-<!--  Botón oculto solo para desarrollo -->
-<button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
-<script>
-document.addEventListener("keydown", async (e) => {
-  if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "l") {
-    const regs = await navigator.serviceWorker.getRegistrations();
-    for (const reg of regs) await reg.unregister();
-    const names = await caches.keys();
-    for (const n of names) await caches.delete(n);
-    alert(" Caché y Service Workers eliminados.\nRecarga la página (Ctrl + F5).");
-  }
-});
 </script>
-<script src="/js/version-footer.js"></script>
-</body>
-</html>
-
-
-

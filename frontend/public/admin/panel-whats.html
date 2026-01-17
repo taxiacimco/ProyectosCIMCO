@@ -1,10 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es" class="scroll-smooth">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Panel WhatsApp - TAXIA CIMCO</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -24,6 +23,15 @@
             to { transform: rotate(360deg); }
         }
     </style>
+  <link rel="stylesheet" href="./css/output.css" />`r`n
+<!-- Firebase PRODUCCIÓN exclusivo para ADMIN (insertado automáticamente) -->
+
+
+    <script>
+        <!-- Define el entorno de la aplicación. 'dev' (Desarrollo) es el valor por defecto. -->
+        <!-- CÁMBIALO MANUALMENTE A 'prod' solo antes de desplegar en producción. -->
+        const APP_ENV = 'dev'; 
+    </script>
 </head>
 <body class="bg-slate-900 text-gray-200">
 
@@ -55,7 +63,7 @@
                     <thead>
                         <tr>
                             <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Nombre</th>
-                            <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">TelÃ©fono</th>
+                            <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Teléfono</th>
                             <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Solicitud</th>
                             <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Estado</th>
                             <th class="px-6 py-3 text-left text-sm font-medium text-gray-400 uppercase">Acciones</th>
@@ -75,9 +83,7 @@
 </footer>
 
 <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
-    import { getFirestore, collection, query, orderBy, getDocs, updateDoc, doc } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js";
-    import { firebaseConfig } from "./firebase-config.js"; // Importa la configuraciÃ³n
+    import { firebaseConfig } from "./firebase-config.js"; // Importa la configuración
 
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
@@ -140,7 +146,7 @@
             try {
                 const docRef = doc(db, "solicitudes_whatsapp", id);
                 await updateDoc(docRef, { estado: "asignado" });
-                alert("Conductor asignado a la solicitud âœ…");
+                alert("Conductor asignado a la solicitud ✅");
                 cargarSolicitudes(); // Recargar la tabla
             } catch (error) {
                 console.error("Error al asignar conductor:", error);
@@ -152,7 +158,7 @@
     cargarSolicitudes();
 </script>
 
-<!--  Botón oculto solo para desarrollo -->
+<!--  Bot�n oculto solo para desarrollo -->
 <button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
 <script>
 document.addEventListener("keydown", async (e) => {
@@ -161,12 +167,23 @@ document.addEventListener("keydown", async (e) => {
     for (const reg of regs) await reg.unregister();
     const names = await caches.keys();
     for (const n of names) await caches.delete(n);
-    alert(" Caché y Service Workers eliminados.\nRecarga la página (Ctrl + F5).");
+    alert(" Cach� y Service Workers eliminados.\nRecarga la p�gina (Ctrl + F5).");
   }
 });
 </script>
 <script src="/js/version-footer.js"></script>
+
+<script src="/js/firebase/firebase-loader.js"></script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
 
 

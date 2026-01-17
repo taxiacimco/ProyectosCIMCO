@@ -1,7 +1,4 @@
-﻿{
-    "deployed":  "2025-10-04 18:32:39",
-    "notas":  "Despliegue automÃ¡tico con panel moderno y limpieza",
-    "entorno":  "ProducciÃ³n",
-    "version":  "2025.10.04-1832",
-    "fecha":  "2025-10-04 18:32:39"
+{
+  "deployed": "2025-11-23 18:19:56",
+  "version": "2025.11.23-1819"
 }

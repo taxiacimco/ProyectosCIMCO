@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es" class="scroll-smooth">
 <head>
   <meta charset="UTF-8">
@@ -14,9 +14,6 @@
   </style>
   <script type="module">
     // Importar Firebase y Auth
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, updateDoc, collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     // Variables globales obligatorias de Canvas
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -211,6 +208,18 @@
   </script>
   <!-- Ãconos de Font Awesome (para iconos profesionales) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
+<script>
+  window.APP_ENV = "prod";
+</script>
+
+
+    <script>
+        <!-- Define el entorno de la aplicación. 'dev' (Desarrollo) es el valor por defecto. -->
+        <!-- CÁMBIALO MANUALMENTE A 'prod' solo antes de desplegar en producción. -->
+        const APP_ENV = 'dev'; 
+    </script>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <!-- Contenedor de Notificaciones (reemplazo de alert()) -->
@@ -256,8 +265,19 @@ document.addEventListener("keydown", async (e) => {
 });
 </script>
 <script src="/js/version-footer.js"></script>
+
+<script src="/js/firebase/firebase-loader.js"></script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
 
 
 

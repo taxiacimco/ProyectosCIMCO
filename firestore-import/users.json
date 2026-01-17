@@ -1,0 +1,22 @@
+{
+  "users": {
+    "UID_EJEMPLO_DRIVER": {
+      "nombre": "Conductor Demo",
+      "email": "driver@demo.com",
+      "rol": "driver",                                                              
+      "activo": true
+    },
+    "UID_EJEMPLO_PASSENGER": {
+      "nombre": "Pasajero Demo",
+      "email": "passenger@demo.com",
+      "rol": "passenger",
+      "activo": true
+    },
+    "UID_EJEMPLO_ADMIN": {
+      "nombre": "Administrador Demo",
+      "email": "admin@demo.com",
+      "rol": "admin",
+      "activo": true
+    }
+  }
+}

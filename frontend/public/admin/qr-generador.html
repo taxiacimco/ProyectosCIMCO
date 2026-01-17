@@ -1,211 +1,141 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generador de QR - TAXI A CIMCO</title>
-    <!-- Incluir Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Incluir Font Awesome para los iconos -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <!-- Incluir librería de QRious para generar códigos QR -->
     <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
+    
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #e2e8f0;
-        }
-        .container {
-            max-width: 95%;
-        }
-        .qr-container {
-            position: relative;
-            display: inline-block;
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Orbitron:wght@700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; }
+        .qr-card { background: white; padding: 2rem; border-radius: 1.5rem; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
+        .btn-active { border: 2px solid #3b82f6; background-color: #1e293b !important; color: white !important; }
     </style>
 </head>
-<body class="p-4 md:p-8 flex items-center justify-center min-h-screen">
-    <div class="max-w-xl w-full space-y-6 bg-white rounded-xl shadow-lg p-6 md:p-8 text-center">
-        <!-- Navegación -->
-        <div class="flex justify-between items-center bg-gray-100 rounded-xl p-4 shadow-sm mb-6">
-            <a href="ceo-panel.html" class="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-300 flex items-center">
+<body class="p-4 md:p-8 flex items-center justify-center min-h-screen text-slate-200">
+    <div class="max-w-4xl w-full space-y-6 bg-slate-900 rounded-3xl shadow-2xl p-6 md:p-10 border border-slate-800">
+        
+        <div class="flex justify-between items-center bg-slate-800 rounded-2xl p-4 mb-6">
+            <a href="ceo-panel.html" class="bg-slate-700 text-white font-bold py-2 px-4 rounded-lg hover:bg-slate-600 transition flex items-center">
                 <i class="fas fa-arrow-left mr-2"></i> Volver
             </a>
-            <h1 class="text-2xl md:text-3xl font-bold text-gray-800">Generador de QR</h1>
+            <h1 style="font-family: 'Orbitron';" class="text-xl md:text-2xl font-bold text-cyan-400 tracking-wider">TAXI A CIMCO</h1>
         </div>
 
-        <p class="text-gray-600">Selecciona el tipo de aplicación para generar su código QR de descarga.</p>
+        <div class="text-center mb-8">
+            <h2 class="text-3xl font-black text-white mb-2">GENERADOR DE QR</h2>
+            <p class="text-slate-400">Selecciona un rol para generar el código de registro automático.</p>
+        </div>
         
-        <!-- Controles para la selección de la app -->
-        <div class="flex flex-wrap justify-center gap-4">
-            <button onclick="generateQR('pasajero')" class="app-btn bg-gray-200 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-300 transition duration-300">
-                <i class="fas fa-user-tie mr-2"></i> Pasajero
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <button onclick="generateQR('pasajero')" class="app-btn bg-slate-800 py-3 px-4 rounded-xl border border-slate-700 hover:bg-slate-700 transition flex flex-col items-center">
+                <i class="fas fa-user text-blue-400 mb-2"></i> <span class="text-xs font-bold uppercase">Pasajero</span>
             </button>
-            <button onclick="generateQR('mototaxi')" class="app-btn bg-gray-200 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-300 transition duration-300">
-                <i class="fas fa-motorcycle mr-2"></i> Mototaxi
+            <button onclick="generateQR('mototaxi')" class="app-btn bg-slate-800 py-3 px-4 rounded-xl border border-slate-700 hover:bg-slate-700 transition flex flex-col items-center">
+                <i class="fas fa-motorcycle text-yellow-400 mb-2"></i> <span class="text-xs font-bold uppercase">Mototaxi</span>
             </button>
-            <button onclick="generateQR('motocarga')" class="app-btn bg-gray-200 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-300 transition duration-300">
-                <i class="fas fa-truck-pickup mr-2"></i> Motocarga
+            <button onclick="generateQR('motoparrillero')" class="app-btn bg-slate-800 py-3 px-4 rounded-xl border border-slate-700 hover:bg-slate-700 transition flex flex-col items-center">
+                <i class="fas fa-users text-green-400 mb-2"></i> <span class="text-xs font-bold uppercase">Parrillero</span>
             </button>
-            <button onclick="generateQR('despachador_intermunicipal')" class="app-btn bg-gray-200 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-300 transition duration-300">
-                <i class="fas fa-user-cog mr-2"></i> Desp. Intermunicipal
+            <button onclick="generateQR('motocarga')" class="app-btn bg-slate-800 py-3 px-4 rounded-xl border border-slate-700 hover:bg-slate-700 transition flex flex-col items-center">
+                <i class="fas fa-truck-pickup text-orange-400 mb-2"></i> <span class="text-xs font-bold uppercase">Motocarga</span>
             </button>
-            <button onclick="generateQR('conductor_intermunicipal')" class="app-btn bg-gray-200 text-gray-800 font-bold py-3 px-6 rounded-lg shadow-md hover:bg-gray-300 transition duration-300">
-                <i class="fas fa-bus mr-2"></i> Cond. Intermunicipal
+            <button onclick="generateQR('conductor_intermunicipal')" class="app-btn bg-slate-800 py-3 px-4 rounded-xl border border-slate-700 hover:bg-slate-700 transition flex flex-col items-center">
+                <i class="fas fa-bus text-purple-400 mb-2"></i> <span class="text-xs font-bold uppercase">Cond. Inter</span>
+            </button>
+            <button onclick="generateQR('despachador')" class="app-btn bg-slate-800 py-3 px-4 rounded-xl border border-slate-700 hover:bg-slate-700 transition flex flex-col items-center">
+                <i class="fas fa-user-cog text-red-400 mb-2"></i> <span class="text-xs font-bold uppercase">Despachador</span>
+            </button>
+            <button onclick="generateQR('admin')" class="app-btn bg-slate-800 py-3 px-4 rounded-xl border border-slate-700 hover:bg-slate-700 transition flex flex-col items-center col-span-2 md:col-span-3">
+                <i class="fas fa-crown text-yellow-500 mb-2"></i> <span class="text-xs font-bold uppercase">Admin / CEO</span>
             </button>
         </div>
         
-        <!-- Contenedor del QR y título de rol (Nuevo título para el rol/app) -->
-        <div class="flex flex-col items-center mt-8">
-            <h2 id="qr-role-title" class="text-xl font-extrabold text-blue-700 mb-4 hidden"></h2>
-            <div id="qr-code-container" class="qr-container hidden">
-                <canvas id="qr-canvas" class="w-full h-auto max-w-sm rounded-lg shadow-xl border-4 border-gray-300"></canvas>
+        <div class="flex flex-col items-center mt-10">
+            <div id="printArea" class="qr-card">
+                <h3 id="qr-role-title" class="text-slate-900 font-black text-lg mb-4 uppercase tracking-tighter">TAXIA-CIMCO</h3>
+                <div class="flex justify-center">
+                    <canvas id="qr-canvas"></canvas>
+                </div>
+                <div id="role-badge" class="mt-4 bg-slate-900 text-white text-[10px] px-3 py-1 rounded-full font-bold uppercase">SELECCIONAR ROL</div>
             </div>
-            <p id="qr-message" class="text-gray-500 mt-4">Selecciona un tipo de aplicación para generar el código QR.</p>
         </div>
 
-        <!-- Botones de acción -->
         <div id="action-buttons" class="flex justify-center gap-4 mt-8 hidden">
-            <button onclick="downloadQR()" class="bg-blue-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition duration-300 flex items-center">
-                <i class="fas fa-download mr-2"></i> Descargar QR
+            <button onclick="downloadQR()" class="bg-blue-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:bg-blue-700 transition flex items-center">
+                <i class="fas fa-download mr-2"></i> Guardar
             </button>
-            <button onclick="copyQRLink()" class="bg-green-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-green-700 transition duration-300 flex items-center">
-                <i class="fas fa-copy mr-2"></i> Copiar enlace
+            <button onclick="copyQRLink()" class="bg-emerald-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg hover:bg-emerald-700 transition flex items-center">
+                <i class="fas fa-copy mr-2"></i> Enlace
             </button>
         </div>
-
     </div>
 
     <script>
         const appUrls = {
-            'pasajero': 'https://taxi-a-cimco.com/app/pasajero',
-            'mototaxi': 'https://taxi-a-cimco.com/app/mototaxi',
-            'motocarga': 'https://taxi-a-cimco.com/app/motocarga',
-            'despachador_intermunicipal': 'https://taxi-a-cimco.com/app/despachador_intermunicipal',
-            'conductor_intermunicipal': 'https://taxi-a-cimco.com/app/conductor_intermunicipal',
+            'pasajero': '/registro?role=pasajero',
+            'mototaxi': '/registro?role=mototaxi',
+            'motoparrillero': '/registro?role=motoparrillero',
+            'motocarga': '/registro?role=motocarga',
+            'conductor_intermunicipal': '/registro?role=cond_inter',
+            'despachador': '/registro?role=despachador',
+            'admin': '/registro?role=admin'
         };
 
-        // Mapa para mostrar el nombre del rol como título
         const roleNames = {
             'pasajero': 'Pasajero',
             'mototaxi': 'Mototaxi',
+            'motoparrillero': 'Motoparrillero',
             'motocarga': 'Motocarga',
-            'despachador_intermunicipal': 'Despachador Intermunicipal',
             'conductor_intermunicipal': 'Conductor Intermunicipal',
+            'despachador': 'Despachador',
+            'admin': 'Administrador / CEO'
         };
 
-        const canvas = document.getElementById('qr-canvas');
-        const message = document.getElementById('qr-message');
-        const container = document.getElementById('qr-code-container');
-        const actionButtons = document.getElementById('action-buttons');
-        const roleTitleElement = document.getElementById('qr-role-title');
-        
+        let currentUrl = '';
+
         function generateQR(appType) {
-            const url = appUrls[appType];
-            if (!url) {
-                console.error("Tipo de aplicación no válido:", appType);
-                return;
-            }
+            const canvas = document.getElementById('qr-canvas');
+            const baseUrl = window.location.origin;
+            currentUrl = baseUrl + appUrls[appType];
 
-            // 1. Actualizar y mostrar el título del rol
-            roleTitleElement.textContent = `Código QR para: ${roleNames[appType]}`;
-            roleTitleElement.classList.remove('hidden');
+            // UI Updates
+            document.getElementById('role-badge').innerText = roleNames[appType];
+            document.getElementById('action-buttons').classList.remove('hidden');
 
-            // Ocultar mensaje y mostrar contenedor
-            message.classList.add('hidden');
-            container.classList.remove('hidden');
-            actionButtons.classList.remove('hidden');
-
-            // 2. Generar el código QR base (tamaño 256)
             const qr = new QRious({
                 element: canvas,
-                value: url,
-                size: 256,
-                padding: 10,
-                background: 'white',
-                foreground: '#1d4ed8' // Tailwind blue-600
+                value: currentUrl,
+                size: 250,
+                level: 'H',
+                foreground: '#0f172a'
             });
 
-            // 3. Dibujar el texto de la empresa en el centro del QR (mínima interferencia)
+            // Dibujar Texto Central
             const ctx = canvas.getContext('2d');
-            const centerX = canvas.width / 2;
-            const centerY = canvas.height / 2;
-            // Reducimos el tamaño de la zona de texto permitido
-            const safeZoneRadius = 30; // 30 píxeles de radio (60x60 píxeles de área total)
-            
-            const textLine1 = "TAXIA";
-            const textLine2 = "CIMCO";
-            
-            // Rellenar el centro del QR para crear un área en blanco
             ctx.fillStyle = 'white';
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, safeZoneRadius, 0, 2 * Math.PI);
-            ctx.fill();
-
-            // Dibujar la primera línea de texto "TAXIA"
-            ctx.fillStyle = '#1d4ed8'; // Color del texto
-            ctx.font = `bold 16px Inter`; 
+            ctx.fillRect(95, 105, 60, 40); // Fondo blanco pequeño para el logo/texto central
+            ctx.fillStyle = '#1d4ed8';
+            ctx.font = 'bold 12px Inter';
             ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            // Dibujar la primera línea ligeramente por encima del centro
-            ctx.fillText(textLine1, centerX, centerY - 8); 
-
-            // Dibujar la segunda línea de texto "CIMCO"
-            ctx.font = `bold 14px Inter`; 
-            // Dibujar la segunda línea ligeramente por debajo del centro
-            ctx.fillText(textLine2, centerX, centerY + 12); 
-            
-            // Nota: Este tamaño de fuente y la zona de borrado (60x60) es una configuración segura
-            // que respeta el nivel de corrección de errores de la mayoría de los códigos QR.
+            ctx.fillText('TAXIA', 125, 120);
+            ctx.fillText('CIMCO', 125, 135);
         }
 
         function downloadQR() {
-            const dataUrl = canvas.toDataURL('image/png');
             const link = document.createElement('a');
-            link.href = dataUrl;
-            link.download = 'codigo-qr-taxi-a-cimco.png';
-            document.body.appendChild(link);
+            link.download = 'QR-TAXIA-CIMCO.png';
+            link.href = document.getElementById('qr-canvas').toDataURL();
             link.click();
-            document.body.removeChild(link);
         }
 
         function copyQRLink() {
-            // Usar una solución de fallback para asegurar la compatibilidad con iframes
-            const tempInput = document.createElement('input');
-            tempInput.value = appUrls[selectedAppType];
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand('copy');
-            document.body.removeChild(tempInput);
-            
-            // Reemplazar alert con un mensaje temporal en la interfaz
-            const copyMessage = document.createElement('div');
-            copyMessage.textContent = 'Enlace copiado al portapapeles!';
-            copyMessage.className = 'fixed bottom-4 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg transition-opacity duration-300 opacity-0';
-            document.body.appendChild(copyMessage);
-            
-            // Mostrar y luego desvanecer
-            setTimeout(() => {
-                copyMessage.style.opacity = '1';
-            }, 10);
-            setTimeout(() => {
-                copyMessage.style.opacity = '0';
-                setTimeout(() => copyMessage.remove(), 300);
-            }, 2000);
+            navigator.clipboard.writeText(currentUrl);
+            alert('¡Enlace copiado al portapapeles!');
         }
-
-        let selectedAppType = '';
-        document.querySelectorAll('.app-btn').forEach(button => {
-            button.addEventListener('click', (event) => {
-                // Obtener el valor de 'onclick' para determinar el tipo de aplicación
-                const onclickValue = event.currentTarget.getAttribute('onclick');
-                const match = onclickValue.match(/'(.*?)'/);
-                if (match && match[1]) {
-                    selectedAppType = match[1];
-                }
-            });
-        });
     </script>
 </body>
 </html>

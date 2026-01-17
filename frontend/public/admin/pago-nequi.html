@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pago de Saldo - Nequi | CIMCO</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
+    .text-nequi { color: #ff007e; }
+    .bg-nequi { background-color: #ff007e; }
+    .bg-nequi:hover { background-color: #e6006e; }
+    .card { background-color: #1e293b; border: 1px solid #334155; box-shadow: 0 0 15px rgba(255, 0, 126, 0.2); }
+    .input { background-color: #111827; border: 1px solid #374151; color: #f1f5f9; }
+    .input:focus { border-color: #ff007e; outline: none; box-shadow: 0 0 5px rgba(255, 0, 126, 0.5); }
+  </style>
+</head>
+
+<body class="flex items-center justify-center min-h-screen p-4">
+
+  <div class="w-full max-w-md p-8 rounded-xl card">
+    <div class="text-center mb-6">
+      <i class="fa-solid fa-mobile-screen text-5xl text-nequi mb-4"></i>
+      <h1 class="text-3xl font-bold">Pago de Saldo - Nequi</h1>
+      <p class="text-gray-400 mt-2">Saldar tus deudas para seguir operando en CIMCO.</p>
+    </div>
+
+    <div id="loadingStatus" class="text-center bg-yellow-900/50 border border-yellow-500 text-yellow-300 rounded-lg p-3 mb-4 font-medium">
+      <i class="fas fa-spinner fa-spin mr-2"></i> Conectando al perfil...
+    </div>
+
+    <div class="bg-slate-800 p-5 rounded-lg mb-5 border border-slate-700">
+      <p class="text-sm text-gray-400">ID de Usuario:</p>
+      <p id="driverId" class="text-xs text-nequi break-all mb-3">Cargando...</p>
+
+      <p class="text-xl font-semibold text-gray-300 flex justify-between items-center">
+        Saldo Pendiente:
+        <span id="pendingBalance" class="text-4xl font-extrabold text-nequi">$0</span>
+      </p>
+    </div>
+
+    <form id="paymentForm" class="space-y-5">
+      <div>
+        <label for="nequiPhone" class="block text-sm font-medium text-gray-300 mb-1">
+          <i class="fas fa-phone mr-1 text-nequi"></i> Número de Teléfono Nequi
+        </label>
+        <input type="number" id="nequiPhone" required 
+               placeholder="310 000 0000"
+               class="input w-full p-3 rounded-md shadow-sm" />
+      </div>
+
+      <button type="submit" id="payBtn"
+        class="w-full py-3 rounded-md font-bold bg-nequi text-white hover:bg-nequi/90 transition disabled:opacity-50"
+        disabled>
+        <i class="fas fa-credit-card mr-2"></i> Pagar Saldo Pendiente
+      </button>
+    </form>
+
+    <p id="message" class="mt-6 text-center text-sm font-medium"></p>
+
+    <div class="mt-6 text-center">
+      <a href="ceo-panel.html" class="text-gray-400 hover:text-nequi font-semibold transition">
+        <i class="fas fa-arrow-left mr-1"></i> Volver al panel
+      </a>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
+      authDomain: "pelagic-chalice-467818-e1.firebaseapp.com",
+      projectId: "pelagic-chalice-467818-e1",
+      storageBucket: "pelagic-chalice-467818-e1.firebasestorage.app",
+      messagingSenderId: "191106268804",
+      appId: "1:191106268804:web:1bb4a7c7c8077b60880cd1"
+    };
+
+    // Inicializar
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    // Elementos DOM
+    const driverIdEl = document.getElementById("driverId");
+    const pendingBalanceEl = document.getElementById("pendingBalance");
+    const payBtn = document.getElementById("payBtn");
+    const messageEl = document.getElementById("message");
+    const form = document.getElementById("paymentForm");
+    const loadingEl = document.getElementById("loadingStatus");
+
+    let currentUID = null;
+    let saldo = 0;
+
+    // Control de Sesión
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        currentUID = user.uid;
+        driverIdEl.textContent = currentUID;
+        loadingEl.style.display = "none";
+        escucharSaldo(currentUID);
+      } else {
+        // Para pruebas en admin si no hay sesión activa
+        await signInAnonymously(auth);
+      }
+    });
+
+    function escucharSaldo(uid) {
+      const docRef = doc(db, "usuarios", uid);
+      onSnapshot(docRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          saldo = data.saldoPendiente || 0;
+
+          pendingBalanceEl.textContent = `$${saldo.toLocaleString("es-CO")}`;
+          
+          if (saldo > 0) {
+            payBtn.disabled = false;
+            payBtn.innerHTML = `<i class="fas fa-credit-card mr-2"></i> Pagar $${saldo.toLocaleString("es-CO")}`;
+          } else {
+            payBtn.disabled = true;
+            payBtn.textContent = "Sin Saldo Pendiente";
+            messageEl.textContent = "✅ Estás a paz y salvo.";
+            messageEl.className = "mt-6 text-center text-sm font-medium text-green-500";
+          }
+        }
+      });
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const phone = document.getElementById("nequiPhone").value;
+
+      if (saldo <= 0) return;
+
+      payBtn.disabled = true;
+      payBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Procesando...';
+
+      try {
+        // Simulamos respuesta de pasarela Nequi
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        await updateDoc(doc(db, "usuarios", currentUID), {
+          saldoPendiente: 0,
+          ultimoPago: new Date().toISOString(),
+          metodoPago: `Nequi (${phone})`
+        });
+
+        messageEl.textContent = "✅ ¡Pago exitoso! Tu saldo ha sido actualizado.";
+        messageEl.className = "mt-6 text-center text-sm font-medium text-green-500";
+        payBtn.textContent = "Pagado";
+
+      } catch (error) {
+        console.error(error);
+        messageEl.textContent = "❌ Error al procesar el pago.";
+        messageEl.className = "mt-6 text-center text-sm font-medium text-red-500";
+        payBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Panel Motocarga - TAXIA CIMCO</title>
+  <link rel="manifest" href="/motocarga/manifest-motocarga.webmanifest">
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    /* Bloqueo visual preventivo para seguridad */
+    body { font-family: 'Inter', sans-serif; background-color: #020617; color: #f8fafc; visibility: hidden; }
+    #map { height: 45vh; border-radius: 1.5rem; border: 2px solid #15803d; transition: all 0.3s ease; }
+    .view-hidden { display: none !important; }
+    .view-active { display: block; }
+    .neon-glow-green { box-shadow: 0 0 25px rgba(34, 197, 94, 0.15); }
+    .tab-active { background-color: #16a34a !important; color: #020617 !important; box-shadow: 0 0 15px rgba(22, 163, 74, 0.4); }
+  </style>
+
+  <script type="module">
+    import { checkAuthAndRedirect } from '../js/auth-guard.js';
+    
+    // Verificación estricta del rol 'motocarga'
+    checkAuthAndRedirect('motocarga').then(isAllowed => {
+        if (isAllowed) {
+            document.body.style.visibility = 'visible';
+        }
+    });
+  </script>
+</head>
+
+<body class="min-h-screen">
+  <header class="bg-slate-950 border-b border-green-900/30 p-4 flex justify-between items-center shadow-2xl sticky top-0 z-50 backdrop-blur-md">
+    <div class="flex flex-col">
+      <h1 class="text-xl font-black text-green-500 italic tracking-tighter leading-none">CIMCO CARGA</h1>
+      <span id="userEmail" class="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1 italic">Verificando operador...</span>
+    </div>
+    <button id="logoutBtn" class="bg-red-950/20 text-red-500 border border-red-900/40 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all">SALIR</button>
+  </header>
+
+  <main class="p-4 space-y-4 max-w-lg mx-auto">
+    <div class="flex gap-2 bg-slate-950 p-1.5 rounded-[2rem] border border-slate-800 shadow-inner">
+      <button id="viewMapBtn" class="tab-active flex-1 py-3 rounded-[1.5rem] text-xs font-black uppercase tracking-widest transition-all">🗺️ Radar</button>
+      <button id="viewNequiBtn" class="flex-1 py-3 rounded-[1.5rem] text-slate-500 text-xs font-black uppercase tracking-widest transition-all">💰 Saldo</button>
+    </div>
+
+    <section id="mapView" class="view-active space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div id="map" class="w-full neon-glow-green"></div>
+
+      <div class="flex justify-center">
+        <div class="px-5 py-2 rounded-full bg-slate-900 border border-green-900/50 flex items-center gap-2">
+          <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+          <span class="text-[10px] font-black text-green-400 uppercase tracking-widest">Señal GPS Estable</span>
+        </div>
+      </div>
+
+      <section class="bg-slate-950 p-6 rounded-[2.5rem] border border-slate-800 shadow-2xl relative overflow-hidden">
+        <div class="flex justify-between items-center mb-6">
+          <div class="flex flex-col">
+            <h2 class="text-[11px] font-black text-green-500 uppercase tracking-[0.2em]">Flete Disponible</h2>
+            <p id="assignedInfo" class="text-sm text-slate-400 mt-1 italic">Buscando cargas pesadas...</p>
+          </div>
+          <div id="statusBadge" class="text-[9px] bg-green-950/30 text-green-500 border border-green-900/50 px-3 py-1 rounded-full font-bold uppercase">Standby</div>
+        </div>
+        
+        <div class="mt-4 flex flex-col gap-3">
+          <button id="acceptBtn" class="hidden w-full bg-green-500 text-slate-950 py-4 rounded-2xl font-black text-lg shadow-[0_10px_30px_rgba(34,197,94,0.3)] uppercase active:scale-95 transition-transform">ACEPTAR FLETE</button>
+          <button id="startBtn" class="hidden w-full bg-indigo-600 text-white py-4 rounded-2xl font-black text-lg shadow-[0_10px_30px_rgba(79,70,229,0.3)] uppercase active:scale-95 transition-transform">INICIAR CARGA</button>
+          <button id="finishBtn" class="hidden w-full bg-slate-100 text-slate-900 py-4 rounded-2xl font-black text-lg shadow-2xl uppercase active:scale-95 transition-transform">ENTREGA FINALIZADA</button>
+        </div>
+      </section>
+    </section>
+
+    <section id="nequiView" class="view-hidden"></section>
+  </main>
+
+  <audio id="alertSound" src="/js/sounds/notify.mp3" preload="auto"></audio>
+
+  <script type="module" src="./js/carga-panel.js"></script>
+  <script type="module" src="./js/carga-tracking.js"></script>
+  <script type="module" src="./js/carga-nequi-app.js"></script>
+
+  <script>
+    const mapBtn = document.getElementById('viewMapBtn');
+    const nequiBtn = document.getElementById('viewNequiBtn');
+    const mapView = document.getElementById('mapView');
+    const nequiView = document.getElementById('nequiView');
+    
+    mapBtn.addEventListener('click', () => {
+      mapView.classList.remove('view-hidden');
+      nequiView.classList.add('view-hidden');
+      mapBtn.classList.add('tab-active');
+      nequiBtn.classList.remove('tab-active');
+    });
+
+    nequiBtn.addEventListener('click', () => {
+      mapView.classList.add('view-hidden');
+      nequiView.classList.remove('view-hidden');
+      nequiBtn.classList.add('tab-active');
+      mapBtn.classList.remove('tab-active');
+      window.dispatchEvent(new CustomEvent('nequiViewActivated'));
+    });
+
+    // Desbloqueo de Audio
+    window.addEventListener('click', () => {
+        const s = document.getElementById('alertSound');
+        if(s) s.play().then(() => { s.pause(); s.currentTime = 0; });
+    }, { once: true });
+  </script>
+</body>
+</html>

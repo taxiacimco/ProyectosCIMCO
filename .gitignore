@@ -1,66 +1,100 @@
-# ============================================================
-# 🚖 TaxiA-CIMCO – .gitignore definitivo
-# ============================================================
+============================================================
 
-# ============================================================
-# 🛠️ BUILD / COMPILADOS
-# ============================================================
-lib/
+🛠️ BUILD (salida de TypeScript / Vite / React)
+
+============================================================
+
+lib//*.js
+lib//*.js.map
 dist/
-dist-ssr/
 build/
 .cache/
 out/
-.tmp/
-*.tsbuildinfo
-*.map
 
-# ============================================================
-# 📦 DEPENDENCIAS
-# ============================================================
+============================================================
+
+📦 DEPENDENCIAS
+
+============================================================
+
 node_modules/
-functions/node_modules/
-frontend/node_modules/
 .pnp.*
 .pnp.js
 
-# ============================================================
-# ⚠️ ARCHIVOS SENSIBLES
-# ============================================================
+============================================================
+
+⚠️ ARCHIVOS SENSIBLES Y DE ENTORNO
+
+============================================================
+
+Archivos .env (variables privadas)
+
 .env
 .env.local
 .env.*.local
-.envrc
-.env.yaml
+
+Asegura que el .env del backend (Firebase Functions) también esté ignorado
+
+functions/.env
+
+Permitimos el archivo de ejemplo
+
+!functions/.env.example
+
+Credenciales privadas de Firebase o Google Cloud
+
 serviceAccount.json
 serviceAccountKey.json
+
+🚨 REGLAS AÑADIDAS PARA IGNORAR LA CLAVE DE ADMINISTRADOR ESPECÍFICA
+
+----------------------------------------------------------------------
+
+Ignora CUALQUIER archivo dentro de la carpeta 'service-account' dentro de 'functions'
+
+Esto cubre la ruta: functions/service-account/admin-sa.json
+
+functions/service-account/
+
+También ignoramos la clave si estuviera en la raíz de functions/ (regla ya existente)
+
+functions/admin-sa.json
+
+----------------------------------------------------------------------
+
+Certificados o llaves
+
 *.pem
 *.key
 
-# Mantener plantillas seguras (permitir subir estas)
-!.env.example
-!frontend/.env.example
-!functions/.env.example
+============================================================
 
-# ============================================================
-# 🔍 LOGS DE DEBUGGING
-# ============================================================
+🔍 LOGS DE DEBUGGING (Firebase / Node)
+
+============================================================
+
 firebase-debug.log
 firestore-debug.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+*-debug.log
 
-# ============================================================
-# 📂 TIPADO ANTIGUO (si existiera)
-# ============================================================
+============================================================
+
+📂 TIPADO ANTIGUO O AUTO-GENERADO
+
+============================================================
+
 typings/
+*.tsbuildinfo
 
-# ============================================================
-# 💻 SISTEMA / EDITORES
-# ============================================================
+============================================================
+
+💻 SISTEMAS / EDITORES
+
+============================================================
+
 .DS_Store
 Thumbs.db
 .vscode/
@@ -68,15 +102,33 @@ Thumbs.db
 *.swp
 *.swo
 
-# ============================================================
-# 🔥 FIREBASE
-# ============================================================
-.firebase/
-.firebaserc
-*.runtimeconfig.json
+============================================================
 
-# ============================================================
-# 📱 PWA / FRONTEND
-# ============================================================
-*.manifest.json
-*.webmanifest
+📱 FRONTEND (React / Vite / PWA)
+
+============================================================
+
+*.local
+*.cache
+
+============================================================
+
+🔥 FIREBASE Y CONFIGURACIONES INTERNAS
+
+============================================================
+
+.firebaserc
+firebase-debug.log
+pubsub-debug.log
+
+============================================================
+
+🧪 PRUEBAS Y SCRIPTS TEMPORALES
+
+============================================================
+
+tests/
+tests/
+pruebas/
+temp/
+tmp/

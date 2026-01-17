@@ -1,81 +1,106 @@
-{
-  "functions": {
-    "source": "functions",
-    "runtime": "nodejs20",
-    "ignore": [
-      "node_modules",
-      ".git",
-      "firebase-debug.log",
-      "firestore-debug.log",
-      "npm-debug.log",
-      "yarn-debug.log",
-      ".env",
-      ".env.local",
-      "serviceAccount.json"
-    ],
-    "predeploy": [
-      "npm --prefix \"$RESOURCE_DIR\" run build"
-    ]
+﻿{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firestore-debug.log",
+        "ui-debug.log",
+        "_respaldos_backend",
+        "lib",
+        "dist"
+      ],
+      "runtime": "nodejs20"
+    }
+  ],
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
-
   "hosting": {
     "public": "frontend/public",
     "ignore": [
       "firebase.json",
       "**/.*",
-      "**/node_modules/**",
-      ".env",
-      ".env.local"
-    ],
-    "headers": [
-      {
-        "source": "**/*.@(js|css)",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "max-age=31536000"
-          }
-        ]
-      },
-      {
-        "source": "/service-worker.js",
-        "headers": [
-          {
-            "key": "Cache-Control",
-            "value": "no-cache"
-          }
-        ]
-      }
+      "**/node_modules/**"
     ],
     "rewrites": [
+      {
+        "source": "/api/**",
+        "function": "api"
+      },
+      {
+        "source": "/v1/**",
+        "function": "api"
+      },
+      {
+        "source": "/mototaxi/**",
+        "destination": "/mototaxi/mototaxi-panel.html"
+      },
+      {
+        "source": "/motoparrillero/**",
+        "destination": "/motoparrillero/panel-parrillero.html"
+      },
+      {
+        "source": "/motocarga/**",
+        "destination": "/motocarga/panel-motocarga.html"
+      },
+      {
+        "source": "/pasajero/**",
+        "destination": "/pasajero/panel-pasajero.html"
+      },
+      {
+        "source": "/despacho/**",
+        "destination": "/despacho/panel-despacho.html"
+      },
+      {
+        "source": "/admin/ceo-mapa",
+        "destination": "/admin/ceo-mapa.html"
+      },
+      {
+        "source": "/admin/**",
+        "destination": "/admin/ceo-panel.html"
+      },
       {
         "source": "**",
         "destination": "/index.html"
       }
-    ]
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false
   },
-
+  "storage": {
+    "rules": "storage.rules"
+  },
   "emulators": {
+    "singleProjectMode": true,
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
     "functions": {
+      "host": "127.0.0.1",
       "port": 5001
     },
     "firestore": {
+      "host": "127.0.0.1",
       "port": 8080
     },
     "hosting": {
+      "host": "127.0.0.1",
       "port": 5000
     },
-    "pubsub": {
-      "port": 8085
+    "storage": {
+      "host": "127.0.0.1",
+      "port": 9199
     },
     "ui": {
       "enabled": true,
+      "host": "127.0.0.1",
       "port": 4000
     }
-  },
-
-  "firestore": {
-    "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
   }
 }

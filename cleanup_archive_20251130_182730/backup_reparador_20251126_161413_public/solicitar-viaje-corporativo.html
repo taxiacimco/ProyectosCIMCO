@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Solicitar Viaje Corporativo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
+<script>
+  window.APP_ENV = "prod";
+</script>
+<script type="module" src="/js/firebase/firebase-mode-manager.js"></script>
+</head>
+
+<body class="bg-slate-900 text-gray-100">
+  <main class="max-w-md mx-auto mt-10 bg-slate-800 p-6 rounded-xl">
+    <h1 class="text-xl font-bold text-cyan-400 mb-4">🚖 Solicitar transporte</h1>
+
+    <form id="viajeForm" class="space-y-3">
+      <input id="origen" type="text" placeholder="📍 Punto de origen" class="w-full p-3 rounded bg-slate-700" required />
+      <input id="destino" type="text" placeholder="🏁 Destino" class="w-full p-3 rounded bg-slate-700" required />
+      <select id="tipo" class="w-full p-3 rounded bg-slate-700">
+        <option value="empresarial">Servicio empresarial</option>
+        <option value="logística">Logística / carga</option>
+        <option value="visita">Visita externa</option>
+      </select>
+      <button type="submit" class="w-full bg-green-500 py-3 rounded-lg font-bold hover:bg-green-600">Enviar solicitud</button>
+    </form>
+
+    <p id="statusMsg" class="text-sm mt-4 text-center"></p>
+  </main>
+
+  <script type="module" src="./js/corporativo-solicitud.js"></script>
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+

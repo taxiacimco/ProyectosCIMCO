@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel del CEO - TAXIA CIMCO</title>
+  <link rel="icon" href="../icons/icon-ceo.jpeg" />
+
+  <!-- ? Tailwind -->
+
+  <!-- ? Fuentes e iconos -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js"></script>
+
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+    #notificationsPanel { transition: all 0.3s ease; }
+  </style>
+  <link rel="stylesheet" href="./css/output.css" />`r`n</head>
+
+<body class="flex bg-slate-100 min-h-screen">
+  <!-- ? Sidebar -->
+  <aside id="sidebar" class="fixed top-0 left-0 h-full w-64 bg-slate-800 text-gray-100 transform -translate-x-full md:translate-x-0 transition-transform duration-300 z-50">
+    <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+      <h2 class="text-lg font-bold text-cyan-400">?? TAXIA CIMCO</h2>
+      <button id="menu-close" class="md:hidden text-gray-400 hover:text-white">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+
+    <nav class="p-4 space-y-3">
+      <a href="ceo-panel.html" class="block hover:bg-slate-700 rounded p-2"><i class="fas fa-chart-bar mr-2"></i> Dashboard</a>
+      <a href="ceo-mapa.html" class="block hover:bg-slate-700 rounded p-2"><i class="fas fa-map mr-2"></i> Mapa</a>
+
+      <a href="listado-viajes.html" class="block hover:bg-slate-700 rounded p-2 flex justify-between items-center">
+        <span><i class="fas fa-taxi mr-2"></i> Viajes</span>
+        <span id="viajes-badge" class="hidden bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">0</span>
+      </a>
+
+      <a href="detalle-conductor.html" class="block hover:bg-slate-700 rounded p-2"><i class="fas fa-motorcycle mr-2"></i> Conductores</a>
+      <a href="panel-credito.html" class="block hover:bg-slate-700 rounded p-2"><i class="fas fa-coins mr-2"></i> Cr�ditos</a>
+      <a href="https://wa.me/573001234567" target="_blank" class="block hover:bg-slate-700 rounded p-2"><i class="fab fa-whatsapp mr-2 text-green-400"></i> WhatsApp Panel</a>
+      <button id="logoutBtn" class="block w-full text-left hover:bg-red-600 rounded p-2 text-white bg-red-500 mt-4"><i class="fas fa-sign-out-alt mr-2"></i> Cerrar sesi�n</button>
+    </nav>
+  </aside>
+
+  <!-- ? Bot�n de men� m�vil -->
+  <button id="menu-toggle" class="md:hidden fixed top-4 left-4 z-50 bg-cyan-500 text-white p-2 rounded-lg shadow-lg">
+    <i class="fas fa-bars"></i>
+  </button>
+
+  <!-- ? Contenido principal -->
+  <main class="flex-1 p-6 md:ml-64 transition-all duration-300">
+    <header class="flex justify-between items-center bg-white shadow p-4 rounded-xl relative">
+      <h1 class="text-2xl font-bold text-slate-700">Panel del CEO</h1>
+
+      <div class="flex items-center gap-6">
+        <!-- ?? Selector de modo Firebase -->
+        <div class="flex items-center space-x-2">
+          <label class="flex items-center cursor-pointer">
+            <input type="checkbox" id="modeSwitch" class="sr-only">
+            <div class="w-10 h-5 bg-slate-400 rounded-full p-1 transition-all duration-300">
+              <div class="dot w-4 h-4 bg-white rounded-full transition-transform duration-300"></div>
+            </div>
+          </label>
+          <span id="modeLabel" class="text-sm text-cyan-700 font-semibold">Modo Producci�n</span>
+        </div>
+
+        <!-- ?? Notificaciones -->
+        <div class="relative">
+          <button id="notifyBell" class="relative text-cyan-600 hover:text-cyan-400 focus:outline-none">
+            <i class="fas fa-bell text-2xl"></i>
+            <span id="notifyDot" class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full hidden"></span>
+          </button>
+
+          <div id="notificationsPanel"
+            class="hidden absolute right-0 mt-2 w-80 bg-slate-800 text-gray-100 rounded-xl shadow-2xl border border-slate-700">
+            <div class="p-3 border-b border-slate-700 flex justify-between items-center">
+              <h3 class="font-semibold text-cyan-400 text-sm">Historial de notificaciones</h3>
+              <button id="clearNotif" class="text-xs text-gray-400 hover:text-white">Limpiar</button>
+            </div>
+            <ul id="notificationsList" class="max-h-72 overflow-y-auto"></ul>
+          </div>
+        </div>
+
+        <!-- ?? Usuario -->
+        <div class="flex items-center gap-3">
+          <i class="fas fa-user-circle text-3xl text-cyan-600"></i>
+          <span id="ceoEmail" class="font-semibold text-gray-700"></span>
+        </div>
+      </div>
+    </header>
+
+    <section class="mt-8 bg-white p-6 rounded-xl shadow">
+      <h2 class="text-xl font-semibold text-slate-700 mb-4">Resumen general ??</h2>
+      <ul class="space-y-2 text-gray-600">
+        <li>? Conductores activos</li>
+        <li>?? Pasajeros registrados</li>
+        <li>?? Viajes en curso</li>
+      </ul>
+      <p class="text-gray-500 mt-4 text-sm">?? Usa el men� lateral para navegar entre las secciones del panel.</p>
+    </section>
+
+    <section id="dashboard-charts" class="mt-10"></section>
+  </main>
+
+  <!-- ========================================================= -->
+  <!-- ?? Scripts -->
+  
+  <script type="module" src="./js/ceo-dashboard.js"></script>
+  <script type="module" src="./js/ceo-notifications-panel.js"></script>
+  <script type="module" src="./js/ceo-sidebar.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- ?? L�gica general -->
+  <script type="module">
+    import { loadFirebaseEnvironment } from "./js/firebase-mode-manager.js";
+    import { auth } from "./js/firebase-config-ceo.js";
+    import { initSidebar } from "./js/ceo-sidebar.js";
+    import { initNotificacionesPersistentes } from "./js/ceo-notifications-panel.js";
+
+    // Inicializar entorno y componentes
+    await loadFirebaseEnvironment();
+    initSidebar();
+    initNotificacionesPersistentes();
+
+    // Mostrar correo actual
+    const emailSpan = document.getElementById("ceoEmail");
+    auth.onAuthStateChanged(user => {
+      if (user) emailSpan.textContent = user.email;
+      else window.location.href = "/admin/login-ceo.html";
+    });
+
+    // Cerrar sesi�n
+    document.getElementById("logoutBtn").addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "/admin/logout-ceo.html";
+    });
+
+    // Sidebar m�vil
+    const sidebar = document.getElementById("sidebar");
+    document.getElementById("menu-toggle").addEventListener("click", () => sidebar.classList.remove("-translate-x-full"));
+    document.getElementById("menu-close").addEventListener("click", () => sidebar.classList.add("-translate-x-full"));
+
+    // Mostrar / ocultar notificaciones
+    const bell = document.getElementById("notifyBell");
+    const panel = document.getElementById("notificationsPanel");
+    bell.addEventListener("click", () => panel.classList.toggle("hidden"));
+  </script>
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+

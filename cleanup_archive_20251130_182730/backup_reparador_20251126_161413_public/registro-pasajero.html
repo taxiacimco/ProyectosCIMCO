@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Registro Pasajero - TAXIA CIMCO</title>
+  <link rel="icon" href="../icons/pasajero-192.png" />
+  <script src="https://cdn.tailwindcss.com"></script>
+
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
+<script>
+  window.APP_ENV = "prod";
+</script>
+<script type="module" src="/js/firebase/firebase-mode-manager.js"></script>
+</head>
+
+<body class="flex items-center justify-center min-h-screen bg-slate-900 text-gray-200">
+  <div class="bg-slate-800 p-8 rounded-2xl shadow-xl w-full max-w-md">
+    <div class="text-center mb-6">
+      <h1 class="text-2xl font-bold text-cyan-400">Registro de Pasajero</h1>
+    </div>
+
+    <form id="registroForm" class="space-y-4">
+      <input id="nombre" type="text" placeholder="Nombre completo" class="w-full p-3 bg-slate-700 rounded-lg" required />
+      <input id="email" type="email" placeholder="Correo electrónico" class="w-full p-3 bg-slate-700 rounded-lg" required />
+      <input id="password" type="password" placeholder="Contraseña" class="w-full p-3 bg-slate-700 rounded-lg" required />
+      <button type="submit" class="w-full bg-gradient-to-r from-cyan-500 to-green-500 py-3 rounded-lg font-bold hover:scale-105 transition">
+        Registrarme
+      </button>
+    </form>
+    <p id="status" class="text-center text-sm text-gray-400 mt-3"></p>
+  </div>
+
+  <script type="module">
+    import { getAuth, createUserWithEmailAndPassword } 
+    import { getFirestore, setDoc, doc } 
+    import { app } from "./js/firebase-config-pasajero.js";
+
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const statusEl = document.getElementById("status");
+
+    document.getElementById("registroForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const nombre = document.getElementById("nombre").value;
+      const email = document.getElementById("email").value;
+      const password = document.getElementById("password").value;
+
+      try {
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        await setDoc(doc(db, "pasajeros", userCred.user.uid), {
+          nombre,
+          email,
+          creado: new Date().toISOString(),
+        });
+        statusEl.textContent = "✅ Registro exitoso. Inicia sesión.";
+        statusEl.style.color = "lightgreen";
+      } catch (err) {
+        statusEl.textContent = "⚠️ Error: " + err.message;
+        statusEl.style.color = "red";
+      }
+    });
+  </script>
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+
+

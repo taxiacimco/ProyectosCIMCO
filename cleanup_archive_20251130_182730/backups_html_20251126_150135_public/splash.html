@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TAXIA CIMCO - Iniciando...</title>
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<style>
+  :root {
+    --azul:#2563eb;
+    --amarillo:#facc15;
+    --blanco:#ffffff;
+    --fondo:#0f172a;
+  }
+
+  * {
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+  }
+
+  body {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
+    background:var(--fondo);
+    color:var(--blanco);
+    font-family:'Inter', sans-serif;
+    overflow:hidden;
+    flex-direction:column;
+  }
+
+  .logo {
+    width:140px;
+    height:140px;
+    border-radius:50%;
+    background:radial-gradient(circle at 30% 30%, var(--azul), #1d4ed8);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    box-shadow:0 0 20px var(--azul);
+    animation: pulse 2.2s infinite ease-in-out;
+  }
+
+  .logo img {
+    width:90px;
+    height:90px;
+    object-fit:contain;
+    filter:drop-shadow(0 0 6px var(--amarillo));
+  }
+
+  h1 {
+    font-size:22px;
+    font-weight:700;
+    margin-top:24px;
+    color:var(--amarillo);
+    text-shadow:0 0 10px rgba(250,204,21,0.6);
+    letter-spacing:1px;
+  }
+
+  .loader {
+    margin-top:24px;
+    width:80px;
+    height:8px;
+    border-radius:8px;
+    background:rgba(255,255,255,0.15);
+    overflow:hidden;
+    position:relative;
+  }
+
+  .loader::before {
+    content:"";
+    position:absolute;
+    width:40%;
+    height:100%;
+    left:-40%;
+    background:linear-gradient(90deg, transparent, var(--azul), var(--amarillo), transparent);
+    animation: slide 1.6s infinite linear;
+  }
+
+  footer {
+    position:absolute;
+    bottom:16px;
+    font-size:13px;
+    opacity:0.8;
+    letter-spacing:0.5px;
+  }
+
+  @keyframes slide {
+    from { left:-40%; }
+    to { left:100%; }
+  }
+
+  @keyframes pulse {
+    0%,100% { transform:scale(1); box-shadow:0 0 12px var(--azul); }
+    50% { transform:scale(1.05); box-shadow:0 0 30px var(--azul); }
+  }
+
+  /* Transición suave al salir */
+  .fade-out {
+    opacity:0;
+    transform:scale(0.96);
+    transition:opacity 0.8s ease, transform 0.8s ease;
+  }
+</style>
+</head>
+
+<body>
+  <div class="logo">
+    <img src="/icons/icon-192.png" alt="TAXIA CIMCO">
+  </div>
+  <h1>Cargando TAXIA CIMCO...</h1>
+  <div class="loader"></div>
+  <footer>Conectamos trayectos, cuidamos personas 🚖</footer>
+
+<script>
+  // Espera 2.5 segundos y redirige al inicio principal (admin o pasajero)
+  setTimeout(() => {
+    document.body.classList.add('fade-out');
+    setTimeout(() => {
+      // 🔁 Puedes cambiar esta ruta si deseas abrir otra página
+      window.location.href = "/admin/index.html";
+    }, 800);
+  }, 2500);
+</script>
+
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+

@@ -109,9 +109,6 @@
     </div>
 
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // Habilitar logs de Firebase para depuración
         setLogLevel('Debug');
@@ -362,3 +359,7 @@
     </script>
 </body>
 </html>
+
+
+<script type="module" src="/js/firebase/firebase-loader.js"></script>
+

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Panel Mototaxi - TAXIA CIMCO</title>
+  <link rel="manifest" href="/mototaxi/manifest-mototaxi.webmanifest">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    /* Ocultamos inicialmente para seguridad */
+    body { font-family: Inter, sans-serif; background:#0f172a; color: white; visibility: hidden; }
+    #map { height: 50vh; border-radius: 1.5rem; border: 2px solid #1e293b; }
+    .offline-banner { background-color:#b91c1c; text-align:center; color:white; padding:8px; display:none; z-index: 100; }
+    .view-hidden { display: none !important; }
+    .view-active { display: block; }
+    .neon-border { border: 1px solid rgba(6, 182, 212, 0.5); box-shadow: 0 0 15px rgba(6, 182, 212, 0.2); }
+    .btn-action { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+    .btn-action:active { transform: scale(0.95); }
+  </style>
+
+  <script type="module">
+    import { checkAuthAndRedirect } from '../js/auth-guard.js';
+    
+    // Solo permite entrar si el usuario tiene Custom Claim: 'mototaxi'
+    checkAuthAndRedirect('mototaxi').then(isAllowed => {
+        if (isAllowed) {
+            document.body.style.visibility = 'visible';
+        }
+    });
+  </script>
+
+  <script>window.APP_ENV = "dev";</script>
+</head>
+
+<body class="min-h-screen bg-slate-900">
+  <div id="offlineBanner" class="offline-banner font-bold text-xs">⚠️ MODO OFFLINE ACTIVADO</div>
+
+  <header class="bg-slate-950/80 backdrop-blur-md shadow-xl p-4 flex justify-between items-center border-b border-slate-800 sticky top-0 z-50">
+    <div class="flex flex-col">
+        <h1 class="text-xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 leading-none">CIMCO DRIVE</h1>
+        <span class="text-[8px] font-black text-cyan-700 tracking-[0.3em] uppercase mt-1">MotoTaxi Edition</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="userEmail" class="text-[10px] text-slate-400 font-bold uppercase tracking-widest border-r border-slate-700 pr-3">Verificando...</span>
+      <button id="logoutBtn" class="bg-red-950/30 text-red-500 border border-red-900/50 px-3 py-1.5 rounded-xl text-[10px] font-black hover:bg-red-600 hover:text-white transition-all">SALIR</button>
+    </div>
+  </header>
+
+  <main class="p-4 max-w-lg mx-auto">
+    <div class="mb-4 flex gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+      <button id="viewMapBtn" class="flex-1 py-3 rounded-xl bg-cyan-600 text-white font-black text-[10px] uppercase tracking-widest neon-border">📍 Mapa</button>
+      <button id="viewNequiBtn" class="flex-1 py-3 rounded-xl bg-slate-900 text-slate-500 font-black text-[10px] uppercase tracking-widest">💰 Billetera</button>
+    </div>
+
+    <section id="mapView" class="view-active space-y-4">
+      <div id="map" class="w-full shadow-2xl"></div>
+
+      <section class="bg-slate-950 p-6 rounded-[2.5rem] border border-slate-800 shadow-2xl relative overflow-hidden">
+        <div class="absolute top-0 right-0 p-4">
+            <span class="flex h-2 w-2">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                <span class="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+            </span>
+        </div>
+
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="font-black text-cyan-400 text-[10px] uppercase tracking-[0.2em] italic">Servicio Asignado</h2>
+          <span id="statusBadge" class="text-[9px] bg-slate-800 border border-slate-700 px-3 py-1 rounded-full text-cyan-400 font-bold">ESPERANDO...</span>
+        </div>
+
+        <div id="assignedInfo" class="text-sm text-slate-400 mt-2 font-bold italic leading-tight">
+            Escaneando el radar en busca de pasajeros...
+        </div>
+        
+        <div class="mt-6 flex flex-col gap-3">
+          <button id="acceptBtn" class="btn-action hidden bg-cyan-500 text-slate-950 py-4 rounded-2xl font-black uppercase tracking-widest shadow-[0_10px_20px_rgba(6,182,212,0.3)]">
+            Aceptar Pedido
+          </button>
+          <button id="startRouteBtn" class="btn-action hidden bg-indigo-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-[0_10px_20px_rgba(79,70,229,0.3)]">
+            Iniciar Recorrido
+          </button>
+          <button id="finishBtn" class="btn-action hidden bg-green-500 text-slate-950 py-4 rounded-2xl font-black uppercase tracking-widest shadow-[0_10px_20px_rgba(34,197,94,0.3)]">
+            Finalizar Viaje
+          </button>
+        </div>
+      </section>
+    </section>
+
+    <section id="nequiView" class="view-hidden pt-2"></section>
+  </main>
+
+  <audio id="tripAlertSound" src="/js/sounds/notify.mp3" preload="auto"></audio>
+
+  <script type="module" src="./js/mototaxi-panel.js"></script>
+  <script type="module" src="./js/mototaxi-tracking.js"></script>
+  <script type="module" src="./js/mototaxi-nequi-app.js"></script>
+
+  <script>
+    // Activación de audio por interacción inicial obligatoria
+    window.addEventListener('click', () => {
+        const audio = document.getElementById('tripAlertSound');
+        if (audio) {
+            audio.play().then(() => { 
+                audio.pause(); 
+                audio.currentTime = 0; 
+                console.log("🔊 Sistema de audio listo para alertas.");
+            }).catch(e => console.log("Audio pendiente"));
+        }
+    }, { once: true });
+  </script>
+</body>
+</html>

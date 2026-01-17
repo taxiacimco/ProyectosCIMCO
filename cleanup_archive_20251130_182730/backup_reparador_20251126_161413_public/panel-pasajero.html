@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel Pasajero - TAXIA CIMCO</title>
+  <link rel="icon" href="../icons/pasajero-192.png" />
+  <link rel="manifest" href="/manifest-pasajero.webmanifest" />
+
+  <!-- ✅ Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- ✅ Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    body {
+      background-color: #0f172a;
+      font-family: 'Inter', sans-serif;
+    }
+    #map {
+      height: 420px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+    }
+    .offline-banner {
+      background-color: #b91c1c;
+      text-align: center;
+      color: white;
+      padding: 8px;
+      display: none;
+    }
+  </style>
+
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
+<script>
+  window.APP_ENV = "prod";
+</script>
+<script type="module" src="/js/firebase/firebase-mode-manager.js"></script>
+</head>
+
+<body class="text-gray-100">
+  <!-- 🔴 Alerta de desconexión -->
+  <div id="offlineBanner" class="offline-banner">⚠️ Estás sin conexión. Algunas funciones se pausarán.</div>
+
+  <!-- 🔹 Encabezado -->
+  <header class="p-4 bg-slate-800 flex justify-between items-center shadow-md">
+    <h1 class="text-lg font-bold text-cyan-400">🚖 Pasajero TAXIA CIMCO</h1>
+    <div class="flex items-center gap-3">
+      <span id="userInfo" class="text-sm text-gray-300"></span>
+      <button id="logoutBtn" class="bg-red-600 px-4 py-2 rounded-lg hover:bg-red-700 transition">
+        Cerrar sesión
+      </button>
+    </div>
+  </header>
+
+  <!-- 🔹 Contenido principal -->
+  <main class="p-6 space-y-6">
+    <!-- 🗺️ Mapa -->
+    <section class="bg-slate-800 p-4 rounded-xl shadow">
+      <h2 class="text-lg font-semibold text-green-300 mb-2">📍 Tu ubicación actual</h2>
+      <div id="map" class="w-full"></div>
+    </section>
+
+    <!-- 🛵 Solicitud de viaje -->
+    <section class="bg-slate-800 p-4 rounded-xl shadow">
+      <h2 class="text-lg font-semibold text-cyan-400">🛵 Solicitar viaje</h2>
+      <button id="solicitarViaje" class="bg-green-500 w-full py-3 mt-3 rounded-lg font-bold hover:bg-green-600 transition">
+        Solicitar viaje ahora
+      </button>
+      <p id="estado" class="text-center mt-3 text-sm text-gray-400"></p>
+    </section>
+  </main>
+
+  <!-- 🔉 Sonido opcional -->
+  <audio id="gpsSound" src="../js/sounds/notify.mp3"></audio>
+
+  <!-- ========================================================= -->
+  <!-- 🔐 Scripts principales -->
+  <script type="module" src="./js/pasajero-panel.js"></script>
+  <script type="module" src="./js/pasajero-solicitud.js"></script>
+  <script type="module" src="./js/pasajero-gps.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- 🌍 Inicialización del mapa -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const map = L.map("map").setView([8.9, -73.6], 13); // 📍 La Jagua de Ibirico
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      const marker = L.marker([8.9, -73.6]).addTo(map).bindPopup("Tu posición");
+
+      if (navigator.geolocation) {
+        navigator.geolocation.watchPosition(
+          (pos) => {
+            const { latitude, longitude } = pos.coords;
+            marker.setLatLng([latitude, longitude]);
+            map.setView([latitude, longitude], 15);
+          },
+          (err) => console.warn("Error GPS:", err),
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      }
+    });
+
+    // 🌐 Detectar modo offline/online
+    window.addEventListener("online", () => document.getElementById("offlineBanner").style.display = "none");
+    window.addEventListener("offline", () => document.getElementById("offlineBanner").style.display = "block");
+
+    // 🔧 Registrar Service Worker
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/service-worker.js")
+        .then(() => console.log("✅ Service Worker registrado para PASAJERO"))
+        .catch(err => console.error("❌ Error registrando SW:", err));
+    }
+  </script>
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+

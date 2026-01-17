@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TAXIA CIMCO — Panel CEO</title>
+
+  <!-- Favicon correcto -->
+  <link rel="icon" type="image/png" href="./assets/favicon-cimco.png" /> 
+  
+  <!-- Tailwind -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.4/dist/tailwind.min.css" rel="stylesheet" />
+  
+  <!-- CSS local del panel CEO -->
+  <link rel="stylesheet" href="./css/ceo-dashboard.css" /> 
+  
+  <!-- CSS global generado por Tailwind -->
+  <link rel="stylesheet" href="/css/output.css" />
+
+  <!-- Librerías para gráficos y exportaciones -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+  <!-- Variable de entorno visible -->
+  <script>
+    const APP_ENV = 'dev'; 
+  </script>
+</head>
+
+<body class="bg-gray-950 text-white font-sans">
+
+  <!-- 🔐 ROLE GUARD PARA ADMIN -->
+  <!-- ESTA ES LA LÍNEA QUE HABILITA LA SEGURIDAD DE ROLES -->
+  <script type="module" src="../js/auth/role-guard.js" data-rol="admin"></script>
+
+  <!-- Loader -->
+  <div id="loader" class="loader-overlay">
+    <img src="./assets/favicon-cimco.png" alt="Logo TAXIA CIMCO" class="logo-spin mb-3" />
+    <div class="loader-spinner"></div>
+    <p class="loader-text">Cargando panel ejecutivo...</p>
+  </div>
+
+  <!-- Header -->
+  <header id="headerCEO" class="hidden flex justify-between items-center p-4 bg-gray-900 shadow-lg border-b border-cyan-700">
+    <h1 class="text-xl font-bold text-cyan-400">🚖 TAXIA CIMCO — Panel CEO</h1>
+    <div class="flex items-center gap-6">
+      <div id="fechaHora" class="text-gray-300 text-sm"></div>
+      <span id="nombreCEO" class="font-semibold text-cyan-300">Administrador</span>
+      <button id="logoutBtn" class="btn-neon">Cerrar sesión</button>
+    </div>
+  </header>
+
+  <!-- Mini Panel de Estado -->
+  <section id="miniStatusPanel" class="hidden flex justify-center mt-4">
+    <div id="estadoSistema" class="flex flex-col items-center justify-center bg-gray-900 border-2 border-cyan-400 rounded-2xl shadow-lg px-6 py-4 transition-all duration-500 animate-pulse" style="min-width: 360px;">
+      <div id="estadoIcon" class="text-3xl mb-2">🟡</div>
+      <div id="estadoTexto" class="text-cyan-300 font-semibold text-lg">Verificando Firestore...</div>
+      <div id="ultimaRevision" class="text-gray-400 text-sm mt-1">Última revisión: —</div>
+    </div>
+  </section>
+
+  <!-- Indicador de entorno -->
+  <div id="firebaseStatusPanel" class="fixed top-4 left-6 z-50 flex items-center gap-3 px-4 py-2 rounded-xl shadow-lg border-2 border-cyan-400 bg-gray-900 transition-all duration-500 animate-pulse">
+    <span id="estadoFirebaseIcon" class="text-cyan-400 text-lg">🧪</span>
+    <span id="estadoFirebaseTexto" class="font-semibold text-cyan-300">MODO PILOTO ACTIVO</span>
+  </div>
+
+  <!-- Selector de modo -->
+  <div class="fixed top-4 right-6 z-50 flex items-center gap-2 bg-gray-900 border border-cyan-500 px-4 py-2 rounded-xl shadow-lg">
+    <label id="modeLabel" class="text-cyan-300 text-sm font-semibold">Modo Producción</label>
+    <input type="checkbox" id="modoToggle" class="w-5 h-5 accent-cyan-500 cursor-pointer" title="Cambiar entre Piloto / Producción" />
+  </div>
+
+  <!-- Contenido principal -->
+  <main id="mainDashboard" class="hidden p-6 space-y-6">
+    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="bg-gray-800 p-5 rounded-xl text-center shadow-lg border border-cyan-700">
+        <h3 class="text-cyan-400 text-lg font-semibold">Total de Viajes</h3>
+        <p id="totalViajes" class="text-3xl font-bold mt-2">0</p>
+      </div>
+      <div class="bg-gray-800 p-5 rounded-xl text-center shadow-lg border border-yellow-600">
+        <h3 class="text-yellow-400 text-lg font-semibold">En Curso</h3>
+        <p id="viajesEnCurso" class="text-3xl font-bold mt-2">0</p>
+      </div>
+      <div class="bg-gray-800 p-5 rounded-xl text-center shadow-lg border border-green-600">
+        <h3 class="text-green-400 text-lg font-semibold">Finalizados</h3>
+        <p id="viajesFinalizados" class="text-3xl font-bold mt-2">0</p>
+      </div>
+      <div class="bg-gray-800 p-5 rounded-xl text-center shadow-lg border border-cyan-500">
+        <h3 class="text-cyan-300 text-lg font-semibold">Promedio por Empresa</h3>
+        <p id="promedioEmpresa" class="text-3xl font-bold mt-2">0</p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Script principal del dashboard -->
+  <script type="module" src="./js/ceo-dashboard.js" defer></script>
+
+  <!-- Loader de Firebase centralizado -->
+  <script src="/js/firebase/firebase-loader.js"></script>
+
+</body>
+</html>

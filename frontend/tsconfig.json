@@ -1,34 +1,41 @@
 {
   "compilerOptions": {
-    /* Versión de ECMAScript que queremos */
+    /* Versión de ECMAScript que queremos (ES2020 es ideal para Node.js y funciones recientes) */
     "target": "ES2020",
 
-    /* Soporte para Node.js y Firebase */
+    /* Soporte para Node.js y Firebase (CommonJS es estándar para Node) */
     "module": "commonjs",
     "moduleResolution": "node",
 
-    /* Archivos de tipado */
+    /* Archivos de tipado base para el proyecto */
     "lib": ["ES2020"],
 
-    /* Salida de los .js */
+    /* Directorio de salida para los archivos .js compilados */
     "outDir": "lib",
+    /* Directorio raíz de los archivos fuente .ts */
     "rootDir": "src",
 
-    /* Soporte JSON (para serviceAccount.json) */
+    /* Soporte JSON (necesario si utilizas archivos .json, como serviceAccount.json) */
     "resolveJsonModule": true,
 
-    /* Reglas de compilación */
+    /* Reglas de compilación y chequeo estricto */
     "strict": true,
+    /* Permite usar importaciones de módulos CommonJS como si fueran ES Modules */
     "esModuleInterop": true,
+    /* Fuerza que los nombres de archivo sean consistentes en mayúsculas/minúsculas */
     "forceConsistentCasingInFileNames": true,
+    /* Omite la verificación de tipos de librerías externas (más rápido) */
     "skipLibCheck": true,
 
-    /* Opciones extra útiles */
+    /* Opciones extra útiles para mantener el código limpio */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
+  /* Compilar automáticamente al guardar */
   "compileOnSave": true,
+  /* Incluir solo la carpeta de código fuente */
   "include": ["src"],
+  /* Excluir directorios generados o de dependencias */
   "exclude": ["node_modules", "lib"]
 }

@@ -1,4 +1,4 @@
-Write-Host "=== Verificando configuración del entorno ===" -ForegroundColor Cyan
+﻿Write-Host "=== Verificando configuración del entorno ===" -ForegroundColor Cyan
 
 # --- JAVA ---
 try {

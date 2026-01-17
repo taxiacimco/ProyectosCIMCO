@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Login Corporativo - TAXIA CIMCO</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="./manifest-corporativo.webmanifest" />
+</head>
+
+<body class="bg-slate-900 flex items-center justify-center h-screen text-gray-200">
+  <div class="bg-slate-800 p-8 rounded-xl shadow-lg w-[95%] max-w-md space-y-6">
+    <h1 class="text-center text-2xl font-bold text-cyan-400">🚖 TAXIA CIMCO - Corporativo</h1>
+
+    <div>
+      <label class="block text-sm mb-1">Correo electrónico</label>
+      <input id="email" type="email" class="w-full p-2 rounded bg-slate-700 border border-slate-600 focus:outline-none" placeholder="empresa@ejemplo.com">
+    </div>
+
+    <div>
+      <label class="block text-sm mb-1">Contraseña</label>
+      <input id="password" type="password" class="w-full p-2 rounded bg-slate-700 border border-slate-600 focus:outline-none" placeholder="••••••••">
+    </div>
+
+    <div class="flex flex-col gap-3">
+      <button id="loginBtn" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 rounded">Iniciar Sesión</button>
+      <button id="registerBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-2 rounded">Registrar Empresa</button>
+    </div>
+
+    <div id="msg" class="text-center text-sm text-gray-400 mt-3"></div>
+  </div>
+
+  <script type="module">
+    import { auth, db, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, addDoc, collection, serverTimestamp } from "./js/firebase-config-corporativo.js";
+
+    const email = document.getElementById("email");
+    const password = document.getElementById("password");
+    const msg = document.getElementById("msg");
+    const loginBtn = document.getElementById("loginBtn");
+    const registerBtn = document.getElementById("registerBtn");
+
+    const showMsg = (t, c = "text-cyan-400") => {
+      msg.className = `text-center text-sm ${c}`;
+      msg.textContent = t;
+    };
+
+    // Crear nueva empresa
+    registerBtn.addEventListener("click", async () => {
+      try {
+        const userCred = await createUserWithEmailAndPassword(auth, email.value, password.value);
+        const user = userCred.user;
+        await addDoc(collection(db, "empresas_corporativas"), {
+          empresaEmail: user.email,
+          empresaId: user.uid,
+          fechaRegistro: serverTimestamp()
+        });
+        showMsg("✅ Empresa registrada correctamente", "text-green-400");
+      } catch (e) {
+        showMsg("⚠️ Error al registrar: " + e.message, "text-red-400");
+      }
+    });
+
+    // Iniciar sesión
+    loginBtn.addEventListener("click", async () => {
+      try {
+        await signInWithEmailAndPassword(auth, email.value, password.value);
+        localStorage.setItem("empresaEmail", email.value);
+        showMsg("✅ Iniciando sesión...");
+        setTimeout(() => window.location.href = "./panel-corporativo.html", 1000);
+      } catch (e) {
+        showMsg("⚠️ Error de inicio de sesión: " + e.message, "text-red-400");
+      }
+    });
+
+    // Redirección si ya está logueado
+    onAuthStateChanged(auth, (user) => {
+      if (user) window.location.href = "./panel-corporativo.html";
+    });
+  </script>
+
+<script src="/js/firebase/firebase-loader.js"></script>
+</body>
+</html>
+
+
+
+
+

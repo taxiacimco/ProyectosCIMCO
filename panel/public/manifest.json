@@ -1,0 +1,49 @@
+{
+  "name": "TAXIA CIMCO - Panel de Mantenimiento",
+  "short_name": "CIMCO Panel",
+  "description": "Centro técnico y de mantenimiento del sistema TAXIA CIMCO.",
+  "start_url": "/panel-mantenimiento.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#00b4ff",
+  "orientation": "portrait",
+  "categories": ["utilities", "productivity", "business"],
+  "icons": [
+    {
+      "src": "/assets/favicon-cimco.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/logo-taxiacimco.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/logo-taxiacimco.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Ejecutar mantenimiento",
+      "short_name": "Mantenimiento",
+      "url": "/panel-mantenimiento.html#run",
+      "icons": [{ "src": "/assets/favicon-cimco.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Ver estado Firestore",
+      "short_name": "Estado",
+      "url": "/panel-mantenimiento.html#status",
+      "icons": [{ "src": "/assets/logo-taxiacimco.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
+  "id": "/panel",
+  "dir": "ltr",
+  "lang": "es-CO"
+}

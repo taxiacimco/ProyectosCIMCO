@@ -1,360 +1,256 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es" class="scroll-smooth">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GestiÃ³n de CrÃ©ditos - TAXIA CIMCO</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <style>
-    body { font-family: 'Inter', sans-serif; }
-    .text-neon-cyan { color: #00F0FF; }
-    .bg-gradient-to-r-neon { background-image: linear-gradient(to right, #B300F2, #00F0FF); }
-    .btn-neon-gradient {
-      background-image: linear-gradient(to right, #B300F2, #00F0FF);
-      transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
-      box-shadow: 0 4px 15px -5px #B300F2;
-      color: white;
-    }
-    .btn-neon-gradient:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px -5px #00F0FF;
-    }
-    .spinner {
-      border: 4px solid rgba(255, 255, 255, 0.1);
-      border-left-color: #00F0FF;
-      border-radius: 50%;
-      width: 24px;
-      height: 24px;
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gestión de Créditos - TAXIA CIMCO</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; }
+        .text-neon-cyan { color: #00F0FF; }
+        .bg-gradient-to-r-neon { background-image: linear-gradient(to right, #B300F2, #00F0FF); }
+        .btn-neon-gradient {
+            background-image: linear-gradient(to right, #B300F2, #00F0FF);
+            transition: transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+            box-shadow: 0 4px 15px -5px #B300F2;
+            color: white;
+        }
+        .btn-neon-gradient:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px -5px #00F0FF;
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: #00F0FF;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
 </head>
-<body class="bg-slate-900 text-gray-200">
+<body class="text-gray-200">
 
-  <!-- Header -->
-  <header class="bg-slate-800 shadow-lg fixed top-0 w-full z-50">
-    <div class="container mx-auto px-4 py-4 flex justify-between items-center">
-      <a href="ceo-panel.html" class="flex items-center space-x-2 transition-transform duration-200 hover:scale-105">
-        <i class="fas fa-chart-line text-4xl text-neon-cyan"></i>
-        <h1 class="text-2xl font-extrabold text-white hidden md:block">Panel de CEO</h1>
-      </a>
-      <nav class="hidden md:flex space-x-8 text-gray-400 font-semibold">
-        <a href="ceo-panel.html" class="hover:text-neon-cyan">Resumen</a>
-        <a href="ceo-mapa.html" class="hover:text-neon-cyan">Mapa de Flota</a>
-        <a href="panel-credito.html" class="text-neon-cyan font-bold">CrÃ©ditos</a>
-        <a href="conductorinter.html" class="hover:text-neon-cyan">Conductores</a>
-        <a href="despachadorinter.html" class="hover:text-neon-cyan">Despachadores</a>
-        <a href="pasajero.html" class="hover:text-neon-cyan">Pasajeros</a>
-        <a href="../index.html" class="hover:text-neon-cyan">Cerrar SesiÃ³n</a>
-      </nav>
-    </div>
-  </header>
+    <header class="bg-slate-800 shadow-lg fixed top-0 w-full z-50 border-b border-slate-700">
+        <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+            <a href="ceo-panel.html" class="flex items-center space-x-2 transition-transform duration-200 hover:scale-105">
+                <i class="fas fa-hand-holding-dollar text-4xl text-neon-cyan"></i>
+                <h1 class="text-2xl font-extrabold text-white">TAXIA <span class="text-neon-cyan">CREDITS</span></h1>
+            </a>
+            <nav class="hidden md:flex space-x-6 text-gray-400 font-semibold">
+                <a href="ceo-panel.html" class="hover:text-neon-cyan">Dashboard</a>
+                <a href="panel-credito.html" class="text-neon-cyan border-b-2 border-neon-cyan">Créditos</a>
+                <a href="../index.html" class="hover:text-red-400">Salir</a>
+            </nav>
+        </div>
+    </header>
 
-  <!-- Main -->
-  <main class="py-24 px-4 md:px-8">
-    <div class="container mx-auto max-w-7xl">
-      <h2 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r-neon mb-8 text-center">
-        GestiÃ³n de CrÃ©ditos
-      </h2>
-
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <!-- Formulario -->
-        <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-          <h3 class="text-2xl font-bold text-white mb-4">Registrar Movimiento</h3>
-          <form id="movimientoForm" class="space-y-4">
-            <div>
-              <label for="conductorId" class="block text-sm font-medium text-gray-400">ID del Conductor</label>
-              <input type="text" id="conductorId" class="mt-1 block w-full bg-slate-700 rounded-md p-2 text-gray-200" placeholder="Ej: UID123" required>
-            </div>
-            <div>
-              <label for="tipo" class="block text-sm font-medium text-gray-400">Tipo de Movimiento</label>
-              <select id="tipo" class="mt-1 block w-full bg-slate-700 rounded-md p-2 text-gray-200" required>
-                <option value="" disabled selected>Seleccione</option>
-                <option value="recarga">Recarga de CrÃ©dito</option>
-                <option value="gasto">Gasto / Retiro</option>
-              </select>
-            </div>
-            <div>
-              <label for="monto" class="block text-sm font-medium text-gray-400">Monto (COP)</label>
-              <input type="number" id="monto" class="mt-1 block w-full bg-slate-700 rounded-md p-2 text-gray-200" placeholder="Ej: 50000" required>
-            </div>
-            <div>
-              <label for="descripcion" class="block text-sm font-medium text-gray-400">DescripciÃ³n</label>
-              <textarea id="descripcion" rows="3" class="mt-1 block w-full bg-slate-700 rounded-md p-2 text-gray-200" placeholder="Ej: Recarga manual"></textarea>
-            </div>
-            <button type="submit" id="submitBtn" class="w-full btn-neon-gradient py-2 px-4 rounded-md font-bold mt-4">
-              <i class="fas fa-plus-circle mr-2"></i> Registrar
-            </button>
-          </form>
+    <main class="py-24 px-4 md:px-8 container mx-auto max-w-7xl">
+        <div id="messageBox" class="fixed top-24 right-4 z-[100] hidden animate-bounce">
+            <div id="messageText" class="p-4 rounded-xl shadow-2xl text-white font-bold"></div>
         </div>
 
-        <!-- Historial + grÃ¡ficos -->
-        <div class="lg:col-span-2 space-y-8">
-          <!-- Historial -->
-          <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-            <div class="flex flex-col md:flex-row justify-between items-center mb-4 space-y-2 md:space-y-0">
-              <h3 class="text-2xl font-bold text-white">Historial de Movimientos</h3>
-              <div class="flex items-center space-x-3">
-                <select id="filtroConductor" class="bg-slate-700 text-white p-2 rounded-md">
-                  <option value="">Todos los conductores</option>
-                </select>
-                <p id="saldoConductor" class="text-sm text-gray-400 hidden">Saldo: $0</p>
-              </div>
-              <div id="loadingIndicator" class="hidden"><div class="spinner"></div></div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div class="bg-slate-800 p-6 rounded-3xl shadow-2xl border border-slate-700 h-fit">
+                <h3 class="text-xl font-black text-white mb-6 uppercase tracking-tighter">Nueva Transacción</h3>
+                <form id="movimientoForm" class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Conductor (ID o Nombre)</label>
+                        <input type="text" id="conductorId" list="conductoresOpciones" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-cyan outline-none" placeholder="Buscar..." required>
+                        <datalist id="conductoresOpciones"></datalist>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo de Operación</label>
+                        <select id="tipo" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white focus:border-neon-cyan outline-none" required>
+                            <option value="recarga">➕ Recarga de Saldo</option>
+                            <option value="gasto">➖ Descuento / Multa</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Monto (COP)</label>
+                        <input type="number" id="monto" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-2xl font-black text-neon-cyan outline-none" placeholder="5000" required>
+                    </div>
+                    <button type="submit" id="submitBtn" class="w-full btn-neon-gradient py-4 rounded-xl font-black uppercase tracking-widest mt-4">
+                        <span id="submitText text-lg">Ejecutar Movimiento</span>
+                    </button>
+                </form>
             </div>
 
-            <p id="statusMessage" class="text-center text-gray-400 py-4 hidden">Cargando...</p>
-            <div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-slate-700">
-                <thead>
-                  <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">ID Conductor</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">Monto</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">DescripciÃ³n</th>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase">Fecha</th>
-                  </tr>
-                </thead>
-                <tbody id="historialTable" class="divide-y divide-slate-700"></tbody>
-              </table>
-            </div>
-          </div>
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-slate-800 p-6 rounded-3xl border border-slate-700 shadow-xl">
+                    <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                        <h3 class="text-xl font-black text-white uppercase">Últimos Movimientos</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="filtroConductor" placeholder="Filtrar historial..." class="bg-slate-900 border border-slate-700 p-2 rounded-lg text-sm text-white outline-none focus:border-neon-cyan">
+                            <select id="filtroTipo" class="bg-slate-900 border border-slate-700 p-2 rounded-lg text-sm text-white">
+                                <option value="">Todos</option>
+                                <option value="recarga">Recargas</option>
+                                <option value="gasto">Gastos</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="text-gray-500 text-xs uppercase border-b border-slate-700">
+                                    <th class="pb-3">Conductor</th>
+                                    <th class="pb-3">Monto</th>
+                                    <th class="pb-3">Fecha</th>
+                                    <th class="pb-3 text-right">Saldo Final</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historialTable" class="text-sm">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
 
-          <!-- GrÃ¡fico en vivo -->
-          <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-            <h3 class="text-2xl font-bold text-white mb-4">GrÃ¡fico en Vivo</h3>
-            <div class="relative h-72">
-              <canvas id="graficoMovimientos"></canvas>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-slate-800 p-6 rounded-3xl border border-slate-700 h-64">
+                        <canvas id="graficoMovimientos"></canvas>
+                    </div>
+                    <div class="bg-slate-800 p-6 rounded-3xl border border-slate-700 h-64">
+                        <canvas id="graficoDona"></canvas>
+                    </div>
+                </div>
             </div>
-          </div>
-
-          <!-- GrÃ¡fico de dona -->
-          <div class="bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
-            <h3 class="text-2xl font-bold text-white mb-4">DistribuciÃ³n Recargas vs Retiros</h3>
-            <div class="relative h-72">
-              <canvas id="graficoDona"></canvas>
-            </div>
-          </div>
         </div>
-      </div>
-    </div>
-  </main>
+    </main>
 
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getFirestore, doc, runTransaction, collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, doc, runTransaction, getDocs, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
-      authDomain: "pelagic-chalice-467818-e1.firebaseapp.com",
-      projectId: "pelagic-chalice-467818-e1",
-      storageBucket: "pelagic-chalice-467818-e1.appspot.com",
-      messagingSenderId: "191106268804",
-      appId: "1:191106268804:web:8b2aa9689abaa35c880cd1",
-      measurementId: "G-CPWSCLGKP2"
-    };
+        // Configuración - Usa tus variables existentes o cámbialas aquí
+        const firebaseConfig = { /* PEGA AQUÍ TU CONFIG DE FIREBASE SI NO SE INYECTA AUTOMÁTICAMENTE */ };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+        // Referencias a elementos
+        const form = document.getElementById("movimientoForm");
+        const historialTable = document.getElementById("historialTable");
+        const conductoresList = document.getElementById("conductoresOpciones");
+        let chartBar, chartDona;
 
-    const form = document.getElementById("movimientoForm");
-    const historialTable = document.getElementById("historialTable");
-    const submitBtn = document.getElementById("submitBtn");
-    const statusMessage = document.getElementById("statusMessage");
-    const filtroConductor = document.getElementById("filtroConductor");
-    const saldoConductor = document.getElementById("saldoConductor");
-    const graficoCanvas = document.getElementById("graficoMovimientos");
-    const graficoDonaCanvas = document.getElementById("graficoDona");
-
-    let unsubscribeHistorial = null;
-    let unsubscribeSaldo = null;
-    let chartInstance = null;
-    let chartDona = null;
-
-    const formatCOP = (valor) =>
-      valor.toLocaleString("es-CO", { style: "currency", currency: "COP", minimumFractionDigits: 0 });
-
-    async function cargarConductores() {
-      const usuariosRef = collection(db, "usuarios");
-      const snaps = await getDocs(usuariosRef);
-      snaps.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.rol?.includes("conductor")) {
-          const option = document.createElement("option");
-          option.value = docSnap.id;
-          option.textContent = `${data.nombre || "Sin nombre"} (${docSnap.id})`;
-          filtroConductor.appendChild(option);
-        }
-      });
-    }
-
-    function escucharSaldo(uid) {
-      if (unsubscribeSaldo) unsubscribeSaldo();
-      if (!uid) {
-        saldoConductor.classList.add("hidden");
-        return;
-      }
-      unsubscribeSaldo = onSnapshot(doc(db, "usuarios", uid), (snap) => {
-        if (snap.exists()) {
-          saldoConductor.textContent = `Saldo: ${formatCOP(snap.data().saldo || 0)}`;
-          saldoConductor.classList.remove("hidden");
-        }
-      });
-    }
-
-    function escucharHistorial(uid = "") {
-      if (unsubscribeHistorial) unsubscribeHistorial();
-      statusMessage.classList.remove("hidden");
-      statusMessage.textContent = "Cargando...";
-      historialTable.innerHTML = "";
-
-      const movsRef = collection(db, "movimientos");
-      let q = query(movsRef, orderBy("fecha", "desc"));
-      if (uid) q = query(movsRef, where("conductorId", "==", uid), orderBy("fecha", "desc"));
-
-      unsubscribeHistorial = onSnapshot(q, (snaps) => {
-        historialTable.innerHTML = "";
-        const datosGrafico = [];
-        let totalRecargas = 0;
-        let totalRetiros = 0;
-
-        if (snaps.empty) {
-          statusMessage.textContent = "No hay movimientos registrados.";
-        } else {
-          statusMessage.classList.add("hidden");
-          snaps.forEach(docSnap => {
-            const data = docSnap.data();
-            const fecha = data.fecha?.toDate?.() || new Date();
-            const montoClase = data.monto > 0 ? "text-green-400" : "text-red-400";
-            historialTable.innerHTML += `
-              <tr>
-                <td class="px-6 py-4 text-sm text-white">${data.conductorId}</td>
-                <td class="px-6 py-4 text-sm ${montoClase}">${formatCOP(data.monto)}</td>
-                <td class="px-6 py-4 text-sm text-gray-400">${data.descripcion || "-"}</td>
-                <td class="px-6 py-4 text-sm text-gray-400">${fecha.toLocaleDateString("es-CO")}</td>
-              </tr>
-            `;
-            datosGrafico.push({ fecha, monto: data.monto });
-
-            if (data.monto > 0) totalRecargas += data.monto;
-            else totalRetiros += Math.abs(data.monto);
-          });
-        }
-        actualizarGrafico(datosGrafico);
-        actualizarGraficoDona(totalRecargas, totalRetiros);
-      });
-    }
-
-    function actualizarGrafico(movimientos) {
-      const agregados = {};
-      movimientos.forEach(m => {
-        const fecha = m.fecha.toLocaleDateString("es-CO");
-        agregados[fecha] = (agregados[fecha] || 0) + m.monto;
-      });
-
-      const labels = Object.keys(agregados).reverse();
-      const valores = Object.values(agregados).reverse();
-
-      if (chartInstance) chartInstance.destroy();
-      const ctx = graficoCanvas.getContext("2d");
-      chartInstance = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels,
-          datasets: [{
-            label: "Movimientos (COP)",
-            data: valores,
-            backgroundColor: valores.map(v => v > 0 ? "rgba(0, 240, 255, 0.6)" : "rgba(255, 0, 0, 0.6)"),
-            borderColor: valores.map(v => v > 0 ? "#00F0FF" : "#FF0000"),
-            borderWidth: 1
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: 'white' } },
-            x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: 'white' } }
-          },
-          plugins: { legend: { labels: { color: 'white' } } }
-        }
-      });
-    }
-
-    function actualizarGraficoDona(totalRecargas, totalRetiros) {
-      if (chartDona) chartDona.destroy();
-
-      const total = totalRecargas + totalRetiros;
-      const porcentajeRecargas = total > 0 ? Math.round((totalRecargas / total) * 100) : 0;
-      const porcentajeRetiros = total > 0 ? 100 - porcentajeRecargas : 0;
-
-      chartDona = new Chart(graficoDonaCanvas.getContext("2d"), {
-        type: "doughnut",
-        data: {
-          labels: ["Recargas", "Retiros"],
-          datasets: [{
-            data: [totalRecargas, totalRetiros],
-            backgroundColor: ["rgba(0, 240, 255, 0.7)", "rgba(255, 0, 0, 0.7)"],
-            borderColor: ["#00F0FF", "#FF0000"],
-            borderWidth: 2
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { labels: { color: "white" } },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  const value = context.raw.toLocaleString("es-CO", { 
-                    style: "currency", 
-                    currency: "COP", 
-                    minimumFractionDigits: 0 
-                  });
-                  return `${context.label}: ${value}`;
+        // 1. CARGAR CONDUCTORES PARA EL AUTOCOMPLETADO
+        async function init() {
+            const q = query(collection(db, "usuarios")); 
+            const snap = await getDocs(q);
+            snap.forEach(doc => {
+                const data = doc.data();
+                if(data.rol === 'conductor' || data.tipoVehiculo) {
+                    const option = document.createElement("option");
+                    option.value = doc.id;
+                    option.textContent = `${data.nombre} (${data.placa || 'Sin Placa'})`;
+                    conductoresList.appendChild(option);
                 }
-              }
+            });
+        }
+
+        // 2. ESCUCHAR MOVIMIENTOS EN TIEMPO REAL
+        const qMovs = query(collection(db, "movimientos"), orderBy("fecha", "desc"), limit(20));
+        onSnapshot(qMovs, (snapshot) => {
+            historialTable.innerHTML = "";
+            let dataBar = { labels: [], values: [] };
+            let totals = { recargas: 0, gastos: 0 };
+
+            snapshot.forEach(doc => {
+                const m = doc.data();
+                const esRecarga = m.tipo === "recarga";
+                totals[esRecarga ? 'recargas' : 'gastos'] += Number(m.monto);
+
+                const row = `
+                    <tr class="border-b border-slate-800 hover:bg-slate-700/30 transition">
+                        <td class="py-4 font-bold">${m.conductorId.substring(0,8)}...</td>
+                        <td class="py-4 font-black ${esRecarga ? 'text-green-400' : 'text-red-400'}">
+                            ${esRecarga ? '+' : '-'}$${Number(m.monto).toLocaleString()}
+                        </td>
+                        <td class="py-4 text-gray-500 text-xs">${m.fecha?.toDate().toLocaleDateString() || 'Hoy'}</td>
+                        <td class="py-4 text-right text-neon-cyan font-mono">$${(m.saldoResultante || 0).toLocaleString()}</td>
+                    </tr>
+                `;
+                historialTable.innerHTML += row;
+            });
+
+            actualizarGraficos(totals);
+        });
+
+        // 3. PROCESAR TRANSACCIÓN (RECARGA + ACTUALIZACIÓN SALDO)
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const cid = document.getElementById("conductorId").value;
+            const tipo = document.getElementById("tipo").value;
+            const monto = Math.abs(Number(document.getElementById("monto").value));
+            
+            const btn = document.getElementById("submitBtn");
+            btn.disabled = true;
+
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const conductorRef = doc(db, "usuarios", cid);
+                    const snap = await transaction.get(conductorRef);
+
+                    if (!snap.exists()) throw "El conductor no existe.";
+
+                    const saldoActual = snap.data().saldo || 0;
+                    const nuevoSaldo = tipo === "recarga" ? saldoActual + monto : saldoActual - monto;
+
+                    // Actualizar el saldo en el perfil del usuario
+                    transaction.update(conductorRef, { saldo: nuevoSaldo });
+
+                    // Crear el registro en la colección movimientos
+                    const movRef = doc(collection(db, "movimientos"));
+                    transaction.set(movRef, {
+                        conductorId: cid,
+                        monto: monto,
+                        tipo: tipo,
+                        saldoResultante: nuevoSaldo,
+                        fecha: serverTimestamp(),
+                        admin: "CEO_PANEL"
+                    });
+                });
+
+                showToast("¡Movimiento procesado con éxito!", "bg-green-600");
+                form.reset();
+            } catch (error) {
+                showToast("Error: " + error, "bg-red-600");
+            } finally {
+                btn.disabled = false;
             }
-          }
-        },
-        plugins: [{
-          id: "textCenter",
-          afterDraw(chart) {
-            const { width, height } = chart;
-            const ctx = chart.ctx;
-            ctx.save();
-            ctx.font = "bold 18px Inter";
-            ctx.fillStyle = "#FFFFFF";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(`${porcentajeRecargas}% / ${porcentajeRetiros}%`, width / 2, height / 2);
-            ctx.restore();
-          }
-        }]
-      });
-    }
+        });
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const conductorId = document.getElementById("conductorId").value.trim();
-      const tipo = document.getElementById("tipo").value;
-      const monto = parseFloat(document.getElementById("monto").value);
-      const descripcion = document.getElementById("descripcion").value;
+        // UTILIDADES
+        function showToast(txt, color) {
+            const box = document.getElementById("messageBox");
+            const inner = document.getElementById("messageText");
+            inner.textContent = txt;
+            box.className = `fixed top-24 right-4 z-[100] ${color} p-4 rounded-xl shadow-2xl`;
+            box.classList.remove("hidden");
+            setTimeout(() => box.classList.add("hidden"), 4000);
+        }
 
-      if (!conductorId || !tipo || !monto) {
-        alert("Complete todos los campos requeridos.");
-        return;
-      }
+        function actualizarGraficos(totals) {
+            const ctxDona = document.getElementById('graficoDona').getContext('2d');
+            if(chartDona) chartDona.destroy();
+            chartDona = new Chart(ctxDona, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Recargas', 'Gastos'],
+                    datasets: [{
+                        data: [totals.recargas, totals.gastos],
+                        backgroundColor: ['#00F0FF', '#B300F2']
+                    }]
+                },
+                options: { maintainAspectRatio: false, plugins: { legend: { labels: { color: 'white' } } } }
+            });
+        }
 
-      submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin
-
-
-
-
-
-
+        init();
+    </script>
+</body>
+</html>

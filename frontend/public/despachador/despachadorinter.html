@@ -1,138 +1,55 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TAXIA CIMCO - Despachador Intermunicipal</title>
+  <title>Mapa Despachador Intermunicipal - TAXIA CIMCO</title>
+
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
   <style>
     body { font-family: 'Inter', sans-serif; }
-    .page-section { display:none; }
-    .page-section.active { display:block; }
-    #viajes-list { max-height: 500px; overflow-y: auto; }
-    .message-box { position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-                   z-index: 1000; padding: .75rem 1.5rem; border-radius: .5rem; opacity: 0;
-                   transition: opacity .3s ease-in-out; }
-    .message-box.show { opacity: 1; }
+    #map { height: 80vh; border-radius: 1rem; box-shadow: 0 0 10px rgba(0,255,255,0.3); }
+    .btn-neon {
+      background: linear-gradient(to right, #B300F2, #00F0FF);
+      color: white; padding: 10px 20px; border-radius: 10px;
+      font-weight: bold; transition: all 0.2s ease-in-out;
+    }
+    .btn-neon:hover { transform: scale(1.05); box-shadow: 0 0 15px #00F0FF; }
   </style>
-</head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
 
-  <!-- Mensajes flotantes -->
-  <div id="messageBox" class="message-box hidden"></div>
-
-  <!-- Contenedor -->
-  <div class="bg-white shadow-xl rounded-xl p-6 md:p-10 w-full md:max-w-2xl space-y-6">
-
-    <h1 class="text-3xl font-bold text-center text-purple-700">Panel Despachador Intermunicipal</h1>
-    <p class="text-center text-gray-600">Gestiona las solicitudes de viajes intermunicipales de tu cooperativa</p>
-
-    <!-- Lista de viajes -->
-    <div id="viajes-list" class="space-y-4">
-      <p class="text-gray-500 italic text-center">Cargando viajes...</p>
-    </div>
-
-  </div>
-
-  <script type="module">
-    import { auth, db } from "../../public/js/firebase-config-despachadorinter.js";
-    import { signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { collection, query, where, onSnapshot, updateDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-    let despachadorId = null;
-
-    const showMessage = (msg, type="info") => {
-      const box = document.getElementById("messageBox");
-      box.textContent = msg;
-      box.className = `message-box show ${
-        type==="success" ? "bg-green-200 text-green-800" : 
-        type==="error" ? "bg-red-200 text-red-800" : 
-        "bg-blue-200 text-blue-800"
-      }`;
-      setTimeout(()=> box.classList.remove("show"), 3000);
-    };
-
-    // ðŸš Render viaje en lista
-    const renderViaje = (id, data) => {
-      const list = document.getElementById("viajes-list");
-      let card = document.getElementById(`viaje-${id}`);
-      if(!card){
-        card = document.createElement("div");
-        card.id = `viaje-${id}`;
-        card.className = "bg-gray-50 p-4 rounded-lg shadow-md border-l-4 border-purple-500";
-        list.prepend(card);
-      }
-      card.innerHTML = `
-        <p><strong>Pasajero:</strong> ${data.pasajeroId}</p>
-        <p><strong>Origen:</strong> ${data.origen}</p>
-        <p><strong>Destino:</strong> ${data.destino}</p>
-        <p><strong>Precio:</strong> $${data.precio}</p>
-        <p><strong>Estado:</strong> <span class="font-bold">${data.estado}</span></p>
-        <div class="mt-2 space-x-2">
-          <button class="asignar bg-blue-500 text-white px-3 py-1 rounded">Asignar Conductor</button>
-          <button class="cancelar bg-red-500 text-white px-3 py-1 rounded">Cancelar</button>
-        </div>
-      `;
-      card.querySelector(".asignar").onclick = ()=>asignarConductor(id);
-      card.querySelector(".cancelar").onclick = ()=>cancelarViaje(id);
-    };
-
-    const asignarConductor = async (id) => {
-      try {
-        await updateDoc(doc(db,"viajes",id),{estado:"asignado", despachadorId});
-        showMessage("Conductor asignado correctamente","success");
-      } catch(err){ console.error(err); showMessage("Error al asignar","error"); }
-    };
-
-    const cancelarViaje = async (id) => {
-      try {
-        await updateDoc(doc(db,"viajes",id),{estado:"cancelado"});
-        showMessage("Viaje cancelado","error");
-      } catch(err){ console.error(err); showMessage("Error al cancelar","error"); }
-    };
-
-    // ðŸš Escuchar viajes intermunicipales de este despachador
-    const listenViajes = () => {
-      const q = query(collection(db,"viajes"), where("tipo","==","intermunicipal"));
-      onSnapshot(q,snap=>{
-        const list = document.getElementById("viajes-list");
-        if(snap.empty){ list.innerHTML="<p class='text-gray-500 italic text-center'>No hay viajes registrados.</p>"; return; }
-        snap.forEach(docSnap=> renderViaje(docSnap.id,docSnap.data()));
-      });
-    };
-
-    // ðŸš Auth
-    onAuthStateChanged(auth, async user=>{
-      if(user){ 
-        despachadorId = user.uid;
-        listenViajes();
-      } else await signInAnonymously(auth);
-    });
-  </script>
-  <script>
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/service-worker.js")
-      .then(() => console.log("âœ… SW registrado para esta app"))
-      .catch(err => console.error("âŒ Error registrando SW:", err));
-  }
-</script>
-<!--  Botón oculto solo para desarrollo -->
-<button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
+<!-- APP_ENV + mode-manager (insertado automáticamente) -->
 <script>
-document.addEventListener("keydown", async (e) => {
-  if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "l") {
-    const regs = await navigator.serviceWorker.getRegistrations();
-    for (const reg of regs) await reg.unregister();
-    const names = await caches.keys();
-    for (const n of names) await caches.delete(n);
-    alert(" Caché y Service Workers eliminados.\nRecarga la página (Ctrl + F5).");
-  }
-});
+  window.APP_ENV = "prod";
 </script>
-<script src="/js/version-footer.js"></script>
+
+
+    <script>
+        <!-- Define el entorno de la aplicación. 'dev' (Desarrollo) es el valor por defecto. -->
+        <!-- CÁMBIALO MANUALMENTE A 'prod' solo antes de desplegar en producción. -->
+        const APP_ENV = 'dev'; 
+    </script>
+</head>
+
+<body class="bg-slate-900 text-gray-200">
+
+  <header class="bg-slate-800 shadow-lg p-4 flex justify-between items-center">
+    <h1 class="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-cyan-400">
+      TAXIA CIMCO - Mapa Intermunicipal
+    </h1>
+    <button id="logoutBtn" class="btn-neon"><i class="fas fa-sign-out-alt mr-1"></i>Salir</button>
+  </header>
+
+  <main class="p-6">
+    <h2 class="text-center text-xl font-semibold mb-4">Conductores Intermunicipales en Tiempo Real</h2>
+    <div id="map"></div>
+  </main>
+
+  <script type="module" src="./js/despachador-mapa.js"></script>
+
+<script src="/js/firebase/firebase-loader.js"></script>
 </body>
 </html>
-
-
-

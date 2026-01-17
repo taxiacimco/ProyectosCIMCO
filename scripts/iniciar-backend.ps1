@@ -1,51 +1,48 @@
-# Cierra procesos antiguos (ngrok, node) para evitar conflictos.
-Write-Host "🛑 Cerrando procesos antiguos (ngrok, node)..." -ForegroundColor Yellow
-Get-Process ngrok -ErrorAction SilentlyContinue | Stop-Process -Force
-Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force
+﻿# -------------------------------------------------
+# Script para iniciar el entorno de Firebase (Functions/Firestore/Auth)
+# Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\scripts\iniciar-backend.ps1
+# -------------------------------------------------
 
-# Inicia el emulador de Firebase en una nueva ventana de PowerShell.
-Write-Host "🚀 Iniciando Firebase Emulator..." -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "firebase emulators:start --only functions" -NoNewWindow
+Write-Host "`n==========================================" -ForegroundColor Magenta
+Write-Host "    INICIANDO BACKEND TAXIA CIMCO         " -ForegroundColor Magenta
+Write-Host "==========================================`n" -ForegroundColor Magenta
 
-# Espera 8 segundos para que el emulador se inicie completamente.
-Start-Sleep -Seconds 8
+# 1) Primero liberamos los puertos por seguridad
+Write-Host "[1/4] Limpiando entorno previo..." -ForegroundColor Cyan
+& "$PSScriptRoot\liberar-puertos.ps1"
 
-# Inicia ngrok en el puerto 5001.
-Write-Host "🌍 Iniciando ngrok en puerto 5001..." -ForegroundColor Cyan
-Start-Process ngrok -ArgumentList "http 5001" -NoNewWindow
+# 2) Ir a la carpeta de funciones
+$functionsPath = "C:\Users\Carlos Fuentes\ProyectosCIMCO\functions"
+Write-Host "`n[2/4] Accediendo a: $functionsPath" -ForegroundColor Cyan
+Set-Location $functionsPath
 
-# Espera 5 segundos para que ngrok publique la URL.
-Start-Sleep -Seconds 5
-
-Write-Host "🔎 Obteniendo URL pública de ngrok..." -ForegroundColor Cyan
-
-# Intenta obtener la URL pública de la API de ngrok.
-try {
-    $response = Invoke-RestMethod http://127.0.0.1:4040/api/tunnels
-    $publicUrl = $response.tunnels[0].public_url
-
-    # Verifica si se obtuvo una URL pública.
-    if ($publicUrl) {
-        Write-Host "✅ URL pública lista: $publicUrl" -ForegroundColor Green
-        Set-Clipboard -Value $publicUrl
-        Write-Host "📋 Copiada al portapapeles automáticamente." -ForegroundColor Yellow
-
-        # Ejecuta el script de configuración del webhook con la URL.
-        $scriptPath = "C:\Users\Carlos Fuentes\ProyectosCIMCO\scripts\configurar-webhook.ps1"
-        if (Test-Path $scriptPath) {
-            Write-Host "⚙️ Ejecutando configurar-webhook.ps1 con la URL de ngrok..." -ForegroundColor Cyan
-            & $scriptPath -NgrokUrl $publicUrl
-        }
-        else {
-            Write-Host "⚠ No encontré configurar-webhook.ps1 en la carpeta scripts." -ForegroundColor Red
-        }
-    }
-    else {
-        Write-Host "⚠ No se pudo obtener la URL de ngrok." -ForegroundColor Red
-    }
+# 3) Validar archivos esenciales y dependencias
+if (-not (Test-Path ".\package.json")) {
+    Write-Host "[ERROR] No se encontró package.json en la carpeta functions." -ForegroundColor Red
+    Write-Host "Ruta actual: $(Get-Location)" -ForegroundColor Yellow
+    exit
 }
-catch {
-    # Muestra un mensaje de error si la conexión a la API de ngrok falló.
-    Write-Host "❌ Error al consultar la API de ngrok." -ForegroundColor Red
-    Write-Host "Asegúrate de que ngrok se ha iniciado correctamente." -ForegroundColor Red
+
+if (-not (Test-Path ".\node_modules")) {
+    Write-Host "[3/4] node_modules no detectado. Instalando dependencias..." -ForegroundColor Yellow
+    npm install
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Falló la instalación de dependencias (npm install)." -ForegroundColor Red
+        exit
+    }
+} else {
+    Write-Host "[3/4] Dependencias encontradas. Saltando instalación." -ForegroundColor Green
 }
+
+# 4) Verificar Firebase CLI y Levantar Emuladores
+if (-not (Get-Command firebase -ErrorAction SilentlyContinue)) {
+    Write-Host "[ERROR] Firebase CLI no está instalado o no está en el PATH." -ForegroundColor Red
+    exit
+}
+
+Write-Host "`n[4/4] Levantando emuladores de Firebase..." -ForegroundColor Cyan
+Write-Host "(Functions, Firestore, Auth, Hosting)" -ForegroundColor Gray
+
+# Se ejecuta el comando de firebase
+# Nota: Si necesitas persistencia de datos puedes añadir: --import=./seed
+firebase emulators:start --only "functions,firestore,auth,hosting"

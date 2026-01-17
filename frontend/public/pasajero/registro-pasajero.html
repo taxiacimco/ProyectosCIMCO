@@ -1,123 +1,74 @@
-﻿<!DOCTYPE html>
-<html lang="es" class="scroll-smooth">
+<!DOCTYPE html>
+<html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Registro Pasajero - TAXIA CIMCO</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <style>
-    body { font-family: 'Inter', sans-serif; }
-  </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Registro Pasajero - TAXIA CIMCO</title>
+    <link rel="icon" href="../icons/pasajero-192.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+
+    <!-- APP_ENV (Estándar CIMCO) -->
+    <script>
+        window.APP_ENV = "prod";
+    </script>
+
+    <!-- Carga Única de Firebase Loader (Maneja __firebase_config) -->
+    <script src="/js/firebase/firebase-loader.js"></script>
+    
+    <!-- Script de Lógica de Registro (Maneja Auth y Firestore) -->
+    <script type="module" src="./js/pasajero-registro.js"></script>
+
+    <script>
+        <!-- Define el entorno de la aplicación. 'dev' (Desarrollo) es el valor por defecto. -->
+        <!-- CÁMBIALO MANUALMENTE A 'prod' solo antes de desplegar en producción. -->
+        const APP_ENV = 'dev'; 
+    </script>
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
 
-  <div class="w-full max-w-md p-8 bg-white rounded-lg shadow-xl">
-    <div class="text-center mb-6">
-      <i class="fas fa-user-plus text-5xl text-blue-600 mb-4"></i>
-      <h1 class="text-3xl font-bold text-gray-800">RegÃ­strate como Pasajero</h1>
+<body class="flex items-center justify-center min-h-screen bg-slate-900 text-gray-200 p-4">
+    <div class="bg-slate-800 p-8 rounded-2xl shadow-xl w-full max-w-md border border-cyan-700/50">
+        <div class="text-center mb-8">
+            <!-- Icono Pasajero: Usando placeholder temporal -->
+            <img src="../icons/pasajero-192.png" onerror="this.onerror=null; this.src='https://placehold.co/80x80/0f172a/06b6d4?text=PAS'" class="mx-auto w-20 mb-3 rounded-full border-2 border-cyan-500 p-1" alt="Icono Pasajero"/>
+            <h1 class="text-3xl font-bold text-cyan-400">Regístrate como Pasajero</h1>
+            <p class="text-gray-400 text-sm mt-1">Crea tu cuenta para comenzar a solicitar viajes.</p>
+        </div>
+
+        <form id="registroForm" class="space-y-4">
+            <div>
+                <label for="nombre" class="block text-sm font-medium text-cyan-200 mb-1">Nombre completo</label>
+                <input id="nombre" type="text" placeholder="Tu nombre"
+                    class="w-full p-3 bg-slate-700 rounded-lg focus:ring-2 focus:ring-cyan-400 border border-slate-600 transition duration-200 text-white" required />
+            </div>
+            <div>
+                <label for="email" class="block text-sm font-medium text-cyan-200 mb-1">Correo electrónico</label>
+                <input id="email" type="email" placeholder="correo@ejemplo.com"
+                    class="w-full p-3 bg-slate-700 rounded-lg focus:ring-2 focus:ring-cyan-400 border border-slate-600 transition duration-200 text-white" required />
+            </div>
+            <div>
+                <label for="password" class="block text-sm font-medium text-cyan-200 mb-1">Contraseña</label>
+                <input id="password" type="password" placeholder="Contraseña segura (min. 6 caracteres)"
+                    class="w-full p-3 bg-slate-700 rounded-lg focus:ring-2 focus:ring-cyan-400 border border-slate-600 transition duration-200 text-white" required />
+            </div>
+
+            <button type="submit" id="registerButton"
+                class="w-full bg-gradient-to-r from-cyan-600 to-green-500 py-3 rounded-lg font-bold text-lg text-slate-900 hover:scale-[1.02] transition shadow-lg shadow-cyan-500/30">
+                Registrarme
+            </button>
+        </form>
+
+        <p id="status" class="text-center text-sm mt-4 min-h-[1.25rem]"></p>
+        
+        <div class="text-center text-sm text-gray-500 pt-4 border-t border-slate-700 mt-6">
+            ¿Ya tienes cuenta? 
+            <a href="login-pasajero.html" class="font-medium text-cyan-400 hover:text-cyan-300 transition duration-150">
+                Iniciar Sesión
+            </a>
+        </div>
     </div>
-
-    <!-- FORMULARIO -->
-    <form id="registroForm" class="space-y-4">
-      <div>
-        <label for="nombre" class="block text-sm font-medium text-gray-700">Nombre completo</label>
-        <input type="text" id="nombre" name="nombre" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm" required>
-      </div>
-      <div>
-        <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
-        <input type="email" id="email" name="email" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm" required>
-      </div>
-      <div>
-        <label for="password" class="block text-sm font-medium text-gray-700">ContraseÃ±a</label>
-        <input type="password" id="password" name="password" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm" required minlength="6">
-      </div>
-      <div>
-        <label for="telefono" class="block text-sm font-medium text-gray-700">TelÃ©fono</label>
-        <input type="tel" id="telefono" name="telefono" placeholder="+573123456789" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm" required>
-      </div>
-      
-      <button type="submit" class="w-full py-3 px-4 bg-blue-600 text-white font-bold rounded-md shadow-md hover:bg-blue-700 transition-colors">
-        Registrarse
-      </button>
-    </form>
-
-    <p id="mensaje" class="mt-4 text-center text-sm font-medium"></p>
-  </div>
-
-  <!-- Firebase + Registro -->
-  <script type="module">
-    // âœ… ConfiguraciÃ³n propia de pasajero
-    import { app, auth, db } from "/js/firebase-config-pasajero.js";
-
-    // Registro del pasajero usando Cloud Function
-    document.getElementById('registroForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const form = e.target;
-      const data = {
-        nombre: form.nombre.value,
-        email: form.email.value,
-        password: form.password.value,
-        telefono: form.telefono.value,
-        rol: "pasajero"   // âœ… Campo clave para diferenciarlo en Firestore
-      };
-      
-      const mensajeDiv = document.getElementById('mensaje');
-      mensajeDiv.textContent = 'Registrando...';
-      mensajeDiv.style.color = 'gray';
-
-      try {
-        const response = await fetch(
-          "https://us-central1-pelagic-chalice-467818-e1.cloudfunctions.net/registrarConductor", 
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-          }
-        );
-
-        const result = await response.json();
-
-        if (response.ok) {
-          mensajeDiv.textContent = "Â¡Registro exitoso! Bienvenido pasajero.";
-          mensajeDiv.style.color = "green";
-
-          setTimeout(() => {
-            window.location.href = "pasajero.html";
-          }, 1500);
-        } else {
-          throw new Error(result.error || "Error desconocido.");
-        }
-      } catch (error) {
-        console.error("Error en el registro:", error);
-        let errorMessage = "OcurriÃ³ un error en el registro. Intenta de nuevo.";
-        if (error.message.includes("email-already-in-use")) {
-          errorMessage = "El email ya estÃ¡ en uso. Intenta iniciar sesiÃ³n.";
-        } else if (error.message.includes("weak-password")) {
-          errorMessage = "La contraseÃ±a es muy dÃ©bil. Debe tener al menos 6 caracteres.";
-        }
-        mensajeDiv.textContent = errorMessage;
-        mensajeDiv.style.color = "red";
-      }
-    });
-  </script>
-<!--  Botón oculto solo para desarrollo -->
-<button id="dev-clean-cache" style="display:none;position:fixed;bottom:10px;right:10px;z-index:9999;"></button>
-<script>
-document.addEventListener("keydown", async (e) => {
-  if (e.ctrlKey && e.altKey && e.key.toLowerCase() === "l") {
-    const regs = await navigator.serviceWorker.getRegistrations();
-    for (const reg of regs) await reg.unregister();
-    const names = await caches.keys();
-    for (const n of names) await caches.delete(n);
-    alert(" Caché y Service Workers eliminados.\nRecarga la página (Ctrl + F5).");
-  }
-});
-</script>
-<script src="/js/version-footer.js"></script>
 </body>
 </html>
-
-
 

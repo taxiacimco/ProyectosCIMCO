@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Taxia CIMCO - Iniciar Sesión</title>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+        }
+
+        .container {
+            max-width: 380px;
+            margin: 60px auto;
+            background: #ffffff;
+            padding: 35px;
+            border-radius: 16px;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
+        }
+
+        h2 {
+            text-align: center;
+            margin-bottom: 25px;
+            font-weight: 700;
+            color: #333;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px;
+            margin-bottom: 12px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            background: #ffcc00;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #e6b800;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 12px;
+            font-size: 15px;
+            color: #444;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h2>Iniciar Sesión</h2>
+
+        <input id="email" type="email" placeholder="Correo" />
+        <input id="password" type="password" placeholder="Contraseña" />
+
+        <button id="btnLogin">Ingresar</button>
+
+        <div class="loading" id="loading">Validando...</div>
+    </div>
+
+    <script type="module">
+        import { auth, db } from "./js/firebase/firebase-loader.js";
+        import { signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const btn = document.getElementById("btnLogin");
+        const loading = document.getElementById("loading");
+
+        btn.addEventListener("click", async () => {
+            const email = document.getElementById("email").value.trim();
+            const pass = document.getElementById("password").value.trim();
+
+            if (!email || !pass) {
+                alert("Por favor ingresa correo y contraseña");
+                return;
+            }
+
+            loading.style.display = "block";
+
+            try {
+                const cred = await signInWithEmailAndPassword(auth, email, pass);
+                const uid = cred.user.uid;
+
+                const snap = await getDoc(doc(db, "users", uid));
+
+                if (!snap.exists()) {
+                    alert("Tu cuenta no tiene un rol asignado.");
+                    loading.style.display = "none";
+                    return;
+                }
+
+                const rol = snap.data().rol;
+
+                // 🔥 RUTAS REALES SEGÚN TU ESTRUCTURA ACTUAL
+                const rutas = {
+                    "admin": "admin/ceo-dashboard.html",
+                    "despachador": "despachador/panel-despachador.html",
+                    "interconductor": "interconductor/panel-interconductor.html",
+                    "mototaxi": "mototaxi/mototaxi-panel.html",
+                    "motocarga": "motocarga/panel-motocarga.html",
+                    "motoparrillero": "motoparrillero/panel-parrillero.html",
+                    "pasajero": "pasajero/panel-pasajero.html"
+                };
+
+                if (!rutas[rol]) {
+                    alert("Tu rol no tiene un panel asignado.");
+                    loading.style.display = "none";
+                    return;
+                }
+
+                window.location.replace(rutas[rol]);
+
+            } catch (err) {
+                console.error(err);
+                alert("Credenciales incorrectas.");
+            }
+
+            loading.style.display = "none";
+        });
+    </script>
+
+</body>
+</html>
