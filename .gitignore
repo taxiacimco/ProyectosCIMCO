@@ -1,100 +1,68 @@
 ============================================================
-
 🛠️ BUILD (salida de TypeScript / Vite / React)
-
 ============================================================
-
-lib//*.js
-lib//*.js.map
+lib/**/*.js
+lib/**/*.js.map
 dist/
 build/
 .cache/
 out/
 
 ============================================================
-
 📦 DEPENDENCIAS
-
 ============================================================
-
 node_modules/
 .pnp.*
 .pnp.js
 
 ============================================================
-
 ⚠️ ARCHIVOS SENSIBLES Y DE ENTORNO
-
 ============================================================
-
-Archivos .env (variables privadas)
-
+# Archivos .env (variables privadas y locales)
 .env
 .env.local
 .env.*.local
-
-Asegura que el .env del backend (Firebase Functions) también esté ignorado
-
+functions/.env.local
 functions/.env
 
-Permitimos el archivo de ejemplo
-
+# Permitimos el archivo de ejemplo para los desarrolladores
 !functions/.env.example
+!frontend/.env.example
 
-Credenciales privadas de Firebase o Google Cloud
-
+# Credenciales privadas de Firebase o Google Cloud
 serviceAccount.json
 serviceAccountKey.json
 
-🚨 REGLAS AÑADIDAS PARA IGNORAR LA CLAVE DE ADMINISTRADOR ESPECÍFICA
-
-----------------------------------------------------------------------
-
-Ignora CUALQUIER archivo dentro de la carpeta 'service-account' dentro de 'functions'
-
-Esto cubre la ruta: functions/service-account/admin-sa.json
-
+# Claves de administrador específicas
 functions/service-account/
-
-También ignoramos la clave si estuviera en la raíz de functions/ (regla ya existente)
-
 functions/admin-sa.json
 
-----------------------------------------------------------------------
-
-Certificados o llaves
-
+# Certificados o llaves
 *.pem
 *.key
 
 ============================================================
-
 🔍 LOGS DE DEBUGGING (Firebase / Node)
-
 ============================================================
-
 firebase-debug.log
+firebase-debug.*.log
 firestore-debug.log
+ui-debug.log
+pubsub-debug.log
 npm-debug.log
 yarn-debug.log
 yarn-error.log
 *-debug.log
 
 ============================================================
-
 📂 TIPADO ANTIGUO O AUTO-GENERADO
-
 ============================================================
-
 typings/
 *.tsbuildinfo
 
 ============================================================
-
 💻 SISTEMAS / EDITORES
-
 ============================================================
-
 .DS_Store
 Thumbs.db
 .vscode/
@@ -103,31 +71,16 @@ Thumbs.db
 *.swo
 
 ============================================================
-
-📱 FRONTEND (React / Vite / PWA)
-
+📱 FRONTEND Y FIREBASE INTERNO
 ============================================================
-
 *.local
 *.cache
-
-============================================================
-
-🔥 FIREBASE Y CONFIGURACIONES INTERNAS
-
-============================================================
-
 .firebaserc
-firebase-debug.log
-pubsub-debug.log
+_respaldos_backend/
 
 ============================================================
-
 🧪 PRUEBAS Y SCRIPTS TEMPORALES
-
 ============================================================
-
-tests/
 tests/
 pruebas/
 temp/

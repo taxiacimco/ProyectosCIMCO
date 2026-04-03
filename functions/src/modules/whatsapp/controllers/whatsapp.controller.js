@@ -1,79 +1,51 @@
-import HttpResponse from "../../../utils/http-response.js";
-import geminiService from "../services/gemini.service.js";
-import whatsappService from "../services/whatsapp.service.js";
+/**
+ * modules/whatsapp/controllers/whatsapp.controller.js
+ * Controlador para la API de WhatsApp Cloud (Webhooks)
+ */
+import { asyncHandler } from '../../../middleware/async-handler.js';
 
 /**
- * Controlador optimizado para la gestión de WhatsApp Business API y Gemini AI
+ * GET /webhook
+ * Verificación obligatoria de Meta para conectar el Webhook
  */
-class WhatsAppController {
-  /**
-   * Verificación del Webhook para Meta (Configuración inicial)
-   * Se ejecuta cuando configuras el webhook en el dashboard de Facebook.
-   */
-  async verifyWebhook(req, res) {
-    const mode = req.query["hub.mode"];
-    const token = req.query["hub.verify_token"];
-    const challenge = req.query["hub.challenge"];
+export const verifyWebhook = (req, res) => {
+    // El token de verificación debe coincidir con el que configures en el panel de Meta
+    const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || 'cimco_token_2026';
+    
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
 
-    // Usamos el token de tus variables de entorno (configuraremos esto en el siguiente paso)
-    const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+    if (mode && token) {
+        if (mode === 'subscribe' && token === verifyToken) {
+            console.log('✅ [WhatsApp] Webhook verificado correctamente por Meta.');
+            // Meta exige que se devuelva el challenge en texto plano, no en JSON
+            return res.status(200).send(challenge);
+        } else {
+            return res.status(403).send('Forbidden');
+        }
+    }
+    return res.status(400).send('Bad Request');
+};
 
-    if (mode === "subscribe" && token === verifyToken) {
-      console.log("✅ [WhatsApp] Webhook verificado con éxito");
-      return res.status(200).send(challenge);
+/**
+ * POST /webhook
+ * Recepción de mensajes del usuario hacia la línea de TAXIA CIMCO
+ */
+export const handleMessage = asyncHandler(async (req, res) => {
+    const body = req.body;
+
+    // Verificar si es un evento de WhatsApp
+    if (body.object === 'whatsapp_business_account') {
+        
+        // 🚨 Aquí es donde conectas con tu servicio (gemini.service o whatsapp.service)
+        // Por ahora, aceptamos el mensaje rápidamente para que Meta no reintente
+        console.log("📨 [WhatsApp] Mensaje entrante recibido");
+        
+        return res.status(200).send('EVENT_RECEIVED');
     }
 
-    console.error("❌ [WhatsApp] Fallo en la verificación del token");
-    return res.status(403).send("Forbidden");
-  }
+    return res.status(404).send('Not Found');
+});
 
-  /**
-   * Manejador de mensajes entrantes (POST)
-   */
-  async handleMessage(req, res) {
-    try {
-      const { body } = req;
-
-      // 1. Validar que sea un evento de WhatsApp
-      if (body.object !== "whatsapp_business_account") {
-        return HttpResponse.notFound(res, "Not a WhatsApp event");
-      }
-
-      // Estructura de extracción segura para evitar errores de undefined
-      const entry = body.entry?.[0];
-      const changes = entry?.changes?.[0];
-      const value = changes?.value;
-      const message = value?.messages?.[0];
-
-      // 2. Procesar solo si es un mensaje de texto y no un estado (read/delivered)
-      if (message && message.type === "text") {
-        const from = message.from; // ID/Número del remitente
-        const userText = message.text.body;
-        const messageId = message.id;
-
-        console.log(`📩 [WhatsApp] Nuevo mensaje de ${from}: ${userText}`);
-
-        // A. Enviar reacción visual (🤖) para indicar que la IA está trabajando
-        await whatsappService.sendReaction(from, messageId, "🤖");
-
-        // B. Consultar a Gemini Service
-        const aiResponse = await geminiService.generateResponse(userText);
-
-        // C. Enviar la respuesta final al usuario
-        await whatsappService.sendMessage(from, aiResponse);
-
-        console.log(`🚀 [WhatsApp] Respuesta enviada a ${from}`);
-      }
-
-      // Siempre responder 200 a Meta para confirmar recepción, incluso si no es texto
-      return HttpResponse.ok(res, { message: "Event processed" });
-      
-    } catch (error) {
-      console.error("❌ [WhatsApp Controller Error]:", error);
-      // Usamos tu manejador interno de errores
-      return HttpResponse.internalError(res, "Error procesando el mensaje de WhatsApp");
-    }
-  }
-}
-
-export default new WhatsAppController();
+export default { verifyWebhook, handleMessage };

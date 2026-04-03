@@ -1,5 +1,13 @@
+/**
+ * PROYECTO: TAXIA CIMCO - Módulo de Motocarga
+ * Arquitectura: Hexagonal / React Functional Components
+ * Estilo: Ciber-Neo-Brutalista (Emerald Industrial)
+ * * Misión: Gestión de fletes pesados con comisión fija de $500 y 
+ * rastreo GPS optimizado.
+ */
+
 import React, { useEffect, useState, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp } from "firebase/app";
 import { 
   getFirestore, 
   doc, 
@@ -8,369 +16,366 @@ import {
   serverTimestamp, 
   collection, 
   query, 
-  where,
-  increment 
+  where, 
+  addDoc,
+  getDoc
 } from 'firebase/firestore';
 import { 
   getAuth, 
-  signOut, 
-  onAuthStateChanged,
-  signInAnonymously,
-  signInWithCustomToken 
+  onAuthStateChanged 
 } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
+
+// --- COMPONENTES Y HOOKS DEL ECOSISTEMA CIMCO ---
+import useDriverTracking from '../hooks/useDriverTracking';
+import ModalGpsInactivo from '../components/Conductor/ModalGpsInactivo';
+
+// --- ICONOGRAFÍA ---
 import { 
-  Truck, 
-  LogOut, 
-  Play, 
-  CheckCircle, 
-  Package, 
-  Wallet,
-  MapPin,
-  Flag,
-  AlertTriangle,
-  Loader2
+  Truck, AlertTriangle, Loader2, Navigation, 
+  Phone, Box, ShieldAlert, Zap, Wallet, 
+  CheckCircle, LogOut, MapPin, X, ChevronRight
 } from 'lucide-react';
 
-// Configuración de Firebase - Se asume que las variables globales están disponibles en el entorno
-const firebaseConfig = JSON.parse(__firebase_config);
+// --- CONFIGURACIÓN FIREBASE (INYECCIÓN DE ENTORNO) ---
+const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const auth = getAuth(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'taxiacimco-app';
 
 const MotocargaPanel = () => {
+  const navigate = useNavigate();
+  
+  // --- ESTADOS DE SESIÓN Y PERFIL ---
   const [user, setUser] = useState(null);
   const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(false);
+
+  // --- ESTADOS DE LOGÍSTICA ---
   const [viajeActivo, setViajeActivo] = useState(null);
   const [solicitudesCarga, setSolicitudesCarga] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const mapContainer = useRef(null);
-  const mapInstance = useRef(null);
+  const [errorGps, setErrorGps] = useState(null);
+
+  // --- REFERENCIAS ---
   const audioRef = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'));
 
-  // 1. Manejo de Autenticación
+  // --- INTEGRACIÓN DEL SISTEMA CENTINELA (GPS) ---
+  const { location } = useDriverTracking(isOnline ? 'motocarga' : null);
+
+  /**
+   * EFECTO 1: Observador de Autenticación
+   */
   useEffect(() => {
-    const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) {
+        navigate('/login');
       } else {
-        await signInAnonymously(auth);
+        setUser(currentUser);
       }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+    });
     return () => unsubscribe();
-  }, []);
+  }, [navigate]);
 
-  // 2. Carga de Datos de Usuario y Radar
+  /**
+   * EFECTO 2: Sincronización con la Ruta Sagrada (Perfil y Viajes)
+   */
   useEffect(() => {
-    if (!user) return;
+    if (!user?.uid) return;
 
-    // Datos del perfil (Ruta estricta según Regla 1)
-    const unsubUser = onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile'), (snap) => {
+    // Escucha del Perfil en la Ruta Sagrada
+    const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid);
+    const unsubUser = onSnapshot(userRef, (snap) => {
       if (snap.exists()) {
         setUserData(snap.data());
-      } else {
-        // Inicializar si no existe
-        setUserData({ balance: 0, displayName: "Operador de Carga" });
       }
       setLoading(false);
-    }, (err) => console.error("Error perfil:", err));
+    });
 
-    // Radar de Cargas (Servicio: Motocarga)
-    const qRadar = query(
-      collection(db, 'artifacts', appId, 'public', 'data', 'viajes_solicitados'),
-      where("estado", "==", "pendiente")
-    );
-
-    const unsubRadar = onSnapshot(qRadar, (snap) => {
-      const docs = [];
-      snap.forEach(d => {
-        const data = d.data();
-        if (data.servicioSolicitado === "Motocarga") {
-          docs.push({ id: d.id, ...data });
-        }
-      });
-      
-      if (docs.length > solicitudesCarga.length && solicitudesCarga.length > 0) {
-        ejecutarAlertaCarga();
-      }
-      setSolicitudesCarga(docs);
-    }, (err) => console.error("Error radar:", err));
-
-    // Viaje Activo
+    // Escucha de Viajes Activos (Ruta Sagrada: rides)
+    const ridesRef = collection(db, 'artifacts', appId, 'public', 'data', 'rides');
     const qActivo = query(
-      collection(db, 'artifacts', appId, 'public', 'data', 'viajes_solicitados'),
-      where("conductorId", "==", user.uid)
+      ridesRef, 
+      where("conductorId", "==", user.uid), 
+      where("estado", "in", ["aceptado", "en_ruta"])
     );
 
     const unsubActivo = onSnapshot(qActivo, (snap) => {
-      let activo = null;
-      snap.forEach(d => {
-        const data = d.data();
-        if (["aceptado", "en_ruta"].includes(data.estado)) {
-          activo = { id: d.id, ...data };
-        }
-      });
-      setViajeActivo(activo);
-    }, (err) => console.error("Error activo:", err));
+      if (!snap.empty) {
+        setViajeActivo({ id: snap.docs[0].id, ...snap.docs[0].data() });
+        if (!isOnline) setIsOnline(true);
+      } else {
+        setViajeActivo(null);
+      }
+    });
 
-    return () => {
-      unsubUser();
-      unsubRadar();
-      unsubActivo();
+    return () => { 
+      unsubUser(); 
+      unsubActivo(); 
     };
-  }, [user]);
+  }, [user, appId]);
 
-  // 3. Inicialización Manual de Leaflet (para evitar errores de importación)
+  /**
+   * EFECTO 3: Radar de Cargas Pendientes
+   */
   useEffect(() => {
-    if (loading || !mapContainer.current || mapInstance.current) return;
-
-    const loadLeaflet = () => {
-        if (window.L) {
-            const L = window.L;
-            mapInstance.current = L.map(mapContainer.current, { 
-                zoomControl: false,
-                attributionControl: false 
-            }).setView([9.566, -73.334], 14);
-
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstance.current);
-            
-            L.circleMarker([9.566, -73.334], {
-                radius: 8,
-                fillColor: "#22c55e",
-                color: "#fff",
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.8
-            }).addTo(mapInstance.current);
-        } else {
-            // Reintentar si aún no carga el script global
-            setTimeout(loadLeaflet, 500);
-        }
-    };
-
-    if (!document.getElementById('leaflet-css')) {
-        const link = document.createElement('link');
-        link.id = 'leaflet-css';
-        link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        document.head.appendChild(link);
-        
-        const script = document.createElement('script');
-        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-        script.onload = loadLeaflet;
-        document.head.appendChild(script);
-    } else {
-        loadLeaflet();
+    if (!user || !isOnline || viajeActivo) { 
+      setSolicitudesCarga([]); 
+      return; 
     }
 
-    return () => {
-        if (mapInstance.current) {
-            mapInstance.current.remove();
-            mapInstance.current = null;
-        }
-    };
-  }, [loading]);
+    const ridesRef = collection(db, 'artifacts', appId, 'public', 'data', 'rides');
+    const qRadar = query(
+      ridesRef, 
+      where("estado", "==", "pendiente"), 
+      where("servicioSolicitado", "==", "Motocarga")
+    );
 
-  const ejecutarAlertaCarga = () => {
-    if ("vibrate" in navigator) navigator.vibrate([300, 100, 300]);
-    audioRef.current.play().catch(() => {});
-  };
+    const unsubRadar = onSnapshot(qRadar, (snap) => {
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length > solicitudesCarga.length) {
+        audioRef.current.play().catch(() => {});
+      }
+      setSolicitudesCarga(docs);
+    });
 
+    return () => unsubRadar();
+  }, [user, isOnline, viajeActivo, appId, solicitudesCarga.length]);
+
+  /**
+   * ACCIÓN: Aceptar Flete
+   * Implementa validación de saldo y asignación de rol para comisión fija ($500)
+   */
   const aceptarFlete = async (viaje) => {
-    if (!user) return;
-    const COBRO_FIJO = 500;
-    const saldoActual = userData?.balance || 0;
-
-    if (saldoActual < COBRO_FIJO) {
-      alert(`⚠️ Saldo insuficiente. Necesitas $${COBRO_FIJO} en tu billetera.`);
+    // REGLA DE NEGOCIO: Bloqueo por saldo negativo crítico
+    if ((userData?.saldoWallet || 0) <= -5000) {
+      alert("⚠️ SALDO INSUFICIENTE: Recargue su boveda para aceptar fletes.");
       return;
     }
 
     try {
-      const viajeRef = doc(db, 'artifacts', appId, 'public', 'data', 'viajes_solicitados', viaje.id);
+      const viajeRef = doc(db, 'artifacts', appId, 'public', 'data', 'rides', viaje.id);
       await updateDoc(viajeRef, {
         conductorId: user.uid,
-        conductorNombre: userData.displayName || "Operador CIMCO",
+        conductorNombre: userData?.nombre || "Unidad de Carga",
+        conductorTelefono: userData?.telefono || "",
         estado: 'aceptado',
-        comisionCobrada: COBRO_FIJO,
-        fechaAceptado: serverTimestamp()
-      });
-
-      const userRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile');
-      await updateDoc(userRef, {
-        balance: increment(-COBRO_FIJO)
+        tipoVehiculo: 'motocarga', // Flag para Backend Java (Comisión $500)
+        fechaAceptado: serverTimestamp(),
+        coordsConductor: location || { lat: 0, lng: 0 }
       });
     } catch (error) {
-      console.error("Error aceptando:", error);
+      console.error("❌ Error al aceptar flete:", error);
     }
   };
 
-  const actualizarEstado = async (nuevoEstado) => {
+  /**
+   * ACCIÓN: Ciclo de Vida del Viaje
+   */
+  const actualizarEstadoViaje = async (nuevoEstado) => {
     if (!viajeActivo) return;
+
     try {
-        const viajeRef = doc(db, 'artifacts', appId, 'public', 'data', 'viajes_solicitados', viajeActivo.id);
-        await updateDoc(viajeRef, { 
-            estado: nuevoEstado,
-            [`fecha_${nuevoEstado}`]: serverTimestamp() 
-        });
-        if(nuevoEstado === 'finalizado') alert("🚚 ¡Flete entregado!");
-    } catch (e) {
-        console.error("Error actualización:", e);
+      const viajeRef = doc(db, 'artifacts', appId, 'public', 'data', 'rides', viajeActivo.id);
+      await updateDoc(viajeRef, { 
+        estado: nuevoEstado, 
+        [`hora_${nuevoEstado}`]: serverTimestamp() 
+      });
+    } catch (error) {
+      console.error("❌ Error al actualizar estado:", error);
     }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-green-500">
-        <Loader2 className="animate-spin mb-4" size={40} />
-        <p className="font-black italic tracking-widest">SISTEMA LOGÍSTICO CIMCO...</p>
+      <div className="min-h-screen bg-[#020617] flex flex-col justify-center items-center gap-4">
+        <Loader2 className="animate-spin text-emerald-500" size={50} />
+        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-emerald-500/50">Cargando Sistema de Carga</span>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-24 font-sans overflow-x-hidden">
-      {/* HEADER LOGÍSTICO */}
-      <header className="p-4 bg-slate-900 border-b border-green-900/30 flex justify-between items-center sticky top-0 z-[1001] shadow-xl">
-        <div className="flex items-center gap-3">
-          <div className="bg-green-600 p-2 rounded-lg">
-            <Truck size={24} className="text-slate-950" />
-          </div>
-          <div>
-            <h1 className="text-xl font-black text-green-500 italic tracking-tighter leading-none">CIMCO CARGA</h1>
-            <span className="text-[8px] text-slate-500 font-bold uppercase tracking-widest">Panel Operativo</span>
+    <div className="min-h-screen bg-[#020617] text-white flex flex-col max-w-xl mx-auto pb-28 font-sans selection:bg-emerald-500 selection:text-black">
+      
+      {/* HEADER INDUSTRIAL */}
+      <header className="p-6 bg-slate-900/40 backdrop-blur-xl border-b border-white/5 sticky top-0 z-30 flex justify-between items-center">
+        <div>
+          <h1 className="text-xl font-black italic tracking-tighter">
+            CIMCO <span className="text-emerald-500">CARGA</span>
+          </h1>
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full animate-pulse ${isOnline ? 'bg-emerald-500' : 'bg-slate-600'}`}></div>
+            <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest">
+              ID: {user?.uid.slice(0, 8)}
+            </span>
           </div>
         </div>
-        
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-950 px-3 py-1.5 rounded-xl border border-green-900/20 text-right">
-             <p className="text-[7px] text-slate-500 font-black uppercase">Saldo</p>
-             <p className="text-sm font-black text-green-400">
-               ${(userData?.balance || 0).toLocaleString()}
-             </p>
-          </div>
-          <button onClick={() => signOut(auth)} className="p-2 bg-red-900/10 text-red-500 rounded-xl border border-red-900/20">
-            <LogOut size={18} />
+
+        {!viajeActivo && (
+          <button 
+            onClick={() => setIsOnline(!isOnline)} 
+            className={`px-6 py-3 rounded-2xl font-black uppercase text-[10px] transition-all duration-500 border-b-4 active:border-b-0 active:translate-y-1 ${
+              isOnline 
+                ? 'bg-rose-500/10 border-rose-700 text-rose-500 hover:bg-rose-500 hover:text-white' 
+                : 'bg-emerald-500 border-emerald-700 text-slate-950'
+            }`}
+          >
+            {isOnline ? 'Desconectar' : 'Entrar Online'}
           </button>
-        </div>
+        )}
       </header>
 
-      <main className="p-4 max-w-lg mx-auto space-y-4">
-        {/* MAPA */}
-        <div className="relative">
-            <div ref={mapContainer} className="h-[22vh] w-full rounded-[2.5rem] border-2 border-green-900/20 z-0 overflow-hidden"></div>
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[400]">
-                <div className="px-4 py-1.5 rounded-full bg-slate-900/90 border border-green-500/30 flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping"></div>
-                    <span className="text-[8px] font-black text-green-500 uppercase italic">GPS Online</span>
-                </div>
-            </div>
+      <main className="p-6 flex-1">
+        
+        {/* PANEL DE SALDO (NEO-BRUTALISMO) */}
+        <div className="mb-8 bg-slate-900 border border-white/5 p-6 rounded-[2.5rem] flex justify-between items-center">
+          <div>
+            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Bóveda de Trabajo</p>
+            <h2 className={`text-2xl font-black ${ (userData?.saldoWallet || 0) < 0 ? 'text-rose-500' : 'text-white'}`}>
+              ${userData?.saldoWallet?.toLocaleString() || '0'}
+            </h2>
+          </div>
+          <div className="p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20">
+             <Wallet className="text-emerald-500" size={24} />
+          </div>
         </div>
 
-        {/* CONTENIDO PRINCIPAL */}
-        {!viajeActivo ? (
-          <div className="space-y-4">
-            <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Radar de Fletes</h2>
-            
-            {solicitudesCarga.length === 0 ? (
-              <div className="p-12 text-center bg-slate-900/40 rounded-[3rem] border-2 border-dashed border-slate-800 flex flex-col items-center">
-                <AlertTriangle size={32} className="text-slate-800 mb-3" />
-                <p className="text-slate-600 text-sm italic font-bold">Esperando nuevas cargas...</p>
+        {/* ALERTAS DE SISTEMA */}
+        {!location && isOnline && (
+          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center gap-3">
+            <AlertTriangle className="text-amber-500 shrink-0" size={20} />
+            <p className="text-[10px] font-bold text-amber-200 uppercase">Esperando señal GPS precisa para recibir fletes...</p>
+          </div>
+        )}
+
+        {viajeActivo ? (
+          /* MODO: VIAJE EN CURSO */
+          <div className="space-y-6 animate-in fade-in zoom-in duration-500">
+            <div className="bg-emerald-500 text-slate-950 p-8 rounded-[3.5rem] shadow-2xl shadow-emerald-500/10 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+                <Truck size={120} />
+              </div>
+              
+              <span className="bg-black text-white px-4 py-1 rounded-full text-[8px] font-black uppercase tracking-widest mb-4 inline-block">
+                Flete en Progreso
+              </span>
+              
+              <h3 className="text-3xl font-black italic uppercase leading-none mb-6">
+                {viajeActivo.puntoRecogidaManual || 'Punto de Carga'}
+              </h3>
+
+              <div className="flex flex-col gap-4 mb-8">
+                <div className="flex items-center gap-3">
+                  <MapPin size={16} />
+                  <p className="text-xs font-bold opacity-80">{viajeActivo.destinoManual || 'Destino por confirmar'}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Zap size={16} />
+                  <p className="text-xl font-black">${viajeActivo.valorOfertado?.toLocaleString()}</p>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => actualizarEstadoViaje(viajeActivo.estado === 'aceptado' ? 'en_ruta' : 'finalizado')} 
+                className="w-full bg-black text-white py-6 rounded-[2.2rem] font-black uppercase text-sm italic flex items-center justify-center gap-3 hover:scale-[1.02] transition-transform"
+              >
+                {viajeActivo.estado === 'aceptado' ? (
+                  <><Box size={20} /> Confirmar Cargue</>
+                ) : (
+                  <><CheckCircle size={20} /> Confirmar Entrega</>
+                )}
+              </button>
+            </div>
+
+            <button className="w-full bg-slate-900 border border-white/10 text-white py-5 rounded-[2rem] font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3">
+              <Phone size={16} /> Contactar Cliente
+            </button>
+          </div>
+        ) : (
+          /* MODO: RADAR DE FLETES */
+          <div className="space-y-6">
+            <div className="flex justify-between items-end mb-4 px-2">
+              <h2 className="text-[11px] font-black text-emerald-500 uppercase tracking-[0.3em]">Cargas Disponibles ({solicitudesCarga.length})</h2>
+              {isOnline && <Loader2 className="animate-spin text-emerald-500/30" size={14} />}
+            </div>
+
+            {!isOnline ? (
+              <div className="mt-20 flex flex-col items-center opacity-20">
+                <ShieldAlert size={80} strokeWidth={1} />
+                <p className="text-center font-black uppercase text-xs mt-4 tracking-widest text-slate-500">Sistema Fuera de Línea</p>
+              </div>
+            ) : solicitudesCarga.length === 0 ? (
+              <div className="mt-20 text-center">
+                <div className="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-6 border border-white/5">
+                  <Navigation className="text-slate-700 animate-pulse" size={32} />
+                </div>
+                <p className="text-slate-500 font-black uppercase text-[10px] tracking-widest">Escaneando zona logística...</p>
               </div>
             ) : (
               solicitudesCarga.map(flete => (
-                <div key={flete.id} className="bg-slate-900 border border-green-900/20 p-6 rounded-[2.5rem] shadow-xl">
-                  <div className="flex justify-between items-start mb-5">
+                <div 
+                  key={flete.id} 
+                  className="bg-slate-900 border border-white/5 p-8 rounded-[3.5rem] shadow-xl hover:border-emerald-500/30 transition-all group relative overflow-hidden"
+                >
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[50px] rounded-full group-hover:bg-emerald-500/10 transition-all"></div>
+                  
+                  <div className="flex justify-between items-start mb-6">
                     <div>
-                      <p className="text-[10px] font-black text-green-600 uppercase">Oferta</p>
-                      <h3 className="text-4xl font-black text-white italic">${flete.valorOfertado}</h3>
+                      <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest mb-1">Oferta de Carga</p>
+                      <h3 className="text-4xl font-black italic text-white">${flete.valorOfertado?.toLocaleString()}</h3>
                     </div>
-                    <Truck className="text-green-500/20" size={40} />
+                    <div className="bg-slate-800 p-3 rounded-2xl">
+                      <Truck className="text-slate-500 group-hover:text-emerald-500 transition-colors" size={24} />
+                    </div>
                   </div>
 
-                  <div className="space-y-3 mb-6">
-                    <div className="flex gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                       <MapPin size={16} className="text-green-500" />
-                       <p className="text-xs font-bold text-slate-300 italic truncate">{flete.puntoRecogidaManual}</p>
+                  <div className="space-y-3 mb-8">
+                    <div className="flex items-center gap-3 text-slate-400">
+                      <MapPin size={14} className="text-emerald-500" />
+                      <span className="text-[11px] font-bold uppercase truncate">{flete.puntoRecogidaManual}</span>
                     </div>
-                    <div className="flex gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                       <Flag size={16} className="text-red-500" />
-                       <p className="text-xs font-bold text-slate-300 italic truncate">{flete.puntoDestinoManual}</p>
+                    <div className="flex items-center gap-3 text-slate-400">
+                      <ChevronRight size={14} className="text-slate-600" />
+                      <span className="text-[11px] font-bold uppercase truncate">{flete.destinoManual || 'Destino a convenir'}</span>
                     </div>
                   </div>
 
                   <button 
-                    onClick={() => aceptarFlete(flete)}
-                    className="w-full bg-green-500 text-slate-950 font-black py-4 rounded-2xl shadow-lg active:scale-95 transition-all"
+                    onClick={() => aceptarFlete(flete)} 
+                    className="w-full bg-emerald-500 text-slate-950 py-6 rounded-[2.2rem] font-black uppercase text-xs italic flex items-center justify-center gap-2 hover:bg-white transition-all shadow-lg shadow-emerald-500/20"
                   >
-                    ACEPTAR CARGA (-$500)
+                    <Zap size={16} fill="currentColor" /> Tomar Flete
                   </button>
                 </div>
               ))
             )}
           </div>
-        ) : (
-          /* VIAJE ACTIVO */
-          <div className="bg-slate-900 border-2 border-green-500 p-6 rounded-[3rem] shadow-2xl space-y-6">
-            <div className="flex justify-between items-center">
-               <span className="text-[10px] font-black text-green-500 uppercase tracking-widest italic">Carga en Curso</span>
-               <p className="text-[9px] font-mono text-slate-600 italic">LOG: {viajeActivo.id.slice(-6).toUpperCase()}</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-               <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                  <p className="text-[8px] font-bold text-slate-500 uppercase">Cobro Cliente</p>
-                  <p className="text-xl font-black text-green-400">${viajeActivo.valorOfertado}</p>
-               </div>
-               <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                  <p className="text-[8px] font-bold text-slate-500 uppercase">CIMCO Fee</p>
-                  <p className="text-xl font-black text-slate-400">$500</p>
-               </div>
-            </div>
-
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2">
-                <p className="text-[10px] text-green-500 font-bold">📍 ORIGEN: {viajeActivo.puntoRecogidaManual}</p>
-                <p className="text-[10px] text-red-500 font-bold">🎯 DESTINO: {viajeActivo.puntoDestinoManual}</p>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              {viajeActivo.estado === 'aceptado' && (
-                <button 
-                  onClick={() => actualizarEstado('en_ruta')}
-                  className="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl flex items-center justify-center gap-2"
-                >
-                  <Play size={18} fill="currentColor"/> INICIAR RUTA
-                </button>
-              )}
-              {viajeActivo.estado === 'en_ruta' && (
-                <button 
-                  onClick={() => actualizarEstado('finalizado')}
-                  className="w-full bg-white text-slate-950 font-black py-4 rounded-2xl flex items-center justify-center gap-2"
-                >
-                  <CheckCircle size={18} fill="currentColor"/> FINALIZAR ENTREGA
-                </button>
-              )}
-            </div>
-          </div>
         )}
       </main>
 
-      {/* NAV */}
-      <nav className="fixed bottom-0 w-full bg-slate-900 border-t border-slate-800 p-4 flex justify-around items-center z-[1001]">
-        <button className="flex flex-col items-center gap-1 text-slate-500">
-          <Wallet size={20} />
-          <span className="text-[8px] font-black uppercase">Billetera</span>
+      {/* NAV INFERIOR INDUSTRIAL */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-3xl border-t border-white/5 p-8 flex justify-around items-end z-50">
+        <button className="flex flex-col items-center gap-2 text-emerald-500">
+          <div className="bg-emerald-500/10 p-3 rounded-2xl border border-emerald-500/20">
+            <Navigation size={22} strokeWidth={3} />
+          </div>
+          <span className="text-[9px] font-black uppercase tracking-widest">Radar</span>
         </button>
-        <div className="bg-green-600 p-3 rounded-full -mt-10 border-4 border-slate-950 shadow-lg">
-          <Truck size={24} className="text-slate-950" />
-        </div>
-        <button className="flex flex-col items-center gap-1 text-slate-500">
-          <Package size={20} />
-          <span className="text-[8px] font-black uppercase">Historial</span>
+        
+        <button onClick={() => navigate('/billetera')} className="flex flex-col items-center gap-2 text-slate-500 hover:text-white transition-all">
+          <div className="p-3"><Wallet size={22} /></div>
+          <span className="text-[9px] font-black uppercase tracking-widest">Bóveda</span>
+        </button>
+        
+        <button onClick={() => navigate('/perfil')} className="flex flex-col items-center gap-2 text-slate-500 hover:text-white transition-all">
+          <div className="p-3"><Box size={22} /></div>
+          <span className="text-[9px] font-black uppercase tracking-widest">Historial</span>
         </button>
       </nav>
+
+      <ModalGpsInactivo isOpen={isOnline && !location} />
     </div>
   );
 };

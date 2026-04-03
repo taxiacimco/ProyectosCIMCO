@@ -3,29 +3,26 @@
  * Configuración de rutas centralizada para el módulo de viajes (rides).
  * TAXIA CIMCO - Soporte para Mototaxis, Motocargas y Cooperativas Intermunicipales.
  */
-
 import { Router } from "express";
 
 // 🔐 Middlewares
 import { authGuard } from "../middleware/auth.guard.js";
 import roleGuard from "../middleware/role.guard.js";
 
-// 🎭 Roles (Importación centralizada)
+// 🎭 Roles
 import ROLES from "../config/app.roles.js";
 
-// 🎮 Controllers
+// 🎮 Controllers (Importación como Objeto para consistencia)
 import RidesController from "../modules/rides/controllers/rides.controller.js";
-import TripController from "../modules/rides/controllers/trip.controller.js";
 
 const router = Router();
 
 // ===============================================
-// RUTAS DE VIAJES (Prefijo base definido en main.router: /v1/rides)
+// RUTAS DE VIAJES (Prefijo: /v1/rides)
 // ===============================================
 
 /**
- * POST /
- * Crear un nuevo viaje (Mototaxi o Intermunicipal).
+ * POST / - Crear solicitud (Pasajero)
  */
 router.post(
   "/",
@@ -35,8 +32,17 @@ router.post(
 );
 
 /**
- * GET /pending/direct
- * Viajes para conductores de Moto (Directos).
+ * POST /aceptar - Conductor toma el servicio
+ */
+router.post(
+  "/aceptar",
+  authGuard,
+  roleGuard([ROLES.DRIVER]),
+  RidesController.aceptarViaje
+);
+
+/**
+ * GET /pending/direct - Radar de Motos
  */
 router.get(
   "/pending/direct",
@@ -46,8 +52,7 @@ router.get(
 );
 
 /**
- * GET /pending/cooperative/:cooperativeName
- * Viajes para Despachadores de Cooperativa.
+ * GET /pending/cooperative/:cooperativeName - Panel Despacho
  */
 router.get(
   "/pending/cooperative/:cooperativeName",
@@ -57,18 +62,16 @@ router.get(
 );
 
 /**
- * GET /my-rides
- * Historial del usuario o conductor.
+ * GET /me - Historial del usuario/conductor
  */
 router.get(
-  "/my-rides",
+  "/me",
   authGuard,
   RidesController.myRides
 );
 
 /**
- * GET /:id
- * Detalle de un viaje por ID.
+ * GET /:id - Detalle individual
  */
 router.get(
   "/:id",
@@ -77,36 +80,12 @@ router.get(
 );
 
 /**
- * PATCH /:id/status
- * Actualizar estado (Aceptar, Cancelar, etc.)
+ * PATCH /:id/status - Control de flujo (Iniciar/Finalizar)
  */
 router.patch(
   "/:id/status",
   authGuard,
   RidesController.updateStatus
-);
-
-// --- RUTAS DE EJECUCIÓN DEL VIAJE (TRIP CONTROLLER) ---
-
-router.put(
-  "/:id/start",
-  authGuard,
-  roleGuard([ROLES.DRIVER]),
-  TripController.startTrip
-);
-
-router.put(
-  "/:id/end",
-  authGuard,
-  roleGuard([ROLES.DRIVER]),
-  TripController.endTrip
-);
-
-router.put(
-  "/assign",
-  authGuard,
-  roleGuard([ROLES.ADMIN, ROLES.DESPATCH]),
-  TripController.assignDriver
 );
 
 export default router;

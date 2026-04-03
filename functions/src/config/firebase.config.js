@@ -1,38 +1,37 @@
 /**
- * src/config/firebase.config.js
- * Configuración central de Firebase (NO inicializa Admin SDK)
- * Este archivo centraliza las credenciales del Cliente Web.
+ * PROYECTO: TAXIA CIMCO - Configuración Maestra Firebase (Backend)
+ * Misión: Centralización de credenciales para el contexto del proyecto.
+ * Arquitectura: Capa de Configuración (Node.js/ESM).
  */
 
 import { ENV } from "./env/index.js";
 
 // ------------------------------------------------------------
-// 1. CONFIGURACIÓN DEL CLIENTE WEB (FRONTEND / CLIENT SDK)
+// 1. CONFIGURACIÓN DEL CLIENTE WEB (PARA CONTEXTO DE ADMIN SDK)
 // ------------------------------------------------------------
 
 /**
- * Configuración pública del cliente Firebase.
- * Se utiliza para inicializar Firebase en el lado del cliente o 
- * para utilidades que requieran el contexto del proyecto.
+ * Configuración pública del cliente Firebase para el Backend.
+ * Nota: El Backend utiliza process.env vía el cargador de ENV interno.
  */
 export const clientConfig = {
-  // Credenciales fundamentales
-  apiKey: ENV.FIREBASE?.WEB_API_KEY || "",
-  projectId: ENV.PROJECT_ID,
+  // Credenciales fundamentales extraídas del entorno seguro
+  apiKey: process.env.FIREBASE_WEB_API_KEY || ENV.FIREBASE?.WEB_API_KEY || "",
+  projectId: process.env.CIMCO_PROJECT_ID || ENV.PROJECT_ID || "pelagic-chalice-467818-e1",
 
-  // Dominios generados dinámicamente según el ID del proyecto
-  authDomain: `${ENV.PROJECT_ID}.firebaseapp.com`,
-  storageBucket: `${ENV.PROJECT_ID}.appspot.com`,
+  // Dominios generados dinámicamente según las reglas de Firebase
+  authDomain: `${process.env.CIMCO_PROJECT_ID || ENV.PROJECT_ID}.firebaseapp.com`,
+  storageBucket: `${process.env.CIMCO_PROJECT_ID || ENV.PROJECT_ID}.firebasestorage.app`,
 
-  // Identificadores opcionales para servicios específicos
-  messagingSenderId: ENV.FIREBASE?.MESSAGING_SENDER_ID || "",
-  appId: ENV.FIREBASE?.APP_ID || "",
-  measurementId: ENV.FIREBASE?.MEASUREMENT_ID || "",
+  // Identificadores de mensajería y analítica
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || ENV.FIREBASE?.MESSAGING_SENDER_ID || "",
+  appId: process.env.FIREBASE_APP_ID || ENV.FIREBASE?.APP_ID || "",
+  measurementId: process.env.FIREBASE_MEASUREMENT_ID || ENV.FIREBASE?.MEASUREMENT_ID || "",
 };
 
-// 🔍 Validación rápida en desarrollo
-if (ENV.NODE_ENV === 'development' && !clientConfig.apiKey) {
-  console.warn("⚠️ Firebase Client: Falta WEB_API_KEY. Algunas funciones de cliente podrían fallar.");
+// 🔍 Validación de Arquitectura en Desarrollo
+if (process.env.NODE_ENV === 'development' && !clientConfig.apiKey) {
+  console.warn("⚠️ [ALERTA ARQUITECTO] Backend: No se detectó WEB_API_KEY en las variables de entorno.");
 }
 
 export { ENV };

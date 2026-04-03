@@ -7,6 +7,7 @@
         "node_modules",
         ".git",
         "firebase-debug.log",
+        "firebase-debug.*.log",
         "firestore-debug.log",
         "ui-debug.log",
         "_respaldos_backend",
@@ -21,7 +22,7 @@
     "indexes": "firestore.indexes.json"
   },
   "hosting": {
-    "public": "frontend/public",
+    "public": "frontend/dist",
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -35,34 +36,6 @@
       {
         "source": "/v1/**",
         "function": "api"
-      },
-      {
-        "source": "/mototaxi/**",
-        "destination": "/mototaxi/mototaxi-panel.html"
-      },
-      {
-        "source": "/motoparrillero/**",
-        "destination": "/motoparrillero/panel-parrillero.html"
-      },
-      {
-        "source": "/motocarga/**",
-        "destination": "/motocarga/panel-motocarga.html"
-      },
-      {
-        "source": "/pasajero/**",
-        "destination": "/pasajero/panel-pasajero.html"
-      },
-      {
-        "source": "/despacho/**",
-        "destination": "/despacho/panel-despacho.html"
-      },
-      {
-        "source": "/admin/ceo-mapa",
-        "destination": "/admin/ceo-mapa.html"
-      },
-      {
-        "source": "/admin/**",
-        "destination": "/admin/ceo-panel.html"
       },
       {
         "source": "**",
@@ -88,6 +61,10 @@
     "firestore": {
       "host": "127.0.0.1",
       "port": 8080
+    },
+    "pubsub": {
+      "host": "127.0.0.1",
+      "port": 8085
     },
     "hosting": {
       "host": "127.0.0.1",

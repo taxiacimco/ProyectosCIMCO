@@ -1,52 +1,52 @@
 /**
  * functions/src/routes/main.router.js
- * Enrutador principal: Conecta todos los módulos de la aplicación.
+ * Enrutador principal: Conecta todos los módulos de la aplicación TAXIA CIMCO.
  */
 
 import { Router } from 'express';
+import HttpResponse from '../utils/http-response.js';
 
-// IMPORTACIONES DE RUTAS DE MÓDULOS
 import authRouter from './auth.routes.js';
-import ridesRouter from './rides.routes.js';   // Viajes (Pasajeros/Mototaxi/Motocarga)
-import driverRouter from './driver.routes.js'; // Gestión del Conductor (Online/Documentos)
-import adminRouter from './admin.routes.js';   // Panel CEO/Admin
-import despatchRouter from './despatch.routes.js'; // Despacho Intermunicipal
-import passwordRouter from './password.routes.js'; // Recuperación de contraseñas
+import ridesRouter from './rides.routes.js';       
+import driverRouter from './driver.routes.js';     
+import adminRouter from './admin.routes.js';       
+import despatchRouter from './despatch.routes.js'; 
+import passwordRouter from './password.routes.js'; 
+import notificationRouter from './notification.routes.js'; 
+import whatsappRouter from './whatsapp.router.js'; 
 
 const router = Router();
 
-/**
- * Health Check - Para verificar que la API responde
- * Ruta: .../api/health
- */
+// ============================================================
+// HEALTH CHECK (Monitoreo del sistema)
+// ============================================================
 router.get('/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
-        service: 'TAXIA-CIMCO-BACKEND',
+    return HttpResponse.ok(res, {
         environment: process.env.NODE_ENV || 'development',
-        timestamp: new Date().toISOString() 
-    });
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    }, "API TAXIA-CIMCO Operativa");
 });
 
 // ============================================================
-// ENLACE DE MÓDULOS (LA ESTRUCTURA DE RUTAS)
+// ENLACE DE MÓDULOS (ESTRUCTURA PLANA Y LIMPIA)
 // ============================================================
 
-// 1. Gestión de Usuarios y Acceso (Todas las Apps)
 router.use('/auth', authRouter);
 router.use('/password', passwordRouter);
 
-// 2. Operaciones de Viaje (Pasajero, Mototaxi, MotoParrillero, Motocarga)
-// Esta ruta centraliza la lógica de pedidos y servicios
-router.use('/v1/rides', ridesRouter);
+// ✅ Ruta de viajes unificada (Se eliminó el /v1)
+router.use('/rides', ridesRouter);
 
-// 3. Módulo de Conductores (Estado de disponibilidad, perfiles)
 router.use('/drivers', driverRouter);
-
-// 4. Módulo Intermunicipal (Despachador y Conductor Intermunicipal)
 router.use('/despatch', despatchRouter);
-
-// 5. Módulo Administrativo (Control total para el CEO)
 router.use('/admin', adminRouter);
+router.use('/notifications', notificationRouter);
+router.use('/whatsapp', whatsappRouter);
+
+// 🚨 CAPTURADOR DE RUTAS INEXISTENTES (404 FALLBACK)
+router.use('*', (req, res) => {
+    return HttpResponse.notFound(res, `La ruta [${req.method}] ${req.originalUrl} no existe en el servidor TAXIA CIMCO.`);
+});
 
 export default router;

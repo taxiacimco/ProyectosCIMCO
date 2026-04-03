@@ -1,24 +1,25 @@
 /**
  * modules/rides/controllers/rides.controller.js
  * Controlador maestro de viajes TAXIA CIMCO
+ * Misión: Orquestar el flujo de servicios (Mototaxi, Intermunicipal, etc.)
  */
 import RideService from "../services/rides.service.js"; 
-import { sendSuccessResponse, sendErrorResponse } from "../../../utils/responses.js"; 
+import HttpResponse from "../../../utils/http-response.js"; 
 import { asyncHandler } from "../../../middleware/async-handler.js";
 
-// Instanciamos el servicio
+// Instanciamos el servicio de lógica de negocio
 const rideService = new RideService();
 
 /**
  * Crear un nuevo viaje
  * Soporta: Mototaxi, Motoparrillero, Motocarga y Vehículo Intermunicipal
  */
-const createRide = asyncHandler(async (req, res) => {
+export const createRide = asyncHandler(async (req, res) => {
     const uid = req.user?.uid; 
     const { tipoServicio, cooperativaSolicitada, origen, destino, tarifa } = req.body;
 
     if (!tipoServicio) {
-        return sendErrorResponse(res, "El tipo de servicio es obligatorio.", 400);
+        return HttpResponse.badRequest(res, "El tipo de servicio es obligatorio.");
     }
 
     // Lógica de asignación de flujo: Intermunicipal requiere intervención de un Despachador
@@ -33,32 +34,66 @@ const createRide = asyncHandler(async (req, res) => {
         origen,
         destino,
         tarifa,
-        createdAt: new Date()
+        createdAt: new Date().toISOString()
     };
 
     const ride = await rideService.create(rideData);
-    return sendSuccessResponse(res, ride, `Solicitud de ${tipoServicio} creada correctamente.`, 201);
+    return HttpResponse.created(res, ride, `Solicitud de ${tipoServicio} creada correctamente.`);
+});
+
+/**
+ * 🛡️ ACEPTAR VIAJE (CON VALIDACIÓN BANCARIA)
+ * Captura errores de negocio como SALDO_INSUFICIENTE lanzados por el Service.
+ */
+export const aceptarViaje = asyncHandler(async (req, res) => {
+    const { viajeId, conductorId } = req.body;
+    
+    if (!viajeId || !conductorId) {
+        return HttpResponse.badRequest(res, "ID de viaje y conductor son requeridos.");
+    }
+
+    try {
+        const result = await RideService.acceptRide(viajeId, conductorId);
+        return HttpResponse.ok(res, result, "Viaje asignado correctamente.");
+    } catch (error) {
+        console.error("[CIMCO-CONTROLLER] Error al aceptar viaje:", error.message);
+
+        // Filtro de Errores de Negocio (Arquitectura Hexagonal)
+        if (error.message === "SALDO_INSUFICIENTE") {
+            return HttpResponse.error(res, "Saldo insuficiente. Debes recargar para aceptar servicios.", 403, "DEUDA_EXCEDIDA");
+        }
+
+        if (error.message === "VIAJE_YA_TOMADO") {
+            return HttpResponse.error(res, "Este viaje ya fue tomado por otro conductor.", 409, "ALREADY_TAKEN");
+        }
+
+        if (error.message === "VIAJE_NO_ENCONTRADO") {
+            return HttpResponse.notFound(res, "El viaje especificado no existe.");
+        }
+
+        throw error; // Deja que el errorHandler general maneje lo demás
+    }
 });
 
 /**
  * Listar viajes de servicios directos (Para conductores de Moto)
  */
-const listPendingDirectRides = asyncHandler(async (req, res) => {
+export const listPendingDirectRides = asyncHandler(async (req, res) => {
     const rides = await rideService.findAll({ 
         status: "pending", 
         requiereDespachador: false 
     });
-    return sendSuccessResponse(res, rides, "Viajes directos disponibles");
+    return HttpResponse.ok(res, rides, "Viajes directos disponibles.");
 });
 
 /**
  * Listar viajes por Cooperativa (Para el panel del Despachador)
  */
-const listPendingByCooperative = asyncHandler(async (req, res) => {
+export const listPendingByCooperative = asyncHandler(async (req, res) => {
     const { cooperativeName } = req.params;
 
     if (!cooperativeName) {
-        return sendErrorResponse(res, "Debe especificar el nombre de la cooperativa.", 400);
+        return HttpResponse.badRequest(res, "Debe especificar la cooperativa.");
     }
 
     const rides = await rideService.findAll({ 
@@ -66,55 +101,51 @@ const listPendingByCooperative = asyncHandler(async (req, res) => {
         cooperativaSolicitada: cooperativeName,
         requiereDespachador: true 
     });
-    return sendSuccessResponse(res, rides, `Viajes pendientes para ${cooperativeName}`);
+    return HttpResponse.ok(res, rides, `Viajes pendientes para ${cooperativeName}.`);
 });
 
 /**
  * Obtener viaje por ID
  */
-const getRideById = asyncHandler(async (req, res) => {
+export const getRideById = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const ride = await rideService.findById(id); 
 
-    if (!ride) {
-        return sendErrorResponse(res, "Viaje no encontrado.", 404, "RIDE_NOT_FOUND");
-    }
-    return sendSuccessResponse(res, ride, "Detalle del viaje");
+    if (!ride) return HttpResponse.notFound(res, "Viaje no encontrado.");
+    return HttpResponse.ok(res, ride, "Detalle del viaje obtenido.");
 });
 
 /**
- * Listar viajes del usuario autenticado
+ * Listar viajes del usuario autenticado (Historial)
  */
-const myRides = asyncHandler(async (req, res) => {
+export const myRides = asyncHandler(async (req, res) => {
     const uid = req.user?.uid;
     const rides = await rideService.findAll({ requesterUid: uid });
-    return sendSuccessResponse(res, rides, "Mis viajes");
+    return HttpResponse.ok(res, rides, "Historial de mis viajes obtenido.");
 });
 
 /**
- * Actualizar estado (Aceptar, Iniciar, Finalizar, Cancelar)
+ * Actualizar estado (Iniciar, Finalizar, Cancelar)
  */
-const updateStatus = asyncHandler(async (req, res) => {
+export const updateStatus = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { status } = req.body; 
 
     const updatedRide = await rideService.updateStatus(id, status);
 
     if (!updatedRide) {
-         return sendErrorResponse(res, "Viaje no encontrado o estado no válido.", 404);
+         return HttpResponse.error(res, "No se pudo actualizar el estado.", 400);
     }
-    return sendSuccessResponse(res, updatedRide, `Estado actualizado a ${status}.`);
+    return HttpResponse.ok(res, updatedRide, `Estado actualizado a ${status}.`);
 });
 
-// Agrupamos en un objeto para exportación limpia
-const ridesController = {
+// Exportación como objeto para compatibilidad con RidesController.method
+export default {
     createRide,
+    aceptarViaje,
     listPendingDirectRides,
     listPendingByCooperative,
     getRideById,
     myRides,
     updateStatus
 };
-
-// ✅ EXPORTACIÓN POR DEFECTO REQUERIDA PARA ESM
-export default ridesController;

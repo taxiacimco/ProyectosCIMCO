@@ -3,72 +3,112 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ==========================================
-    // FUNCIONES DE SEGURIDAD (EL MOTOR)
+    // 1. FUNCIONES GLOBALES DE SEGURIDAD
     // ==========================================
 
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Verifica si un conductor tiene saldo suficiente
-    // Buscamos el balance en la ruta específica del usuario
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && request.auth.token.role == role;
+    }
+
+    // Función auxiliar consolidada
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    function isOwnerOrAdmin(userId) {
+      return isOwner(userId) || isAdmin() || hasRole('ceo');
+    }
+
     function hasEnoughCredit(appId, uid) {
-      let walletPath = /databases/$(database)/documents/artifacts/$(appId)/users/$(uid)/wallet/balance;
-      return exists(walletPath) && get(walletPath).data.saldo >= 0;
+      let userDoc = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/usuarios/$(uid));
+      return userDoc != null && userDoc.data.saldoWallet >= 0;
     }
 
     // ==========================================
-    // REGLAS PARA LA ESTRUCTURA DE ARTEFACTOS
+    // 2. REGLAS PARA LA ESTRUCTURA SAGRADA
     // ==========================================
 
     match /artifacts/{appId} {
       
-      // --- DATOS PÚBLICOS (SOS, VIAJES, ETC) ---
-      match /public/data/{collectionName}/{docId} {
-        
-        // Reglas para SOS
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated();
-        allow update: if isAuthenticated() && (
-          // Solo se permite actualizar para resolver o si se es Admin
-          request.resource.data.estado == 'RESUELTO'
-        );
+      allow read, write: if appId == 'taxiacimco-app';
 
-        // Reglas para VIAJES (Aquí vive el bloqueo por deuda)
-        allow read: if isAuthenticated();
-        allow create: if isAuthenticated();
-        allow update: if isAuthenticated() && (
-          // Si el estado cambia a 'aceptado', validamos crédito instantáneamente
-          (request.resource.data.estado == 'aceptado') 
-            ? hasEnoughCredit(appId, request.auth.uid) 
-            : true
-        );
-      }
+      match /public/data {
 
-      // --- BILLETERAS (PRIVADAS) ---
-      match /users/{userId}/wallet/balance {
-        allow read: if isAuthenticated() && request.auth.uid == userId;
-        // BLOQUEO TOTAL: El cliente NUNCA modifica su saldo. Solo Admin SDK (Backend Java).
-        allow write: if false; 
-      }
+        // --- A. CONDUCTORES ONLINE ---
+        match /conductores_online/{docId} {
+          allow read: if isAuthenticated();
+          allow write: if isOwner(docId);
+        }
 
-      // --- PERFILES DE USUARIO ---
-      match /users/{userId}/profile/data {
-        allow read: if isAuthenticated();
-        // El usuario puede crear su perfil, pero no cambiar campos sensibles como su ROL
-        allow create: if isAuthenticated() && request.auth.uid == userId;
-        allow update: if isAuthenticated() && request.auth.uid == userId 
-                      && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['rol', 'appId']);
-      }
+        // --- B. ALERTAS SOS ---
+        match /alertas_sos/{docId} {
+          allow read: if isAuthenticated();
+          allow create: if isAuthenticated();
+          allow update: if isAuthenticated() && request.resource.data.estado == 'RESUELTO';
+        }
 
-      // --- ESTADÍSTICAS GLOBALES ---
-      match /public/data/admin_stats/{docId} {
-        allow read: if isAuthenticated();
-        allow write: if false; 
+        // --- C. COLECCIÓN DE USUARIOS Y BILLETERAS ---
+        match /usuarios/{userId} {
+          // LECTURA: Un usuario puede leer si está autenticado
+          allow read: if isAuthenticated();
+          
+          // CREACIÓN: Se permite la escritura inicial desde el frontend para completar el registro
+          allow create: if isOwner(userId);
+          
+          // ACTUALIZACIÓN QUIRÚRGICA: Protegida. Se prohíbe alterar campos financieros y de rol.
+          allow update: if isOwnerOrAdmin(userId) 
+            && !('saldoWallet' in request.resource.data.diff(resource.data).affectedKeys())
+            && !('saldo' in request.resource.data.diff(resource.data).affectedKeys())
+            && !('rol' in request.resource.data.diff(resource.data).affectedKeys())
+            && !('role' in request.resource.data.diff(resource.data).affectedKeys())
+            && !('estado' in request.resource.data.diff(resource.data).affectedKeys());
+          
+          // BORRADO: Solo altos mandos
+          allow delete: if isAdmin() || hasRole('ceo');
+
+          match /transacciones/{transId} {
+            allow read: if isOwnerOrAdmin(userId);
+            allow write: if false; // Candado total: Solo el Admin SDK de Node.js escribe aquí
+          }
+        }
+
+        // --- D. COLECCIÓN DE VIAJES (RIDES) ---
+        match /rides/{rideId} {
+          allow read: if isAuthenticated();
+          allow create: if hasRole('passenger') || hasRole('pasajero') || hasRole('despachador');
+          
+          allow update: if isAuthenticated() && (
+            (request.resource.data.estado == 'aceptado' || request.resource.data.status == 'accepted') 
+              ? (hasRole('driver') || hasRole('conductor') || hasRole('mototaxi')) && hasEnoughCredit(appId, request.auth.uid)
+              : true
+          ) && (
+            // Bloqueo de manipulación de tarifas
+            !('tarifa' in request.resource.data.diff(resource.data).affectedKeys()) &&
+            !('comisionAplicada' in request.resource.data.diff(resource.data).affectedKeys())
+          );
+          
+          allow delete: if isAdmin() || hasRole('ceo');
+        }
+
+        // --- E. REGISTRO CONTABLE ---
+        match /ingresos_cimco/{logId} {
+          allow read: if hasRole('ceo') || isAdmin();
+          allow write: if false; 
+        }
       }
     }
 
-    // --- BLOQUEO POR DEFECTO ---
+    // ==========================================
+    // 3. BLOQUEO POR DEFECTO (Fail-Safe)
+    // ==========================================
     match /{document=**} {
       allow read, write: if false;
     }

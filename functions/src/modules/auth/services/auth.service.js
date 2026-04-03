@@ -1,77 +1,58 @@
 /**
  * src/modules/auth/services/auth.service.js
- * * Este servicio maneja la lógica de negocio para la autenticación,
- * integrando Firebase Admin SDK y validaciones de roles.
+ * Lógica de negocio con Custom Claims (Nivel Bancario)
  */
+import { auth, db } from "../../../firebase/firebase-admin.js";
 
-import { auth, db } from "../../../config/firebase.config.js";
-import { APP_ROLES } from "../../../config/app.roles.js";
+// ID del artefacto principal según la Estructura Sagrada
+const appId = 'taxiacimco-app';
 
-/**
- * Verifica un ID Token enviado desde el cliente (Frontend)
- * @param {string} idToken 
- * @returns {Promise<Object>} Decoded Token
- */
 export const verifyIdToken = async (idToken) => {
   try {
-    const decodedToken = await auth.verifyIdToken(idToken);
-    return decodedToken;
+    return await auth.verifyIdToken(idToken);
   } catch (error) {
-    console.error("Error al verificar token en auth.service:", error.message);
-    throw new Error("Token de autenticación inválido o expirado.");
+    console.error("❌ [Auth Service] Error verificando token:", error.message);
+    throw new Error("Token inválido.");
   }
 };
 
-/**
- * Lógica de inicio de sesión (Login)
- * Verifica el token y valida que el usuario exista en Firestore con el rol correcto.
- * * @param {string} idToken 
- * @returns {Promise<Object>} Datos del usuario y claims
- */
 export const loginService = async (idToken) => {
   try {
-    // 1. Validar el token con Firebase Auth
     const decodedToken = await verifyIdToken(idToken);
     const { uid, email } = decodedToken;
 
-    // 2. Buscar datos adicionales en Firestore (colección 'users')
-    // Nota: El path de la colección depende de tu implementación de Firestore
-    const userDoc = await db.collection("users").doc(uid).get();
+    // Búsqueda en el Path Sagrado: artifacts/taxiacimco-app/public/data/usuarios/[uid]
+    const userRef = db.collection("artifacts").doc(appId)
+                      .collection("public").doc("data")
+                      .collection("usuarios").doc(uid);
+                      
+    const userDoc = await userRef.get();
 
+    // ALERTA: Si el usuario no existe en Firestore, lanzamos error controlado
     if (!userDoc.exists) {
-      throw new Error("El usuario no está registrado en la base de datos de CIMCO.");
+      console.error(`❌ [CIMCO] Usuario ${uid} no encontrado en la ruta sagrada.`);
+      throw new Error("El usuario no está registrado en el sistema CIMCO.");
     }
 
     const userData = userDoc.data();
-
-    // 3. Validar si el usuario tiene un rol asignado válido según config/app.roles.js
-    const userRole = userData.role || APP_ROLES.USER;
+    const userRole = userData.rol || userData.role || "pasajero"; 
     
-    // Opcional: Podrías asignar Custom Claims aquí si es necesario
-    // await auth.setCustomUserClaims(uid, { role: userRole });
+    // Sincronización de Custom Claims (Roles en Firebase Auth)
+    const userRecord = await auth.getUser(uid);
+    const currentClaims = userRecord.customClaims || {};
+
+    if (currentClaims.role !== userRole) {
+      await auth.setCustomUserClaims(uid, { role: userRole });
+    }
 
     return {
       uid,
       email,
       role: userRole,
-      displayName: userData.displayName || "Usuario",
-      photoURL: userData.photoURL || ""
+      nombre: userData.nombre || "Usuario CIMCO",
+      estado: userData.estado || "activo"
     };
   } catch (error) {
     throw error;
-  }
-};
-
-/**
- * Obtener perfil de usuario por UID
- * @param {string} uid 
- */
-export const getUserProfile = async (uid) => {
-  try {
-    const userDoc = await db.collection("users").doc(uid).get();
-    if (!userDoc.exists) throw new Error("Perfil no encontrado.");
-    return userDoc.data();
-  } catch (error) {
-    throw new Error("Error al obtener perfil: " + error.message);
   }
 };

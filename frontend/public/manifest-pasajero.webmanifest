@@ -1,0 +1,26 @@
+{
+"name": "TAXIA CIMCO - Pasajero",
+"short_name": "TAXIA App",
+"description": "App oficial para solicitar viajes en La Jagua de Ibirico. Realiza seguimiento en tiempo real.",
+"lang": "es",
+"start_url": "/roles/pasajero/index.html",
+"scope": "/",
+"display": "standalone",
+"orientation": "portrait",
+"background_color": "#0f172a",
+"theme_color": "#2563eb",
+"icons": [
+{
+"src": "/icons/pasajero-192.png",
+"sizes": "192x192",
+"type": "image/png",
+"purpose": "any"
+},
+{
+"src": "/assets/pwa-512x512.png",
+"sizes": "512x512",
+"type": "image/png",
+"purpose": "maskable"
+}
+]
+}

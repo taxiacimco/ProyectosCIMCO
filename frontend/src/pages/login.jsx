@@ -1,105 +1,272 @@
-import React, { useEffect, useState } from 'react'; // IMPORTACIÓN CRUCIAL
-import { useAuth } from '../context/AuthContext';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Mail, MessageSquare, X, UserCheck } from 'lucide-react';
+/**
+ * PROYECTO: TAXIA CIMCO - Módulo de Autenticación
+ * Arquitectura: Hexagonal (Capa de Adaptadores de Entrada)
+ * Estilo: Ciber-Neo-Brutalista con Tailwind CSS
+ */
 
-const LoginPage = () => {
-  const { user, loginWithGoogle, loading, currentRole, sendPasswordReset, loginWithPhone } = useAuth();
+import React, { useState } from 'react';
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  serverTimestamp 
+} from 'firebase/firestore';
+import { useNavigate } from 'react-router-dom';
+import { 
+  Loader2, Mail, Lock, Chrome, 
+  ShieldCheck, ArrowRight, Smartphone, User, AlertCircle 
+} from 'lucide-react';
+
+// Importamos el servicio de sincronización con el Backend
+import { syncUserWithBackend } from '../api/authService';
+
+const auth = getAuth();
+const db = getFirestore();
+const appId = 'taxiacimco-app';
+
+const Login = () => {
   const navigate = useNavigate();
-  const location = useLocation();
+  const [loading, setLoading] = useState(false);
+  const [isRegister, setIsRegister] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(""); // Estado para errores visuales
+  const [formData, setFormData] = useState({ 
+    email: '', 
+    password: '', 
+    nombre: '', 
+    rol: 'pasajero',
+    telefono: '' 
+  });
 
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [resetMethod, setResetMethod] = useState(null);
-  const [inputValue, setInputValue] = useState('');
-  const [verificationCode, setVerificationCode] = useState(''); 
-  const [confirmationResult, setConfirmationResult] = useState(null); 
-  const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
-  const [qrRole, setQrRole] = useState(null);
+  /**
+   * ✅ SINCRONIZACIÓN QUIRÚRGICA CON FIRESTORE
+   * Ruta Sagrada: artifacts/taxiacimco-app/public/data/usuarios/[uid]
+   */
+  const syncUserProfile = async (authUser, additionalData = {}) => {
+    if (!authUser) return;
 
-  // 1. LÓGICA DE AUTOREGISTRO (LECTURA DE QR)
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const roleFromUrl = params.get('role');
-    if (roleFromUrl) {
-      setQrRole(roleFromUrl);
-      localStorage.setItem('pendingRole', roleFromUrl);
-    }
-  }, [location]);
+    // Definición de la Ruta Sagrada
+    const userRef = doc(
+      db, 
+      'artifacts', 'taxiacimco-app', 
+      'public', 'data', 
+      'usuarios', authUser.uid
+    );
+    
+    try {
+      const docSnap = await getDoc(userRef);
+      
+      if (!docSnap.exists()) {
+        console.log("📝 [CIMCO] Creando nuevo perfil en la Ruta Sagrada...");
+        
+        const newUserData = {
+          uid: authUser.uid,
+          nombre: additionalData.nombre || authUser.displayName || 'Nuevo Usuario',
+          email: authUser.email,
+          telefono: additionalData.telefono || '',
+          role: additionalData.rol || 'pasajero', // Por defecto pasajero
+          saldoWallet: 0,
+          estado: 'Activo',
+          verificado: false,
+          fechaRegistro: serverTimestamp(),
+          ultimaConexion: serverTimestamp(),
+          placa: additionalData.rol === 'conductor' ? (additionalData.placa || '') : null
+        };
 
-  // 2. REDIRECCIÓN AUTOMÁTICA SEGÚN ROL
-  useEffect(() => {
-    if (user && !loading) {
-      console.log("[LOGIN] Redirigiendo usuario con rol:", currentRole);
-      switch (currentRole) {
-        case 'admin': navigate('/admin/dashboard'); break;
-        case 'mototaxi': navigate('/mototaxi/panel'); break;
-        case 'pasajero': navigate('/pasajero/panel'); break;
-        case 'motocarga': navigate('/motocarga/panel'); break;
-        case 'despachadorinter': navigate('/despachador/panel'); break;
-        case 'cond_inter': navigate('/conductor-inter/panel'); break;
-        default: navigate('/welcome'); 
+        await setDoc(userRef, newUserData);
+        console.log("✅ [CIMCO] Documento creado con éxito.");
+      } else {
+        console.log("🔄 [CIMCO] El usuario ya existe, actualizando última conexión...");
+        await setDoc(userRef, { ultimaConexion: serverTimestamp() }, { merge: true });
       }
+    } catch (err) {
+      console.error("❌ [CIMCO-ERROR] Fallo crítico en la Ruta Sagrada:", err);
+      throw new Error("No se pudo registrar el perfil en la base de datos.");
     }
-  }, [user, loading, currentRole, navigate]);
-
-  const closeModal = () => {
-    setShowResetModal(false);
-    setResetMethod(null);
-    setInputValue('');
-    setVerificationCode('');
-    setConfirmationResult(null);
-    setStatusMsg({ type: '', text: '' });
   };
 
-  const handleRecovery = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setStatusMsg({ type: 'info', text: 'Procesando...' });
+    setLoading(true);
+    setErrorMessage(""); 
+
     try {
-      if (resetMethod === 'email') {
-        await sendPasswordReset(inputValue);
-        setStatusMsg({ type: 'success', text: 'Enlace enviado a tu correo.' });
+      let userCredential;
+      
+      if (isRegister) {
+        userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        await syncUserProfile(userCredential.user, { 
+          nombre: formData.nombre, 
+          rol: formData.rol,
+          telefono: formData.telefono 
+        });
       } else {
-        const result = await loginWithPhone(inputValue, 'recaptcha-container');
-        setConfirmationResult(result);
-        setStatusMsg({ type: 'success', text: 'Código enviado al celular.' });
+        userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        // Si es login normal, actualizamos su última conexión
+        await syncUserProfile(userCredential.user);
       }
-    } catch (error) {
-      setStatusMsg({ type: 'error', text: 'Error en la recuperación.' });
+
+      // 🔄 SINCRONIZACIÓN QUIRÚRGICA CON BACKEND
+      const idToken = await userCredential.user.getIdToken();
+      await syncUserWithBackend(idToken);
+
+      navigate('/redirect');
+
+    } catch (err) {
+      console.error("🚨 Auth Error:", err.code);
+      
+      const errorMap = {
+        'auth/invalid-credential': 'Las credenciales no coinciden. Revisa tu correo o contraseña.',
+        'auth/user-not-found': 'Este usuario no existe en el sistema CIMCO.',
+        'auth/wrong-password': 'Contraseña incorrecta.',
+        'auth/unauthorized-domain': '⚠️ Dominio no autorizado. Verifica tu IP local.',
+        'auth/network-request-failed': 'Error de red. ¿Tu celular tiene internet y alcanza la PC?'
+      };
+
+      setErrorMessage(errorMap[err.code] || "Error: Verifica tus credenciales o conexión.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginGoogle = async () => {
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      const provider = new GoogleAuthProvider();
+      const res = await signInWithPopup(auth, provider);
+      
+      const idToken = await res.user.getIdToken();
+      await syncUserProfile(res.user);
+      await syncUserWithBackend(idToken); 
+      
+      navigate('/redirect');
+    } catch (err) {
+      setErrorMessage("Fallo la autenticación con Google.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-100 p-4">
-      {qrRole && (
-        <div className="mb-6 bg-blue-600 text-white px-6 py-3 rounded-full flex items-center shadow-lg animate-bounce">
-          <UserCheck className="mr-2" size={20} />
-          <span className="font-bold text-sm uppercase">Registrándote como: {qrRole}</span>
+    <div className="min-h-screen bg-[#020617] text-slate-200 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+      
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-cyan-500/10 blur-[120px] rounded-full"></div>
+
+      <div className="w-full max-w-md z-10">
+        <div className="bg-slate-900/80 backdrop-blur-2xl p-8 md:p-10 rounded-[3rem] border border-white/10 shadow-2xl">
+          
+          <div className="text-center mb-10">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-2xl mb-4 shadow-lg shadow-cyan-500/20">
+              <ShieldCheck size={32} className="text-white" />
+            </div>
+            <h1 className="text-4xl font-black italic tracking-tighter text-white leading-none">
+              CIMCO<span className="text-cyan-500">AUTH</span>
+            </h1>
+          </div>
+
+          {errorMessage && (
+            <div className="mb-6 p-4 bg-red-500/10 border-l-4 border-red-500 rounded-r-xl flex items-start gap-3 animate-in fade-in slide-in-from-left-4 duration-300">
+              <AlertCircle className="text-red-500 shrink-0" size={20} />
+              <p className="text-xs font-bold text-red-200 uppercase tracking-tight">{errorMessage}</p>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {isRegister && (
+              <div className="space-y-4 animate-in fade-in slide-in-from-top-4">
+                <div className="relative">
+                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                  <input 
+                    type="text" placeholder="Nombre Completo" required
+                    className="w-full bg-black/40 border border-white/5 p-4 pl-12 rounded-2xl text-sm focus:border-cyan-500/50 outline-none transition-all"
+                    onChange={(e) => setFormData({...formData, nombre: e.target.value})}
+                  />
+                </div>
+                
+                <div className="relative">
+                  <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                  <input 
+                    type="tel" placeholder="Teléfono" required
+                    className="w-full bg-black/40 border border-white/5 p-4 pl-12 rounded-2xl text-sm focus:border-cyan-500/50 outline-none transition-all"
+                    onChange={(e) => setFormData({...formData, telefono: e.target.value})}
+                  />
+                </div>
+
+                <div className="relative">
+                  <select 
+                    className="w-full bg-black/40 border border-white/5 p-4 rounded-2xl text-sm focus:border-cyan-500/50 outline-none transition-all appearance-none text-slate-300"
+                    onChange={(e) => setFormData({...formData, rol: e.target.value})}
+                    value={formData.rol}
+                  >
+                    <option value="pasajero">Pasajero</option>
+                    <option value="conductor">Conductor</option>
+                  </select>
+                </div>
+              </div>
+            )}
+            
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+              <input 
+                type="email" placeholder="Correo Electrónico" required
+                className="w-full bg-black/40 border border-white/5 p-4 pl-12 rounded-2xl text-sm focus:border-cyan-500/50 outline-none transition-all"
+                onChange={(e) => setFormData({...formData, email: e.target.value})}
+              />
+            </div>
+
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+              <input 
+                type="password" placeholder="Contraseña" required
+                className="w-full bg-black/40 border border-white/5 p-4 pl-12 rounded-2xl text-sm focus:border-cyan-500/50 outline-none transition-all"
+                onChange={(e) => setFormData({...formData, password: e.target.value})}
+              />
+            </div>
+
+            <button 
+              disabled={loading}
+              className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-black py-4 rounded-2xl uppercase text-[11px] tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+            >
+              {loading ? <Loader2 className="animate-spin" size={20} /> : (
+                <>{isRegister ? 'Crear Cuenta' : 'Ingresar'} <ArrowRight size={16} /></>
+              )}
+            </button>
+          </form>
+
+          <div className="relative my-8 text-center">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
+            <span className="relative bg-slate-900 px-4 text-[9px] font-black text-slate-600 uppercase tracking-widest">o continuar con</span>
+          </div>
+
+          <button 
+            type="button"
+            onClick={loginGoogle}
+            className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all"
+          >
+            <Chrome size={18} className="text-cyan-400" /> Google Account
+          </button>
+
+          <p className="mt-10 text-center text-[11px] text-slate-500 font-bold uppercase">
+            {isRegister ? '¿Ya eres parte de CIMCO?' : '¿Aún no tienes cuenta?'} 
+            <span 
+              onClick={() => setIsRegister(!isRegister)} 
+              className="text-cyan-500 font-black cursor-pointer ml-2 hover:underline italic transition-all"
+            >
+              {isRegister ? 'Inicia Sesión' : 'Regístrate'}
+            </span>
+          </p>
         </div>
-      )}
-
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center border-t-4 border-blue-600">
-        <img src="/img/logo-taxiacimco.png" alt="Logo" className="mx-auto w-32 mb-6" />
-        <h1 className="text-2xl font-bold mb-2 text-gray-800">TAXIA CIMCO</h1>
-        <p className="text-gray-500 mb-8 text-sm italic">Movilidad inteligente y segura</p>
-
-        <button 
-          onClick={loginWithGoogle} 
-          disabled={loading} 
-          className="w-full flex items-center justify-center bg-white border border-gray-300 p-3 rounded-xl hover:bg-gray-50 transition mb-4 font-bold text-gray-700 shadow-sm"
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/layout/google.svg" className="w-5 h-5 mr-3" alt="G" />
-          {loading ? 'Cargando...' : qrRole ? `Registrarme como ${qrRole}` : 'Ingresar con Google'}
-        </button>
-
-        <button onClick={() => setShowResetModal(true)} className="text-sm text-blue-600 hover:underline font-medium">
-          ¿Olvidaste tu contraseña o método de acceso?
-        </button>
       </div>
-
-      {/* Modal de recuperación omitido aquí por brevedad, pero debe mantenerse igual */}
-      <div id="recaptcha-container"></div>
     </div>
   );
 };
 
-export default LoginPage;
+export default Login;

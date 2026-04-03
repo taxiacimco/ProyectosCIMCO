@@ -1,30 +1,28 @@
-// src/modules/auth/services/rbac.service.js
-import ROLES from '../../../config/app.roles.js';
+import { auth, db } from "../../../firebase/firebase-admin.js";
+import admin from "firebase-admin"; // Necesario para FieldValue
 
 /**
- * RBAC Service (Role-Based Access Control)
- * Centraliza la lógica de permisos complejos.
+ * Asigna roles (Custom Claims) a un usuario en Firebase Auth y registra el evento.
  */
-export const rbacService = {
-    /**
-     * Verifica si un rol tiene permisos de nivel administrativo
-     */
-    isAdmin: (role) => {
-        return role === ROLES.ADMIN || role === ROLES.CEO;
-    },
+export const asignarRol = async (uid, rol) => {
+  try {
+    // 1. Establecer el claim en Firebase Auth
+    // Esto es lo que permite usar 'request.auth.token.rol' en las reglas de Firestore
+    await auth.setCustomUserClaims(uid, { rol });
+    
+    // 2. Registrar en la colección 'movimientos' para auditoría
+    await db.collection("movimientos").add({
+      tipo: "asignacion_rol",
+      uid,
+      rol,
+      fecha: admin.firestore.FieldValue.serverTimestamp(),
+      descripcion: `Rol '${rol}' asignado exitosamente via RBAC Service.`
+    });
 
-    /**
-     * Retorna los permisos básicos por rol
-     */
-    getPermissionsByRole: (role) => {
-        const permissions = {
-            [ROLES.ADMIN]: ['all'],
-            [ROLES.CEO]: ['view_analytics', 'manage_users'],
-            [ROLES.CONDUCTOR]: ['update_location', 'accept_ride'],
-            [ROLES.USUARIO]: ['request_ride', 'view_history']
-        };
-        return permissions[role] || [];
-    }
+    console.log(`✅ Rol [${rol}] asignado correctamente al UID: ${uid}`);
+    return { success: true, message: `Rol ${rol} asignado.` };
+  } catch (error) {
+    console.error("❌ Error en RBAC Service:", error);
+    throw new Error("No se pudo asignar el rol: " + error.message);
+  }
 };
-
-export default rbacService;

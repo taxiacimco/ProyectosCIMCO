@@ -1,6 +1,9 @@
 {
   "projects": {
     "default": "pelagic-chalice-467818-e1",
-    "production": "pelagic-chalice-467818-e1"
-  }
-}                                                                                                                     
+    "production": "pelagic-chalice-467818-e1",
+    "test": "pelagic-chalice-467818-e1-test"
+  },
+  "targets": {},
+  "etags": {}
+}

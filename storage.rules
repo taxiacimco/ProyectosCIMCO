@@ -1,8 +1,34 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    
+    // Función para verificar si el usuario es Administrador
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Función para verificar si el usuario es dueño de los documentos
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // 📂 Reglas para Documentos de Conductores
+    match /conductores/{userId}/{documento=**} {
+      // Un conductor puede subir y ver sus propios documentos
+      // Un administrador puede ver y gestionar todo
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    // 📂 Reglas para Iconos y Activos Públicos (Panel)
+    match /public_assets/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 📂 Regla Maestra de Seguridad
     match /{allPaths=**} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
     }
   }
 }

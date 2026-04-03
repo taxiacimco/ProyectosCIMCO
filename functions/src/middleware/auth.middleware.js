@@ -1,60 +1,40 @@
-// src/middleware/auth.middleware.js
-import admin from "../firebase/firebase-init.js";
-
 /**
- * ==============================
- * authMiddleware (Firebase JWT)
- * ==============================
- * - Verifica ID Token de Firebase
- * - Detecta tokens revocados
- * - Extrae Custom Claims (role)
- * - Expone identidad en req.user
+ * middleware/auth.middleware.js
+ * Guardia de seguridad principal - TAXIA CIMCO
  */
+import { getAuth } from 'firebase-admin/auth';
+import { sendErrorResponse } from '../utils/http-response.js';
+
 const authMiddleware = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
+    let idToken;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({
-        success: false,
-        message: "Token de autenticación no proporcionado",
-      });
+    // 1. Extraer el token del header de autorización
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+        idToken = req.headers.authorization.split('Bearer ')[1];
     }
 
-    const token = authHeader.split(" ")[1];
-
-    // 🔐 Verificación fuerte (incluye revocación)
-    // El segundo argumento 'true' fuerza la verificación de revocación.
-    const decodedToken = await admin.auth().verifyIdToken(token, true);
-
-    // 🔒 Validación de Custom Claims: Aseguramos que el rol exista
-    if (!decodedToken.role) {
-      return res.status(401).json({
-        success: false,
-        message: "Token sin rol asignado",
-      });
+    if (!idToken) {
+        return sendErrorResponse(res, "Acceso denegado. No se proporcionó token de autenticación.", 401, "UNAUTHORIZED");
     }
 
-    /**
-     * req.user es la ÚNICA fuente de identidad para los controladores.
-     * Contiene la información de seguridad esencial extraída del JWT.
-     */
-    req.user = {
-      uid: decodedToken.uid,
-      email: decodedToken.email || null,
-      role: decodedToken.role,
-    };
+    try {
+        // 2. Verificar el token con Firebase Admin (forzando verificación de revocación)
+        const decodedToken = await getAuth().verifyIdToken(idToken, true);
+        
+        // 3. 💉 INYECCIÓN CRÍTICA: Guardar los datos del usuario en la petición (req.user)
+        req.user = decodedToken;
 
-    next();
-  } catch (error) {
-    // Si la verificación falla (expirado, inválido, revocado, etc.)
-    console.error("❌ Auth error:", error.code || error.message);
-
-    return res.status(401).json({
-      success: false,
-      message: "Token inválido, expirado o revocado",
-    });
-  }
+        // 4. Continuar hacia el controlador
+        next();
+    } catch (error) {
+        console.error("❌ [Auth Middleware Error]:", error.code || error.message);
+        
+        if (error.code === 'auth/id-token-expired') {
+            return sendErrorResponse(res, "El token ha expirado. Por favor, inicia sesión nuevamente.", 401, "TOKEN_EXPIRED");
+        }
+        
+        return sendErrorResponse(res, "Token inválido, expirado o revocado.", 401, "INVALID_TOKEN");
+    }
 };
 
 export default authMiddleware;

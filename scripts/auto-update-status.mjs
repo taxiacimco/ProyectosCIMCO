@@ -1,29 +1,34 @@
 // ✅ auto-update-status.mjs
-// Actualiza el archivo status.json del Panel TAXIA CIMCO con datos reales de Firebase.
-// Compatible con entorno de producción y ejecución automática por PowerShell o Node Scheduler.
+// Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\scripts\auto-update-status.mjs
+// Descripción: Sincroniza el estado de Firebase con el panel local.
+// Optimización: Control de cierre de procesos y gestión de logs circulares.
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import os from "os";
-import { initializeApp, cert } from "firebase-admin/app";
+import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 
 // ============================================================
-// 🧠 CARGAR VARIABLES DE ENTORNO (.env.production)
+// 🧠 CONFIGURACIÓN DE RUTAS Y ENTORNO
 // ============================================================
-dotenv.config({ path: "./functions/.env.production" });
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ============================================================
-// 📂 RUTAS DE ARCHIVOS
-// ============================================================
+// Cargamos el .env desde la carpeta functions (Ruta absoluta segura)
+dotenv.config({ path: path.join(__dirname, "../functions/.env") });
+
 const serviceAccountPath = path.join(__dirname, "../functions/serviceAccount.json");
 const statusPath = path.join(__dirname, "../panel/public/status.json");
-const logPath = path.join(__dirname, "../logs/auto-update-status.log");
+const logDir = path.join(__dirname, "../logs");
+const logPath = path.join(logDir, "auto-update-status.log");
+
+// Asegurar existencia de carpetas
+if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+const publicDir = path.join(__dirname, "../panel/public");
+if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
 
 // ============================================================
 // 🔥 INICIALIZACIÓN DE FIREBASE ADMIN SDK
@@ -32,108 +37,87 @@ let db = null;
 let initStatus = "NO_INICIADO";
 
 try {
-  if (!fs.existsSync(serviceAccountPath)) {
-    throw new Error("No se encuentra el archivo serviceAccount.json");
-  }
-
-  const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
-
-  initializeApp({
-    credential: cert(serviceAccount),
-    projectId: process.env.PROJECT_ID || "pelagic-chalice-467818-e1",
-  });
-
-  db = getFirestore();
-  initStatus = "OK";
-  console.log("✅ Firebase Admin SDK inicializado correctamente.");
-} catch (error) {
-  console.error("❌ Error al inicializar Firebase Admin SDK:", error.message);
-  initStatus = "ERROR_INIT";
-}
-
-// ============================================================
-// 🔎 FUNCIÓN: Verificar conexión con Firestore
-// ============================================================
-async function verificarFirestore() {
-  if (initStatus !== "OK") return "ERROR";
-
-  try {
-    const testRef = db.collection("testConnection").doc("status_check");
-    const doc = await testRef.get();
-
-    if (doc.exists) {
-      return "OK";
-    } else {
-      // Si no existe, creamos el documento la primera vez
-      await testRef.set({ checkedAt: new Date().toISOString() });
-      return "CREADO";
+    if (!fs.existsSync(serviceAccountPath)) {
+        throw new Error(`Falta serviceAccount.json en: ${serviceAccountPath}`);
     }
-  } catch (err) {
-    console.error("⚠️ Error de conexión a Firestore:", err.message);
-    return "ERROR";
-  }
+
+    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
+
+    if (getApps().length === 0) {
+        initializeApp({
+            credential: cert(serviceAccount),
+            projectId: process.env.PROJECT_ID || "pelagic-chalice-467818-e1",
+        });
+    }
+
+    db = getFirestore();
+    db.settings({ ignoreUndefinedProperties: true }); // Evita errores por datos vacíos
+    initStatus = "OK";
+} catch (error) {
+    console.error("❌ Error de Inicialización:", error.message);
+    initStatus = "ERROR_INIT";
 }
 
 // ============================================================
-// 🔐 FUNCIÓN: Verificar estado del Auth
+// 🧾 FUNCIÓN DE LIMPIEZA DE LOGS (Evita que el PC se llene)
 // ============================================================
-function verificarAuth() {
-  return initStatus === "OK" ? "OK" : "ERROR";
+function rotarLogs() {
+    try {
+        if (fs.existsSync(logPath)) {
+            const stats = fs.statSync(logPath);
+            if (stats.size > 1024 * 1024) { // Si pesa más de 1MB, lo borra para empezar de cero
+                fs.writeFileSync(logPath, `--- Log Reiniciado el ${new Date().toISOString()} ---\n`);
+            }
+        }
+    } catch (e) { /* Silencio */ }
 }
 
 // ============================================================
-// 🧾 FUNCIÓN: Actualizar el archivo status.json
+// 🧾 FUNCIÓN PRINCIPAL
 // ============================================================
 async function actualizarStatus() {
-  const estadoFirestore = await verificarFirestore();
-  const estadoAuth = verificarAuth();
-  const timestamp = new Date().toISOString();
+    rotarLogs();
+    const timestamp = new Date().toISOString();
+    let estadoFirestore = "OFFLINE";
 
-  const statusData = {
-    project: "TAXIA CIMCO",
-    firestore: estadoFirestore,
-    auth: estadoAuth,
-    updated_at: timestamp,
-    init_status: initStatus,
-    host: os.hostname(),
-    env: process.env.NODE_ENV || "production",
-  };
-
-  try {
-    // 1. Escribir el status.json (público)
-    fs.writeFileSync(statusPath, JSON.stringify(statusData, null, 2));
-
-    // 2. Escribir el log de historial (privado)
-    fs.appendFileSync(logPath, `[${timestamp}] Actualizado: ${JSON.stringify(statusData)}\n`);
-
-    // ==========================================================
-    // INICIO: NUEVA LÓGICA PARA COPIAR EL LOG AL HOSTING PÚBLICO
-    // (Paso 2 de la actividad solicitada)
-    // ==========================================================
-    try {
-        // La ruta pública debe ser relativa a la carpeta 'taxia_cimco_backend/scripts'
-        // Nos movemos dos niveles arriba (..) para llegar a ProyectosCIMCO, luego entramos a panel/public/
-        const publicLog = path.join(__dirname, "../panel/public/auto-update-status.log");
-        
-        // Escribimos el mismo registro en la ubicación pública
-        fs.appendFileSync(publicLog, `[${timestamp}] Actualizado: ${JSON.stringify(statusData)}\n`);
-        
-        console.log(`✅ Log de estado copiado a la ruta pública: ${publicLog}`);
-    } catch(e) { 
-        console.error(`⚠️ Advertencia: No se pudo escribir el log en la ruta pública: ${e.message}`);
-        // Se ignora el error si no se puede escribir el log público (se cumple Opción B)
+    if (initStatus === "OK" && db) {
+        try {
+            // Prueba de conexión ultra rápida (timeout mental)
+            const testRef = db.collection("testConnection").doc("status_check");
+            await testRef.set({ last_seen: timestamp }, { merge: true });
+            estadoFirestore = "ONLINE";
+        } catch (err) {
+            estadoFirestore = "ERROR_CONN";
+        }
     }
-    // ==========================================================
-    // FIN: NUEVA LÓGICA
-    // ==========================================================
-    
-    console.log("✅ status.json y logs actualizados correctamente.");
-  } catch (err) {
-    console.error("❌ Error al escribir los archivos:", err.message);
-  }
+
+    const statusData = {
+        project: "TAXIA CIMCO",
+        version: "2.0.0",
+        firestore: estadoFirestore,
+        server_status: "RUNNING",
+        updated_at: timestamp,
+        pc_health: {
+            hostname: os.hostname(),
+            mem_free: Math.round(os.freemem() / 1024 / 1024) + " MB",
+            cpu_load: os.loadavg()[0].toFixed(2)
+        }
+    };
+
+    try {
+        fs.writeFileSync(statusPath, JSON.stringify(statusData, null, 2));
+        fs.appendFileSync(logPath, `[${timestamp}] Firestore: ${estadoFirestore} | RAM Libre: ${statusData.pc_health.mem_free}\n`);
+        console.log(`✅ Status Sincronizado: ${estadoFirestore}`);
+    } catch (err) {
+        console.error("❌ Error escribiendo status:", err.message);
+    }
 }
 
-// ============================================================
-// 🕒 EJECUCIÓN PRINCIPAL
-// ============================================================
-await actualizarStatus();
+// Ejecución con cierre forzado para no dejar procesos colgando
+actualizarStatus().then(() => {
+    // Cerramos el proceso 1 segundo después para asegurar escritura
+    setTimeout(() => process.exit(0), 1000);
+}).catch(err => {
+    console.error("❌ Fallo crítico:", err);
+    process.exit(1);
+});

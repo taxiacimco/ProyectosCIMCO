@@ -1,40 +1,23 @@
 {
-  "name": "taxia-cimco-backend",
-  "version": "1.0.0",
-  "description": "Backend de TAXI A CIMCO - Gestión de mototaxis con Firebase Functions (JS ESM).",
-  "type": "module",
-  "main": "src/index.js",
-  "scripts": {
-    "serve": "firebase emulators:start --only functions,auth,firestore",
-    "shell": "firebase functions:shell",
-    "start": "npm run serve",
-    "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log",
-    "test:firestore": "node testFirestore.js",
-    "report": "pwsh -ExecutionPolicy Bypass -File ./scripts/post-deploy-report.ps1"
-  },
-  "dependencies": {
-    "dotenv": "^17.2.3",
-    "express": "^4.18.2",
-    "firebase-admin": "^12.7.0",
-    "firebase-functions": "^5.0.0",
-    "jimp": "^1.6.0",
-    "leaflet": "^1.9.4",
-    "qrcode": "^1.5.4",
-    "react-leaflet": "^5.0.0"
-  },
-  "devDependencies": {
-    "firebase-tools": "^14.25.0",
-    "nodemon": "^3.1.11"
-  },
-  "engines": {
-    "node": "20"
-  },
-  "author": "Carlos Mario Fuentes García",
-  "license": "MIT",
+  "name": "taxia-cimco-monorepo",
+  "version": "1.1.0",
   "private": true,
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/CarlosFuentesCIMCO/taxia-cimco-backend.git"
+  "description": "Workspace raíz para TAXIA CIMCO - Gestión Integral",
+  "scripts": {
+    "front:dev": "npm run dev --workspace=taxia-cimco-frontend",
+    "front:build": "npm run build --workspace=taxia-cimco-frontend",
+    "func:dev": "npm run serve --workspace=taxia-cimco-backend",
+    "func:shell": "npm run shell --workspace=taxia-cimco-backend",
+    "dev:all": "concurrently \"npm run front:dev\" \"npm run func:shell\"",
+    "deploy:full": "npm run front:build && firebase deploy",
+    "install:all": "npm install && npm install --workspace=taxia-cimco-frontend && npm install --workspace=taxia-cimco-backend"
+  },
+  "workspaces": [
+    "frontend",
+    "functions"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "firebase-tools": "^13.0.0"
   }
 }

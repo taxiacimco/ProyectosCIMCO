@@ -3,7 +3,7 @@
  * Lógica de negocio para conductores de Mototaxis e Intermunicipales.
  */
 
-import { db } from "../../../firebase-admin.js";
+import { db } from "../../../firebase/firebase-admin.js";
 
 class DriverService {
   /**

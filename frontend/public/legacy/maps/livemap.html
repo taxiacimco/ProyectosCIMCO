@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CIMCO LiveMap Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Estilos de Routing (Opcional para rutas visuales) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background: #020617; margin: 0; }
+        #map { height: 100vh; width: 100vw; }
+        .leaflet-container { background: #020617 !important; }
+        
+        /* Estilos de Popup Estilo CIMCO */
+        .cimco-popup .leaflet-popup-content-wrapper {
+            background: #0f172a;
+            color: white;
+            border-radius: 1.5rem;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 5px;
+        }
+        .cimco-popup .leaflet-popup-tip { background: #0f172a; }
+        
+        /* Custom Scrollbar para popups */
+        .leaflet-popup-content { margin: 12px; line-height: 1.4; }
+
+        .pulse-animation {
+            box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.7);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(6, 182, 212, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Interfaz de Usuario sobre el Mapa -->
+    <div class="fixed inset-0 pointer-events-none z-[1000] p-6 flex flex-col justify-between">
+        <!-- Barra Superior: Estado y Distancia -->
+        <div class="flex justify-between items-start w-full">
+            <div class="flex flex-col gap-2 pointer-events-auto">
+                <div id="status-badge" class="bg-slate-900/90 backdrop-blur-xl border border-white/10 px-4 py-2 rounded-2xl flex items-center gap-3 shadow-2xl">
+                    <div id="status-indicator" class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
+                    <div class="flex flex-col">
+                        <span id="status-text" class="text-[10px] font-black text-white uppercase tracking-tighter">Sincronizando...</span>
+                        <span id="distance-text" class="text-[9px] text-slate-400 font-bold uppercase">GPS Activo</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel de Pedidos Cercanos (Simulado/Real) -->
+            <div class="pointer-events-auto">
+                <div class="bg-yellow-400 text-slate-950 px-4 py-2 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    Zonas de Alta Demanda
+                </div>
+            </div>
+        </div>
+
+        <!-- Botón de Acción Inferior -->
+        <div class="flex justify-end pointer-events-auto">
+            <button id="recenter-btn" class="bg-cyan-500 text-slate-950 p-5 rounded-[2rem] shadow-2xl hover:scale-110 active:scale-95 transition-all">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Script de Lógica -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";
+
+        // Parámetros de Configuración (Desde el sistema)
+        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
+        const appId = window.__app_id || 'taxiacimco-app';
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Variables de Estado del Mapa
+        let map, myMarker, myCircle;
+        let conductorsMarkers = {};
+        let ordersMarkers = [];
+        let myCoords = null;
+        
+        // Props Iniciales (Simuladas de React)
+        const CONFIG = {
+            modo: "conductor", // admin_global, conductor, pasajero
+            estadoActual: "disponible"
+        };
+
+        const motoIcon = L.icon({
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/1048/1048314.png',
+            iconSize: [40, 40],
+            iconAnchor: [20, 20],
+            popupAnchor: [0, -20]
+        });
+
+        const orderIcon = L.icon({
+            iconUrl: 'https://cdn-icons-png.flaticon.com/512/581/581647.png', // Icono de destino/pedido
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        });
+
+        // Fórmula de Haversine para Distancia
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; // Radio de la tierra en km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return (R * c).toFixed(2);
+        }
+
+        function initMap(lat, lng) {
+            map = L.map('map', { zoomControl: false }).setView([lat, lng], 16);
+            
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; CARTO'
+            }).addTo(map);
+
+            myMarker = L.marker([lat, lng], { icon: motoIcon }).addTo(map);
+            myCircle = L.circle([lat, lng], {
+                radius: 60,
+                color: '#06b6d4',
+                fillColor: '#06b6d4',
+                fillOpacity: 0.1,
+                weight: 1
+            }).addTo(map);
+
+            document.getElementById('status-text').innerText = CONFIG.estadoActual;
+            
+            // Si es admin, empezar a escuchar a otros conductores
+            if (CONFIG.modo === 'admin_global') {
+                listenToConductores();
+            }
+            
+            // Escuchar pedidos cercanos
+            listenToOrders(lat, lng);
+        }
+
+        function listenToConductores() {
+            const path = `artifacts/${appId}/public/data/ubicaciones_en_vivo`;
+            onSnapshot(collection(db, path), (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    const data = change.doc.data();
+                    const id = change.doc.id;
+                    
+                    if (id === auth.currentUser?.uid) return; // No duplicarme
+
+                    if (change.type === "added" || change.type === "modified") {
+                        if (conductorsMarkers[id]) {
+                            conductorsMarkers[id].setLatLng([data.lat, data.lng]);
+                        } else {
+                            conductorsMarkers[id] = L.marker([data.lat, data.lng], { icon: motoIcon })
+                                .addTo(map)
+                                .bindPopup(`
+                                    <div class="cimco-popup">
+                                        <p class="font-black uppercase text-[10px] text-cyan-500">${data.nombre || 'Conductor'}</p>
+                                        <p class="text-[9px] text-white font-bold">${data.estado || 'En ruta'}</p>
+                                    </div>
+                                `);
+                        }
+                    }
+                });
+            });
+        }
+
+        function listenToOrders(lat, lng) {
+            // Aquí podrías conectar a tu colección de "pedidos_activos"
+            // Por ahora simularemos uno cercano para mostrar la funcionalidad de distancia
+            const mockOrder = { lat: lat + 0.005, lng: lng + 0.005, id: 'demo-1' };
+            
+            const dist = calculateDistance(lat, lng, mockOrder.lat, mockOrder.lng);
+            document.getElementById('distance-text').innerText = `Pedido a ${dist} KM`;
+
+            L.marker([mockOrder.lat, mockOrder.lng], { icon: orderIcon })
+                .addTo(map)
+                .bindPopup(`<div class="cimco-popup text-xs font-bold">NUEVO PEDIDO CERCANO</div>`);
+        }
+
+        async function updateMyPresence(coords) {
+            if (!auth.currentUser || CONFIG.modo === 'admin_global') return;
+            
+            try {
+                const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'ubicaciones_en_vivo', auth.currentUser.uid);
+                await setDoc(userRef, {
+                    ...coords,
+                    lastUpdate: serverTimestamp(),
+                    estado: CONFIG.estadoActual,
+                    rol: CONFIG.modo,
+                    userId: auth.currentUser.uid
+                }, { merge: true });
+            } catch (e) {
+                console.error("Error al reportar ubicación:", e);
+            }
+        }
+
+        // Geolocalización en Tiempo Real
+        function startTracking() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.watchPosition(
+                    (pos) => {
+                        const { latitude: lat, longitude: lng } = pos.coords;
+                        myCoords = { lat, lng };
+
+                        if (!map) {
+                            initMap(lat, lng);
+                        } else {
+                            myMarker.setLatLng([lat, lng]);
+                            myCircle.setLatLng([lat, lng]);
+                            
+                            // Actualizar distancia si hay un objetivo
+                            // (Lógica para actualizar distance-text dinámicamente)
+                        }
+                        
+                        updateMyPresence(myCoords);
+                    },
+                    (err) => console.warn("Esperando GPS...", err),
+                    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+                );
+            }
+        }
+
+        // Inicio
+        signInAnonymously(auth).then(() => {
+            startTracking();
+        });
+
+        document.getElementById('recenter-btn').onclick = () => {
+            if (myCoords && map) {
+                map.flyTo([myCoords.lat, myCoords.lng], 17);
+            }
+        };
+    </script>
+</body>
+</html>

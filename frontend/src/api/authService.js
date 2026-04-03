@@ -1,72 +1,55 @@
 /**
  * frontend/src/api/authService.js
  * Sincronización de sesión usando la instancia centralizada de Axios.
- * Este servicio comunica el estado de Firebase con el Backend de TAXIA CIMCO.
+ * ARQUITECTURA: TAXIA CIMCO - Integración Quirúrgica V3
  */
 import api from './axiosConfig';
 
-// Detección de entorno para el Bypass (Modo Desarrollo)
-const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+// Detectamos si estamos en red local o localhost para activar herramientas de dev
+const isDevelopment = 
+  window.location.hostname === "localhost" || 
+  window.location.hostname === "127.0.0.1" || 
+  window.location.hostname.startsWith("192.168."); 
 
 /**
  * ✅ Sincroniza el usuario con el Backend de TAXIA CIMCO.
- * @param {string} idToken - El ID Token obtenido de Firebase Auth.
  */
 export const syncUserWithBackend = async (idToken) => {
   if (!idToken) {
-    console.error("❌ [AuthService] No se proporcionó un idToken para la sincronización.");
+    console.error("❌ [AuthService] No se proporcionó un idToken.");
     return null;
   }
 
   try {
-    /**
-     * 1. INTENTO DE CONEXIÓN REAL
-     * Enviamos el token al endpoint de login/sync.
-     * El interceptor de axiosConfig ya maneja la URL base y el retorno de data.
-     */
-    const data = await api.post('/auth/login', { idToken }, {
-      // Refuerzo manual de cabecera para la sincronización inicial
-      headers: {
-        'Authorization': `Bearer ${idToken}`
-      }
-    });
-
+    // Intento de conexión al Backend Real
+    const data = await api.post('/auth/login', { idToken });
     console.log("✅ [CIMCO] Backend sincronizado con éxito.");
     return data;
 
   } catch (error) {
-    /**
-     * 2. LÓGICA DE RESILIENCIA (Bypass en Desarrollo)
-     * Si el backend de Spring Boot no está corriendo o hay errores de red en local,
-     * permitimos que el desarrollador siga trabajando.
-     */
-    if (isLocal) {
-      console.warn("⚠️ [CIMCO DEV] Error de conexión con API (Posible Backend apagado). Activando Bypass...");
+    // LÓGICA DE RESILIENCIA PARA CARLOS (Modo Desarrollo en Red Local)
+    if (isDevelopment || import.meta.env.DEV) {
+      console.warn("⚠️ [CIMCO DEV] Error de API (Backend posiblemente apagado o IP bloqueada). Activando Bypass...");
       
-      // Simulamos una respuesta exitosa del servidor para desarrollo
       return { 
         success: true, 
-        message: "Bypass activado",
+        message: "Bypass activado para pruebas en red local",
         user: { 
-          role: 'conductor', // Ajustado a conductor para las pruebas de Mototaxi
+          role: 'conductor', 
           status: 'active', 
           uid: 'dev-id-001',
-          displayName: 'Usuario Demo (Modo Dev)',
-          email: 'demo@cimco.com',
-          saldo: 25000 
+          displayName: 'Carlos Fuentes (Dev)',
+          email: 'admin@taxiacimco.com',
+          saldo: 50000 
         } 
       };
     }
 
-    // En producción (cuando el hostname no es localhost), el error es crítico.
     console.error("❌ [CIMCO] Error crítico de autenticación:", error.response?.data || error.message);
     throw error;
   }
 };
 
-/**
- * ✅ Ejemplo: Cerrar sesión en el backend (si aplica)
- */
 export const logoutFromBackend = async () => {
   try {
     return await api.post('/auth/logout');
@@ -75,7 +58,4 @@ export const logoutFromBackend = async () => {
   }
 };
 
-export default {
-  syncUserWithBackend,
-  logoutFromBackend
-};
+export default { syncUserWithBackend, logoutFromBackend };

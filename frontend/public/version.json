@@ -1,4 +1,6 @@
 {
-  "deployed": "2025-11-23 18:19:56",
-  "version": "2025.11.23-1819"
+"version": "2024.05.20.01",
+"deployed": "2024-05-20 10:00:00",
+"description": "Actualización de manifiestos por roles y rutas index.html",
+"min_required_version": "2024.05.15.00"
 }

@@ -10,7 +10,8 @@ export const enviarAlertaSOS = async (coords, tipoVehiculo) => {
   const user = auth.currentUser;
 
   if (!user) {
-    throw new Error("Usuario no autenticado para enviar SOS");
+    console.error("SOS Fallido: Usuario no autenticado");
+    return { success: false, error: "No autenticado" };
   }
 
   try {
@@ -18,20 +19,29 @@ export const enviarAlertaSOS = async (coords, tipoVehiculo) => {
     
     const nuevaAlerta = {
       usuarioId: user.uid,
-      nombreUsuario: user.displayName || "Conductor Anónimo",
+      nombreUsuario: user.displayName || "Conductor Registrado",
       email: user.email,
-      tipoVehiculo: tipoVehiculo,
+      tipoVehiculo: tipoVehiculo || "No especificado",
       ubicacion: {
         lat: coords.lat,
         lng: coords.lng
       },
       fecha: serverTimestamp(),
-      estado: 'ACTIVO', // ACTIVO, EN_CAMINO, RESUELTO
-      prioridad: 'CRITICA'
+      estado: 'ACTIVO', // ACTIVO -> EN_CAMINO -> RESUELTO
+      prioridad: 'CRITICA',
+      atendidoPor: null
     };
 
+    // 1. Guardar en Firebase
     const docRef = await addDoc(sosRef, nuevaAlerta);
-    console.log("SOS enviado con éxito, ID:", docRef.id);
+    
+    // 2. Feedback Físico (Vibración de confirmación)
+    if (navigator.vibrate) {
+        // Vibra 3 veces rápido para avisar que se envió
+        navigator.vibrate([200, 100, 200, 100, 500]);
+    }
+
+    console.log("¡SOS CRÍTICO ENVIADO! ID:", docRef.id);
     return { success: true, id: docRef.id };
     
   } catch (error) {

@@ -10,116 +10,144 @@ import {
   ChevronRight, 
   Navigation, 
   Truck, 
-  LayoutDashboard 
+  LayoutDashboard,
+  ShieldAlert,
+  Bike
 } from 'lucide-react';
 
 const DashboardBienvenida = () => {
-  const { user, isAdmin, isDriver, isDespachador, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  // Configuración de UI según el rol
+  /**
+   * 🛠️ CONFIGURACIÓN DE RUTAS UNIFICADA
+   * Sincronizada con el nuevo ConductorPanel.jsx
+   */
   const getRoleConfig = () => {
-    switch (user?.role) {
+    const role = user?.role?.toLowerCase();
+    
+    // Agrupamos conductores urbanos para el nuevo panel unificado
+    if (['mototaxi', 'motocarga', 'motoparrillero'].includes(role)) {
+      return { 
+        label: `Unidad ${role.charAt(0).toUpperCase() + role.slice(1)}`, 
+        color: role === 'mototaxi' ? 'bg-yellow-500' : role === 'motocarga' ? 'bg-orange-500' : 'bg-indigo-500', 
+        icon: role === 'motocarga' ? <Truck size={20}/> : <Bike size={20}/>, 
+        path: '/driver/panel' // <-- RUTA UNIFICADA
+      };
+    }
+
+    switch (role) {
       case 'admin':
-        return { label: 'CEO / Admin', color: 'bg-red-600', icon: <LayoutDashboard size={20}/>, path: '/admin/dashboard' };
-      case 'mototaxi':
-        return { label: 'Conductor Mototaxi', color: 'bg-yellow-500', icon: <Navigation size={20}/>, path: '/mototaxi/panel' };
-      case 'motocarga':
-        return { label: 'Conductor Motocarga', color: 'bg-orange-500', icon: <Truck size={20}/>, path: '/motocarga/panel' };
-      case 'cond_inter':
-        return { label: 'Conductor Intermunicipal', color: 'bg-purple-600', icon: <Navigation size={20}/>, path: '/conductor-inter/panel' };
-      case 'despachador':
+      case 'ceo':
+        return { label: 'Administración Central', color: 'bg-red-600', icon: <LayoutDashboard size={20}/>, path: '/admin/dashboard' };
+      case 'conductorinter':
+        return { label: 'Línea Intermunicipal', color: 'bg-purple-600', icon: <Navigation size={20}/>, path: '/inter/conductor' };
       case 'despachadorinter':
-        return { label: 'Despachador Oficial', color: 'bg-blue-600', icon: <User size={20}/>, path: '/despachador/panel' };
+        return { label: 'Despacho Intermunicipal', color: 'bg-blue-600', icon: <User size={20}/>, path: '/inter/despachador' };
       default:
         return { label: 'Pasajero TaxiA', color: 'bg-cyan-600', icon: <User size={20}/>, path: '/pasajero/panel' };
     }
   };
 
   const roleConfig = getRoleConfig();
+  // El saldo y la verificación vienen del context o del objeto user
+  const saldo = user?.saldoWallet || 0;
+  const verificado = user?.documentacion?.estado === 'APROBADO' || user?.verificado;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-white shadow-2xl rounded-[2.5rem] overflow-hidden border border-slate-100">
+    <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4 font-sans">
+      <div className="max-w-md w-full bg-slate-900 shadow-[0_20px_50px_rgba(0,0,0,0.5)] rounded-[3rem] overflow-hidden border border-white/5 relative">
         
-        {/* Cabecera con Color Dinámico */}
-        <div className={`${roleConfig.color} p-8 text-white relative`}>
-          <div className="flex items-center space-x-4">
+        {/* Glow de fondo dinámico basado en el rol */}
+        <div className={`absolute top-0 left-0 w-full h-40 ${roleConfig.color} opacity-10 blur-[100px] -z-10`}></div>
+
+        {/* Cabecera de Identidad */}
+        <div className="p-10 pb-6 text-white relative">
+          <div className="flex items-center space-x-6">
             <div className="relative">
+              <div className={`absolute inset-0 ${roleConfig.color} blur-xl opacity-30 rounded-full`}></div>
               <img 
-                src={user?.photoURL || 'https://via.placeholder.com/150'} 
+                src={user?.photoURL || 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + user?.uid} 
                 alt="Avatar" 
-                className="w-20 h-20 rounded-2xl border-4 border-white/30 object-cover shadow-lg" 
+                className="relative w-24 h-24 rounded-[2rem] border-2 border-white/10 object-cover shadow-2xl transition-transform hover:scale-105" 
               />
-              <div className="absolute -bottom-2 -right-2 bg-white text-slate-900 p-1.5 rounded-lg shadow-md">
+              <div className={`absolute -bottom-2 -right-2 ${roleConfig.color} text-slate-950 p-2.5 rounded-2xl shadow-xl border-4 border-slate-900`}>
                 {roleConfig.icon}
               </div>
             </div>
-            <div>
-              <p className="text-white/80 text-sm font-medium">Bienvenido de nuevo,</p>
-              <h2 className="text-2xl font-black tracking-tight leading-none">{user?.displayName?.split(' ')[0]}</h2>
-              <span className="mt-2 inline-block bg-black/20 backdrop-blur-md text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">
-                {roleConfig.label}
-              </span>
+            <div className="flex-1">
+              <p className="text-slate-500 text-[9px] font-black uppercase tracking-[0.3em] mb-1">CIMCO OPERATOR</p>
+              <h2 className="text-3xl font-black tracking-tighter leading-none italic uppercase">
+                {user?.displayName?.split(' ')[0] || 'Usuario'}
+              </h2>
+              <div className="flex items-center gap-2 mt-3">
+                <span className={`inline-block ${roleConfig.color} text-slate-950 text-[10px] font-black px-4 py-1 rounded-full uppercase tracking-wider`}>
+                  {roleConfig.label}
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="p-8">
-          {/* Tarjetas de Estado */}
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100 group hover:bg-white hover:shadow-xl transition-all duration-300">
-              <div className="flex items-center justify-between mb-2">
-                <Wallet className="text-blue-600" size={18} />
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Saldo</span>
+        <div className="px-10 pb-10 space-y-6">
+          {/* Tarjeta de Estado Operativo */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-slate-950/40 p-6 rounded-[2.5rem] border border-white/5 backdrop-blur-sm">
+              <div className="flex items-center gap-2 mb-2 opacity-50">
+                <Wallet size={12} />
+                <span className="text-[10px] font-black uppercase tracking-widest">Saldo</span>
               </div>
-              <p className="text-2xl font-black text-slate-800">${user?.balance || 0}</p>
+              <p className={`text-2xl font-black ${saldo < 0 ? 'text-red-500' : 'text-white'}`}>
+                ${saldo.toLocaleString()}
+              </p>
             </div>
 
-            <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100 group hover:bg-white hover:shadow-xl transition-all duration-300">
-              <div className="flex items-center justify-between mb-2">
-                {user?.isApproved ? <ShieldCheck className="text-emerald-500" size={18} /> : <Clock className="text-amber-500" size={18} />}
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Estado</span>
+            <div className="bg-slate-950/40 p-6 rounded-[2.5rem] border border-white/5 backdrop-blur-sm">
+              <div className="flex items-center gap-2 mb-2 opacity-50">
+                {verificado ? <ShieldCheck size={12} /> : <Clock size={12} />}
+                <span className="text-[10px] font-black uppercase tracking-widest">Cuenta</span>
               </div>
-              <p className={`text-sm font-black uppercase ${user?.isApproved ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {user?.isApproved ? 'Verificado' : 'En Revisión'}
+              <p className={`text-[11px] font-black uppercase tracking-tight ${verificado ? 'text-emerald-500' : 'text-amber-500'}`}>
+                {verificado ? 'Verificado' : 'Pendiente'}
               </p>
             </div>
           </div>
 
-          {/* Alerta de Saldo para Conductores */}
-          {isDriver && (user?.balance < 200 || !user?.balance) && (
-            <div className="bg-red-50 border-2 border-red-100 p-4 rounded-2xl mb-8 flex items-start space-x-3">
-              <div className="bg-red-500 text-white p-1 rounded-lg">
-                <Wallet size={16} />
-              </div>
-              <p className="text-red-700 text-xs font-bold leading-tight">
-                SALDO BAJO: Recarga pronto para que el sistema te asigne nuevos viajes.
+          {/* Alerta de Saldo Negativo */}
+          {saldo <= 0 && (
+            <div className="bg-red-500/5 border border-red-500/20 p-5 rounded-[2rem] flex items-center gap-4 animate-pulse">
+              <ShieldAlert className="text-red-500 shrink-0" size={24} />
+              <p className="text-red-200 text-[10px] font-bold leading-snug uppercase tracking-tight">
+                Saldo insuficiente. Recarga en los puntos autorizados de La Jagua para seguir operando.
               </p>
             </div>
           )}
 
-          {/* Botón de Acción Principal (Redirección Automática) */}
-          <button 
-            onClick={() => navigate(roleConfig.path)}
-            className={`w-full ${roleConfig.color} text-white font-black py-4 rounded-2xl shadow-lg shadow-blue-200 flex items-center justify-center space-x-2 hover:scale-[1.02] active:scale-95 transition-all mb-4`}
-          >
-            <span>ENTRAR AL PANEL DE CONTROL</span>
-            <ChevronRight size={20} />
-          </button>
+          {/* BOTÓN DE ACCIÓN PRINCIPAL */}
+          <div className="pt-4">
+            <button 
+              onClick={() => navigate(roleConfig.path)}
+              disabled={saldo <= 0 && user?.role !== 'pasajero' && user?.role !== 'admin'}
+              className={`w-full ${roleConfig.color} text-slate-950 font-black py-7 rounded-[2.5rem] shadow-[0_20px_40px_rgba(0,0,0,0.3)] hover:brightness-110 active:scale-95 transition-all flex items-center justify-center gap-4 group disabled:opacity-50 disabled:grayscale`}
+            >
+              <span className="text-lg italic uppercase tracking-tighter">Entrar a mi Terminal</span>
+              <ChevronRight size={24} className="group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
 
-          {/* Botón Cerrar Sesión */}
+          {/* Botón Salir */}
           <button 
             onClick={logout}
-            className="w-full bg-slate-100 text-slate-500 font-bold py-4 rounded-2xl flex items-center justify-center space-x-2 hover:bg-red-50 hover:text-red-600 transition-all"
+            className="w-full bg-white/5 text-slate-500 font-black py-5 rounded-[2rem] flex items-center justify-center gap-2 hover:bg-rose-500/10 hover:text-rose-500 transition-all text-xs uppercase italic border border-white/5"
           >
-            <LogOut size={18} />
-            <span>Cerrar Sesión</span>
+            <LogOut size={16} />
+            <span>Cerrar Sesión Segura</span>
           </button>
         </div>
 
-        <div className="bg-slate-50 p-4 text-center">
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">TaxiA-CIMCO v2.0 • Seguridad y Confianza</p>
+        {/* Branding Inferior */}
+        <div className="pb-8 text-center">
+          <p className="text-[8px] text-slate-700 font-black uppercase tracking-[0.8em]">CIMCO LOGISTICS • CEIBA SOFTWARE</p>
         </div>
       </div>
     </div>

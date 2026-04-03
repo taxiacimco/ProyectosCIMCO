@@ -3,7 +3,7 @@
  * Lógica de negocio para despacho y filtrado por cooperativa en TAXIA CIMCO.
  */
 
-import { db } from "../../../firebase-admin.js";
+import { db } from "../../../firebase/firebase-admin.js";
 
 class DespatchService {
   /**

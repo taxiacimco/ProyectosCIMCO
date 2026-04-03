@@ -4,7 +4,7 @@
  */
 
 // Importamos las instancias ya configuradas desde nuestro punto central
-import { db, auth } from "../../../firebase-admin.js";
+import { db, auth } from "../../../firebase/firebase-admin.js";
 
 /**
  * Servicio de Administración

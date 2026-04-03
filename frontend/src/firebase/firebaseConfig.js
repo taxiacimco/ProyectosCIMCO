@@ -1,43 +1,43 @@
-import { initializeApp } from "firebase/app";
-import { getAuth, connectAuthEmulator } from "firebase/auth";
-import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
-import { getStorage, connectStorageEmulator } from "firebase/storage";
+/**
+ * PROYECTO: TAXIA CIMCO - Configuración Maestra Firebase (Frontend)
+ * Misión: Inicialización del SDK con persistencia de AuthDomain original.
+ * Arquitectura: Cliente de Infraestructura (Vite/React).
+ */
 
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
+import { getMessaging, isSupported } from "firebase/messaging";
+
+// 1. Configuración dinámica con Variables de Entorno y Fallbacks de seguridad
 const firebaseConfig = {
-  apiKey: "AIzaSyCm0Gb8KxhgnHe3W5P8p8hAn68VfuvvTs",
-  authDomain: "pelagic-chalice-467818-e1.firebaseapp.com",
-  projectId: "pelagic-chalice-467818-e1",
-  storageBucket: "pelagic-chalice-467818-e1.firebasestorage.app",
-  messagingSenderId: "191455248884",
-  appId: "1:191455248884:web:beec361b7e7ab77ed5b60d",
-  measurementId: "G-HT5L0XG5CH"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "pelagic-chalice-467818-e1.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "pelagic-chalice-467818-e1",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "pelagic-chalice-467818-e1.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "191106268804",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:191106268804:web:1bb4a7c7c8077b60880cd1"
 };
 
-// Inicializar Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const storage = getStorage(app);
+// 2. Inicialización de la App (Singleton Pattern para evitar duplicados en HMR de Vite)
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// ✅ DETECCIÓN DE ENTORNO PROFESIONAL
-const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+// 3. Exportación de Instancias de Servicios
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
 
-if (isLocal) {
-  console.warn("🚀 [CIMCO] Conectando a los Emuladores Locales de Firebase...");
-  
-  /**
-   * NOTA: Usamos 'localhost' preferentemente para evitar conflictos de CORS 
-   * con el motor de búsqueda del navegador.
-   */
-  connectAuthEmulator(auth, "http://localhost:9099", { disableWarnings: true });
-  connectFirestoreEmulator(db, "localhost", 8080);
-  connectStorageEmulator(storage, "localhost", 9199);
-  
-  // Guardamos en el objeto global para debugging si es necesario
-  window.firebaseAuth = auth;
-  window.firebaseDb = db;
-}
+// 4. Identificador de Aplicación para rutas sagradas de Firestore
+export const appId = "pelagic-chalice-467818-e1";
 
-// Exportaciones consistentes
-export { auth, db, storage };
+// 5. Configuración de Mensajería con Guardrail para Navegadores/SSR
+export const messaging = async () => {
+  if (typeof window !== 'undefined') {
+    const supported = await isSupported();
+    return supported ? getMessaging(app) : null;
+  }
+  return null;
+};
+
 export default app;

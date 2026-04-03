@@ -10,6 +10,9 @@
 
 body {
   margin: 0;
+  /* Fondo gris claro profesional para que resalten los paneles */
+  background-color: #f8f9fa; 
+  color: #333;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -17,21 +20,46 @@ body {
 
 /* 3. Optimizaciones para componentes de tu proyecto */
 @layer components {
-  /* Si necesitas algún botón o tarjeta que se repita mucho, puedes definirlo aquí */
+  /* Botón principal para formularios */
   .btn-primary {
-    @apply bg-blue-600 text-white px-6 py-2 rounded-xl font-semibold hover:bg-blue-700 transition duration-300;
+    @apply bg-blue-600 text-white px-6 py-2 rounded-xl font-semibold hover:bg-blue-700 transition duration-300 shadow-md;
+  }
+
+  /* Botón de éxito (Ideal para completar viajes o registros) */
+  .btn-success {
+    @apply bg-green-600 text-white px-6 py-2 rounded-xl font-semibold hover:bg-green-700 transition duration-300 shadow-md;
+  }
+
+  /* Estilo para el botón flotante de WhatsApp */
+  .btn-whatsapp {
+    @apply fixed bottom-5 right-5 bg-[#25D366] text-white p-4 rounded-full shadow-lg transition-transform hover:scale-110 z-[1000] flex items-center justify-center;
   }
 }
 
-/* 4. Correcciones para visualización en móviles */
+/* 4. Correcciones para visualización en móviles y multimedia */
 img, svg, video, canvas {
   display: block;
   max-width: 100%;
   height: auto;
 }
 
-/* Asegura que los inputs tengan un estilo limpio */
+/* Estilo limpio para campos de texto */
 input::placeholder, textarea::placeholder {
   color: #9ca3af;
   opacity: 1;
+}
+
+/* Mejora para el scrollbar en paneles laterales */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #999;
 }

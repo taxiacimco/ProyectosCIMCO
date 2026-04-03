@@ -1,136 +1,180 @@
 /**
  * src/modules/rides/services/rides.service.js
- * Lógica de negocio para viajes (rides) - TAXIA CIMCO
+ * Lógica de negocio, Asignación de Viajes y Liquidación - TAXIA CIMCO
  */
 
-import { db } from "../../../firebase-admin.js";
+// ✅ CORRECCIÓN QUIRÚRGICA: Ruta corregida incluyendo la carpeta /firebase/
+// Se mantiene el .js obligatorio para cumplimiento de ESM en Node 20
+import admin, { db } from "../../../firebase/firebase-admin.js";
+
+const appId = 'taxiacimco-app';
 
 class RideService {
-  /**
-   * Crear un nuevo viaje
-   * Soporta Motos (Directo) e Intermunicipales (Despacho)
-   */
-  async create(data) {
-    const docRef = await db.collection("rides").add({
-      ...data,
-      status: "pending",
-      createdAt: new Date(),
-    });
 
-    return {
-      id: docRef.id,
-      ...data,
-      status: "pending",
-    };
+  // =========================================================
+  // 🛡️ MÉTODOS DE INSTANCIA (CRUD REQUERIDO POR EL CONTROLADOR)
+  // =========================================================
+
+  async create(rideData) {
+    const docRef = db.collection("artifacts").doc(appId)
+                     .collection("public").doc("data")
+                     .collection("rides").doc();
+                     
+    await docRef.set({ ...rideData, id: docRef.id });
+    return { id: docRef.id, ...rideData };
   }
 
-  /**
-   * Obtener un viaje por ID
-   */
-  async findById(rideId) {
-    const snapshot = await db.collection("rides").doc(rideId).get();
-
-    if (!snapshot.exists) {
-      return null;
-    }
-
-    return {
-      id: snapshot.id,
-      ...snapshot.data(),
-    };
-  }
-
-  /**
-   * Listar viajes con filtros avanzados
-   * Maneja la separación entre Motos y Cooperativas
-   */
   async findAll(filters = {}) {
-    let query = db.collection("rides");
-
-    // Filtro por estado
-    if (filters.status) {
-      query = query.where("status", "==", filters.status);
+    let query = db.collection("artifacts").doc(appId)
+                  .collection("public").doc("data")
+                  .collection("rides");
+    
+    // Aplicación dinámica de filtros
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined) {
+         query = query.where(key, "==", value);
+      }
     }
-
-    // Filtro por tipo de flujo (Directo o Despacho)
-    if (filters.requiereDespachador !== undefined) {
-      query = query.where("requiereDespachador", "==", filters.requiereDespachador);
-    }
-
-    // Filtro para el Despachador de Cooperativa
-    if (filters.cooperativaSolicitada && filters.cooperativaSolicitada !== 'N/A') {
-      query = query.where("cooperativaSolicitada", "==", filters.cooperativaSolicitada);
-    }
-
-    // Filtro por Usuario/Pasajero
-    if (filters.requesterUid) {
-      query = query.where("requesterUid", "==", filters.requesterUid);
-    }
-
-    const snapshot = await query.orderBy("createdAt", "desc").get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    
+    const snapshot = await query.get();
+    if (snapshot.empty) return [];
+    
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
 
-  /**
-   * Asignar conductor a un viaje (Llamado por el Despachador)
-   */
-  static async assignDriver(rideId, driverId, assignedBy) {
-    const docRef = db.collection("rides").doc(rideId);
+  async findById(id) {
+    const docRef = db.collection("artifacts").doc(appId)
+                     .collection("public").doc("data")
+                     .collection("rides").doc(id);
+                     
+    const docSnap = await docRef.get();
+    if (!docSnap.exists) return null;
+    
+    return { id: docSnap.id, ...docSnap.data() };
+  }
 
-    await docRef.update({
-      driverId,
-      assignedBy,
-      status: "assigned",
-      assignedAt: new Date(),
+  async updateStatus(id, status) {
+    const docRef = db.collection("artifacts").doc(appId)
+                     .collection("public").doc("data")
+                     .collection("rides").doc(id);
+                     
+    await docRef.update({ 
+        status, 
+        updatedAt: admin.firestore.FieldValue.serverTimestamp() 
+    });
+    
+    const updatedSnap = await docRef.get();
+    return { id: updatedSnap.id, ...updatedSnap.data() };
+  }
+
+  // =========================================================
+  // ⚙️ MÉTODOS ESTÁTICOS (REGLAS DE NEGOCIO Y TRANSACCIONES)
+  // =========================================================
+
+  /**
+   * 🛡️ ACEPTAR VIAJE (CON VALIDACIÓN BANCARIA)
+   */
+  static async acceptRide(viajeId, conductorId) {
+    const rideRef = db.collection("artifacts").doc(appId)
+                      .collection("public").doc("data")
+                      .collection("rides").doc(viajeId);
+                      
+    const driverRef = db.collection("artifacts").doc(appId)
+                        .collection("public").doc("data")
+                        .collection("usuarios").doc(conductorId);
+
+    return await db.runTransaction(async (transaction) => {
+      const rideSnap = await transaction.get(rideRef);
+      if (!rideSnap.exists) throw new Error("VIAJE_NO_ENCONTRADO");
+      
+      const rideData = rideSnap.data();
+      if (rideData.status !== "pending") throw new Error("VIAJE_YA_TOMADO");
+      
+      const driverSnap = await transaction.get(driverRef);
+      if (driverSnap.exists) {
+         const driverData = driverSnap.data();
+         const saldo = driverData.saldo || 0;
+         if (saldo < -5000) {
+            throw new Error("SALDO_INSUFICIENTE");
+         }
+      }
+      
+      transaction.update(rideRef, {
+         status: "accepted",
+         driverId: conductorId,
+         acceptedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      return { id: viajeId, status: "accepted", driverId: conductorId };
+    });
+  }
+
+  static async asignarConductorCercano(latCliente, lngCliente, tipoVehiculoRequerido) {
+    const conductoresRef = db.collection("artifacts").doc(appId)
+                             .collection("public").doc("data")
+                             .collection("usuarios");
+
+    const snapshot = await conductoresRef
+      .where("rol", "in", ["conductor", "mototaxi", "motocarga"])
+      .where("estadoFisico", "==", "disponible")
+      .get();
+
+    if (snapshot.empty) return { success: false, message: "No hay conductores disponibles." };
+
+    let conductorMasCercano = null;
+    let distanciaMinima = 5; 
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      if (!data.ubicacionActual || data.tipoVehiculo !== tipoVehiculoRequerido) return;
+
+      const { lat, lng } = data.ubicacionActual;
+      const R = 6371; 
+      const dLat = (lat - latCliente) * (Math.PI / 180);
+      const dLon = (lng - lngCliente) * (Math.PI / 180);
+      const a = Math.sin(dLat/2)**2 + Math.cos(latCliente*(Math.PI/180)) * Math.cos(lat*(Math.PI/180)) * Math.sin(dLon/2)**2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const distancia = R * c;
+
+      if (distancia < distanciaMinima) {
+        distanciaMinima = distancia;
+        conductorMasCercano = { uid: doc.id, ...data, distanciaAprox: distancia };
+      }
     });
 
-    const updated = await docRef.get();
-    return { id: updated.id, ...updated.data() };
+    return conductorMasCercano ? { success: true, conductor: conductorMasCercano } : { success: false, message: "Fuera de rango." };
   }
 
-  /**
-   * Iniciar viaje
-   */
-  static async startTrip(rideId) {
-    const docRef = db.collection("rides").doc(rideId);
-    await docRef.update({
-      status: "in_progress",
-      startedAt: new Date(),
-    });
-    const updated = await docRef.get();
-    return { id: updated.id, ...updated.data() };
-  }
-
-  /**
-   * Finalizar viaje
-   */
   static async endTrip(rideId) {
-    const docRef = db.collection("rides").doc(rideId);
-    await docRef.update({
-      status: "completed",
-      completedAt: new Date(),
-    });
-    const updated = await docRef.get();
-    return { id: updated.id, ...updated.data() };
-  }
+    const rideRef = db.collection("artifacts").doc(appId)
+                      .collection("public").doc("data")
+                      .collection("rides").doc(rideId);
 
-  /**
-   * Actualizar estado genérico (Mantenido por compatibilidad)
-   */
-  async updateStatus(rideId, status) {
-    const docRef = db.collection("rides").doc(rideId);
-    await docRef.set(
-      {
-        status,
-        updatedAt: new Date(),
-      },
-      { merge: true }
-    );
-    return { success: true };
+    return await db.runTransaction(async (transaction) => {
+      const rideSnap = await transaction.get(rideRef);
+      if (!rideSnap.exists) throw new Error("Viaje no encontrado");
+
+      const rideData = rideSnap.data();
+      const { driverId, tarifa, tipoVehiculo } = rideData;
+
+      let montoComision = (tipoVehiculo === "motocarga") ? 500 : Number(tarifa) * 0.10;
+
+      const responsableRef = db.collection("artifacts").doc(appId)
+                              .collection("public").doc("data")
+                              .collection("usuarios").doc(driverId);
+
+      transaction.update(responsableRef, {
+        saldo: admin.firestore.FieldValue.increment(-montoComision)
+      });
+
+      transaction.update(rideRef, {
+        status: "completed",
+        completedAt: admin.firestore.FieldValue.serverTimestamp(),
+        comisionAplicada: montoComision
+      });
+
+      return { success: true, comision: montoComision };
+    });
   }
 }
 
