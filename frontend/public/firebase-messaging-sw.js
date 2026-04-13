@@ -1,8 +1,8 @@
+// Versión Arquitectura: V8.0 - Gestión Táctica de Flota y Notificaciones PUSH
 /**
- * JAGUA PRO - FIREBASE MESSAGING SERVICE WORKER (FUSIÓN V3.2)
+ * JAGUA PRO - FIREBASE MESSAGING SERVICE WORKER
  * Ubicación: frontend/public/firebase-messaging-sw.js
- * Objetivo: Gestión táctica de flota, notificaciones de alta prioridad 
- * y aceptación de viajes mediante Webhook dinámico.
+ * Objetivo: Gestión táctica de flota con UI Ciber-Neo-Brutalista y Webhooks de aceptación.
  */
 
 importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js');
@@ -10,78 +10,90 @@ importScripts('https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-comp
 
 /**
  * 1. CONFIGURACIÓN DUAL Y CAPTURA DE PARÁMETROS
- * Soporta inicialización vía URL Params (robusto para PWA) o self.name.
  */
 const urlParams = new URLSearchParams(self.location.search);
 const configParam = urlParams.get('config');
-const dynamicApiUrl = urlParams.get('apiUrl'); // URL Base de la API (inyectada desde el registro)
+const dynamicApiUrl = urlParams.get('apiUrl'); 
 
-let firebaseConfig = {};
-try {
-    if (configParam) {
+let firebaseConfig = {
+    apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
+    authDomain: "pelagic-chalice-467818-e1.firebaseapp.com",
+    projectId: "pelagic-chalice-467818-e1",
+    storageBucket: "pelagic-chalice-467818-e1.firebasestorage.app",
+    messagingSenderId: "191106268804",
+    appId: "1:191106268804:web:1bb4a7c7847c20c0827255"
+};
+
+if (configParam) {
+    try {
         firebaseConfig = JSON.parse(decodeURIComponent(configParam));
-    } else if (self.name && self.name.startsWith('{')) {
-        firebaseConfig = JSON.parse(self.name);
+    } catch (e) {
+        console.error('[CIMCO SW] Error al parsear config:', e);
     }
-} catch (e) {
-    console.error('[CIMCO SW] Error crítico al parsear config de Firebase:', e);
 }
 
 if (firebaseConfig.apiKey) {
     firebase.initializeApp(firebaseConfig);
     const messaging = firebase.messaging();
 
-    /**
-     * 2. MANEJO DE MENSAJES EN SEGUNDO PLANO
-     * Implementación de visuales "Ciber-Neo-Brutalistas" y patrones de vibración.
-     */
+    // Manejo de notificaciones en segundo plano
     messaging.onBackgroundMessage((payload) => {
-        console.log('[CIMCO SW] Alerta de alta prioridad recibida:', payload);
-
-        const notificationTitle = payload.data?.title || "NUEVO VIAJE DISPONIBLE";
-        const notificationOptions = {
-            body: payload.data?.body || "Hay un servicio cerca de tu ubicación.",
-            icon: '/assets/pwa-192x192.png',
-            badge: '/assets/favicon-cimco.png',
-            tag: payload.data?.viajeId || 'viaje-asignado',
-            renotify: true,
-            requireInteraction: true,
-            // ⚡ Patrón de vibración táctico (Secuencia de atención)
-            vibrate: [500, 110, 500, 110, 450, 110, 200, 110, 170, 40, 450, 110, 200, 110],
-            data: {
-                url: payload.data?.url || '/ConductorPanel',
-                viajeId: payload.data?.viajeId,
-                conductorId: payload.data?.conductorId,
-                apiBase: dynamicApiUrl
-            },
-            actions: [
-                { action: 'accept', title: '✅ ACEPTAR VIAJE', icon: '/assets/check-icon.png' },
-                { action: 'close', title: 'IGNORAR' }
-            ]
-        };
-
-        return self.registration.showNotification(notificationTitle, notificationOptions);
+        console.log('[CIMCO SW] Mensaje recibido en background:', payload);
     });
 }
 
 /**
- * 3. GESTIÓN DE INTERACCIÓN (Notification Click)
- * Fusión de Lógica: Apertura de ventana + Aceptación Dinámica (Silent Fetch).
+ * 2. EVENTO PUSH: Personalización Ciber-Neo-Brutalista
  */
-self.addEventListener('notificationclick', (event) => {
-    const notification = event.notification;
+self.addEventListener('push', function(event) {
+    if (event.data) {
+        const data = event.data.json();
+        const notificationData = data.notification || data.data;
+
+        const title = notificationData.title || "Nuevo Viaje - TAXIA CIMCO";
+        const options = {
+            body: notificationData.body || "Tienes una nueva solicitud cerca.",
+            // ✅ RUTA CORREGIDA: Apuntando a la nueva estructura de assets
+            icon: '/assets/logo-cimco.png', 
+            badge: '/assets/badge-icon.png', 
+            vibrate: [200, 100, 200],
+            tag: notificationData.tag || 'request-notification',
+            data: {
+                url: notificationData.url || '/ConductorPanel',
+                viajeId: notificationData.viajeId,
+                conductorId: notificationData.conductorId,
+                apiBase: dynamicApiUrl || 'https://taxia-cimco-backend.web.app'
+            },
+            actions: [
+                {
+                    action: 'accept',
+                    title: '✅ ACEPTAR VIAJE',
+                    icon: '/assets/check-icon.png' 
+                },
+                {
+                    action: 'close',
+                    title: 'IGNORAR',
+                    icon: '/assets/cancel-icon.png' 
+                }
+            ]
+        };
+
+        event.waitUntil(self.registration.showNotification(title, options));
+    }
+});
+
+/**
+ * 3. INTERACCIÓN: Lógica de Aceptación Rápida
+ */
+self.addEventListener('notificationclick', function(event) {
     const action = event.action;
-    const { url, viajeId, conductorId, apiBase } = notification.data;
-    const urlToOpen = new URL(url, self.location.origin).href;
+    const notification = event.notification;
+    const { viajeId, conductorId, apiBase, url } = notification.data;
 
     notification.close();
 
-    if (action === 'close') return;
+    const urlToOpen = new URL(url, self.location.origin).href;
 
-    /**
-     * CASO A: ACCIÓN 'ACCEPT' (Aceptación Quirúrgica)
-     * Se realiza la petición al backend antes de enfocar la aplicación.
-     */
     if (action === 'accept' && apiBase && viajeId) {
         event.waitUntil(
             fetch(`${apiBase}/api/rides/accept-fast`, {
@@ -99,18 +111,11 @@ self.addEventListener('notificationclick', (event) => {
             })
         );
     } 
-    /**
-     * CASO B: CLIC GENERAL
-     * Redirección estándar al panel correspondiente.
-     */
-    else {
+    else if (action !== 'close') {
         event.waitUntil(focusOrOpenWindow(event, urlToOpen));
     }
 });
 
-/**
- * 4. UTILIDAD: GESTIÓN DE VENTANAS
- */
 function focusOrOpenWindow(event, url) {
     return clients.matchAll({ type: 'window', includeUncontrolled: true })
         .then((windowClients) => {
@@ -120,6 +125,8 @@ function focusOrOpenWindow(event, url) {
                     return client.focus();
                 }
             }
-            if (clients.openWindow) return clients.openWindow(url);
+            if (clients.openWindow) {
+                return clients.openWindow(url);
+            }
         });
 }

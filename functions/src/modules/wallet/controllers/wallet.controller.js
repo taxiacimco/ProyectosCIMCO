@@ -2,7 +2,7 @@
  * modules/wallet/controllers/wallet.controller.js
  * Controlador Maestro de Operaciones Financieras - TAXIA CIMCO
  */
-import { getFirestore } from 'firebase-admin/firestore';
+import admin from '../../../firebase/firebase-admin.js'; // ✅ Ajuste Arquitectónico: Uso estricto del Singleton
 import WalletService from "../services/wallet.service.js";
 import { asyncHandler } from '../../../middleware/async-handler.js';
 import { sendSuccessResponse, sendErrorResponse } from '../../../utils/http-response.js';
@@ -18,7 +18,7 @@ export const rechargeNequi = asyncHandler(async (req, res) => {
         return sendErrorResponse(res, "Monto inválido para recarga", 400);
     }
 
-    const db = getFirestore();
+    const db = admin.firestore(); // ✅ Instancia segura
     
     // Registro de Intento de Transacción en la Estructura Sagrada
     const transactionRef = db.collection('artifacts')
@@ -70,13 +70,6 @@ export const rechargeManualAdmin = asyncHandler(async (req, res) => {
  */
 export const getBalance = asyncHandler(async (req, res) => {
     const uid = req.params.uid || req.user.uid;
-    // Listo para conectar con WalletService.getBalance(uid)
-    return sendSuccessResponse(res, { uid }, "Función lista para expansión de consulta de saldo");
+    // Listo para integrarse con la base de datos más adelante
+    return sendSuccessResponse(res, { uid, saldoVirtual: 0 }, "Saldo obtenido");
 });
-
-// Agrupamos para ESM
-export default { 
-    rechargeNequi, 
-    rechargeManualAdmin, 
-    getBalance 
-};

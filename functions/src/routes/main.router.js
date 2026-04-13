@@ -1,52 +1,20 @@
-/**
- * functions/src/routes/main.router.js
- * Enrutador principal: Conecta todos los módulos de la aplicación TAXIA CIMCO.
- */
-
 import { Router } from 'express';
-import HttpResponse from '../utils/http-response.js';
-
-import authRouter from './auth.routes.js';
-import ridesRouter from './rides.routes.js';       
-import driverRouter from './driver.routes.js';     
-import adminRouter from './admin.routes.js';       
-import despatchRouter from './despatch.routes.js'; 
-import passwordRouter from './password.routes.js'; 
-import notificationRouter from './notification.routes.js'; 
-import whatsappRouter from './whatsapp.router.js'; 
 
 const router = Router();
 
-// ============================================================
-// HEALTH CHECK (Monitoreo del sistema)
-// ============================================================
+// Ruta de diagnóstico del Router
 router.get('/health', (req, res) => {
-    return HttpResponse.ok(res, {
-        environment: process.env.NODE_ENV || 'development',
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString()
-    }, "API TAXIA-CIMCO Operativa");
+    res.status(200).send("ROUTER CIMCO: CONECTADO Y LIMPIO");
 });
 
-// ============================================================
-// ENLACE DE MÓDULOS (ESTRUCTURA PLANA Y LIMPIA)
-// ============================================================
+// 🚧 MANTÉN TODO ESTO COMENTADO POR AHORA 🚧
+// import authRouter from './auth.routes.js';
+// import ridesRouter from './rides.routes.js';       
+// import driverRouter from './driver.routes.js';     
+// ... (el resto de tus importaciones)
 
-router.use('/auth', authRouter);
-router.use('/password', passwordRouter);
-
-// ✅ Ruta de viajes unificada (Se eliminó el /v1)
-router.use('/rides', ridesRouter);
-
-router.use('/drivers', driverRouter);
-router.use('/despatch', despatchRouter);
-router.use('/admin', adminRouter);
-router.use('/notifications', notificationRouter);
-router.use('/whatsapp', whatsappRouter);
-
-// 🚨 CAPTURADOR DE RUTAS INEXISTENTES (404 FALLBACK)
-router.use('*', (req, res) => {
-    return HttpResponse.notFound(res, `La ruta [${req.method}] ${req.originalUrl} no existe en el servidor TAXIA CIMCO.`);
-});
+// router.use('/auth', authRouter);
+// router.use('/rides', ridesRouter);
+// ... (el resto de tus rutas)
 
 export default router;

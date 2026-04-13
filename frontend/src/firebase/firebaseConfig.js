@@ -23,21 +23,12 @@ const firebaseConfig = {
 // 2. Inicialización de la App (Singleton Pattern para evitar duplicados en HMR de Vite)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// 3. Exportación de Instancias de Servicios
+// 3. Exportación de Instancias
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
-// 4. Identificador de Aplicación para rutas sagradas de Firestore
-export const appId = "pelagic-chalice-467818-e1";
-
-// 5. Configuración de Mensajería con Guardrail para Navegadores/SSR
-export const messaging = async () => {
-  if (typeof window !== 'undefined') {
-    const supported = await isSupported();
-    return supported ? getMessaging(app) : null;
-  }
-  return null;
-};
+// 4. Motor de Mensajería (Asíncrono por compatibilidad)
+export const messaging = getMessaging(app);
 
 export default app;

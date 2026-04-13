@@ -1,24 +1,33 @@
 {
-"name": "TAXIA CIMCO - Conductor Intermunicipal",
-"short_name": "TAXIA Inter",
-"description": "App PWA para conductores intermunicipales de TAXIA CIMCO.",
-"start_url": "/roles/interconductor/index.html",
-"display": "standalone",
-"background_color": "#0f172a",
-"theme_color": "#0d9488",
-"orientation": "portrait",
-"icons": [
-{
-"src": "/icons/conductor-192.png",
-"sizes": "192x192",
-"type": "image/png",
-"purpose": "any"
-},
-{
-"src": "/assets/pwa-512x512.png",
-"sizes": "512x512",
-"type": "image/png",
-"purpose": "maskable"
-}
-]
+  "_version_arquitectura": "V8.2 - Sincronización de Iconos PWA",
+  "name": "TAXIA CIMCO - Conductor Intermunicipal",
+  "short_name": "TAXIA Inter",
+  "description": "App PWA para conductores intermunicipales de TAXIA CIMCO.",
+  "start_url": "/roles/interconductor/index.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0d9488",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/pwa-icons/conductor-72.png",
+      "sizes": "72x72",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/pwa-icons/conductor-96.png",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/pwa-icons/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/pwa-icons/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
 }

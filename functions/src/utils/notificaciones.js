@@ -1,9 +1,9 @@
-// functions/src/utils/notificaciones.js
-import admin from '../firebase/firebase-admin.js'; // <- Cambio vital: Apuntamos al Singleton
-
 /**
- * Envía una notificación Push a un conductor específico
+ * 📲 TAXIA CIMCO - Notificaciones Push Service (V7 Ready)
+ * Arquitectura Libre de functions.config()
  */
+import admin from '../firebase/firebase-admin.js';
+
 export const enviarNotificacionPush = async (token, content, extraData = {}) => {
     if (!token) return { success: false, error: "Token no proporcionado" };
 

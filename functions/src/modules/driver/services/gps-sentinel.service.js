@@ -6,7 +6,7 @@
  * ARQUITECTURA: ESM (Módulos de ECMAScript)
  */
 
-import admin from 'firebase-admin';
+import admin from '../../../firebase/firebase-admin.js';
 
 /**
  * Verifica la salud del GPS de los conductores marcados como 'online'.

@@ -1,3 +1,9 @@
+// Versión Arquitectura: V1.1 - Optimización de Gitignore (Logs y Caché Firebase)
+/**
+ * .gitignore - TAXIA CIMCO
+ * Misión: Protección de archivos sensibles, exclusión de dependencias y optimización de repositorio.
+ */
+
 ============================================================
 🛠️ BUILD (salida de TypeScript / Vite / React)
 ============================================================
@@ -53,6 +59,7 @@ npm-debug.log
 yarn-debug.log
 yarn-error.log
 *-debug.log
+*.log
 
 ============================================================
 📂 TIPADO ANTIGUO O AUTO-GENERADO
@@ -77,6 +84,7 @@ Thumbs.db
 *.cache
 .firebaserc
 _respaldos_backend/
+.firebase/
 
 ============================================================
 🧪 PRUEBAS Y SCRIPTS TEMPORALES
@@ -84,4 +92,5 @@ _respaldos_backend/
 tests/
 pruebas/
 temp/
-tmp/
+*.tmp
+*.bak

@@ -3,16 +3,15 @@
  * Lógica de negocio, Asignación de Viajes y Liquidación - TAXIA CIMCO
  */
 
-// ✅ CORRECCIÓN QUIRÚRGICA: Ruta corregida incluyendo la carpeta /firebase/
-// Se mantiene el .js obligatorio para cumplimiento de ESM en Node 20
 import admin, { db } from "../../../firebase/firebase-admin.js";
+import { enviarNotificacionNuevaSolicitud } from "../notifications/services/notification.service.js";
 
 const appId = 'taxiacimco-app';
 
 class RideService {
 
   // =========================================================
-  // 🛡️ MÉTODOS DE INSTANCIA (CRUD REQUERIDO POR EL CONTROLADOR)
+  // 🛡️ MÉTODOS DE INSTANCIA (CRUD & LOGIC)
   // =========================================================
 
   async create(rideData) {
@@ -29,121 +28,108 @@ class RideService {
                   .collection("public").doc("data")
                   .collection("rides");
     
-    // Aplicación dinámica de filtros
     for (const [key, value] of Object.entries(filters)) {
       if (value !== undefined) {
          query = query.where(key, "==", value);
       }
     }
-    
+
     const snapshot = await query.get();
-    if (snapshot.empty) return [];
-    
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   }
 
   async findById(id) {
-    const docRef = db.collection("artifacts").doc(appId)
-                     .collection("public").doc("data")
-                     .collection("rides").doc(id);
-                     
-    const docSnap = await docRef.get();
-    if (!docSnap.exists) return null;
-    
-    return { id: docSnap.id, ...docSnap.data() };
+    const doc = await db.collection("artifacts").doc(appId)
+                        .collection("public").doc("data")
+                        .collection("rides").doc(id).get();
+    return doc.exists ? { id: doc.id, ...doc.data() } : null;
   }
 
   async updateStatus(id, status) {
-    const docRef = db.collection("artifacts").doc(appId)
-                     .collection("public").doc("data")
-                     .collection("rides").doc(id);
-                     
-    await docRef.update({ 
-        status, 
-        updatedAt: admin.firestore.FieldValue.serverTimestamp() 
-    });
-    
-    const updatedSnap = await docRef.get();
-    return { id: updatedSnap.id, ...updatedSnap.data() };
-  }
-
-  // =========================================================
-  // ⚙️ MÉTODOS ESTÁTICOS (REGLAS DE NEGOCIO Y TRANSACCIONES)
-  // =========================================================
-
-  /**
-   * 🛡️ ACEPTAR VIAJE (CON VALIDACIÓN BANCARIA)
-   */
-  static async acceptRide(viajeId, conductorId) {
     const rideRef = db.collection("artifacts").doc(appId)
                       .collection("public").doc("data")
-                      .collection("rides").doc(viajeId);
-                      
-    const driverRef = db.collection("artifacts").doc(appId)
-                        .collection("public").doc("data")
-                        .collection("usuarios").doc(conductorId);
-
-    return await db.runTransaction(async (transaction) => {
-      const rideSnap = await transaction.get(rideRef);
-      if (!rideSnap.exists) throw new Error("VIAJE_NO_ENCONTRADO");
-      
-      const rideData = rideSnap.data();
-      if (rideData.status !== "pending") throw new Error("VIAJE_YA_TOMADO");
-      
-      const driverSnap = await transaction.get(driverRef);
-      if (driverSnap.exists) {
-         const driverData = driverSnap.data();
-         const saldo = driverData.saldo || 0;
-         if (saldo < -5000) {
-            throw new Error("SALDO_INSUFICIENTE");
-         }
-      }
-      
-      transaction.update(rideRef, {
-         status: "accepted",
-         driverId: conductorId,
-         acceptedAt: admin.firestore.FieldValue.serverTimestamp()
-      });
-      
-      return { id: viajeId, status: "accepted", driverId: conductorId };
-    });
+                      .collection("rides").doc(id);
+    await rideRef.update({ status, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    return this.findById(id);
   }
 
-  static async asignarConductorCercano(latCliente, lngCliente, tipoVehiculoRequerido) {
-    const conductoresRef = db.collection("artifacts").doc(appId)
-                             .collection("public").doc("data")
-                             .collection("usuarios");
+  /**
+   * NOTIFICACIÓN TÁCTICA A CONDUCTORES CERCANOS
+   * @param {string} viajeId 
+   * @param {object} viajeData 
+   */
+  async notifyNearbyDrivers(viajeId, viajeData) {
+    const { origen, tipoServicio } = viajeData;
+    
+    try {
+        // 1. Obtener conductores online con disponibilidad inmediata
+        // Path Sagrado: artifacts/taxiacimco-app/public/data/conductores_online
+        const conductoresSnap = await db.collection("artifacts")
+            .doc(appId)
+            .collection("public")
+            .doc("data")
+            .collection("conductores_online")
+            .where("tipoVehiculo", "==", tipoServicio) // Mapeo de tipo de servicio a vehículo
+            .where("estado", "==", "disponible")
+            .get();
 
-    const snapshot = await conductoresRef
-      .where("rol", "in", ["conductor", "mototaxi", "motocarga"])
-      .where("estadoFisico", "==", "disponible")
-      .get();
+        if (conductoresSnap.empty) {
+            console.log(`ℹ️ [RideService] No hay conductores online disponibles para ${tipoServicio}.`);
+            return;
+        }
 
-    if (snapshot.empty) return { success: false, message: "No hay conductores disponibles." };
+        // 2. Filtrado por cercanía (Lógica de negocio: 5km)
+        const conductoresCerca = conductoresSnap.docs.filter(doc => {
+            const c = doc.data();
+            if (!c.l || !origen) return false;
+            
+            // Usamos la utilidad de distancia privada
+            const distancia = this._calculateDistance(origen.lat, origen.lng, c.l[0], c.l[1]);
+            return distancia <= 5; 
+        });
 
-    let conductorMasCercano = null;
-    let distanciaMinima = 5; 
+        console.log(`🎯 [RideService] Conductores en radio de acción (5km): ${conductoresCerca.length}`);
 
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      if (!data.ubicacionActual || data.tipoVehiculo !== tipoVehiculoRequerido) return;
+        // 3. Consolidar Tokens FCM y disparar Push
+        let allTokens = [];
+        for (const doc of conductoresCerca) {
+            const conductor = doc.data();
+            if (conductor.fcmTokens && Array.isArray(conductor.fcmTokens)) {
+                allTokens = [...allTokens, ...conductor.fcmTokens];
+            } else if (conductor.fcmToken) {
+                allTokens.push(conductor.fcmToken);
+            }
+        }
 
-      const { lat, lng } = data.ubicacionActual;
-      const R = 6371; 
-      const dLat = (lat - latCliente) * (Math.PI / 180);
-      const dLon = (lng - lngCliente) * (Math.PI / 180);
-      const a = Math.sin(dLat/2)**2 + Math.cos(latCliente*(Math.PI/180)) * Math.cos(lat*(Math.PI/180)) * Math.sin(dLon/2)**2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      const distancia = R * c;
+        const tokensValidos = [...new Set(allTokens)].filter(t => t && t.length > 10);
 
-      if (distancia < distanciaMinima) {
-        distanciaMinima = distancia;
-        conductorMasCercano = { uid: doc.id, ...data, distanciaAprox: distancia };
-      }
-    });
+        if (tokensValidos.length > 0) {
+            await enviarNotificacionNuevaSolicitud(tokensValidos, viajeId, viajeData);
+            console.log(`✅ [RideService] Notificaciones enviadas a ${tokensValidos.length} dispositivos.`);
+        }
 
-    return conductorMasCercano ? { success: true, conductor: conductorMasCercano } : { success: false, message: "Fuera de rango." };
+    } catch (error) {
+        throw new Error(`Error en notifyNearbyDrivers: ${error.message}`);
+    }
   }
+
+  /**
+   * UTILIDAD: Cálculo de distancia Haversine
+   */
+  _calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Radio de la Tierra en km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  // =========================================================
+  // 💰 LÓGICA DE LIQUIDACIÓN Y CIERRE
+  // =========================================================
 
   static async endTrip(rideId) {
     const rideRef = db.collection("artifacts").doc(appId)
@@ -155,7 +141,9 @@ class RideService {
       if (!rideSnap.exists) throw new Error("Viaje no encontrado");
 
       const rideData = rideSnap.data();
-      const { driverId, tarifa, tipoVehiculo } = rideData;
+      const { driverId, tarifa, tipoVehiculo, status } = rideData;
+
+      if (status === "completed") throw new Error("Viaje ya liquidado");
 
       let montoComision = (tipoVehiculo === "motocarga") ? 500 : Number(tarifa) * 0.10;
 

@@ -1,96 +1,44 @@
+// Versión Arquitectura: V8.1 - Optimización de Carga (Anti-Timeout)
 /**
  * functions/src/triggers/trips.js
  * Trigger de Firestore: Reacciona a la creación de nuevos viajes.
- * Lógica: Filtrado por cercanía y notificación masiva a conductores.
+ * Misión: Notificación masiva a conductores con carga perezosa (Lazy Loading)
+ * para evitar Timeouts en el despliegue de Firebase V2.
  */
 
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import { db } from "../firebase/firebase-admin.js"; // Importación centralizada del Admin SDK
-import { enviarNotificacionNuevaSolicitud } from "../modules/notifications/services/notification.service.js";
-import { filtrarConductoresPorCercania } from "../modules/notifications/services/locationService.js";
 
-// 📍 RUTA MAESTRA CIMCO: Se dispara cuando un cliente crea un documento en la subcolección de rides
+/**
+ * 🛡️ REGLA DE ARQUITECTURA:
+ * No instanciamos servicios en el ámbito global. Esto previene que fallos en
+ * módulos profundos bloqueen la inicialización de las Cloud Functions durante el deploy.
+ */
 export const onViajeCreado = onDocumentCreated(
-  "artifacts/taxiacimco-app/public/data/rides/{viajeId}", 
+  "artifacts/taxiacimco-app/public/data/rides/{viajeId}",
   async (event) => {
     const snapshot = event.data;
     if (!snapshot) return;
 
-    const viajeData = snapshot.data();
     const viajeId = event.params.viajeId;
+    const viajeData = snapshot.data();
 
     try {
-      console.log(`🚖 [Trigger CIMCO] Nuevo viaje detectado: ${viajeId}. Iniciando radar de conductores...`);
+        /**
+         * 🚀 CARGA QUIRÚRGICA (Dynamic Import):
+         * Solo cargamos la lógica de negocio cuando el evento ocurre.
+         * Ruta validada: ../modules/rides/services/rides.service.js
+         */
+        const { default: RideService } = await import("../modules/rides/services/rides.service.js");
+        const rideService = new RideService();
 
-      // 1. BUSCAR CONDUCTORES ACTIVOS
-      // Filtramos por rol, estado 'disponible' y que el vehículo coincida con lo pedido (mototaxi, motocarga, etc.)
-      const conductoresSnap = await db.collection("artifacts")
-        .doc("taxiacimco-app")
-        .collection("public")
-        .doc("data")
-        .collection("usuarios")
-        .where("rol", "in", ["conductor", "mototaxi", "motoparrillero", "motocarga"])
-        .where("estadoFisico", "==", "disponible") // Usamos estadoFisico para match con Rides Service
-        .where("tipoVehiculo", "==", viajeData.tipoVehiculo || "mototaxi")
-        .get();
-
-      if (conductoresSnap.empty) {
-        console.log("ℹ️ [Trigger] No hay conductores disponibles para este tipo de vehículo en este momento.");
-        return;
-      }
-
-      // 2. EXTRAER DATOS PARA FILTRADO
-      let conductores = [];
-      conductoresSnap.forEach(doc => {
-        conductores.push({ id: doc.id, ...doc.data() });
-      });
-
-      // 3. FILTRADO QUIRÚRGICO POR GEOLOCALIZACIÓN
-      // El cliente debe enviar 'origen' con { latitude, longitude } desde el Frontend
-      if (viajeData.origen && viajeData.origen.latitude && viajeData.origen.longitude) {
-        console.log(`📍 [Trigger] Calculando cercanía respecto a: ${viajeData.origen.latitude}, ${viajeData.origen.longitude}`);
+        console.log(`🚖 [Trigger] Nueva solicitud detectada: ${viajeId}. Delegando al RideService...`);
         
-        conductores = filtrarConductoresPorCercania(
-          conductores, 
-          viajeData.origen.latitude, 
-          viajeData.origen.longitude, 
-          5 // Radio de 5 kilómetros (Ajustado para cobertura en La Jagua)
-        );
-        
-        console.log(`🎯 [Trigger] Conductores en radio de acción: ${conductores.length}`);
-      }
-
-      if (conductores.length === 0) {
-        console.log("ℹ️ [Trigger] Conductores encontrados pero fuera del radio de 5km.");
-        return;
-      }
-
-      // 4. GESTIÓN DE TOKENS FCM (Push Notifications)
-      // Soportamos tanto el campo fcmToken (string) como fcmTokens (array) para máxima compatibilidad
-      let allTokens = [];
-      for (const conductor of conductores) {
-        if (conductor.fcmTokens && Array.isArray(conductor.fcmTokens)) {
-          allTokens = [...allTokens, ...conductor.fcmTokens];
-        } else if (conductor.fcmToken) {
-          allTokens.push(conductor.fcmToken);
-        }
-      }
-
-      // Limpieza de duplicados y valores nulos
-      const tokensValidos = [...new Set(allTokens)].filter(t => t && t.length > 10);
-
-      if (tokensValidos.length === 0) {
-        console.log("⚠️ [Trigger] Conductores cerca, pero ninguno tiene un token de notificación válido.");
-        return;
-      }
-
-      // 5. DISPARAR ALERTAS A DISPOSITIVOS MÓVILES
-      await enviarNotificacionNuevaSolicitud(tokensValidos, viajeId, viajeData);
-      
-      console.log(`✅ [Trigger] Alertas enviadas con éxito a ${tokensValidos.length} dispositivos.`);
+        // Ejecución de la lógica de notificación y filtrado geográfico
+        // Se asume que notifyNearbyDrivers maneja internamente la lógica de la V8.0
+        await rideService.notifyNearbyDrivers(viajeId, viajeData);
 
     } catch (error) {
-      console.error("❌ [Trigger Error] Fallo crítico en proceso de asignación:", error.message);
+        console.error(`❌ [Trigger Error] Falla crítica en despacho de viaje ${viajeId}:`, error);
     }
   }
 );

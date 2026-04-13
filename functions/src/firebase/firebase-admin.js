@@ -1,5 +1,6 @@
+// Versión Arquitectura: V1.1 - Configuración Centralizada de Servicios Nucleares
 /**
- * src/firebase/firebase-admin.js
+ * functions/src/firebase/firebase-admin.js
  * CONFIGURACIÓN CENTRALIZADA DE FIREBASE ADMIN (BACKEND)
  * Arquitectura TAXIA CIMCO - Backend (Node.js 20 / ESM)
  */
@@ -13,9 +14,10 @@ if (!admin.apps.length) {
 }
 
 // 2. Exportar Instancias de Servicios Nucleares para el Backend
+// Se exportan con nombres claros para facilitar su uso en la capa de servicios
 export const db = admin.firestore();
 export const auth = admin.auth();
-export const messaging = admin.messaging(); // ✅ INTEGRADO PARA PUSH NOTIFICATIONS
+export const messaging = admin.messaging(); // Integrado para Push Notifications (FCM)
 export const storage = admin.storage();
 
 // ============================================================================
@@ -24,8 +26,7 @@ export const storage = admin.storage();
 const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
 
 if (isEmulator) {
-    console.log("🛠️ [CIMCO ADMIN] Modo Emulador detectado en el Backend.");
-    // El Admin SDK se conecta automáticamente a los emuladores definidos en firebase.json
+    console.log("🛠️ [CIMCO ADMIN] Modo Emulador detectado. Conexión local activa.");
 }
 
 export default admin;

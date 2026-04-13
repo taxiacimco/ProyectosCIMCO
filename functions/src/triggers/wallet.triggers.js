@@ -3,48 +3,41 @@
  * Arquitectura: Event-Driven (Cloud Functions V2)
  * Misión: Reaccionar a eventos financieros en la Ruta Sagrada.
  */
-
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions";
+import admin from "../firebase/firebase-admin.js";
 
-// Importaciones adaptadas a tu árbol de directorios exacto
-// Verifica que estas funciones existan en sus respectivos servicios
-import { sendPushNotification } from "../modules/notifications/services/notification.service.js";
+// 🚨 BLOQUEADO PARA V7: Comentamos la importación que causa el crash
+// import { enviarNotificacionPush } from "../utils/notificaciones.js";
+
 import { actualizarSaldoWallet } from "../modules/wallet/services/wallet.service.js";
 
-/**
- * ⚡ TRIGGER: onNuevaTransaccion
- * Se activa automáticamente cuando se crea un documento en la sub-colección de transacciones.
- */
 export const onNuevaTransaccion = onDocumentCreated(
-  "artifacts/taxiacimco-app/public/data/usuarios/{uid}/transacciones/{txId}",
-  async (event) => {
-    const snapshot = event.data;
-    if (!snapshot) return;
+    "artifacts/taxiacimco-app/public/data/billeteras/{walletId}/transacciones/{transaccionId}",
+    async (event) => {
+        const snapshot = event.data;
+        if (!snapshot) return null;
 
-    const data = snapshot.data();
-    const { uid } = event.params;
-    const { tipo, monto, estado } = data;
+        const data = snapshot.data();
+        const { walletId, transaccionId } = event.params;
+        const monto = data.monto;
+        const estado = data.estado;
 
-    logger.info(`🔔 Transacción detectada [${tipo}] para usuario: ${uid}`);
+        // 🛡️ REGLA DE SEGURIDAD: Solo procesar si el estado es EXACTAMENTE "COMPLETADO"
+        if (estado !== "COMPLETADO") {
+            logger.warn(`⚠️ [IGNORADO] Transacción ${transaccionId} no procesada. Estado: ${estado}`);
+            return null; // Detenemos la función aquí, protegiendo el saldo
+        }
 
-    try {
-      // 1. FILTRO DE SEGURIDAD: Solo procesamos recargas completadas
-      if (tipo === "RECARGA_EXITOSA" && estado === "COMPLETADO") {
-        
-        // 2. ACTUALIZACIÓN DE SALDO EN NODE.JS
-        await actualizarSaldoWallet(uid, monto);
-        logger.info(`💰 Saldo actualizado para ${uid}: +${monto}`);
-
-        // 3. NOTIFICACIÓN PUSH AL CELULAR
-        const titulo = "¡Recarga Exitosa! 🚀";
-        const mensaje = `Se han acreditado $${monto} a tu billetera CIMCO.`;
-        
-        await sendPushNotification(uid, titulo, mensaje);
-        logger.info(`📲 Notificación enviada con éxito a ${uid}`);
-      }
-    } catch (error) {
-      logger.error("❌ Error crítico procesando el trigger de wallet:", error);
+        try {
+            logger.info(`💰 Procesando abono para: ${walletId} por monto: ${monto}`);
+            
+            // ✅ LLAMADA SEGURA AL SERVICIO
+            await actualizarSaldoWallet(walletId, monto);
+            
+            logger.info(`✅ [EXITO] Saldo actualizado para ${walletId}: +${monto}`);
+        } catch (error) {
+            logger.error(`❌ [ERROR] No se pudo actualizar el saldo:`, error);
+        }
     }
-  }
 );

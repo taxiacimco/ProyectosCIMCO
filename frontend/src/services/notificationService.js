@@ -1,129 +1,99 @@
 /**
- * TAXIA CIMCO - SERVICIO DE LOGICA DE NOTIFICACIONES V12.1
- * Centro de despacho y sincronización de tokens para conductores.
- * Objetivo: Conectar el motor de Firebase con la base de datos de usuarios (Java Backend Sync).
- * Consolidación: Arquitectura Multidispositivo con fcmTokens.
+ * TAXIA CIMCO - SERVICIO DE LOGICA DE NOTIFICACIONES V12.2
+ * Integración Quirúrgica: Captura de Token + Persistencia en Ruta Sagrada.
  */
 
-import { db, auth } from "../firebase/firebaseConfig";
+import { db, auth, messaging } from "../firebase/firebaseConfig";
 import { doc, updateDoc, arrayUnion, serverTimestamp } from "firebase/firestore";
-import { solicitarPermisosYObtenerToken, escucharNotificaciones } from "../utils/notificaciones";
+import { getToken, onMessage } from "firebase/messaging";
+
+const VAPID_KEY = "BLK4gLk8LiDQQEQBTjOLNmfqcr0aQB7Mwy38ayAIDYcTs02Pl1gnSqeesDO2-5cGvEJVFmn_tAHj3xzu258LOMY";
 
 /**
- * --- 1. PERSISTENCIA DE TOKENS (NUEVA LÓGICA) ---
- * Sincroniza el token actual con el perfil del usuario en la Ruta Sagrada.
- * Usa arrayUnion para soportar múltiples dispositivos activos.
+ * --- 1. CAPTURA Y PERMISIONAMIENTO ---
  */
+export const solicitarPermisosYObtenerToken = async () => {
+  try {
+    if (!("Notification" in window)) {
+      console.warn("Este navegador no soporta notificaciones de escritorio.");
+      return null;
+    }
+
+    const permiso = await Notification.requestPermission();
+    
+    if (permiso === 'granted') {
+      console.log("✅ Permiso de notificaciones concedido.");
+      
+      const token = await getToken(messaging, { vapidKey: VAPID_KEY });
+      
+      if (token) {
+        console.log("-----------------------------------------");
+        console.log("🔥 TOKEN FCM DE TAXIA CIMCO:", token);
+        console.log("-----------------------------------------");
+        
+        await guardarTokenEnBaseDeDatos(token);
+        return token;
+      } else {
+        console.warn("⚠️ No se pudo generar el token. Verifica la VAPID Key.");
+      }
+    } else {
+      console.error("❌ El usuario bloqueó las notificaciones.");
+    }
+  } catch (error) {
+    console.error("❌ Error en solicitarPermisosYObtenerToken:", error);
+  }
+  return null;
+};
 
 /**
- * Guarda el fcmToken en la colección de usuarios dentro de la estructura de artefactos.
- * @param {string} token - Token FCM obtenido del navegador/dispositivo.
+ * --- 2. PERSISTENCIA EN RUTA SAGRADA ---
  */
 export const guardarTokenEnBaseDeDatos = async (token) => {
   const user = auth.currentUser;
-  if (!user || !token) {
-    console.warn("⚠️ [Service] Intento de guardado de token inválido o sin sesión activa.");
-    return;
-  }
-
-  // Referencia exacta siguiendo la jerarquía de la arquitectura CIMCO
-  const userRef = doc(db, 'artifacts', 'taxiacimco-app', 'public', 'data', 'usuarios', user.uid);
+  if (!user || !token) return;
 
   try {
+    // Path Sagrado: artifacts/taxiacimco-app/public/data/usuarios/[uid]
+    const userRef = doc(db, 'artifacts', 'taxiacimco-app', 'public', 'data', 'usuarios', user.uid);
     await updateDoc(userRef, {
-      // Usamos fcmTokens como array para permitir múltiples sesiones (multidevice support)
       fcmTokens: arrayUnion(token),
-      // Mantenemos fcmToken individual para retrocompatibilidad con servicios legacy de Java
-      fcmToken: token,
-      lastTokenUpdate: new Date().toISOString()
+      lastTokenUpdate: serverTimestamp()
     });
-    console.log("✅ [Service] Token sincronizado con el perfil del conductor (Multidevice Mode).");
+    console.log("✅ Token sincronizado con el perfil CIMCO.");
   } catch (error) {
-    console.error("❌ [Service] Error al sincronizar token con Firestore:", error);
+    console.error("❌ Error persistiendo token:", error);
   }
 };
 
 /**
- * --- 2. INICIALIZACIÓN Y ORQUESTACIÓN ---
- * Orquesta la recuperación del token y su vinculación con el perfil del usuario.
+ * --- 3. ESCUCHA EN TIEMPO REAL (FIRST PLANE) ---
  */
-
-/**
- * Punto de entrada para activar las notificaciones al iniciar la sesión del conductor.
- */
-export const inicializarNotificaciones = async () => {
-  const user = auth.currentUser;
-  if (!user) {
-    console.warn("⚠️ [Service] No se puede inicializar notificaciones: Sesión no encontrada.");
-    return;
-  }
-
-  try {
-    const token = await solicitarPermisosYObtenerToken();
+export const registrarEscuchaMensajes = () => {
+  onMessage(messaging, (payload) => {
+    console.log("🔔 Notificación recibida en tiempo real:", payload);
     
-    if (token) {
-      // Invocamos la persistencia atómica en la base de datos
-      await guardarTokenEnBaseDeDatos(token);
-
-      // Activamos el listener de mensajes en primer plano (Foreground)
-      escucharNotificaciones((payload) => {
-        console.log("🚨 [Service] Notificación recibida en tiempo real:", payload);
-        
-        // Ejecutamos la retroalimentación visual y sonora definida en CIMCO
-        mostrarAlertaVisual(
-          payload.notification?.title || "NUEVO SERVICIO", 
-          payload.notification?.body || "Hay una carga disponible cerca de tu ubicación."
-        );
-        reproducirSonidoAlerta();
-      });
-    }
-  } catch (error) {
-    console.error("❌ [Service] Falla crítica en el sistema de notificaciones:", error);
-  }
+    reproducirSonidoAlerta();
+    mostrarAlertaVisual(
+      payload.notification?.title || "Nueva Alerta",
+      payload.notification?.body || "Revisa el panel de despacho."
+    );
+  });
 };
 
 /**
- * --- 3. LÓGICA DE INTERFAZ Y RESPUESTA (UI/UX) ---
- * Gestiona la visibilidad y las alertas sonoras para garantizar la atención del conductor.
- */
-
-/**
- * Dispara la notificación nativa del sistema o alertas visuales personalizadas.
+ * --- 4. UI / UX UTILS ---
  */
 export const mostrarAlertaVisual = (titulo, cuerpo) => {
-  if (!("Notification" in window)) return;
-  
   if (Notification.permission === "granted") {
     new Notification(titulo, { 
       body: cuerpo, 
-      icon: '/logo-cimco.png',
-      tag: 'nuevo-viaje', // Previene el spam agrupando notificaciones del mismo tipo
-      silent: false
+      icon: '/favicon.ico',
+      tag: 'cimco-alert'
     });
   }
 };
 
-/**
- * Retroalimentación Auditiva y Háptica.
- * Hace que el dispositivo reaccione físicamente ante una nueva asignación.
- */
 export const reproducirSonidoAlerta = () => {
   const audio = new Audio('/sounds/alert-taxi.mp3');
-  
-  audio.play().catch(e => {
-    console.log("ℹ️ [Service] Bloqueo de reproducción automática: Se requiere interacción previa.");
-  });
-  
-  // Vibración táctica para entornos ruidosos
-  if (navigator.vibrate) {
-    navigator.vibrate([200, 100, 200, 100, 500]);
-  }
-};
-
-/**
- * Mantenimiento de compatibilidad para notificaciones locales simples.
- */
-export const enviarNotificacionLocal = (titulo, mensaje) => {
-  mostrarAlertaVisual(titulo, mensaje);
-  reproducirSonidoAlerta();
+  audio.play().catch(e => console.log("ℹ️ Bloqueo de audio por navegador."));
 };

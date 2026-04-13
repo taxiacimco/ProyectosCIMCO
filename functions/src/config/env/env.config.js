@@ -1,17 +1,32 @@
-// --- FIX TS2305 (Importación de ENV) ---
 /**
- * Configuración de variables de entorno.
- * Accede directamente a process.env y proporciona valores por defecto 
- * para el desarrollo si las variables no están definidas.
+ * src/config/env/env.config.js
+ * Configuración centralizada de TAXIA CIMCO.
  */
-export const ENV = {
-  // Clave secreta para la generación y validación de JSON Web Tokens (JWT).
-  // Se usa 'your-secret-key-development' como valor por defecto en desarrollo.
-  JWT_SECRET: process.env.JWT_SECRET || 'your-secret-key-development',
-  
-  // ID del proyecto de Firebase.
-  // Se usa 'taxia-cimco-default' como valor por defecto en desarrollo.
-  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || 'taxia-cimco-default',
+import "./env.loader.js";
 
-  // Puedes añadir más variables de entorno aquí según las necesites.
+export const ENV = {
+  // Configuración Básica
+  PROJECT_NAME: process.env.PROJECT_NAME || 'taxia-cimco-backend',
+  NODE_ENV: process.env.NODE_ENV || 'development',
+  
+  // Puertos
+  PORT: process.env.PORT || 3000,
+  APP_PORT: process.env.APP_PORT || 5001,
+  
+  // Firebase / CIMCO
+  FIREBASE_PROJECT_ID: process.env.CIMCO_PROJECT_ID || 'pelagic-chalice-467818-e1',
+  FUNCTIONS_REGION: process.env.FUNCTIONS_REGION || 'us-central1',
+  
+  // Seguridad
+  JWT_SECRET: process.env.JWT_SECRET || 'taxia_cimco_secure_token_2025',
+  INTERNAL_API_SECRET: process.env.INTERNAL_API_SECRET || 'taxia_cimco_secure_token_2025',
+  
+  // URLs de Integración
+  API_BASE_URL: process.env.API_BASE_URL || 'http://192.168.100.34:5001/pelagic-chalice-467818-e1/us-central1',
+  FRONTEND_BASE_URL: process.env.FRONTEND_BASE_URL || 'http://192.168.100.34:5173',
+
+  // Regla de Oro: Path Sagrado de Firestore
+  FIRESTORE_PATH: 'artifacts/taxiacimco-app/public/data'
 };
+
+export default ENV;
