@@ -1,9 +1,9 @@
+// Versión Arquitectura: V2.0 - Trazabilidad de Módulo
 /**
- * src/routes/whatsapp.router.js
- * Enrutador para el Webhook de WhatsApp en la arquitectura TAXIA CIMCO.
+ * functions/src/routes/whatsapp.router.js
+ * Misión: Enrutador para el Webhook de WhatsApp en la arquitectura TAXIA CIMCO.
  */
 import { Router } from 'express';
-// ✅ CORRECCIÓN DE RUTA: Apunta al módulo correcto
 import whatsappController from '../modules/whatsapp/controllers/whatsapp.controller.js';
 
 const router = Router();

@@ -1,80 +1,138 @@
 /**
- * 💰 TAXIA CIMCO - Wallet Service (Versión Corregida V2)
- * Misión: Gestión atómica de saldos sin errores de documento no encontrado.
+ * 💰 TAXIA CIMCO - Wallet Service
+ * Misión: Gestión atómica de saldos, recargas, débitos y conciliación de pagos externos.
  */
 import admin from "../../../firebase/firebase-admin.js";
+import { enviarNotificacionPush } from "../../../utils/notificaciones.js";
 
 const db = admin.firestore();
 const appId = 'taxiacimco-app';
 
-/**
- * ✅ ACTUALIZAR SALDO WALLET (Profesional)
- * Usa FieldValue.increment y set() con merge para evitar el crash NOT_FOUND.
- * @param {string} uid - ID del usuario/conductor
- * @param {number} monto - Cantidad a sumar (o restar si es negativo)
- */
-export const actualizarSaldoWallet = async (uid, monto) => {
-  // 🎯 RUTA EXACTA: artifacts -> taxiacimco-app -> public -> data -> billeteras
-  const walletRef = db.collection("artifacts").doc(appId)
-                    .collection("public").doc("data")
-                    .collection("billeteras").doc(uid);
+// 🎯 Definición de la Ruta Sagrada Centralizada
+const sacredDataPath = db.collection("artifacts").doc(appId).collection("public").doc("data");
 
-  try {
-    // 🛡️ MODO SEGURO: Usamos set con merge para evitar el error de "documento no encontrado"
-    await walletRef.set({
-      saldoWallet: admin.firestore.FieldValue.increment(monto),
-      lastUpdateAt: admin.firestore.FieldValue.serverTimestamp(),
-      ultimoMovimiento: {
-        tipo: monto > 0 ? 'INGRESO' : 'EGRESO',
-        monto: Math.abs(monto),
-        fecha: new Date()
-      }
-    }, { merge: true });
-
-    console.log(`✅ [Wallet] Saldo actualizado para ${uid}: +${monto}`);
-    return { success: true };
-  } catch (error) {
-    console.error(`❌ [Wallet Error]:`, error);
-    throw error;
-  }
-};
-
-/**
- * CLASE WalletService
- * (Gestión de recargas administrativas manuales)
- */
 class WalletService {
-  static async recharge(targetUid, amount, adminUid) {
-    const walletRef = db.collection("artifacts").doc(appId)
-                      .collection("public").doc("data")
-                      .collection("billeteras").doc(targetUid);
 
-    try {
-      await db.runTransaction(async (transaction) => {
-        // Usamos set con merge en la transacción también por seguridad
-        transaction.set(walletRef, {
-          saldoWallet: admin.firestore.FieldValue.increment(amount),
-          lastRechargeAt: admin.firestore.FieldValue.serverTimestamp(),
-          adminResponsable: adminUid
-        }, { merge: true });
+  /**
+   * ✅ MÉTODO: processWompiWebhook
+   * Misión: Validar el pago y actualizar saldo distinguiendo entre Pasajero y Conductor.
+   */
+  static async processWompiWebhook(data) {
+    const { reference, amount_in_cents, status } = data;
+    const amount = amount_in_cents / 100;
 
-        const historyRef = db.collection("artifacts").doc(appId)
-                             .collection("public").doc("data")
-                             .collection("historial_recargas").doc();
-        
-        transaction.set(historyRef, {
-          targetUid: targetUid,
-          amount: amount,
-          adminUid: adminUid, 
-          fecha: admin.firestore.FieldValue.serverTimestamp(),
-          metodo: 'MANUAL_ADMIN'
-        });
-      });
-      return { success: true };
-    } catch (error) {
-      console.error("❌ Error en WalletService.recharge:", error);
-      throw error;
+    // 1. Localizar la intención de transacción
+    const transaccionRef = sacredDataPath.collection("transacciones").doc(reference);
+    const transaccionDoc = await transaccionRef.get();
+
+    if (!transaccionDoc.exists) {
+      console.error(`❌ [Wompi Webhook] Referencia no encontrada: ${reference}`);
+      throw new Error("TRANSACCION_NOT_FOUND");
     }
+
+    const { targetUid, user_type, processed } = transaccionDoc.data();
+
+    if (processed) {
+      console.log(`ℹ️ [Wompi Webhook] Transacción ${reference} ya procesada anteriormente.`);
+      return { success: true, alreadyProcessed: true };
+    }
+
+    // 2. Si el pago es exitoso, procedemos a la recarga atómica
+    if (status === 'APPROVED') {
+      const userRef = sacredDataPath.collection("usuarios").doc(targetUid);
+      const historyRef = sacredDataPath.collection("historial_recargas").doc(reference);
+
+      await db.runTransaction(async (transaction) => {
+        const userDoc = await transaction.get(userRef);
+        if (!userDoc.exists) throw new Error("USER_NOT_FOUND");
+
+        // Actualizamos saldo y marcamos la transacción como procesada
+        transaction.update(userRef, {
+          saldoWallet: admin.firestore.FieldValue.increment(amount),
+          lastRechargeAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        transaction.set(historyRef, {
+          targetUid,
+          amount,
+          reference,
+          status: 'SUCCESS',
+          user_type: user_type || 'DESCONOCIDO', // Distinción Pasajero/Conductor
+          fecha: admin.firestore.FieldValue.serverTimestamp(),
+          metodo: 'WOMPI'
+        });
+
+        transaction.update(transaccionRef, { processed: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      });
+
+      // 3. Notificación Push Personalizada según el tipo de usuario
+      const userData = (await userRef.get()).data();
+      if (userData?.fcmToken) {
+        const mensaje = {
+          titulo: "💰 Recarga Exitosa",
+          cuerpo: user_type === 'CONDUCTOR' 
+            ? `Tu saldo ha sido actualizado. ¡Ya puedes aceptar más carreras!` 
+            : `Has recargado $${amount.toLocaleString()}. ¡Listo para tu próximo viaje!`
+        };
+        await enviarNotificacionPush(userData.fcmToken, mensaje, { tipo: 'RECARGA', user_type });
+      }
+
+      return { success: true, amount };
+    }
+
+    return { success: false, status };
+  }
+
+  /**
+   * ✅ MÉTODO: recharge (Manual / Administrativa)
+   */
+  static async recharge(targetUid, amount, adminUid = "SYSTEM") {
+    const userRef = sacredDataPath.collection("usuarios").doc(targetUid);
+    const historyRef = sacredDataPath.collection("historial_recargas").doc();
+
+    await db.runTransaction(async (transaction) => {
+      transaction.update(userRef, {
+        saldoWallet: admin.firestore.FieldValue.increment(amount),
+        lastRechargeAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      transaction.set(historyRef, {
+        targetUid,
+        amount,
+        adminUid,
+        tipo: 'RECARGA_MANUAL',
+        fecha: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+
+    return { success: true, newBalance: (await userRef.get()).data().saldoWallet };
+  }
+
+  /**
+   * ✅ MÉTODO: debit (Cobro de Comisión por Carrera)
+   */
+  static async debit(targetUid, amount, serviceId) {
+    const userRef = sacredDataPath.collection("usuarios").doc(targetUid);
+
+    return await db.runTransaction(async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) throw new Error("USER_NOT_FOUND");
+
+      const currentBalance = userDoc.data().saldoWallet || 0;
+      if (currentBalance < amount) throw new Error("INSUFFICIENT_FUNDS");
+
+      transaction.update(userRef, {
+        saldoWallet: admin.firestore.FieldValue.increment(-amount),
+        lastDebitAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      return { success: true, newBalance: currentBalance - amount };
+    });
+  }
+
+  static async getWallet(uid) {
+    const userDoc = await sacredDataPath.collection("usuarios").doc(uid).get();
+    return userDoc.exists ? userDoc.data() : { saldoWallet: 0 };
   }
 }
 

@@ -1,10 +1,13 @@
+// Versión Arquitectura: V4.8 - Resolución Definitiva de Enrutamiento de Módulos (ESM)
 /**
  * src/modules/rides/services/rides.service.js
  * Lógica de negocio, Asignación de Viajes y Liquidación - TAXIA CIMCO
  */
 
 import admin, { db } from "../../../firebase/firebase-admin.js";
-import { enviarNotificacionNuevaSolicitud } from "../notifications/services/notification.service.js";
+
+// ✅ AJUSTE QUIRÚRGICO: Ruta absoluta relativa verificada contra el árbol de directorios (../../)
+import { enviarNotificacionNuevaSolicitud } from "../../notifications/services/notification.service.js";
 
 const appId = 'taxiacimco-app';
 
@@ -148,8 +151,8 @@ class RideService {
       let montoComision = (tipoVehiculo === "motocarga") ? 500 : Number(tarifa) * 0.10;
 
       const responsableRef = db.collection("artifacts").doc(appId)
-                              .collection("public").doc("data")
-                              .collection("usuarios").doc(driverId);
+                               .collection("public").doc("data")
+                               .collection("usuarios").doc(driverId);
 
       transaction.update(responsableRef, {
         saldo: admin.firestore.FieldValue.increment(-montoComision)

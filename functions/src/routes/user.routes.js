@@ -1,13 +1,15 @@
+// Versión Arquitectura: V2.1 - Saneamiento de Middlewares
 /**
- * routes/user.routes.js
+ * functions/src/routes/user.routes.js
+ * Módulo de usuarios.
  */
 import { Router } from 'express';
 import userController from '../modules/auth/controllers/user.controller.js';
-import authMiddleware from '../middleware/auth.middleware.js';
+import { authGuard } from '../middleware/auth.middleware.js'; // FIX: Nombrada y ruta correcta
 
 const router = Router();
 
 // Endpoint protegido para actualizar perfil
-router.put('/profile', authMiddleware, userController.updateProfile);
+router.put('/profile', authGuard, userController.updateProfile);
 
 export default router;

@@ -8,9 +8,9 @@
     "front:build": "npm run build --workspace=taxia-cimco-frontend",
     "func:dev": "npm run serve --workspace=taxia-cimco-backend",
     "func:shell": "npm run shell --workspace=taxia-cimco-backend",
-    "dev:all": "concurrently \"npm run front:dev\" \"npm run func:shell\"",
+    "dev:all": "concurrently \"npm run front:dev\" \"npm run func:dev\"",
     "deploy:full": "npm run front:build && firebase deploy",
-    "install:all": "npm install && npm install --workspace=taxia-cimco-frontend && npm install --workspace=taxia-cimco-backend"
+    "install:all": "npm install"
   },
   "workspaces": [
     "frontend",

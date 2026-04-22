@@ -1,3 +1,4 @@
+// Versión Arquitectura: V3.3 - Blindaje Transaccional Wompi y Eliminación de Bypass Global
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -18,7 +19,6 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.token.role == role;
     }
 
-    // Función auxiliar consolidada
     function isAdmin() {
       return hasRole('admin');
     }
@@ -38,7 +38,10 @@ service cloud.firestore {
 
     match /artifacts/{appId} {
       
-      allow read, write: if appId == 'taxiacimco-app';
+      /** * 🛡️ AJUSTE DE SEGURIDAD: 
+       * Se ha eliminado el bypass 'allow read, write' global para evitar 
+       * manipulaciones directas desde el frontend en colecciones financieras.
+       */
 
       match /public/data {
 
@@ -57,26 +60,20 @@ service cloud.firestore {
 
         // --- C. COLECCIÓN DE USUARIOS Y BILLETERAS ---
         match /usuarios/{userId} {
-          // LECTURA: Un usuario puede leer si está autenticado
           allow read: if isAuthenticated();
-          
-          // CREACIÓN: Se permite la escritura inicial desde el frontend para completar el registro
           allow create: if isOwner(userId);
-          
-          // ACTUALIZACIÓN QUIRÚRGICA: Protegida. Se prohíbe alterar campos financieros y de rol.
           allow update: if isOwnerOrAdmin(userId) 
             && !('saldoWallet' in request.resource.data.diff(resource.data).affectedKeys())
             && !('saldo' in request.resource.data.diff(resource.data).affectedKeys())
             && !('rol' in request.resource.data.diff(resource.data).affectedKeys())
             && !('role' in request.resource.data.diff(resource.data).affectedKeys())
             && !('estado' in request.resource.data.diff(resource.data).affectedKeys());
-          
-          // BORRADO: Solo altos mandos
           allow delete: if isAdmin() || hasRole('ceo');
 
+          // Historial Transaccional Interno
           match /transacciones/{transId} {
             allow read: if isOwnerOrAdmin(userId);
-            allow write: if false; // Candado total: Solo el Admin SDK de Node.js escribe aquí
+            allow write: if false; // Solo Admin SDK
           }
         }
 
@@ -90,11 +87,9 @@ service cloud.firestore {
               ? (hasRole('driver') || hasRole('conductor') || hasRole('mototaxi')) && hasEnoughCredit(appId, request.auth.uid)
               : true
           ) && (
-            // Bloqueo de manipulación de tarifas
             !('tarifa' in request.resource.data.diff(resource.data).affectedKeys()) &&
             !('comisionAplicada' in request.resource.data.diff(resource.data).affectedKeys())
           );
-          
           allow delete: if isAdmin() || hasRole('ceo');
         }
 
@@ -103,11 +98,24 @@ service cloud.firestore {
           allow read: if hasRole('ceo') || isAdmin();
           allow write: if false; 
         }
+
+        // --- F. PAGOS WOMPI (INTEGRACIÓN QUIRÚRGICA) ---
+        // Path: artifacts/taxiacimco-app/public/data/payments/{paymentId}
+        match /payments/{paymentId} {
+          // El usuario puede consultar su propio historial de pagos/recargas
+          allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+          
+          // ⚠️ BLOQUEO DE ESCRITURA CLIENT-SIDE
+          // Solo el Firebase Admin SDK en las Cloud Functions tiene permiso de escritura.
+          allow create: if false;
+          allow update: if false;
+          allow delete: if false;
+        }
       }
     }
 
     // ==========================================
-    // 3. BLOQUEO POR DEFECTO (Fail-Safe)
+    // 3. BLOQUEO POR DEFECTO (FAIL-SAFE)
     // ==========================================
     match /{document=**} {
       allow read, write: if false;

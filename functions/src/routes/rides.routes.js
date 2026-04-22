@@ -1,25 +1,22 @@
+// Versión Arquitectura: V2.1 - Saneamiento de Middlewares
 /**
- * src/routes/rides.routes.js
+ * functions/src/routes/rides.routes.js
  * Configuración de rutas centralizada para el módulo de viajes (rides).
  * TAXIA CIMCO - Soporte para Mototaxis, Motocargas y Cooperativas Intermunicipales.
  */
 import { Router } from "express";
 
-// 🔐 Middlewares
-import { authGuard } from "../middleware/auth.guard.js";
+// 🔐 Middlewares (Rutas corregidas)
+import { authGuard } from "../middleware/auth.middleware.js"; // FIX: Era auth.guard.js
 import roleGuard from "../middleware/role.guard.js";
 
 // 🎭 Roles
 import ROLES from "../config/app.roles.js";
 
-// 🎮 Controllers (Importación como Objeto para consistencia)
+// 🎮 Controllers
 import RidesController from "../modules/rides/controllers/rides.controller.js";
 
 const router = Router();
-
-// ===============================================
-// RUTAS DE VIAJES (Prefijo: /v1/rides)
-// ===============================================
 
 /**
  * POST / - Crear solicitud (Pasajero)

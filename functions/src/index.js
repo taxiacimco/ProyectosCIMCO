@@ -1,47 +1,51 @@
-// Versión Arquitectura: V2.1 - Consolidación de API y Triggers Activos
-/**
- * functions/src/index.js
- * PROYECTO: TAXIA CIMCO - Sistema Integrado
- * Misión: Punto de entrada principal. Expone la API Express y los Triggers
- * de Firestore para el ecosistema de producción y emuladores.
- */
-
-// 1. Carga de entorno (Debe ser la primera acción para configurar secretos/vars)
+// Versión Arquitectura: V4.9 - Gateway de Alta Disponibilidad
 import { loadEnv } from './config/env/env.loader.js';
 loadEnv();
 
 import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
 import { onRequest } from "firebase-functions/v2/https";
-import mainRouter from './routes/main.router.js';
+import admin from "firebase-admin";
 
-// 2. Configuración de la Aplicación Express
+if (!admin.apps.length) {
+    admin.initializeApp();
+}
+
 const app = express();
 
-// Middlewares base para procesamiento de JSON y Rutas
+// 🛡️ SEGURIDAD CIMCO: Permitir la ejecución del Widget de Wompi
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// ✅ CORS: Configuración específica para el entorno local de Firebase
+app.use(cors({ 
+    origin: true, 
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+}));
+
 app.use(express.json());
 
-// Registro de rutas modulares del sistema (mainRouter centraliza los módulos)
-app.use('/', mainRouter);
-
 /**
- * 🌍 API GATEWAY: Centraliza todos los endpoints bajo la Cloud Function 'api'
- * Configuración optimizada para evitar arranques en frío (maxInstances: 1)
+ * 🚀 ROUTING: Delegación al mainRouter
  */
+app.use("/v1", async (req, res, next) => {
+    try {
+        const { default: mainRouter } = await import('./routes/main.router.js');
+        return mainRouter(req, res, next);
+    } catch (error) {
+        console.error("🔴 Error Crítico Gateway:", error);
+        res.status(500).json({ success: false, message: "Error interno en Gateway" });
+    }
+});
+
 export const api = onRequest({
     region: "us-central1",
-    cors: true,
-    maxInstances: 1,
-    timeoutSeconds: 120
+    memory: "256MiB",
+    timeoutSeconds: 60,
+    cors: true 
 }, app);
-
-/**
- * ⚡ TRIGGERS DE FIRESTORE (EVENT-DRIVEN ARCHITECTURE)
- * Exportación explícita para que Firebase CLI registre las funciones.
- */
-
-// Trigger para gestión de saldo y transacciones de billetera (Wallet Module)
-export { onNuevaTransaccion } from './triggers/wallet.triggers.js';
-
-// Trigger para despacho automático y notificaciones PUSH de viajes (Rides Module)
-// ✅ Integrado con V8.1 para despliegue quirúrgico
-export { onViajeCreado } from './triggers/trips.js';

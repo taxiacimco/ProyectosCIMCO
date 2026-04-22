@@ -1,4 +1,4 @@
-// Versión Arquitectura: V1.1 - Optimización de Gitignore (Logs y Caché Firebase)
+// Versión Arquitectura: V7.7 - Protección de Secretos y Exclusión de Entorno
 /**
  * .gitignore - TAXIA CIMCO
  * Misión: Protección de archivos sensibles, exclusión de dependencias y optimización de repositorio.
@@ -27,9 +27,11 @@ node_modules/
 # Archivos .env (variables privadas y locales)
 .env
 .env.local
+.env.production
 .env.*.local
 functions/.env.local
 functions/.env
+functions/.env.production
 
 # Permitimos el archivo de ejemplo para los desarrolladores
 !functions/.env.example
@@ -83,14 +85,13 @@ Thumbs.db
 *.local
 *.cache
 .firebaserc
-_respaldos_backend/
 .firebase/
+_respaldos_backend/
 
 ============================================================
 🧪 PRUEBAS Y SCRIPTS TEMPORALES
 ============================================================
 tests/
 pruebas/
-temp/
-*.tmp
-*.bak
+*.test.js
+*.spec.js

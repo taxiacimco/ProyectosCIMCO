@@ -1,55 +1,42 @@
-// functions/src/middleware/permission.guard.js
+// Versión Arquitectura: V2.0 - Guardia de Permisos RBAC (Migración a ESM)
+/**
+ * functions/src/middleware/permission.guard.js
+ * PROYECTO: TAXIA CIMCO
+ * Misión: Verificar permisos granulares antes de tocar la lógica de negocio.
+ * ⚠️ ALERTA DE ARQUITECTURA: Se eliminó CommonJS (require) por incompatibilidad con Node 20 ESM.
+ */
+import { hasPermission, AppPermission } from '../services/rbac.service.js';
+import { sendErrorResponse } from '../utils/http-response.js';
 
 /**
- * =================================================================
- * MIDDLEWARE: PERMISSION GUARD
- * =================================================================
- * Crea un middleware de Express para Cloud Functions que verifica si
- * el rol del usuario autenticado (extraído de req.user.role) tiene
- * un permiso específico antes de permitir el acceso a la ruta.
+ * Valida un permiso específico contra el rol del usuario en req.user.
+ * @param {string} requiredPermission - Constante de AppPermission.
  */
-
-const { hasPermission, AppPermission } = require('../services/rbac.service');
-
-/**
- * Retorna una función middleware que verifica un permiso específico.
- * * Uso: router.post('/ruta', authGuard, permissionGuard(AppPermission.MANAGE_USERS), controlador);
- *
- * @param {string} requiredPermission - El permiso necesario de la constante AppPermission.
- * @returns {function} Función middleware de Express.
- */
-const permissionGuard = (requiredPermission) => {
-    // 1. Verificar que el permiso sea válido y requerido
+export const permissionGuard = (requiredPermission) => {
+    // 1. Verificación de integridad de la configuración
     if (!Object.values(AppPermission).includes(requiredPermission)) {
-        console.error(`PermissionGuard ERROR: Permiso requerido inválido: ${requiredPermission}`);
-        // Retorna un middleware que siempre falla si la configuración es incorrecta
-        return (req, res, next) => res.status(500).send({ error: 'Internal server configuration error.' });
+        console.error(`🚫 [PermissionGuard Config Error]: Permiso inválido: ${requiredPermission}`);
+        return (req, res) => sendErrorResponse(res, "Error de configuración de permisos.", 500);
     }
 
     return (req, res, next) => {
-        // 2. Asumimos que la autenticación previa ha adjuntado el usuario (con el rol) a la solicitud
         const user = req.user; 
 
         if (!user || !user.role) {
-            // Usuario no autenticado o rol no definido (esto debería ser manejado por authGuard)
-            return res.status(401).send({ error: 'Acceso denegado. Se requiere autenticación.' });
+            return sendErrorResponse(res, "Acceso denegado. Identidad no verificada.", 401, "UNAUTHORIZED");
         }
 
-        const userRole = user.role;
-
-        // 3. Usar el servicio RBAC para la verificación
-        if (hasPermission(userRole, requiredPermission)) {
-            // El usuario tiene el permiso, continuar
+        // 2. Evaluación lógica contra el servicio RBAC
+        if (hasPermission(user.role, requiredPermission)) {
             next();
         } else {
-            // 4. No tiene el permiso requerido
-            console.warn(`Intento de acceso denegado. Rol: ${userRole}, Permiso requerido: ${requiredPermission}`);
-            return res.status(403).send({ 
-                error: 'Acceso no autorizado.',
-                message: `Su rol (${userRole}) no tiene el permiso requerido: ${requiredPermission}.`
-            });
+            console.warn(`🛑 [RBAC DENIED]: UID ${user.uid} (Role: ${user.role}) intentó acceder a permiso: ${requiredPermission}`);
+            return sendErrorResponse(
+                res, 
+                `No tienes el permiso requerido: ${requiredPermission}`, 
+                403, 
+                "INSUFFICIENT_PERMISSIONS"
+            );
         }
     };
 };
-
-module.exports = permissionGuard;

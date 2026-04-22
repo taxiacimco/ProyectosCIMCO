@@ -1,15 +1,15 @@
+// Versión Arquitectura: V2.0 - Trazabilidad de Módulo
 /**
- * src/routes/password.routes.js
- * Rutas para el manejo de contraseñas (Hash y Verificación)
+ * functions/src/routes/password.routes.js
+ * Misión: Rutas para el manejo de contraseñas (Hash y Verificación)
  */
-
 import { Router } from "express";
 import passwordController from "../modules/password/controllers/password.controller.js";
 
 const router = Router();
 
 /**
- * POST /api/password/hash
+ * POST /hash
  * Ruta para encriptar una contraseña
  */
 router.post(
@@ -18,7 +18,7 @@ router.post(
 );
 
 /**
- * POST /api/password/verify
+ * POST /verify
  * Ruta para verificar una contraseña contra un hash
  */
 router.post(

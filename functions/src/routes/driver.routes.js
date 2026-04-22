@@ -1,29 +1,22 @@
+// Versión Arquitectura: V2.1 - Saneamiento de Middlewares
 /**
- * src/routes/driver.routes.js
+ * functions/src/routes/driver.routes.js
  * Configuración de rutas para el módulo de conductores (drivers).
- * Ubicación anterior: modules/driver/routes/driver.routes.js
  */
 import { Router } from "express";
 
-// 🔐 Middlewares (Ajustados a la nueva ubicación en la raíz)
-import { authGuard } from "../middleware/auth.guard.js";
+// 🔐 Middlewares (Rutas corregidas)
+import { authGuard } from "../middleware/auth.middleware.js"; // FIX: Era auth.guard.js
 import roleGuard from "../middleware/role.guard.js";
 
-// 🎭 Roles (Acceso a la configuración global)
+// 🎭 Roles
 import AppRoles from "../config/app.roles.js";
 
-// 🎮 Controller (Importación corregida hacia la ubicación del módulo)
-// Apunta a: src/modules/driver/controllers/driver.controller.js
+// 🎮 Controller 
 import DriverController from "../modules/driver/controllers/driver.controller.js";
 
 const router = Router();
-
-// Extraemos roles para legibilidad
 const { DRIVER, ADMIN, DESPATCH } = AppRoles;
-
-// ===============================================
-// RUTAS DE CONDUCTORES (DRIVER)
-// ===============================================
 
 /**
  * PUT /api/v1/drivers/location
@@ -46,10 +39,6 @@ router.get(
   roleGuard([DRIVER]),
   DriverController.profile
 );
-
-// ===============================================
-// RUTAS ADMINISTRATIVAS (ADMIN, DESPATCH)
-// ===============================================
 
 /**
  * GET /api/v1/drivers

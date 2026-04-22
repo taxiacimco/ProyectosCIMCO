@@ -1,19 +1,15 @@
+// Versión Arquitectura: V1.3 - Manejador de Promesas (Clean Code)
 /**
- * src/middleware/async-handler.js
- *
- * Middleware que envuelve funciones asíncronas de Express (controladores)
- * para capturar automáticamente errores y promesas rechazadas,
- * enviándolos al manejador global de errores de Express.
+ * functions/src/middleware/async-handler.js
+ * PROYECTO: TAXIA CIMCO
+ * Misión: Envolver controladores asíncronos para capturar errores sin bloques try-catch repetitivos.
  */
 
 /**
- * Envuelve un controlador async y captura errores.
- *
- * @param {Function} fn - Controlador async (req, res, next)
- * @returns {Function} Middleware de Express
+ * Encapsula la ejecución de funciones asíncronas y redirige errores al middleware global.
+ * @param {Function} fn - Controlador (req, res, next)
+ * @returns {Function}
  */
 export const asyncHandler = (fn) => (req, res, next) => {
-  Promise
-    .resolve(fn(req, res, next))
-    .catch(next);
+    return Promise.resolve(fn(req, res, next)).catch(next);
 };

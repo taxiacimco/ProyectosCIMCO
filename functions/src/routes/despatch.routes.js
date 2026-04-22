@@ -1,25 +1,21 @@
+// Versión Arquitectura: V2.1 - Saneamiento de Middlewares
 /**
- * src/routes/despatch.routes.js
+ * functions/src/routes/despatch.routes.js
  * Configuración de rutas para el módulo de despacho intermunicipal.
  */
-
 import { Router } from "express";
 
-// 🔐 Middlewares
-import { authGuard } from "../middleware/auth.guard.js";
+// 🔐 Middlewares (Rutas corregidas)
+import { authGuard } from "../middleware/auth.middleware.js"; // FIX: Era auth.guard.js
 import roleGuard from "../middleware/role.guard.js";
 
 // 🎭 Roles (Importación centralizada)
 import ROLES from "../config/app.roles.js";
 
-// 🎮 Controller (Importación del objeto exportado por defecto)
+// 🎮 Controller
 import DespatchController from "../modules/despatch/controllers/despatch.controller.js";
 
 const router = Router();
-
-// ===============================================
-// RUTAS DE DESPACHO INTERMUNICIPAL
-// ===============================================
 
 /**
  * POST /api/despatch/assign

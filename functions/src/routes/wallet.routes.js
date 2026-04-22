@@ -1,31 +1,48 @@
+// Versión Arquitectura: V3.5 - Refactor de Importaciones Nombradas y Estabilización de Gateway
 /**
- * routes/wallet.routes.js
- * Definición de endpoints financieros - TAXIA CIMCO
+ * functions/src/routes/wallet.routes.js
+ * PROYECTO: TAXIA CIMCO
+ * Misión: Exponer servicios financieros y asegurar la resolución de controladores.
+ * Ajuste: Se fuerza importación nombrada para evitar fallos de referencia en el Router de Express.
  */
+
 import { Router } from 'express';
-import walletController from '../modules/wallet/controllers/wallet.controller.js';
-import authMiddleware from '../middleware/auth.middleware.js';
+import { 
+    generatePaymentIntent, 
+    rechargeNequi, 
+    rechargeManualAdmin, 
+    getBalance, 
+    debitBalance, 
+    getHistory 
+} from '../modules/wallet/controllers/wallet.controller.js';
+import { handleWompiWebhook } from '../modules/wallet/controllers/webhook.controller.js';
+import { authGuard } from '../middleware/auth.middleware.js'; 
 
 const router = Router();
 
 /**
- * @route POST /wallet/recharge
- * @desc  Inicia una solicitud de recarga vía Nequi (Para el Usuario/Conductor)
- * @access Private
+ * 🧪 RUTA DE PRUEBA PÚBLICA (Bypass temporal para Widget Wompi)
  */
-router.post('/recharge', authMiddleware, walletController.rechargeNequi);
+router.post('/test-signature', generatePaymentIntent);
 
 /**
- * @route POST /wallet/admin/recharge
- * @desc  Procesa una recarga manual (Solo para el Panel Administrativo)
- * @access Private/Admin
+ * 🔐 RUTAS PRIVADAS (Requieren Autenticación)
  */
-router.post('/admin/recharge', authMiddleware, walletController.rechargeManualAdmin);
+// Motor de Intenciones de Pago
+router.post('/payment-intent', authGuard, generatePaymentIntent);
+
+// Operaciones de Billetera y Saldos
+router.post('/recharge', authGuard, rechargeNequi);
+router.post('/admin/recharge', authGuard, rechargeManualAdmin);
+router.get('/balance/:uid?', authGuard, getBalance);
+router.post('/debit', authGuard, debitBalance);
+
+// Historial de Transacciones
+router.get('/history/:uid', authGuard, getHistory);
 
 /**
- * @route GET /wallet/balance/:uid?
- * @desc  Consulta de saldo actual
+ * 🌍 RUTAS PÚBLICAS (Webhooks)
  */
-router.get('/balance/:uid?', authMiddleware, walletController.getBalance);
+router.post('/webhook', handleWompiWebhook);
 
 export default router;

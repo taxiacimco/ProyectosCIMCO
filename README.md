@@ -1,59 +1,26 @@
 # 🚖 TAXIA CIMCO – Plataforma Integral de Movilidad Inteligente
 
-**TAXIA CIMCO** es una plataforma de movilidad digital que conecta pasajeros, conductores y empresas mediante un ecosistema web progresivo (**PWA**) soportado sobre **Firebase** y con integración de **WhatsApp Business API** para comunicación instantánea.  
-El sistema incluye paneles de control para administración, mantenimiento, y gestión en tiempo real de viajes y operaciones.
+**TAXIA CIMCO** es una plataforma de movilidad de alto rendimiento diseñada bajo principios de **Arquitectura Hexagonal** y **Clean Code**. El sistema conecta pasajeros, conductores y despachadores mediante un ecosistema web progresivo (**PWA**) soportado sobre **Firebase Functions V2** y **Cloud Firestore**, con integración avanzada de **Google Gemini AI**.
 
 ---
 
-## 📂 Estructura del Proyecto
+## 📂 Estructura Real del Proyecto (Arquitectura Modular)
 
 ```bash
 ProyectosCIMCO/
-├── functions/                    # Backend con Firebase Cloud Functions
-│   ├── index.js                  # Lógica principal (API, eventos, triggers)
-│   ├── package.json              # Dependencias backend
-│   ├── .env.production           # Variables de entorno (no se sube a GitHub)
-│   └── serviceAccountKey.json    # 🔒 Clave privada Firebase Admin SDK
+├── package.json                  # 📦 Orquestador Monorepo (Workspaces)
+├── firebase.json                 # ⚙️ Configuración Global de Firebase
+├── functions/                    # 🚀 BACKEND (Node.js 20 ESM)
+│   ├── src/
+│   │   ├── modules/              # Lógica de Negocio (Wallet, Rides, Auth)
+│   │   ├── triggers/             # Eventos de Firestore (Ruta Sagrada)
+│   │   ├── routes/               # Endpoints de API
+│   │   └── config/               # Variables de entorno
+│   └── package.json              # name: taxia-cimco-backend
 │
-├── frontend/                     # Frontend público (PWA)
-│   ├── public/                   # HTML, CSS, JS, manifest y service workers
-│   │   ├── admin/                # Panel del CEO y administración
-│   │   ├── pasajero/             # App del pasajero
-│   │   ├── mototaxi/             # App de conductores mototaxi
-│   │   ├── motoparrillero/       # App de conductores parrilleros
-│   │   ├── motocarga/            # App de carga
-│   │   ├── interconductor/       # App intermunicipal
-│   │   ├── despachador/          # Panel de despacho y monitoreo
-│   │   ├── manifest.json         # Configuración PWA
-│   │   └── service-worker.js     # Cache y modo offline
-│   ├── firebase.json             # Configuración Firebase Hosting del frontend
-│   └── vite.config.mjs           # Configuración Vite (build frontend)
+├── frontend/                     # ⚛️ FRONTEND (React + Vite)
+│   ├── src/                      # Componentes Ciber-Neo-Brutalistas
+│   ├── public/                   # PWA Manifests y Assets
+│   └── package.json              # name: taxia-cimco-frontend
 │
-├── panel/                        # Panel de mantenimiento técnico
-│   ├── public/
-│   │   ├── splash.html           # Pantalla de carga animada (Splash)
-│   │   ├── manifest.json         # Manifest específico del panel
-│   │   ├── service-worker.js     # PWA offline cache
-│   │   ├── panel-mantenimiento.html
-│   │   ├── assets/               # Logos y favicons
-│   │   └── icons/                # Íconos PWA (192x192 / 512x512)
-│   └── firebase.json             # Configuración Hosting exclusiva del panel
-│
-├── scripts/                      # Automatización y tareas administrativas
-│   ├── auto-update-status.mjs    # Actualiza status.json de Firestore
-│   ├── run-background.vbs        # Ejecuta scripts en segundo plano
-│   ├── verificar-firebase.ps1    # Verifica configuración de Firebase
-│   └── iniciar-frontend.ps1      # Abre el frontend localmente
-│
-├── database/
-│   ├── firestore.rules           # 🔐 Reglas de seguridad Firestore
-│   ├── firestore.indexes.json    # Índices de consultas Firestore
-│
-├── functions-piloto/             # Entorno paralelo para pruebas (sandbox)
-├── logs/                         # Logs automáticos del backend
-├── .firebaserc                   # Proyecto Firebase activo
-├── firebase.json                 # Configuración global (hosting + functions)
-├── firestore.rules               # Reglas principales de Firestore
-├── storage.rules                 # 🔐 Reglas de seguridad para Cloud Storage
-├── offline-verification.md       # Guía para pruebas de modo offline PWA
-└── README.md                     # Documentación del proyecto
+└── database/                     # 🔐 Seguridad (Rules & Indexes)
