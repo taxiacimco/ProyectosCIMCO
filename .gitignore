@@ -1,4 +1,4 @@
-// Versión Arquitectura: V7.7 - Protección de Secretos y Exclusión de Entorno
+// Versión Arquitectura: V7.8 - Actualización de Gitignore para Emuladores Locales
 /**
  * .gitignore - TAXIA CIMCO
  * Misión: Protección de archivos sensibles, exclusión de dependencias y optimización de repositorio.
@@ -95,3 +95,8 @@ tests/
 pruebas/
 *.test.js
 *.spec.js
+
+# ---------------------------------------------------------
+# Exportaciones locales de emuladores de Firebase
+# ---------------------------------------------------------
+firebase-export-*/
