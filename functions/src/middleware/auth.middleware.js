@@ -1,4 +1,4 @@
-// Versión Arquitectura: V2.4 - Guardia de Identidad (Firebase Auth + Emulator Bypass)
+// Versión Arquitectura: V2.5 - Guardia de Identidad (Firebase Auth + Bypass Carlos Fuentes Dev Mode)
 /**
  * functions/src/middleware/auth.middleware.js
  * PROYECTO: TAXIA CIMCO
@@ -24,6 +24,12 @@ export const authGuard = async (req, res, next) => {
 
     try {
         const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
+
+        // 🚀 BYPASS PARA PRUEBAS LOCALES (Carlos Fuentes Dev Mode)
+        if (isEmulator && idToken === 'owner') {
+            req.user = { uid: 'ADMIN_LOCAL', role: 'ADMIN' };
+            return next();
+        }
 
         /**
          * 🛡️ PUERTA DE ENLACE PARA PRUEBAS (SOLO EMULADOR)

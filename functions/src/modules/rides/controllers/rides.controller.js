@@ -1,3 +1,4 @@
+// Versión Arquitectura: V3.0 - Despacho Híbrido (Directo vs Cooperativa)
 /**
  * modules/rides/controllers/rides.controller.js
  * Controlador maestro de viajes TAXIA CIMCO
@@ -7,29 +8,57 @@ import RideService from "../services/rides.service.js";
 import HttpResponse from "../../../utils/http-response.js"; 
 import { asyncHandler } from "../../../middleware/async-handler.js";
 
-// Instanciamos el servicio de lógica de negocio
 const rideService = new RideService();
 
 /**
- * Crear un nuevo viaje
- * Soporta: Mototaxi, Motoparrillero, Motocarga y Vehículo Intermunicipal
+ * 🏍️ 1. CREAR VIAJE DIRECTO (Radar 5km)
+ * Soporta: mototaxi, motoparrillero, motocarga
+ * Va directo al conductor sin pasar por despachador.
  */
-export const createRide = asyncHandler(async (req, res) => {
+export const createDirectRide = asyncHandler(async (req, res) => {
     const uid = req.user?.uid; 
-    const { tipoServicio, cooperativaSolicitada, origen, destino, tarifa } = req.body;
+    const { tipoServicio, origen, destino, tarifa, locationGeoHash } = req.body;
 
-    if (!tipoServicio) {
-        return HttpResponse.badRequest(res, "El tipo de servicio es obligatorio.");
+    if (!tipoServicio || !['mototaxi', 'motoparrillero', 'motocarga'].includes(tipoServicio)) {
+        return HttpResponse.badRequest(res, "Tipo de servicio directo inválido o ausente.");
     }
-
-    // Lógica de asignación de flujo: Intermunicipal requiere intervención de un Despachador
-    const requiereDespachador = (tipoServicio === 'Vehiculo Intermunicipal');
 
     const rideData = {
         requesterUid: uid,
         tipoServicio,
-        cooperativaSolicitada: requiereDespachador ? cooperativaSolicitada : 'N/A',
-        requiereDespachador,
+        cooperativaSolicitada: 'N/A',
+        requiereDespachador: false, // CLAVE: No usa despachador
+        dispatchMode: 'direct',
+        status: "pending",
+        origen,
+        destino,
+        tarifa,
+        locationGeoHash: locationGeoHash || null, // Para futura búsqueda geoespacial
+        createdAt: new Date().toISOString()
+    };
+
+    const ride = await rideService.create(rideData);
+    return HttpResponse.created(res, ride, `Solicitud de ${tipoServicio} enviada al radar.`);
+});
+
+/**
+ * 🚌 2. CREAR VIAJE POR COOPERATIVA (Intermunicipal)
+ * Requiere intervención de un Despachador de la cooperativa específica.
+ */
+export const createCooperativeRide = asyncHandler(async (req, res) => {
+    const uid = req.user?.uid; 
+    const { tipoServicio, cooperativaSolicitada, origen, destino, tarifa } = req.body;
+
+    if (!cooperativaSolicitada) {
+         return HttpResponse.badRequest(res, "Debe especificar la cooperativa para este servicio.");
+    }
+
+    const rideData = {
+        requesterUid: uid,
+        tipoServicio: tipoServicio || 'intermunicipal',
+        cooperativaSolicitada,
+        requiereDespachador: true, // CLAVE: Va a la bandeja del despachador
+        dispatchMode: 'managed',
         status: "pending",
         origen,
         destino,
@@ -38,12 +67,11 @@ export const createRide = asyncHandler(async (req, res) => {
     };
 
     const ride = await rideService.create(rideData);
-    return HttpResponse.created(res, ride, `Solicitud de ${tipoServicio} creada correctamente.`);
+    return HttpResponse.created(res, ride, `Solicitud enviada a la taquilla de ${cooperativaSolicitada}.`);
 });
 
 /**
  * 🛡️ ACEPTAR VIAJE (CON VALIDACIÓN BANCARIA)
- * Captura errores de negocio como SALDO_INSUFICIENTE lanzados por el Service.
  */
 export const aceptarViaje = asyncHandler(async (req, res) => {
     const { viajeId, conductorId } = req.body;
@@ -53,41 +81,38 @@ export const aceptarViaje = asyncHandler(async (req, res) => {
     }
 
     try {
-        const result = await RideService.acceptRide(viajeId, conductorId);
+        const result = await rideService.acceptRide(viajeId, conductorId); // Corrección: rideService minúscula
         return HttpResponse.ok(res, result, "Viaje asignado correctamente.");
     } catch (error) {
         console.error("[CIMCO-CONTROLLER] Error al aceptar viaje:", error.message);
 
-        // Filtro de Errores de Negocio (Arquitectura Hexagonal)
         if (error.message === "SALDO_INSUFICIENTE") {
-            return HttpResponse.error(res, "Saldo insuficiente. Debes recargar para aceptar servicios.", 403, "DEUDA_EXCEDIDA");
+            return HttpResponse.error(res, "Saldo insuficiente. Debes recargar.", 403, "DEUDA_EXCEDIDA");
         }
-
         if (error.message === "VIAJE_YA_TOMADO") {
-            return HttpResponse.error(res, "Este viaje ya fue tomado por otro conductor.", 409, "ALREADY_TAKEN");
+            return HttpResponse.error(res, "Este viaje ya fue tomado.", 409, "ALREADY_TAKEN");
         }
-
         if (error.message === "VIAJE_NO_ENCONTRADO") {
             return HttpResponse.notFound(res, "El viaje especificado no existe.");
         }
 
-        throw error; // Deja que el errorHandler general maneje lo demás
+        throw error;
     }
 });
 
 /**
- * Listar viajes de servicios directos (Para conductores de Moto)
+ * 📡 LISTAR VIAJES DIRECTOS (Radar de Motos)
  */
 export const listPendingDirectRides = asyncHandler(async (req, res) => {
     const rides = await rideService.findAll({ 
         status: "pending", 
         requiereDespachador: false 
     });
-    return HttpResponse.ok(res, rides, "Viajes directos disponibles.");
+    return HttpResponse.ok(res, rides, "Viajes directos disponibles en tu zona.");
 });
 
 /**
- * Listar viajes por Cooperativa (Para el panel del Despachador)
+ * 🏢 LISTAR VIAJES POR COOPERATIVA (Panel Despachador)
  */
 export const listPendingByCooperative = asyncHandler(async (req, res) => {
     const { cooperativeName } = req.params;
@@ -101,7 +126,7 @@ export const listPendingByCooperative = asyncHandler(async (req, res) => {
         cooperativaSolicitada: cooperativeName,
         requiereDespachador: true 
     });
-    return HttpResponse.ok(res, rides, `Viajes pendientes para ${cooperativeName}.`);
+    return HttpResponse.ok(res, rides, `Taquilla de ${cooperativeName} actualizada.`);
 });
 
 /**
@@ -139,9 +164,9 @@ export const updateStatus = asyncHandler(async (req, res) => {
     return HttpResponse.ok(res, updatedRide, `Estado actualizado a ${status}.`);
 });
 
-// Exportación como objeto para compatibilidad con RidesController.method
 export default {
-    createRide,
+    createDirectRide,      // NUEVO
+    createCooperativeRide, // NUEVO
     aceptarViaje,
     listPendingDirectRides,
     listPendingByCooperative,

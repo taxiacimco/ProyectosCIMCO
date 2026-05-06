@@ -1,35 +1,40 @@
-// Versión Arquitectura: V3.1 - Refactor de Resolución de Rutas de Entorno
-/**
- * functions/src/config/env/env.loader.js
- * Misión: Carga de variables de entorno con resolución de ruta simplificada
- * para evitar bloqueos de I/O durante el Discovery.
- */
-
 import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
+import { envSchema } from "./env.schema.js"; // Importamos el validador
 
 export function loadEnv() {
   const rootPath = process.cwd();
-  
-  // 🎯 Resolución Quirúrgica: Priorizamos el archivo local al proceso actual
-  const envPath = fs.existsSync(path.join(rootPath, '.env')) 
-                  ? path.join(rootPath, '.env') 
-                  : path.join(rootPath, 'functions', '.env');
+  const nodeEnv = process.env.NODE_ENV || 'development';
 
-  if (fs.existsSync(envPath)) {
-    const result = dotenv.config({ path: envPath });
-    
-    if (!result.error && process.env.NODE_ENV !== 'test') {
-      console.log(`✅ [CIMCO CONFIG] Entorno cargado exitosamente: ${envPath}`);
-    }
-  } else {
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn("⚠️ [CIMCO CONFIG] No se detectó archivo .env en las rutas estándar.");
+  // 🎯 Estrategia de Carga Priorizada:
+  // 1. .env.local (Para desarrollo)
+  // 2. .env (Genérico)
+  const envFiles = [
+    path.join(rootPath, `.env.${nodeEnv}.local`),
+    path.join(rootPath, `.env.local`),
+    path.join(rootPath, `.env`)
+  ];
+
+  for (const file of envFiles) {
+    if (fs.existsSync(file)) {
+      dotenv.config({ path: file });
+      if (nodeEnv !== 'test') {
+        console.log(`✅ [CIMCO CONFIG] Archivo cargado: ${file}`);
+      }
+      break; // Detenerse en el primer archivo encontrado con mayor prioridad
     }
   }
-  
-  return process.env;
+
+  // 🛡️ VALIDACIÓN DE INTEGRIDAD CON ZOD[cite: 39]
+  try {
+    return envSchema.parse(process.env);
+  } catch (error) {
+    console.error("❌ [ALERTA DE ARQUITECTURA] Variables de entorno inválidas:");
+    console.error(JSON.stringify(error.format(), null, 2));
+    if (nodeEnv === 'production') process.exit(1);
+    return process.env;
+  }
 }
 
 export default loadEnv;

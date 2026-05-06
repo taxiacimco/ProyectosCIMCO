@@ -1,65 +1,85 @@
-/* 1. Directivas base de Tailwind CSS */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* 2. Estilos Globales personalizados */
 :root {
-  scroll-behavior: smooth;
+--color-dark-bg: #020617;
+--color-cyan-glow: #06b6d4;
+--font-main: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
+@layer base {
 body {
-  margin: 0;
-  /* Fondo gris claro profesional para que resalten los paneles */
-  background-color: #f8f9fa; 
-  color: #333;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@apply bg-[#020617] text-white antialiased;
+font-family: var(--font-main);
 }
 
-/* 3. Optimizaciones para componentes de tu proyecto */
-@layer components {
-  /* Botón principal para formularios */
-  .btn-primary {
-    @apply bg-blue-600 text-white px-6 py-2 rounded-xl font-semibold hover:bg-blue-700 transition duration-300 shadow-md;
-  }
-
-  /* Botón de éxito (Ideal para completar viajes o registros) */
-  .btn-success {
-    @apply bg-green-600 text-white px-6 py-2 rounded-xl font-semibold hover:bg-green-700 transition duration-300 shadow-md;
-  }
-
-  /* Estilo para el botón flotante de WhatsApp */
-  .btn-whatsapp {
-    @apply fixed bottom-5 right-5 bg-[#25D366] text-white p-4 rounded-full shadow-lg transition-transform hover:scale-110 z-[1000] flex items-center justify-center;
-  }
-}
-
-/* 4. Correcciones para visualización en móviles y multimedia */
-img, svg, video, canvas {
-  display: block;
-  max-width: 100%;
-  height: auto;
-}
-
-/* Estilo limpio para campos de texto */
-input::placeholder, textarea::placeholder {
-  color: #9ca3af;
-  opacity: 1;
-}
-
-/* Mejora para el scrollbar en paneles laterales */
+/* Personalización de scrollbars para estética futurista */
 ::-webkit-scrollbar {
-  width: 6px;
+width: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+background: #020617;
 }
 ::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 10px;
+background: #1e293b;
+border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #999;
+background: var(--color-cyan-glow);
+}
+}
+
+@layer components {
+/* Clase para el texto brillante del logo */
+.cimco-logo-text {
+@apply font-black italic uppercase tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-blue-500 to-cyan-400;
+background-size: 200% auto;
+animation: shine 4s linear infinite;
+}
+
+/* Tarjetas con efecto de cristal (Glassmorphism) */
+.cimco-card {
+@apply bg-slate-900/50 backdrop-blur-xl border border-white/5 rounded-[2rem] shadow-2xl;
+}
+
+/* Botones de acción principal */
+.cimco-btn-primary {
+@apply px-6 py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl transition-all
+active:scale-95 shadow-lg shadow-cyan-900/20 flex items-center justify-center gap-2 uppercase tracking-widest text-[10px];
+}
+}
+
+/* Animaciones personalizadas */
+@keyframes shine {
+to {
+background-position: 200% center;
+}
+}
+
+/* Ajustes para Leaflet para que combine con el tema oscuro */
+.leaflet-container {
+background: #020617 !important;
+}
+
+.leaflet-bar a {
+background-color: #0f172a !important;
+color: #22d3ee !important;
+border-bottom: 1px solid #1e293b !important;
+}
+
+/* Animación de pulso para la ubicación del usuario */
+.user-location-pulse {
+box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.7);
+animation: pulse 2s infinite;
+border-radius: 50%;
+}
+
+@keyframes pulse {
+70% {
+box-shadow: 0 0 0 15px rgba(6, 182, 212, 0);
+}
+100% {
+box-shadow: 0 0 0 0 rgba(6, 182, 212, 0);
+}
 }

@@ -1,13 +1,13 @@
-// Versión Arquitectura: V2.1 - Saneamiento de Middlewares
+// Versión Arquitectura: V3.0 - Rutas de Despacho Híbrido
 /**
  * functions/src/routes/rides.routes.js
  * Configuración de rutas centralizada para el módulo de viajes (rides).
- * TAXIA CIMCO - Soporte para Mototaxis, Motocargas y Cooperativas Intermunicipales.
+ * TAXIA CIMCO - Soporte para Mototaxis (Directo) y Cooperativas (Despachador).
  */
 import { Router } from "express";
 
-// 🔐 Middlewares (Rutas corregidas)
-import { authGuard } from "../middleware/auth.middleware.js"; // FIX: Era auth.guard.js
+// 🔐 Middlewares
+import { authGuard } from "../middleware/auth.middleware.js"; 
 import roleGuard from "../middleware/role.guard.js";
 
 // 🎭 Roles
@@ -19,27 +19,37 @@ import RidesController from "../modules/rides/controllers/rides.controller.js";
 const router = Router();
 
 /**
- * POST / - Crear solicitud (Pasajero)
+ * 🏍️ POST /request/direct - Crear solicitud para motos (Va al radar)
  */
 router.post(
-  "/",
+  "/request/direct",
   authGuard,
   roleGuard([ROLES.PASSENGER, ROLES.USER]), 
-  RidesController.createRide
+  RidesController.createDirectRide
 );
 
 /**
- * POST /aceptar - Conductor toma el servicio
+ * 🚌 POST /request/cooperative - Crear solicitud Intermunicipal (Va al despachador)
+ */
+router.post(
+  "/request/cooperative",
+  authGuard,
+  roleGuard([ROLES.PASSENGER, ROLES.USER]), 
+  RidesController.createCooperativeRide
+);
+
+/**
+ * 🟢 POST /aceptar - Conductor o Despachador asigna el servicio
  */
 router.post(
   "/aceptar",
   authGuard,
-  roleGuard([ROLES.DRIVER]),
+  roleGuard([ROLES.DRIVER, ROLES.DESPATCH]), // Añadido DESPATCH para que puedan asignar
   RidesController.aceptarViaje
 );
 
 /**
- * GET /pending/direct - Radar de Motos
+ * 📡 GET /pending/direct - Radar de Motos (Solo conductores directos)
  */
 router.get(
   "/pending/direct",
@@ -49,7 +59,7 @@ router.get(
 );
 
 /**
- * GET /pending/cooperative/:cooperativeName - Panel Despacho
+ * 🏢 GET /pending/cooperative/:cooperativeName - Taquilla de la Cooperativa
  */
 router.get(
   "/pending/cooperative/:cooperativeName",
@@ -59,7 +69,7 @@ router.get(
 );
 
 /**
- * GET /me - Historial del usuario/conductor
+ * 👤 GET /me - Historial del usuario/conductor
  */
 router.get(
   "/me",
@@ -68,7 +78,7 @@ router.get(
 );
 
 /**
- * GET /:id - Detalle individual
+ * 🔍 GET /:id - Detalle individual
  */
 router.get(
   "/:id",
@@ -77,7 +87,7 @@ router.get(
 );
 
 /**
- * PATCH /:id/status - Control de flujo (Iniciar/Finalizar)
+ * 🔄 PATCH /:id/status - Control de flujo (Iniciar/Finalizar)
  */
 router.patch(
   "/:id/status",

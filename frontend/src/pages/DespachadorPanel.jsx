@@ -1,6 +1,7 @@
+// Versión Arquitectura: V8.1 - Integración con Túnel Cloudflare Activo
 /**
  * PROYECTO: TAXIA CIMCO - DespachadorPanel
- * Misión: Central de Mando con Cobro de Comisiones y Mapa.
+ * Misión: Central de Mando con Cobro de Comisiones y Conectividad por Túnel.
  */
 import React, { useEffect, useState, useRef } from 'react';
 import { 
@@ -16,6 +17,13 @@ import Swal from 'sweetalert2';
 
 // Servicios de CIMCO
 import { viajeService } from '../services/viajeService';
+
+// 🌐 Configuración de Conectividad Central TAXIA CIMCO
+export const CONFIG = {
+    // 🔗 URL ACTIVA DEL TÚNEL CLOUDFLARE
+    API_URL: "https://progress-revolutionary-apply-carol.trycloudflare.com/v1",
+    PROJECT_ID: "pelagic-chalice-467818-e1"
+};
 
 const loadLeafletResources = () => {
     if (!document.getElementById('leaflet-css')) {
@@ -72,7 +80,7 @@ const DespachadorPanel = ({ db, auth, appId = 'taxiacimco-app' }) => {
 
         const miCoop = userData.cooperativa;
 
-        // 1. ALERTAS SOS (Ruta Sagrada)
+        // 1. ALERTAS SOS
         const qSOS = query(
           collection(db, 'artifacts', appId, 'public', 'data', 'alertas_sos'),
           where("estado", "==", "ACTIVO"), where("cooperativa", "==", miCoop)
@@ -83,7 +91,7 @@ const DespachadorPanel = ({ db, auth, appId = 'taxiacimco-app' }) => {
           alertas.length > 0 ? sirenaRef.current.play().catch(e => {}) : (sirenaRef.current.pause(), sirenaRef.current.currentTime = 0);
         }));
 
-        // 2. VIAJES (Ruta Sagrada unificada en 'rides')
+        // 2. VIAJES (Rides)
         const qViajes = query(
           collection(db, 'artifacts', appId, 'public', 'data', 'rides'),
           where("cooperativaNombre", "==", miCoop)
@@ -98,7 +106,7 @@ const DespachadorPanel = ({ db, auth, appId = 'taxiacimco-app' }) => {
           setPedidos(cat);
         }));
 
-        // 3. FLOTA ONLINE (Conductores Libres)
+        // 3. FLOTA ONLINE
         const qFlota = query(
           collection(db, 'artifacts', appId, 'public', 'data', 'conductores_online'),
           where("cooperativa", "==", miCoop)
@@ -140,9 +148,7 @@ const DespachadorPanel = ({ db, auth, appId = 'taxiacimco-app' }) => {
     }
   };
 
-  // ⚡ FUNCIÓN MAESTRA: Despachar y Cobrar
   const manejarDespacho = async (viajeId, conductorId, clienteNombre) => {
-    // 1. Verificación Financiera
     if (!perfil || (perfil.saldoWallet || 0) < 500) {
       Swal.fire({
         title: 'Saldo Insuficiente',
@@ -167,12 +173,11 @@ const DespachadorPanel = ({ db, auth, appId = 'taxiacimco-app' }) => {
 
     if (confirm.isConfirmed) {
         try {
-            // Llamada al servicio que ejecuta el cobro y la asignación
             const res = await viajeService.despacharViaje({
               viajeId,
               conductorId,
               despachadorId: user.uid,
-              montoCobro: 500, // Regla de negocio fija
+              montoCobro: 500,
               rolAccion: 'despachador'
             });
 
@@ -200,7 +205,6 @@ const DespachadorPanel = ({ db, auth, appId = 'taxiacimco-app' }) => {
               <div key={a.id} className="p-6 bg-red-600/10 rounded-3xl border border-red-600/30 text-left mb-4">
                 <p className="text-2xl font-black text-white italic uppercase">{a.nombre}</p>
                 <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase">PLACA: <span className="text-red-500">{a.placa}</span></p>
-                {/* Lógica SOS Omitida por brevedad en vista, pero mantenida funcional en el código original */}
               </div>
             ))}
           </div>
@@ -235,20 +239,19 @@ const DespachadorPanel = ({ db, auth, appId = 'taxiacimco-app' }) => {
                     <p className="truncate"><span className="text-cyan-500 font-black">A:</span> {v.puntoDestinoManual || v.puntoDestino}</p>
                   </div>
                   
-                  {/* Selector de Conductores Inyectado */}
                   <div className="space-y-2 mt-4">
                     <p className="text-[9px] font-black text-slate-600 uppercase">Seleccionar Unidad a Despachar:</p>
                     <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
                       {conductoresEnLinea.length === 0 ? (
-                        <span className="text-xs text-rose-500">No hay unidades en línea</span>
+                        <span className="text-xs text-rose-500 font-bold uppercase tracking-tighter italic">No hay unidades en línea ❌</span>
                       ) : (
                         conductoresEnLinea.map(conductor => (
                           <button 
                             key={conductor.id}
                             onClick={() => manejarDespacho(v.id, conductor.id, v.clienteNombre || v.pasajeroNombre)}
-                            className="bg-slate-950 hover:bg-cyan-600 border border-white/5 px-4 py-3 rounded-xl text-[10px] font-black transition-all whitespace-nowrap"
+                            className="bg-slate-950 hover:bg-cyan-600 border border-white/5 px-4 py-3 rounded-xl text-[10px] font-black transition-all whitespace-nowrap uppercase italic"
                           >
-                            {conductor.placa || 'Unidad'} • {conductor.nombre}
+                            🚕 {conductor.placa || 'Unidad'} • {conductor.nombre}
                           </button>
                         ))
                       )}

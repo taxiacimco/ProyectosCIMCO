@@ -1,79 +1,80 @@
+// Versión Arquitectura: V8.1 - Protocolo de Seguridad CIMCO
+/**
+ * ARCHIVO: frontend/src/components/ProtectedRoute.jsx
+ * MISIÓN: Actuar como un interceptor de rutas (Route Guard) para asegurar
+ * que solo niveles de acceso autorizados entren a zonas críticas.
+ */
+
 import React, { useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { ShieldAlert, Lock } from 'lucide-react';
+import { Navigate, useLocation } from 'react-router-dom';
+import { ShieldAlert, ArrowLeft, Loader2 } from 'lucide-react';
 
-/**
- * Componente ProtectedRoute
- * Versión: 3.1.0 - Protocolo de Seguridad CIMCO
- * * Este componente actúa como un guardián de rutas (Route Guard) para asegurar
- * que solo usuarios con el rol adecuado accedan a paneles específicos.
- */
-const ProtectedRoute = ({ allowedRoles }) => {
-  // Extraemos currentRole, que es el que realmente tiene el rol validado desde Firestore/Claims
+const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading, currentRole } = useAuth();
   const location = useLocation();
 
-  // Registro de logs para monitoreo técnico en consola (CIMCO Monitoring)
+  // Registro de auditoría técnica en consola
   useEffect(() => {
     if (!loading && user) {
-      console.log(`[CIMCO AUTH] 👤 Usuario: ${user.email} | 🔑 Rol: ${currentRole || 'Pendiente'}`);
+      console.log(`[CIMCO-GUARD] 👤 ${user.email} | 🔑 Nivel: ${currentRole || 'Pendiente'}`);
     }
   }, [user, loading, currentRole]);
 
-  // 1. PANTALLA DE CARGA (Branding CIMCO)
-  // Se muestra mientras se verifica el token y se recupera el rol de Firestore
+  // 1. ESTADO DE CARGA (Branding CIMCO)
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-6">
-          <div className="relative">
-            {/* Spinner animado con colores de la marca */}
-            <div className="w-16 h-16 border-4 border-yellow-400/20 border-t-yellow-400 rounded-full animate-spin"></div>
-            <Lock className="absolute inset-0 m-auto text-yellow-400 animate-pulse" size={20} />
-          </div>
-          <div className="flex flex-col items-center">
-            <span className="text-white font-black text-xs uppercase tracking-[0.3em] mb-2">Seguridad CIMCO</span>
-            <div className="text-yellow-400/50 font-bold animate-pulse text-[10px] tracking-widest uppercase">
-              Verificando Protocolos de Acceso...
-            </div>
+          <div className="w-16 h-16 border-4 border-cyan-500/20 border-t-cyan-500 rounded-full animate-spin" />
+          <div className="text-cyan-500 font-black text-[10px] tracking-[0.3em] uppercase animate-pulse">
+            Verificando Protocolos CIMCO...
           </div>
         </div>
       </div>
     );
   }
 
-  // 2. VERIFICACIÓN DE AUTENTICACIÓN
-  // Si no hay usuario en el estado global, redirigir al Login
+  // 2. VERIFICACIÓN DE SESIÓN
   if (!user) {
-    console.warn("[CIMCO AUTH] 🚫 Bloqueado: Usuario no autenticado.");
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // 3. VALIDACIÓN DE ROLES
-  // Si se definieron roles permitidos para esta ruta, compararlos con el rol actual
+  // 3. VALIDACIÓN DE ROLES (Control de Acceso Basado en Atributos)
   if (allowedRoles) {
-    // Convertimos todo a minúsculas para evitar discrepancias de mayúsculas/minúsculas
     const userRole = (currentRole || '').toLowerCase();
     const rolesPermitidos = allowedRoles.map(r => r.toLowerCase());
     
-    const hasPermission = rolesPermitidos.includes(userRole);
-
-    if (!hasPermission) {
-      console.error(`[CIMCO AUTH] ❌ Acceso Denegado. Rol Actual: ${userRole} | Requeridos: ${allowedRoles}`);
+    if (!rolesPermitidos.includes(userRole)) {
+      console.error(`[CIMCO-AUTH] Acceso Denegado. Se requiere: ${allowedRoles}. Actual: ${userRole}`);
       
-      /**
-       * Lógica de Redirección por Desvío de Seguridad:
-       * Si un usuario intenta entrar a una zona prohibida, lo enviamos al Dashboard de Bienvenida
-       * donde el sistema lo redistribuirá según su rol real.
-       */
-      return <Navigate to="/welcome" replace />;
+      return (
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
+          <div className="max-w-md w-full space-y-8 bg-slate-900 border border-white/10 p-12 rounded-[3rem] shadow-2xl shadow-red-500/5">
+            <div className="bg-red-500/10 w-20 h-20 rounded-full flex items-center justify-center mx-auto border border-red-500/20">
+              <ShieldAlert className="text-red-500" size={40} />
+            </div>
+            
+            <div>
+              <h1 className="text-white font-black text-2xl uppercase italic tracking-tighter">Acceso Restringido</h1>
+              <p className="text-slate-400 text-sm mt-4 leading-relaxed">
+                Tu nivel de credenciales <span className="text-white font-bold">[{userRole}]</span> no tiene autorización para este sector del sistema.
+              </p>
+            </div>
+
+            <button 
+              onClick={() => window.location.href = '/'}
+              className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] transition-all flex items-center justify-center gap-3 group"
+            >
+              <ArrowLeft className="group-hover:-translate-x-1 transition-transform" size={16} /> Volver al Inicio
+            </button>
+          </div>
+        </div>
+      );
     }
   }
 
-  // 4. ACCESO CONCEDIDO
-  // Outlet renderiza el componente hijo definido en las rutas (App.jsx)
-  return <Outlet />;
+  return children;
 };
 
 export default ProtectedRoute;

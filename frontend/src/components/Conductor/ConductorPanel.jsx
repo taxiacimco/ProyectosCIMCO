@@ -1,3 +1,4 @@
+// Versión Arquitectura: V2.1 - Integración Financiera y UI Elegante
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
@@ -18,8 +19,10 @@ import {
 } from 'firebase/firestore';
 import { CheckCircle, MapPin, Navigation, Phone, User, Bell, Settings, Wallet, Clock, AlertTriangle } from 'lucide-react';
 
-// ✅ IMPORTACIÓN DEL NUEVO COMPONENTE QUIRÚRGICO
+// ✅ IMPORTACIÓN DEL NUEVO COMPONENTE QUIRÚRGICO Y SERVICIOS
 import TarjetaViajeConductor from './TarjetaViajeConductor';
+import viajeService from '../../services/viajeService';
+import { notificarExito, notificarError } from '../../utils/notificaciones';
 
 // --- CONFIGURACIÓN E INICIALIZACIÓN ---
 const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
@@ -74,6 +77,7 @@ const ConductorPanelContent = () => {
   const [solicitudes, setSolicitudes] = useState([]);
   const [viajeActual, setViajeActual] = useState(null);
   const [estaDisponible, setEstaDisponible] = useState(false);
+  const [procesandoPago, setProcesandoPago] = useState(false);
 
   // 1. Escuchar solicitudes disponibles basadas en el rol del conductor
   useEffect(() => {
@@ -111,6 +115,36 @@ const ConductorPanelContent = () => {
       
     } catch (error) {
       console.error("Error al setear estado local de viaje:", error);
+    }
+  };
+
+  // 3. Lógica Quirúrgica: Finalizar y Cobrar
+  const handleFinalizarViaje = async () => {
+    setProcesandoPago(true);
+    try {
+      // Llamamos al motor financiero pasándole el UID y la tarifa del viaje
+      const res = await viajeService.finalizarViajeYCobrar(user.uid, viajeActual.tarifa);
+
+      if (res.success) {
+        notificarExito("Viaje finalizado y comisión cobrada con éxito.");
+        
+        // Restauramos al conductor al pool de disponibles
+        const conductorRef = doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid);
+        await updateDoc(conductorRef, {
+          estadoFisico: "disponible",
+          viajeActualId: null
+        });
+
+        setViajeActual(null);
+      } else {
+        notificarError(res.message);
+        // Opcional: Redirigir a billetera si es error de fondos
+      }
+    } catch (error) {
+      console.error("Error al finalizar viaje:", error);
+      notificarError("Error crítico de red.");
+    } finally {
+      setProcesandoPago(false);
     }
   };
 
@@ -180,10 +214,19 @@ const ConductorPanelContent = () => {
           </button>
           
           <button 
-            onClick={() => setViajeActual(null)}
-            className="w-full bg-white/5 py-4 rounded-2xl font-bold uppercase text-[10px] text-slate-400 active:scale-95 transition-transform"
+            onClick={handleFinalizarViaje}
+            disabled={procesandoPago}
+            className={`w-full py-4 rounded-2xl font-semibold uppercase tracking-widest flex items-center justify-center gap-2 transition-all mt-4 backdrop-blur-md shadow-lg
+              ${procesandoPago 
+                ? 'bg-slate-800/50 text-slate-500 cursor-not-allowed border border-slate-700/50' 
+                : 'bg-slate-800/80 text-white border border-slate-600/50 hover:bg-slate-700 hover:border-slate-500 active:scale-95'
+              }`}
           >
-            Finalizar Servicio
+            {procesandoPago ? (
+              <><span className="animate-spin text-lg">🌀</span> PROCESANDO PAGO...</>
+            ) : (
+              "FINALIZAR SERVICIO"
+            )}
           </button>
         </div>
       </div>
@@ -247,13 +290,5 @@ const ConductorPanelContent = () => {
         <User size={22} className="text-slate-600" />
       </nav>
     </div>
-  );
-};
-
-export default function App() {
-  return (
-    <AuthProvider>
-      <ConductorPanelContent />
-    </AuthProvider>
   );
 }

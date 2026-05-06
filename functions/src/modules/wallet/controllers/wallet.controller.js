@@ -1,9 +1,9 @@
-// Versión Arquitectura: V4.1 - Persistencia de Intención y Blindaje de Metadatos
+// Versión Arquitectura: V5.1 - Integración de Trazabilidad targetUid
 /**
  * modules/wallet/controllers/wallet.controller.js
  * PROYECTO: TAXIA CIMCO
- * Misión: Gestión integral de flujos financieros y resolución de errores de enrutamiento.
- * Respeta el path sagrado: artifacts/taxiacimco-app/public/data/
+ * Misión: Integrar cobro automático de comisiones por rol y actualizar saldo en tiempo real, 
+ * asegurando la trazabilidad biométrica/UID en cada transacción.
  */
 
 import admin from '../../../firebase/firebase-admin.js'; 
@@ -18,46 +18,45 @@ const sacredDataPath = db.collection("artifacts").doc(appId).collection("public"
 
 /**
  * 1. 🔐 GENERAR INTENCIÓN DE PAGO
- * @desc Crea la firma y persiste la transacción como PENDIENTE para el Webhook.
+ * @desc Crea la firma y persiste la transacción en el path sagrado.
  */
 export const generatePaymentIntent = asyncHandler(async (req, res) => {
-    console.log("🚀 [WALLET] Creando intención de pago y persistiendo metadatos...");
+    res.set('Access-Control-Allow-Origin', '*');
+    console.log("🚀 [WALLET] Creando intención de pago...");
     
-    const { amount, reference, currency = "COP", user_type } = req.body;
-    const uid = req.user?.uid;
+    // ✅ AJUSTE: Extraemos targetUid directamente del payload del frontend
+    const { amount, reference, currency = "COP", user_type = 'CONDUCTOR', targetUid } = req.body;
 
-    if (!amount || !reference || !uid) {
-        return sendErrorResponse(res, "Faltan datos críticos (Monto/Referencia/UID).", 400);
+    // ✅ VALIDACIÓN FÉRREA: Si no hay targetUid, rechazamos la petición
+    if (!amount || !reference || !targetUid) {
+        return sendErrorResponse(res, "Faltan datos críticos (Monto/Referencia/targetUid).", 400);
     }
 
-    const amountInCents = Math.round(Number(amount) * 100);
-
     try {
-        // 🛡️ BLINDAJE: Guardamos la intención en Firestore antes de que el usuario pague
-        // Esto es lo que leerá el Webhook para saber a quién acreditar.
+        const amountInCents = Math.round(Number(amount)); 
+
         await sacredDataPath.collection("transacciones").doc(reference).set({
-            targetUid: uid,
-            user_type: user_type || 'PASAJERO',
-            amount: Number(amount),
+            targetUid: targetUid, // ✅ Guardado impecable con el nombre exacto
+            user_type: user_type,
+            amount: amountInCents, // Ajustado a persistir centavos puros para consistencia V5.0
             currency,
             status: 'PENDING',
             processed: false,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            gateway: "WOMPI"
         });
 
-        // Generamos la firma de integridad
         const signature = generateWompiSignature(reference, amountInCents, currency);
 
         return sendSuccessResponse(res, {
             signature,
-            publicKey: process.env.WOMPI_PUBLIC_KEY,
-            reference,
-            amountInCents
+            publicKey: process.env.WOMPI_PUBLIC_KEY || "pub_test_izIw7dbFsEITfI090UsC0BVspoy60CNx",
+            reference
         }, "Intención de pago registrada exitosamente");
 
     } catch (error) {
-        console.error("❌ [WALLET ERROR] Fallo al persistir intención:", error);
-        return sendErrorResponse(res, "Error al preparar la pasarela de pago.", 500);
+        console.error("❌ [CIMCO ERROR] Fallo en persistencia:", error);
+        return sendErrorResponse(res, "Error interno al preparar pago.", 500);
     }
 });
 
@@ -66,7 +65,7 @@ export const generatePaymentIntent = asyncHandler(async (req, res) => {
  */
 export const handleWompiWebhook = asyncHandler(async (req, res) => {
     const result = await WalletService.processWompiWebhook(req.body.data.transaction);
-    return sendSuccessResponse(res, result, "Webhook procesado");
+    return sendSuccessResponse(res, result, "Webhook processed");
 });
 
 /**
@@ -74,7 +73,7 @@ export const handleWompiWebhook = asyncHandler(async (req, res) => {
  */
 export const rechargeBalance = asyncHandler(async (req, res) => {
     const { targetUid, amount } = req.body;
-    const adminUid = req.user.uid;
+    const adminUid = req.user?.uid || "ADMIN_LOCAL";
 
     if (!targetUid || !amount || amount <= 0) {
         return sendErrorResponse(res, "Datos de recarga inválidos.", 400);
@@ -88,28 +87,119 @@ export const rechargeBalance = asyncHandler(async (req, res) => {
  * 4. 🔍 CONSULTA DE SALDO
  */
 export const getBalance = asyncHandler(async (req, res) => {
-    const uid = req.params.uid || req.user.uid;
+    const uid = req.params.uid || req.user?.uid;
+    if (!uid) return sendErrorResponse(res, "UID requerido", 401);
+    
     const wallet = await WalletService.getWallet(uid);
     return sendSuccessResponse(res, wallet, "Saldo recuperado con éxito");
 });
 
 /**
- * 5. 📉 DÉBITO POR COMISIÓN
+ * 5. 📉 DÉBITO POR COMISIÓN (Legacy/Manual)
  */
 export const debitBalance = asyncHandler(async (req, res) => {
     const { targetUid, amount, serviceId } = req.body;
 
     if (!targetUid || !amount || amount <= 0) {
-        return sendErrorResponse(res, "Datos de débito insuficientes.", 400);
+        return sendErrorResponse(res, "Datos insuficientes.", 400);
+    }
+
+    const result = await WalletService.debit(targetUid, amount, serviceId);
+    return sendSuccessResponse(res, result, "Débito completado");
+});
+
+/**
+ * 6. 📜 HISTORIAL DE TRANSACCIONES
+ */
+export const getHistory = asyncHandler(async (req, res) => {
+    const uid = req.user?.uid || "TEST_USER_CIMCO";
+
+    try {
+        const snapshot = await sacredDataPath.collection("transacciones")
+            .where("targetUid", "==", uid)
+            .get();
+
+        const history = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+
+        history.sort((a, b) => {
+            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+            return dateB - dateA; 
+        });
+
+        return sendSuccessResponse(res, history, "Historial recuperado");
+    } catch (error) {
+        return sendErrorResponse(res, "Error al leer transacciones.", 500);
+    }
+});
+
+/**
+ * 7. 🤖 PROCESAR COMISIÓN AUTOMÁTICA (V5.0)
+ * @desc Calcula y ejecuta el cobro según el rol del conductor usando transacciones atómicas.
+ */
+export const processServiceCommission = asyncHandler(async (req, res) => {
+    const { conductorId, tipoServicio } = req.body;
+
+    if (!conductorId || !tipoServicio) {
+        return sendErrorResponse(res, "conductorId y tipoServicio son obligatorios.", 400);
+    }
+
+    // 1. Definición de montos en centavos (Regla de negocio TAXIA CIMCO)
+    const montos = {
+        'MOTOCARGA': -50000,
+        'DESPACHADOR': -50000,
+        'MOTOTAXI': -200000,
+        'PARRILLERO': -200000
+    };
+
+    const montoCentavos = montos[tipoServicio.toUpperCase()];
+
+    if (montoCentavos === undefined) {
+        return sendErrorResponse(res, `Tipo de servicio '${tipoServicio}' no reconocido.`, 400);
     }
 
     try {
-        const result = await WalletService.debit(targetUid, amount, serviceId);
-        return sendSuccessResponse(res, result, "Débito por servicio completado");
+        await db.runTransaction(async (t) => {
+            // A. Referencia al balance del usuario en el Path Sagrado
+            const userRef = sacredDataPath.collection('usuarios').doc(conductorId);
+            const userDoc = await t.get(userRef);
+
+            if (!userDoc.exists) {
+                throw new Error("El conductor no existe en la base de datos.");
+            }
+
+            const saldoActual = userDoc.data().wallet_balance || 0;
+
+            // B. Generar referencia para la nueva transacción histórica
+            const txRef = sacredDataPath.collection('transacciones').doc();
+
+            // C. Operación Atómica: Actualizar Saldo + Registrar Historial
+            t.update(userRef, { 
+                wallet_balance: saldoActual + montoCentavos,
+                last_update: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+            t.set(txRef, {
+                targetUid: conductorId,
+                amount: montoCentavos,
+                gateway: "SISTEMA",
+                status: "COMPLETED",
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                reference: `COM-${Date.now()}-${conductorId.slice(0, 4)}`,
+                tipoServicio: tipoServicio.toUpperCase()
+            });
+        });
+
+        return sendSuccessResponse(res, { 
+            montoAplicado: montoCentavos,
+            unidad: "CENTAVOS" 
+        }, "Comisión de sistema procesada y saldo actualizado.");
+
     } catch (error) {
-        if (error.message === "INSUFFICIENT_FUNDS") {
-            return sendErrorResponse(res, "Saldo insuficiente para esta operación.", 402, "INSUFFICIENT_FUNDS");
-        }
-        throw error;
+        console.error("⚠️ [ALERTA DE ARQUITECTURA] Fallo en Transacción de Comisión:", error);
+        return sendErrorResponse(res, `Error en procesamiento atómico: ${error.message}`, 500);
     }
 });

@@ -1,21 +1,22 @@
 {
   "name": "taxia-cimco-backend",
-  "version": "1.1.1",
+  "version": "5.8.0",
   "type": "module",
-  "description": "Cloud Functions for Firebase - Arquitectura Modular",
+  "description": "Cerebro Central TAXIA CIMCO - Node.js 20 ESM - Seguridad Reforzada",
   "main": "src/index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "scripts": {
-    "serve": "firebase emulators:start --only functions,firestore,auth,pubsub",
+    "serve": "firebase emulators:start --only functions,firestore,auth,pubsub --import=./seed",
     "shell": "firebase functions:shell",
     "start": "npm run serve",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
     "dev": "node --watch src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "clean": "rimraf node_modules"
+    "clean": "rimraf node_modules",
+    "fix": "npm audit fix"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -28,6 +29,10 @@
     "express-validator": "^7.2.1",
     "firebase-admin": "^13.8.0",
     "firebase-functions": "^7.2.5",
-    "helmet": "^8.1.0"
+    "helmet": "^8.1.0",
+    "ngeohash": "^0.6.3"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.0"
   }
 }

@@ -1,6 +1,19 @@
+// Versión Arquitectura: V2.0 - Seguridad JWT Modo Fail-Safe
+/**
+ * utils/jwt.js
+ * Misión: Utilidad para generar y verificar JSON Web Tokens sin secretos expuestos.
+ */
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'taxia_cimco_default_secret_2026';
+// 🛡️ MODO FAIL-SAFE: Si no hay secreto, el módulo falla inmediatamente.
+const getJwtSecret = () => {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+        throw new Error("⚠️ FATAL: JWT_SECRET no está configurado en las variables de entorno.");
+    }
+    return secret;
+};
+
 const JWT_EXPIRATION = '7d';
 
 /**
@@ -13,7 +26,7 @@ class JwtUtil {
      * @returns {string} El token generado.
      */
     generateToken(payload) {
-        return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRATION });
+        return jwt.sign(payload, getJwtSecret(), { expiresIn: JWT_EXPIRATION });
     }
 
     /**
@@ -24,7 +37,7 @@ class JwtUtil {
      */
     verifyToken(token) {
         try {
-            return jwt.verify(token, JWT_SECRET);
+            return jwt.verify(token, getJwtSecret());
         } catch (error) {
             throw new Error('TOKEN_INVALID_OR_EXPIRED');
         }

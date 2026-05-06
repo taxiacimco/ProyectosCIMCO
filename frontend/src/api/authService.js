@@ -1,61 +1,42 @@
+// Versión Arquitectura: V9.0 - Refactor de Sincronización Backend
 /**
  * frontend/src/api/authService.js
- * Sincronización de sesión usando la instancia centralizada de Axios.
- * ARQUITECTURA: TAXIA CIMCO - Integración Quirúrgica V3
+ * Sincronización de sesión y validación de Custom Claims.
+ * ARQUITECTURA: Capa de Infraestructura (Adaptador de Red)
  */
+
 import api from './axiosConfig';
 
-// Detectamos si estamos en red local o localhost para activar herramientas de dev
+// Configuración de entorno
 const isDevelopment = 
   window.location.hostname === "localhost" || 
-  window.location.hostname === "127.0.0.1" || 
   window.location.hostname.startsWith("192.168."); 
 
 /**
- * ✅ Sincroniza el usuario con el Backend de TAXIA CIMCO.
+ * Sincroniza el usuario autenticado con el servidor de TAXIA CIMCO.
  */
 export const syncUserWithBackend = async (idToken) => {
   if (!idToken) {
-    console.error("❌ [AuthService] No se proporcionó un idToken.");
+    console.error("❌ [AuthService] idToken inexistente.");
     return null;
   }
 
   try {
-    // Intento de conexión al Backend Real
     const data = await api.post('/auth/login', { idToken });
-    console.log("✅ [CIMCO] Backend sincronizado con éxito.");
+    console.log("✅ [CIMCO-API] Backend validado correctamente.");
     return data;
-
   } catch (error) {
-    // LÓGICA DE RESILIENCIA PARA CARLOS (Modo Desarrollo en Red Local)
-    if (isDevelopment || import.meta.env.DEV) {
-      console.warn("⚠️ [CIMCO DEV] Error de API (Backend posiblemente apagado o IP bloqueada). Activando Bypass...");
-      
+    // Mantenemos Lógica de Resiliencia para Carlos Fuentes (Desarrollo)
+    if (isDevelopment) {
+      console.warn("⚠️ [CIMCO-DEV] Servidor local offline. Activando Bypass para pruebas de UI...");
       return { 
         success: true, 
-        message: "Bypass activado para pruebas en red local",
-        user: { 
-          role: 'conductor', 
-          status: 'active', 
-          uid: 'dev-id-001',
-          displayName: 'Carlos Fuentes (Dev)',
-          email: 'admin@taxiacimco.com',
-          saldo: 50000 
-        } 
+        mock: true,
+        user: { role: 'admin', displayName: 'Carlos (DevMode)' } 
       };
     }
-
-    console.error("❌ [CIMCO] Error crítico de autenticación:", error.response?.data || error.message);
+    
+    console.error("❌ [CIMCO-API] Fallo crítico de autenticación:", error.message);
     throw error;
   }
 };
-
-export const logoutFromBackend = async () => {
-  try {
-    return await api.post('/auth/logout');
-  } catch (error) {
-    console.warn("⚠️ [AuthService] No se pudo notificar el logout al servidor.");
-  }
-};
-
-export default { syncUserWithBackend, logoutFromBackend };

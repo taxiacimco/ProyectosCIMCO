@@ -1,6 +1,8 @@
+// Versión Arquitectura: V9.3 - Sincronización de Custom Claims Financieros
 /**
  * 💰 TAXIA CIMCO - Wallet Service
- * Misión: Gestión atómica de saldos, recargas, débitos y conciliación de pagos externos.
+ * Misión: Gestión atómica de saldos, recargas, débitos y sincronización de Custom Claims
+ * para optimización Zero-Read Cost en Firebase Rules.
  */
 import admin from "../../../firebase/firebase-admin.js";
 import { enviarNotificacionPush } from "../../../utils/notificaciones.js";
@@ -14,6 +16,33 @@ const sacredDataPath = db.collection("artifacts").doc(appId).collection("public"
 class WalletService {
 
   /**
+   * ⚡ MÉTODO NUEVO: Sincronización Quirúrgica de Custom Claims
+   * Lee el saldo actual y actualiza el token JWT del usuario.
+   */
+  static async syncWalletClaims(uid) {
+    const userRef = sacredDataPath.collection("usuarios").doc(uid);
+    const userDoc = await userRef.get();
+    
+    if (!userDoc.exists) return false;
+    
+    const currentBalance = userDoc.data().saldoWallet || 0;
+    const hasCredit = currentBalance >= 0;
+
+    const auth = admin.auth();
+    const userRecord = await auth.getUser(uid);
+    const currentClaims = userRecord.customClaims || {};
+
+    // Inyectamos el claim 'hasCredit' manteniendo el rol y otros claims intactos
+    await auth.setCustomUserClaims(uid, {
+      ...currentClaims,
+      hasCredit: hasCredit
+    });
+
+    console.log(`🔐 [Claims Sync] Usuario ${uid} | hasCredit: ${hasCredit} | Saldo: ${currentBalance}`);
+    return hasCredit;
+  }
+
+  /**
    * ✅ MÉTODO: processWompiWebhook
    * Misión: Validar el pago y actualizar saldo distinguiendo entre Pasajero y Conductor.
    */
@@ -21,7 +50,6 @@ class WalletService {
     const { reference, amount_in_cents, status } = data;
     const amount = amount_in_cents / 100;
 
-    // 1. Localizar la intención de transacción
     const transaccionRef = sacredDataPath.collection("transacciones").doc(reference);
     const transaccionDoc = await transaccionRef.get();
 
@@ -37,7 +65,6 @@ class WalletService {
       return { success: true, alreadyProcessed: true };
     }
 
-    // 2. Si el pago es exitoso, procedemos a la recarga atómica
     if (status === 'APPROVED') {
       const userRef = sacredDataPath.collection("usuarios").doc(targetUid);
       const historyRef = sacredDataPath.collection("historial_recargas").doc(reference);
@@ -46,26 +73,31 @@ class WalletService {
         const userDoc = await transaction.get(userRef);
         if (!userDoc.exists) throw new Error("USER_NOT_FOUND");
 
-        // Actualizamos saldo y marcamos la transacción como procesada
         transaction.update(userRef, {
           saldoWallet: admin.firestore.FieldValue.increment(amount),
           lastRechargeAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
         transaction.set(historyRef, {
-          targetUid,
+          targetUid, 
           amount,
           reference,
           status: 'SUCCESS',
-          user_type: user_type || 'DESCONOCIDO', // Distinción Pasajero/Conductor
+          user_type: user_type || 'DESCONOCIDO',
           fecha: admin.firestore.FieldValue.serverTimestamp(),
           metodo: 'WOMPI'
         });
 
-        transaction.update(transaccionRef, { processed: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+        transaction.update(transaccionRef, { 
+            processed: true, 
+            status: 'APPROVED', 
+            updatedAt: admin.firestore.FieldValue.serverTimestamp() 
+        });
       });
 
-      // 3. Notificación Push Personalizada según el tipo de usuario
+      // ⚡ DISPARADOR DE CLAIMS: Actualizamos el token tras el éxito de la transacción
+      await WalletService.syncWalletClaims(targetUid);
+
       const userData = (await userRef.get()).data();
       if (userData?.fcmToken) {
         const mensaje = {
@@ -105,6 +137,9 @@ class WalletService {
       });
     });
 
+    // ⚡ DISPARADOR DE CLAIMS
+    await WalletService.syncWalletClaims(targetUid);
+
     return { success: true, newBalance: (await userRef.get()).data().saldoWallet };
   }
 
@@ -114,7 +149,7 @@ class WalletService {
   static async debit(targetUid, amount, serviceId) {
     const userRef = sacredDataPath.collection("usuarios").doc(targetUid);
 
-    return await db.runTransaction(async (transaction) => {
+    const result = await db.runTransaction(async (transaction) => {
       const userDoc = await transaction.get(userRef);
       if (!userDoc.exists) throw new Error("USER_NOT_FOUND");
 
@@ -128,6 +163,11 @@ class WalletService {
 
       return { success: true, newBalance: currentBalance - amount };
     });
+
+    // ⚡ DISPARADOR DE CLAIMS
+    await WalletService.syncWalletClaims(targetUid);
+
+    return result;
   }
 
   static async getWallet(uid) {

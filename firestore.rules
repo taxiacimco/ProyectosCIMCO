@@ -1,122 +1,98 @@
-// Versión Arquitectura: V3.3 - Blindaje Transaccional Wompi y Eliminación de Bypass Global
+// Versión Arquitectura: V9.2 - Optimización de Radar (Zero-Read Cost)
+/**
+ * ARCHIVO: firestore.rules
+ * PROYECTO: TAXIA CIMCO
+ * MISIÓN: Validar solvencia mediante Custom Claims para eliminar costos de lectura en GPS.
+ */
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ==========================================
-    // 1. FUNCIONES GLOBALES DE SEGURIDAD
-    // ==========================================
-
+    // ============================================================
+    // 1. FUNCIONES NUCLEARES (CORE)
+    // ============================================================
+    
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
     function hasRole(role) {
-      return isAuthenticated() && request.auth.token.role == role;
+      return isAuthenticated() && 
+        (request.auth.token.rol == role || request.auth.token.rol == role.upper());
     }
 
-    function isAdmin() {
-      return hasRole('admin');
+    /**
+     * ✅ OPTIMIZACIÓN V9.2: Ya no usa get(). 
+     * Lee el claim 'hasCredit' directamente del token JWT. Costo: 0.
+     */
+    function hasEnoughCredit() {
+      return request.auth.token.hasCredit == true;
     }
 
-    function isOwnerOrAdmin(userId) {
-      return isOwner(userId) || isAdmin() || hasRole('ceo');
+    function isOwner(userId) {
+      return request.auth.uid == userId;
     }
 
-    function hasEnoughCredit(appId, uid) {
-      let userDoc = get(/databases/$(database)/documents/artifacts/$(appId)/public/data/usuarios/$(uid));
-      return userDoc != null && userDoc.data.saldoWallet >= 0;
-    }
+    // ============================================================
+    // 2. REGLAS DE NEGOCIO (TAXIA CIMCO PATH)
+    // ============================================================
 
-    // ==========================================
-    // 2. REGLAS PARA LA ESTRUCTURA SAGRADA
-    // ==========================================
-
-    match /artifacts/{appId} {
+    match /artifacts/taxiacimco-app/public/data {
       
-      /** * 🛡️ AJUSTE DE SEGURIDAD: 
-       * Se ha eliminado el bypass 'allow read, write' global para evitar 
-       * manipulaciones directas desde el frontend en colecciones financieras.
-       */
+      // --- C. COLECCIÓN DE USUARIOS (CONDUCTORES Y PASAJEROS) ---
+      match /usuarios/{userId} {
+        
+        // 🔓 Lectura: Cualquier usuario autenticado puede ver la ubicación para el radar de 5km
+        allow read: if isAuthenticated();
 
-      match /public/data {
-
-        // --- A. CONDUCTORES ONLINE ---
-        match /conductores_online/{docId} {
-          allow read: if isAuthenticated();
-          allow write: if isOwner(docId);
-        }
-
-        // --- B. ALERTAS SOS ---
-        match /alertas_sos/{docId} {
-          allow read: if isAuthenticated();
-          allow create: if isAuthenticated();
-          allow update: if isAuthenticated() && request.resource.data.estado == 'RESUELTO';
-        }
-
-        // --- C. COLECCIÓN DE USUARIOS Y BILLETERAS ---
-        match /usuarios/{userId} {
-          allow read: if isAuthenticated();
-          allow create: if isOwner(userId);
-          allow update: if isOwnerOrAdmin(userId) 
-            && !('saldoWallet' in request.resource.data.diff(resource.data).affectedKeys())
-            && !('saldo' in request.resource.data.diff(resource.data).affectedKeys())
-            && !('rol' in request.resource.data.diff(resource.data).affectedKeys())
-            && !('role' in request.resource.data.diff(resource.data).affectedKeys())
-            && !('estado' in request.resource.data.diff(resource.data).affectedKeys());
-          allow delete: if isAdmin() || hasRole('ceo');
-
-          // Historial Transaccional Interno
-          match /transacciones/{transId} {
-            allow read: if isOwnerOrAdmin(userId);
-            allow write: if false; // Solo Admin SDK
-          }
-        }
-
-        // --- D. COLECCIÓN DE VIAJES (RIDES) ---
-        match /rides/{rideId} {
-          allow read: if isAuthenticated();
-          allow create: if hasRole('passenger') || hasRole('pasajero') || hasRole('despachador');
+        // 🔒 Escritura: Solo el dueño del perfil
+        allow create: if isAuthenticated() && isOwner(userId);
+        
+        allow update: if isAuthenticated() && isOwner(userId)
+          // 🛑 DEFENSA ATÓMICA: Prohibido alterar campos financieros o de rango desde el cliente
+          && !request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['saldoWallet', 'rol', 'acceso_total', 'wallet_balance'])
           
-          allow update: if isAuthenticated() && (
-            (request.resource.data.estado == 'aceptado' || request.resource.data.status == 'accepted') 
-              ? (hasRole('driver') || hasRole('conductor') || hasRole('mototaxi')) && hasEnoughCredit(appId, request.auth.uid)
-              : true
-          ) && (
-            !('tarifa' in request.resource.data.diff(resource.data).affectedKeys()) &&
-            !('comisionAplicada' in request.resource.data.diff(resource.data).affectedKeys())
+          // 🛰️ VALIDACIÓN GPS SENTINEL:
+          // El conductor solo puede actualizar su GPS si su TOKEN dice que tiene crédito
+          && (
+            (request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastLocation', 'lastActive']))
+            ? hasEnoughCredit()
+            : true
           );
-          allow delete: if isAdmin() || hasRole('ceo');
-        }
+      }
 
-        // --- E. REGISTRO CONTABLE ---
-        match /ingresos_cimco/{logId} {
-          allow read: if hasRole('ceo') || isAdmin();
-          allow write: if false; 
-        }
+      // --- E. COLECCIÓN DE TRANSACCIONES (BILLETERA) ---
+      match /transacciones/{txId} {
+        // Solo el dueño puede ver su historial de dinero
+        allow list: if isAuthenticated() && request.auth.uid == resource.data.targetUid;
+        allow get: if isAuthenticated() && request.auth.uid == resource.data.targetUid;
+        
+        // Integridad Financiera: Nadie escribe transacciones desde el Frontend
+        allow write: if false; 
+      }
 
-        // --- F. PAGOS WOMPI (INTEGRACIÓN QUIRÚRGICA) ---
-        // Path: artifacts/taxiacimco-app/public/data/payments/{paymentId}
-        match /payments/{paymentId} {
-          // El usuario puede consultar su propio historial de pagos/recargas
-          allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-          
-          // ⚠️ BLOQUEO DE ESCRITURA CLIENT-SIDE
-          // Solo el Firebase Admin SDK en las Cloud Functions tiene permiso de escritura.
-          allow create: if false;
-          allow update: if false;
-          allow delete: if false;
-        }
+      // --- D. COLECCIÓN DE VIAJES (RIDES) ---
+      match /rides/{rideId} {
+        allow read: if isAuthenticated();
+        allow create: if hasRole('pasajero') || hasRole('despachador');
+        
+        allow update: if isAuthenticated() && (
+          // Si el viaje es aceptado por un conductor, verificamos su solvencia vía Token
+          !(request.resource.data.status in ['aceptado', 'accepted']) || (
+            (hasRole('mototaxi') || hasRole('conductor')) && hasEnoughCredit()
+          )
+        ) 
+        // Proteger la tarifa de alteraciones externas
+        && !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['tarifa', 'comisionAplicada']);
       }
     }
 
-    // ==========================================
-    // 3. BLOQUEO POR DEFECTO (FAIL-SAFE)
-    // ==========================================
+    // ============================================================
+    // 3. BLOQUEO POR DEFECTO (ZERO TRUST)
+    // ============================================================
     match /{document=**} {
       allow read, write: if false;
     }

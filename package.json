@@ -10,7 +10,8 @@
     "func:shell": "npm run shell --workspace=taxia-cimco-backend",
     "dev:all": "concurrently \"npm run front:dev\" \"npm run func:dev\"",
     "deploy:full": "npm run front:build && firebase deploy",
-    "install:all": "npm install"
+    "install:all": "npm install",
+    "emuladores": "firebase emulators:start --import=./database --export-on-exit"
   },
   "workspaces": [
     "frontend",

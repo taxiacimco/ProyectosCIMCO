@@ -1,3 +1,4 @@
+// Versión Arquitectura: V2.0 - Integración Motor Financiero (Cobro de Comisión)
 /**
  * SERVICIO DE GESTIÓN DE VIAJES - CIMCO (PRO-VERSION)
  * Ubicación: frontend/src/services/viajeService.js
@@ -79,6 +80,37 @@ const viajeService = {
       return { 
         success: false, 
         message: error.response?.data?.message || "Error de conexión con el servidor" 
+      };
+    }
+  },
+
+  /**
+   * FINALIZACIÓN Y COBRO DE COMISIÓN (Motor Financiero)
+   * Extrae el token de Firebase y ejecuta el débito en la wallet.
+   */
+  finalizarViajeYCobrar: async (conductorId, tarifaMonto) => {
+    try {
+      console.log(`[CIMCO-FINANZAS] Procesando cobro de comisión...`);
+      
+      // 1. Obtenemos el Token JWT fresco para máxima seguridad
+      const token = await auth.currentUser.getIdToken(true);
+
+      // 2. Llamada al endpoint quirúrgico (enviamos la tarifa total, el backend calcula el porcentaje)
+      const response = await api.post('/v1/wallet/commission', {
+        conductorId: conductorId,
+        montoBase: Number(tarifaMonto)
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      return { success: true, data: response.data };
+    } catch (error) {
+      console.error("❌ Error en el motor financiero:", error);
+      return { 
+        success: false, 
+        message: error.response?.data?.message || "Fondos insuficientes o error de conexión." 
       };
     }
   },

@@ -1,56 +1,40 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, onSnapshot } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
-import { Loader2 } from 'lucide-react';
-
-// --- CONFIGURACIÓN DE FIREBASE (EXTRACCIÓN DIRECTA PARA EVITAR ERRORES DE RUTA) ---
-const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'taxiacimco-app';
-
+// Versión Arquitectura: V8.5 - Unificación de lectura de campo 'rol' y limpieza de dependencias
 /**
  * Componente DriverRedirect
  * Propósito: Actúa como un "Controlador de Tráfico" tras el inicio de sesión.
  * Lee el rol del usuario desde Firestore y lo envía a su panel correspondiente.
  */
+
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+// [AJUSTE ARQUITECTURA]: Importaciones limpias desde la configuración central en lugar de inyecciones inline
+import { db, auth } from '../firebase/firebaseConfig';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { Loader2 } from 'lucide-react';
+
 const DriverRedirect = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Inicialización de autenticación para asegurar acceso a Firestore
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else if (!auth.currentUser) {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Auth Error:", err);
-      }
-    };
-    initAuth();
-
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!user) {
-        setLoading(false);
+        navigate('/login');
         return;
       }
 
-      // Escuchamos el documento del usuario en tiempo real para obtener su rol
-      const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'usuarios', user.uid);
+      // [REGLA SAGRADA]: Mismo path centralizado
+      const userRef = doc(db, 'artifacts', 'taxiacimco-app', 'public', 'data', 'usuarios', user.uid);
       
       const unsubDoc = onSnapshot(userRef, (docSnap) => {
         if (docSnap.exists()) {
           const userData = docSnap.data();
-          const role = (userData.role || userData.servicio || '').toLowerCase();
+          
+          // [AJUSTE ARQUITECTURA]: Leemos 'rol' en lugar de 'role'
+          const role = (userData.rol || userData.servicio || '').toLowerCase();
 
-          // Mapeo lógico según tu estructura de archivos en /pages
+          // Mapeo lógico conservado según estructura /pages
           const routes = {
             'pasajero': '/user-panel',
             'mototaxi': '/mototaxi-panel',
@@ -66,11 +50,11 @@ const DriverRedirect = () => {
           const target = routes[role] || '/dashboard-bienvenida';
           navigate(target);
         } else {
-          console.warn("Perfil no encontrado en Firestore");
+          console.error("⚠️ [CIMCO] Perfil no encontrado en la ruta de datos.");
           setLoading(false);
         }
       }, (error) => {
-        console.error("Error al obtener datos de usuario:", error);
+        console.error("Firestore Error:", error);
         setLoading(false);
       });
 
@@ -94,7 +78,7 @@ const DriverRedirect = () => {
         <div className="flex items-center justify-center gap-2">
           <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></div>
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">
-            Configurando acceso por rol...
+            Sincronizando acceso por rol...
           </p>
         </div>
       </div>

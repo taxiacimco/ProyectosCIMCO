@@ -1,34 +1,56 @@
-/**
- * PROYECTO: TAXIA CIMCO - Configuración Maestra Firebase (Frontend)
- * Misión: Inicialización del SDK con persistencia de AuthDomain original.
- * Arquitectura: Cliente de Infraestructura (Vite/React).
- */
-
+// Versión Arquitectura: V9.2 - Protocolo de Tolerancia a Fallos + Host Dinámico
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
-import { getMessaging, isSupported } from "firebase/messaging";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
+import { getStorage, connectStorageEmulator } from "firebase/storage"; 
+import { getMessaging } from "firebase/messaging";
 
-// 1. Configuración dinámica con Variables de Entorno y Fallbacks de seguridad
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "pelagic-chalice-467818-e1.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "pelagic-chalice-467818-e1",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "pelagic-chalice-467818-e1.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "191106268804",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:191106268804:web:1bb4a7c7c8077b60880cd1"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// 2. Inicialización de la App (Singleton Pattern para evitar duplicados en HMR de Vite)
+// 🧠 Inicialización del núcleo único
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// 3. Exportación de Instancias
+// 🔧 Órganos principales (Siempre disponibles)
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const storage = getStorage(app);
 
-// 4. Motor de Mensajería (Asíncrono por compatibilidad)
-export const messaging = getMessaging(app);
+// 🛡️ Inicialización protegida de Storage 
+let storageInstance;
+try {
+    storageInstance = getStorage(app);
+} catch (e) {
+    console.warn("⚠️ [CIMCO] Storage en modo standby.");
+}
+export const storage = storageInstance;
+
+// 🛡️ Inicialización protegida de Messaging
+let messagingInstance = null;
+try {
+    messagingInstance = getMessaging(app);
+} catch (e) {
+    console.warn("📢 [CIMCO] Messaging no disponible en este entorno local. Continuando sin notificaciones.");
+}
+export const messaging = messagingInstance;
+
+// 📡 Sincronización Dinámica con el Cerebro Local
+const host = window.location.hostname;
+const isLocal = host === "localhost" || host.startsWith("192.168.");
+
+if (isLocal) {
+  console.log(`📡 [CIMCO CENTRAL] Conectando órganos a Emuladores en: ${host}`);
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  connectFirestoreEmulator(db, host, 8080);
+  
+  if (storage) {
+    connectStorageEmulator(storage, host, 9199); 
+  }
+}
 
 export default app;
