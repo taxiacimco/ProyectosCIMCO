@@ -1,7 +1,0 @@
-{
-  "_version_arquitectura": "V8.2 - Trazabilidad Core Frontend",
-  "version": "2026.04.12.01",
-  "deployed": "2026-04-12 19:30:00",
-  "description": "Actualización de manifiestos unificados, consolidación Ciber-Neo-Brutalista y refactorización de rutas PWA Assets.",
-  "min_required_version": "2026.01.01.00"
-}
