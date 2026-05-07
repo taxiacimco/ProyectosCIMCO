@@ -1,0 +1,5 @@
+{
+    "livePreview.defaultPreviewPath": "/frontend/public/pasajero/solicitar-viaje.html",
+    "liveServer.settings.port": 5501,
+    "java.configuration.updateBuildConfiguration": "disabled"
+}
