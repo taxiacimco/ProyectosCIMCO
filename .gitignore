@@ -1,3 +1,16 @@
 node_modules
 functions/firebase-export-*
 functions/service-account/admin-sa.json
+
+# Logs de Firebase y Firestore
+*-debug.log
+firebase-debug.log*
+firestore-debug.log*
+pubsub-debug.log*
+
+# Carpetas de datos locales y backups
+database/
+data_backups/
+
+# Carpeta de configuración de Firebase (opcional pero recomendado)
+.firebase/
