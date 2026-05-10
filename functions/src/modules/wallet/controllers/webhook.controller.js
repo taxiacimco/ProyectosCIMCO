@@ -1,52 +1,39 @@
-// Versión Arquitectura: V2.6 - Integración de Webhook Nombrado con Bypass para Emuladores
+// Versión Arquitectura: V2.8 - Sincronización con Servicio Default y Bypass de Emulador
 /**
  * modules/wallet/controllers/webhook.controller.js
- * Misión: Recibir y validar la autenticidad de los pagos de Wompi con soporte híbrido (Local/Producción).
+ * Misión: Orquestar la recepción de eventos de Wompi y validar la seguridad de la petición.
  */
-import { walletService } from "../services/wallet.service.js";
+import walletService from "../services/wallet.service.js"; // ✅ Importación default corregida
 import WompiSecurity from "../../../utils/wompi-security.js";
 
 export const webhookController = async (req, res) => {
     try {
         const payload = req.body;
-        const checksum = req.headers['x-event-checksum']; // Firma enviada por Wompi
-        
-        // 🛡️ MODO DESARROLLO: Bypass de firma para pruebas locales
+        const checksum = req.headers['x-event-checksum'];
         const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
 
-        console.log(`📩 [Webhook] Evento recibido: ${payload?.event || 'Desconocido'}`, JSON.stringify(payload?.data || {}));
+        console.log(`📩 [Webhook] Evento Recibido: ${payload?.event}`);
 
-        // 1. Bloqueo inmediato si es producción y no hay firma
-        if (!isEmulator && !checksum) {
-            console.error("❌ [Webhook] Intento sin firma en producción.");
-            return res.status(401).send({ status: 'unauthorized' });
-        }
-
-        // 2. Validación de Seguridad Condicional
-        let isValid = true;
+        // 🛡️ VALIDACIÓN DE SEGURIDAD (Bypass solo en emulador local para pruebas rápidas)
+        let isValid = isEmulator;
         if (!isEmulator) {
             isValid = WompiSecurity.validateWebhookSignature(payload, checksum);
-        } else {
-            console.log("⚠️ [MODO DESARROLLO] Bypass de firma criptográfica activado para pruebas locales.");
         }
 
-        // 3. Manejo de firma inválida (Respuesta 200 para evitar Timing/Reconnaissance Attacks)
         if (!isValid) {
-            console.error("⚠️ [ALERTA DE SEGURIDAD] Intento de Webhook con firma inválida.");
+            console.error("⚠️ [ALERTA] Firma de Webhook inválida o intento de suplantación.");
             return res.status(200).send({ status: 'security_check_failed' });
         }
 
         const { data, event } = payload;
 
-        // 4. Procesamiento de la Transacción
         if (event === 'transaction.updated') {
-            // Delegación a la capa de servicio (Arquitectura Hexagonal)
+            // 🚀 Invocación al método unificado processTransaction
             const result = await walletService.processTransaction(data.transaction);
             
-            console.log(`🔔 [Webhook Wompi] Transacción ${data.transaction.reference} procesada con éxito.`);
             return res.status(200).send({
                 status: 'success',
-                processed: result
+                processed: result.success
             });
         }
 
@@ -54,9 +41,6 @@ export const webhookController = async (req, res) => {
 
     } catch (error) {
         console.error("❌ [Webhook Error]:", error.message);
-        return res.status(500).send({ 
-            error: "Internal Server Error",
-            message: error.message 
-        });
+        return res.status(500).send({ error: error.message });
     }
 };

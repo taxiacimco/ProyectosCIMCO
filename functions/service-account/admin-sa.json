@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "pelagic-chalice-467818-e1",
+  "private_key_id": "51d9f751052d228be3be65d5d81c26d62295d19f",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCkGR8iiYXGygpM\nSZo3DXoJgoiZINt52jZoPVfRofe8OtJEBwN5gXlAMnTFddF19h1XW5bIJCA8qm2j\nVVo/jhLudBe78WeT37cHLfqLlXJZegL6L5hI5HR7tpZwjBEwCb9g1YGCWNI0gt99\npT2ZFhMbDSKLzfMaUdo+17GwFiZ5wIDKj9jX2spu6Um+AzWdEmpwgrmgG1HCN9oL\nyydmOv3wV02wQfTBYkLPg1V8yVHCm4g9hxu52nDP3qEluXO03qfHJQNUHwDQFvE3\n8krcm5DWcxIS5R8mvTNGEnCYWUmGZH6MIgAwSBcw7STlWmqrAnopHMrN/NX3FNju\n5oYRw/YtAgMBAAECggEAPf0zcsOKopauHzVqqUNRB4ik+1ubLUPOa8BIjWtm/1cl\nGQehO2Q6npKw4+rm7m3Dlb2GjyJ+fwxOkHXsurd71VJLqPa/ju/i3zZyQAp7gOuD\ndmlGWLrceeN2nxt6XrA/+F+PJeNRvP53WKp0Q4FARGbI1xE8tYOYM0cd24vyiukf\nlwjI+wS8giyk0hd8jOHYtbd2nfM7yQneHIaFUMC+1ZLsVFg4Jxs1F0/IHLr1KeQA\nV+Nc/yp5ciwt1AmEi15Ihe6Bgu5p50L4iNfXwj9upGdIJFzAQV2abstoWl3ZVQIP\nqtcdehhDJeTHvBO424rTlgCBjfenrIt/ChzbCKN2LQKBgQDSKs++4ABnEbnSGQ02\nGMUeKWlEXORU+dcE4edmx8aMEOa3yAHs2w6vk2ATT5Xx6zSdAhOqrFbSOOmsK7JF\nI8DEMR0Gnw+Tvj40ryrYgh+dxxOcJV/zG4XIImRItPOWjgulvt6UiKQwJc2J4ORr\nXgnC9Qj8IGfIjRs3ODbRM7T/hwKBgQDH4l7T/vhkDsg3qPhJfS7+gD1Dh+CYX6Hq\nDsfYU7E9rlMq9oEGsmSIEnd/jXMNZenJM+fIrDxwfs4oym1XEmKfnZxJQOf1QfEP\nOAv82nItxnErFj4DOoaZDrYd0aaetEV7gsB8V54j7UAetI4aBzUXsUeBDqrIEYVI\n2fAwPCRBqwKBgBg3BI6qgoFdonpZlpMYEYYjIVTWGxzLWIHggWfvNqomvF6KdeZT\nawLByT0QW2dvQTWh6qAskShRlGLY+gZLU0eHnR+JLiNItSQe1qHxhDEKofDIwaBi\nGGzxwXo7FyHOpfrn3f9hKwG9KUxslATm5dsHnoxmM28BCxS2rmI2QfF7AoGBAJl4\nXpTpDLBOhT3vN4u9WSrBLci++BwmOTxr0tdvEwQn5+Vx1QleSUAM5cGCypa77C+2\n8b0rOVCqnAHHwwH6tMyXCBtagX7W/Y5Q2ytuUgKBffy2HDEAa73zBLOKeCMciMjX\nUJFn+JzfGb85pG2poQMq85rMtyXcBfk0lG2Ej9X3AoGAUCj62rwWiaPJb0qoAk+K\nXtuMZi9ShkHqgogGSHYbhlhtPOAOBjyJ7GrPFVNv29MD+sz6g0PNKcXoqFdaNLiU\nc2OWA/+0xlOAsoyPoJfms9bsjCG1WUpXQ3LCSjvXTJ+buZfohgDw6Raq/ad/fUvb\n7ki3yqUAtKegrh9OkQLPbXA=\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@pelagic-chalice-467818-e1.iam.gserviceaccount.com",
+  "client_id": "110995765782374512579",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40pelagic-chalice-467818-e1.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
