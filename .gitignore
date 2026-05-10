@@ -1,3 +1,15 @@
-node_modules
-.wrangler
-dist
+# Dependencias
+node_modules/
+.wrangler/
+dist/
+
+# Seguridad y Llaves (Crítico)
+*.json
+!package.json
+!package-lock.json
+!wrangler.toml
+.env
+.env.local
+
+# Logs
+*-debug.log
