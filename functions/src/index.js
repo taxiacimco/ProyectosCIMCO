@@ -1,41 +1,67 @@
-// Versión Arquitectura: V1.3 - Optimización de Carga Crítica (Anti-Timeout)
+// Versión Arquitectura: V5.7 - Normalización de Rutas y Resolución de Point-of-Failure (Cannot POST)
 /**
  * functions/src/index.js
- * Misión: Bootloader ultra-rápido para TAXIA CIMCO.
- * Ajuste: Se elimina la carga pesada del inicio para evitar el Timeout de 10s.
+ * Misión: Punto de entrada único para Cloud Functions V2.
+ * Configura Express para manejar el tráfico del Webhook de Wompi de forma resiliente.
  */
 
 import { onRequest } from "firebase-functions/v2/https";
 import express from "express";
 import cors from "cors";
 
+// 🚀 Inicialización de Express
 const app = express();
 
-// Middlewares básicos (se ejecutan rápido)
+// 🛡️ Middleware de Seguridad y Parseo
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-// 🛡️ ENDPOINT: Webhook de Wompi con Carga Perezosa
-app.post("/webhook/wompi", async (req, res) => {
+/**
+ * 💡 ESTRATEGIA DE RUTEO:
+ * Para evitar el error "Cannot POST" debido a la jerarquía de Firebase (/api/api/v1...), 
+ * definimos las rutas de forma que respondan correctamente al prefijo de la función.
+ */
+const router = express.Router();
+
+// Registro del Webhook dentro del router
+router.post("/v1/wallet/webhook", async (req, res) => {
     try {
-        // Importación dinámica: Solo carga el controlador cuando llega un mensaje
+        console.log("📥 Webhook recibido en /v1/wallet/webhook");
+        // Carga dinámica del controlador para optimizar el inicio de la función
         const { webhookController } = await import("./modules/wallet/controllers/webhook.controller.js");
-        return webhookController(req, res);
+        return await webhookController(req, res);
     } catch (error) {
-        console.error("❌ Error cargando el controlador:", error);
-        res.status(500).send("Internal Server Error");
+        console.error("❌ Error crítico en el ruteo del Webhook:", error);
+        return res.status(500).json({ 
+            success: false, 
+            message: "Internal Server Error",
+            error: error.message 
+        });
     }
 });
 
-// 🩺 Health Check: Para verificar que la API está viva
-app.get("/health", (req, res) => {
-    res.status(200).send({ status: "ok", service: "TAXIA-CIMCO-API" });
+// Health check para monitoreo del sistema
+router.get("/health", (req, res) => {
+    res.status(200).json({ 
+        status: "online", 
+        project: "TaxiA-CIMCO",
+        timestamp: new Date().toISOString()
+    });
 });
 
-// Exposición de la API con configuración de rendimiento
+/**
+ * Inyección del Router:
+ * Montamos el router en '/api' para que la URL final sea:
+ * .../us-central1/api/v1/wallet/webhook (si Firebase no añade el nombre de la función)
+ * o .../us-central1/api/api/v1/wallet/webhook (comportamiento estándar del emulador)
+ */
+app.use("/api", router);
+app.use("/", router); // Fallback para asegurar captura en cualquier nivel
+
+// 🌏 Exportación de la Cloud Function V2
 export const api = onRequest({ 
     region: "us-central1",
-    timeoutSeconds: 60, // Aumentamos el tiempo de ejecución
-    memory: "256MiB",
-    maxInstances: 10 
+    maxInstances: 10,
+    timeoutSeconds: 15,
+    memory: "256MiB"
 }, app);

@@ -1,32 +1,45 @@
-// Versión Arquitectura: V6.6 - Hook de Autenticación Reactiva Unificado
+// Versión Arquitectura: V7.0 - Hook de Autenticación JWT Local (CIMCO Backend Core)
 /**
  * src/hooks/useAuth.js
- * Misión: Monitorear el estado de la sesión de Firebase y proveer el contexto de usuario.
+ * Misión: Gestionar el token de seguridad del backend y mantener la sesión activa en el navegador.
  */
 import { useState, useEffect } from 'react';
-import { auth } from '../config/firebase'; // 🏛️ Importa la instancia del Singleton Real
-import { onAuthStateChanged } from 'firebase/auth';
 
 export const useAuth = () => {
   const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 🛡️ Suscripción al observador de Firebase en tiempo real
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
-        // El usuario está logueado
-        setUser(firebaseUser);
-      } else {
-        // El usuario cerró sesión o no existe
-        setUser(null);
-      }
-      setLoading(false); // 🏁 Finaliza la carga inicial
-    });
+    // 🛡️ 1. Al cargar la app, inspeccionamos el localStorage buscando las credenciales
+    const storedToken = localStorage.getItem('cimco_token');
+    const storedUser = localStorage.getItem('cimco_user');
 
-    // Limpieza de la suscripción al desmontar el hook
-    return () => unsubscribe();
+    if (storedToken && storedUser) {
+      // Si existen, restauramos la sesión automáticamente
+      setToken(storedToken);
+      setUser(JSON.parse(storedUser));
+    }
+    
+    // 🏁 Finaliza la validación inicial
+    setLoading(false); 
   }, []);
 
-  return { user, loading };
+  // 🔑 Función para iniciar sesión (Guarda en memoria del navegador)
+  const login = (newToken, userData) => {
+    localStorage.setItem('cimco_token', newToken);
+    localStorage.setItem('cimco_user', JSON.stringify(userData));
+    setToken(newToken);
+    setUser(userData);
+  };
+
+  // 🚪 Función para cerrar sesión (Destruye la evidencia de seguridad)
+  const logout = () => {
+    localStorage.removeItem('cimco_token');
+    localStorage.removeItem('cimco_user');
+    setToken(null);
+    setUser(null);
+  };
+
+  return { user, token, loading, login, logout };
 };

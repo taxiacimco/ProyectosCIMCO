@@ -1,95 +1,147 @@
-// Versión Arquitectura: V6.6 - Integración de Login con UI Ciber-Neo-Brutalista
-/**
- * src/pages/Login.jsx
- * Misión: Proveer la interfaz de entrada a TAXIA CIMCO con extrema legibilidad y diseño Brutalista.
- */
-import React, { useState } from 'react';
-import { auth } from '../config/firebase'; // ✅ Instancia Singleton conectada
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+// Versión Architecture: V4.2 - Detección Automatizada de Roles mediante Parámetros QR y UI Ciber-Neo-Brutalismo
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 
 const Login = () => {
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
 
-  const handleGoogleLogin = async () => {
-    setIsAuthenticating(true);
-    const provider = new GoogleAuthProvider();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [rol, setRol] = useState('pasajero'); // Pasajero por defecto operativo
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // 🔍 ESTRATEGIA QR: Escucha automática de Query Strings para preseleccionar rol instantáneamente
+    const params = new URLSearchParams(window.location.search);
+    const rolEnUrl = params.get('rol');
+    
+    if (rolEnUrl === 'conductor' || rolEnUrl === 'pasajero' || rolEnUrl === 'admin') {
+        setRol(rolEnUrl);
+    }
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
     try {
-      // Abre el popup de Google protegido por la infraestructura de Firebase
-      await signInWithPopup(auth, provider);
-      // Nota: No necesitamos redireccionar aquí porque el AppRouter ya está 
-      // escuchando el cambio de estado en onAuthStateChanged y lo hará automáticamente.
-    } catch (error) {
-      console.error("⚠️ Error de Autenticación:", error.code, error.message);
+      // 📡 Petición directa al Servidor Central Node.js en puerto 3000
+      const respuesta = await fetch('http://localhost:3000/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password, rol }),
+      });
+
+      const data = await respuesta.json();
+
+      if (!respuesta.ok || !data.success) {
+        throw new Error(data.message || 'Credenciales o rol inválidos en nodo central.');
+      }
+
+      // 🔑 Inyectamos el Token Bearer y el perfil al localStorage del navegador
+      const datosUsuario = { email, rol, id: data.id || 'cimco_session_active' };
+      login(data.token, datosUsuario);
+
+      alert(`🔑 ¡Autenticación Exitosa! Conectado al nodo central de TAXIA CIMCO.`);
+      
+      // Enrutamiento seguro basado en rol
+      if (rol === 'admin') {
+          navigate('/admin/dashboard');
+      } else if (rol === 'conductor') {
+          navigate('/conductor/home');
+      } else {
+          navigate('/pasajero/home');
+      }
+
+    } catch (err) {
+      setError(err.message);
     } finally {
-      setIsAuthenticating(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-6 font-mono selection:bg-yellow-400 selection:text-black">
-      
-      {/* 🛡️ Tarjeta Neo-Brutalista */}
-      <div className="w-full max-w-md bg-zinc-900 border-4 border-yellow-400 p-8 relative shadow-[8px_8px_0px_0px_#facc15] transition-all hover:shadow-[12px_12px_0px_0px_#facc15]">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 selection:bg-blue-500 selection:text-white font-sans text-slate-100">
+      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl relative overflow-hidden backdrop-blur-xl">
         
-        {/* Decoración Ciber-Tech */}
-        <div className="absolute -top-3 -left-3 bg-yellow-400 text-black text-xs font-black px-2 py-1 uppercase tracking-widest border-2 border-black">
-          SISTEMA_ACTIVO
+        {/* Estética CIMCO-UI: Línea Superior Ciber-Neo-Brutalista */}
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500" />
+        
+        <div className="mb-6 text-center">
+          <h1 className="text-2xl font-black tracking-tight text-white uppercase">CIMCO LOGIN CORE</h1>
+          <p className="text-slate-400 text-xs mt-1">Ecosistema de Transporte Híbrido - La Jagua de Ibirico</p>
+          <div className="mt-2 inline-block bg-blue-950/40 border border-blue-800 text-blue-400 px-3 py-0.5 text-[10px] font-mono rounded-full uppercase tracking-wider">
+            Canal detectado: {rol}
+          </div>
         </div>
 
-        <div className="flex flex-col items-center text-center mt-4">
-          
-          {/* Logo */}
-          <div className="w-24 h-24 bg-black border-4 border-yellow-400 rounded-none mb-6 flex items-center justify-center overflow-hidden shadow-[4px_4px_0px_0px_#facc15]">
-             <img 
-              src="/assets/pasajero-192.png" 
-              alt="CIMCO Logo" 
-              className="w-full h-full object-cover opacity-90 hover:opacity-100 transition-opacity"
-              onError={(e) => {
-                // Fallback icon si no existe la imagen en public/assets/
-                e.target.src = "https://ui-avatars.com/api/?name=TX&background=000&color=facc15&font-size=0.5&bold=true";
-              }}
+        {error && (
+          <div className="mb-4 bg-red-950/50 border border-red-800 text-red-400 text-xs p-3 rounded-lg font-mono">
+            ⚠️ ERROR: {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-slate-300 text-xs font-semibold uppercase tracking-wider">
+              Correo Electrónico
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded-lg p-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all placeholder-slate-600"
+              placeholder="nombre@taxiacimco.com"
+              required
             />
           </div>
 
-          {/* Textos Principales */}
-          <h1 className="text-4xl md:text-5xl font-black text-white uppercase tracking-tighter mb-2">
-            TAXIA <span className="text-yellow-400">CIMCO</span>
-          </h1>
-          <p className="text-zinc-400 text-sm font-bold tracking-widest uppercase mb-10 border-b-2 border-zinc-800 pb-4 w-full">
-            Logística & Transporte // La Jagua
-          </p>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-slate-300 text-xs font-semibold uppercase tracking-wider">
+              Contraseña de Acceso
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded-lg p-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all placeholder-slate-600"
+              placeholder="••••••••••••"
+              required
+            />
+          </div>
 
-          {/* Botón de Acción Principal */}
-          <button 
-            onClick={handleGoogleLogin} 
-            disabled={isAuthenticating}
-            className={`w-full group relative flex items-center justify-center gap-4 bg-yellow-400 text-black border-4 border-black py-4 px-6 text-lg font-black uppercase tracking-widest transition-all
-              ${isAuthenticating 
-                ? 'opacity-70 cursor-not-allowed translate-y-1 shadow-none' 
-                : 'hover:-translate-y-1 hover:shadow-[6px_6px_0px_0px_#fff] active:translate-y-1 active:shadow-none'
-              }`}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-slate-300 text-xs font-semibold uppercase tracking-wider">
+              Rol de Acceso Ecosistema
+            </label>
+            <select
+              value={rol}
+              onChange={(e) => setRol(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 text-slate-100 rounded-lg p-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all appearance-none cursor-pointer"
+            >
+              <option value="pasajero">Pasajero (Ecosistema Urbano)</option>
+              <option value="conductor">Conductor (Mototaxi / Motocarga)</option>
+              <option value="admin">Administrador / CEO</option>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className={`w-full mt-2 py-3.5 px-4 rounded-lg text-sm font-bold tracking-wide transition-all
+              ${loading 
+                ? 'bg-slate-800 text-slate-400 cursor-not-allowed' 
+                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 active:scale-[0.99]'}`}
           >
-            {isAuthenticating ? (
-              <span className="animate-pulse">Verificando...</span>
-            ) : (
-              <>
-                <img 
-                  src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" 
-                  alt="Google" 
-                  className="w-6 h-6 bg-white rounded-full border-2 border-black p-0.5" 
-                />
-                Ingresar al Panel
-              </>
-            )}
+            {loading ? 'SINCRO EN CURSO...' : 'ACCEDER AL NODO CENTRAL'}
           </button>
-        </div>
-
-        {/* Footer Técnico */}
-        <div className="mt-10 flex justify-between items-center text-[10px] text-zinc-600 font-mono uppercase tracking-widest border-t-2 border-zinc-800 pt-4">
-          <span>V 2.0.26</span>
-          <span>Red Segura CF-TLS</span>
-        </div>
-
+        </form>
       </div>
     </div>
   );

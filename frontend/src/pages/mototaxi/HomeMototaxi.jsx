@@ -1,285 +1,330 @@
-// Versión Arquitectura: V2.7 - Corrección de Enrutamiento y Motor de Liquidación Híbrido
-// Misión: Resolver Import Analysis, implementar escucha reactiva de ingresos diarios, 
-// y ejecutar runTransaction con el Custom Hook de Autenticación.
+// Versión Arquitectura: V8.2 - Blindaje Financiero Proactivo y Liquidación Atómica del 10%
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
+ * Misión: Dashboard operativo del conductor con control de ingresos y radar de ofertas.
+ * Ajuste: Se implementa la "Regla de Oro de Aceptación": No se puede aceptar un viaje sin saldo previo para la comisión.
+ * Se integra la transacción atómica para la liquidación final del 10% según el valor de la oferta.
+ */
 
 import React, { useState, useEffect } from 'react';
-import { 
-  doc, 
-  onSnapshot, 
-  collection, 
-  query, 
-  where, 
-  updateDoc, 
-  serverTimestamp, 
-  runTransaction 
+import {
+  doc,
+  onSnapshot,
+  collection,
+  query,
+  where,
+  updateDoc,
+  serverTimestamp,
+  runTransaction,
+  addDoc,
+  orderBy
 } from 'firebase/firestore';
+
+// ✅ CONFIGURACIÓN Y HOOKS DE INFRAESTRUCTURA
 import { db } from '../../config/firebase';
 import { useAuth } from '../../hooks/useAuth';
-import { MapPin, Navigation, Wallet, CheckCircle, TrendingUp, Clock } from 'lucide-react';
+import { useWallet } from '../../hooks/useWallet';
+import {
+  MapPin,
+  Navigation,
+  Wallet,
+  Clock,
+  TrendingUp,
+  AlertCircle,
+  MessageSquare,
+  Send,
+  XCircle,
+  CheckCircle,
+  Truck,
+  CircleDollarSign
+} from 'lucide-react';
 
 const HomeMototaxi = () => {
-  const { user } = useAuth(); // Dependencia arquitectónica corregida
-  const [saldoBilletera, setSaldoBilletera] = useState(0);
-  const [ingresosHoy, setIngresosHoy] = useState(0);
-  const [viajesDisponibles, setViajesDisponibles] = useState([]);
+  const { user } = useAuth();
+  const { balance, loading: walletLoading } = useWallet();
+
+  // ESTADOS OPERATIVOS
+  const [ofertasDisponibles, setOfertasDisponibles] = useState([]);
   const [viajeActivo, setViajeActivo] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [mensajes, setMensajes] = useState([]);
+  const [nuevoMensaje, setNuevoMensaje] = useState('');
+  const [mostrandoChat, setMostrandoChat] = useState(false);
 
-  // 1. ESCUCHA DE BILLETERA (Saldo Digital)
+  // 🛰️ RADAR DE VIAJES: Escucha ofertas de pasajeros en tiempo real (Path Sagrado)
   useEffect(() => {
-    if (!user?.uid) return;
-    const walletPath = `artifacts/taxiacimco-app/public/data/wallets/${user.uid}`;
-    
-    const unsub = onSnapshot(doc(db, walletPath), (docSnap) => {
-      if (docSnap.exists()) {
-        setSaldoBilletera(docSnap.data().saldo || 0);
-      }
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [user]);
+    if (!user) return;
 
-  // 2. MOTOR DE INGRESOS REACTIVO (Ganancia Hoy)
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0); // Inicio del día para resetear el contador diario
-
-    const viajesRef = collection(db, "artifacts/taxiacimco-app/public/data/viajes");
     const q = query(
-      viajesRef, 
-      where("mototaxiId", "==", user.uid),
-      where("estado", "==", "FINALIZADO"), // Usamos el estado en español como definimos antes
-      where("finalizadoAt", ">=", hoy)
+      collection(db, "artifacts/taxiacimco-app/public/data/viajes"),
+      where("estado", "==", "buscando")
     );
 
-    const unsub = onSnapshot(q, (snapshot) => {
-      let total = 0;
-      snapshot.forEach((doc) => {
-        // Sumamos el valor ofertado por el pasajero a la ganancia del día
-        total += doc.data().pago?.tarifaOfertada || doc.data().oferta || 0; 
-      });
-      setIngresosHoy(total);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ofertas = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setOfertasDisponibles(ofertas);
     });
 
-    return () => unsub();
+    return () => unsubscribe();
   }, [user]);
 
-  // 3. ESCUCHA DE VIAJES DISPONIBLES (Radar de Solicitudes)
+  // 📡 LISTENER DE VIAJE ACTIVO: Monitorea el estado del servicio asignado al conductor
   useEffect(() => {
-    const viajesRef = collection(db, "artifacts/taxiacimco-app/public/data/viajes");
-    const q = query(viajesRef, where("estado", "==", "BUSCANDO")); // Ajustado a la nomenclatura original
+    if (!user) return;
 
-    const unsub = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setViajesDisponibles(docs);
+    const q = query(
+      collection(db, "artifacts/taxiacimco-app/public/data/viajes"),
+      where("conductorId", "==", user.uid),
+      where("estado", "in", ["aceptado", "en_camino", "iniciado"])
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!snapshot.empty) {
+        setViajeActivo({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
+      } else {
+        setViajeActivo(null);
+      }
     });
 
-    return () => unsub();
-  }, []);
+    return () => unsubscribe();
+  }, [user]);
 
-  // 4. TRANSACCIÓN ATÓMICA PARA ACEPTAR SERVICIO
+  // 💬 LISTENER DE CHAT: Terminal de comunicación bidireccional
+  useEffect(() => {
+    if (!viajeActivo) {
+      setMensajes([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, `artifacts/taxiacimco-app/public/data/viajes/${viajeActivo.id}/chats`),
+      orderBy("timestamp", "asc")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMensajes(msgs);
+    });
+
+    return () => unsubscribe();
+  }, [viajeActivo]);
+
+  // ⚡ ACCIÓN: ACEPTAR VIAJE (Con Blindaje Financiero Preventivo)
   const aceptarViaje = async (viaje) => {
-    if (viajeActivo) {
-      alert("⚠️ ALERTA: Ya tienes un servicio en curso. Finalízalo primero.");
+    const COMISION_PREVISTA = (viaje.oferta || 0) * 0.10;
+
+    // ⚠️ ALERTA DE ARQUITECTURA: Validación de saldo antes de la aceptación
+    if ((balance || 0) < COMISION_PREVISTA) {
+      alert(`⚠️ BLOQUEO FINANCIERO: Tu saldo ($${balance}) es insuficiente para cubrir la comisión de este viaje ($${COMISION_PREVISTA}). Por favor, recarga tu billetera CIMCO.`);
       return;
     }
-
-    const valorServicio = viaje.pago?.tarifaOfertada || viaje.oferta || 0;
-    const comision = valorServicio * 0.10;
-
-    if (saldoBilletera < comision) {
-      alert(`❌ Saldo insuficiente. Necesitas $${comision} en tu Billetera App para tomar este servicio.`);
-      return;
-    }
-
-    const tripRef = doc(db, "artifacts/taxiacimco-app/public/data/viajes", viaje.id);
-    const walletRef = doc(db, "artifacts/taxiacimco-app/public/data/wallets", user.uid);
-    // Generamos una referencia vacía en la subcolección correcta para inyectarla en la transacción
-    const transRef = doc(collection(db, `artifacts/taxiacimco-app/public/data/wallets/${user.uid}/transacciones`));
 
     try {
-      await runTransaction(db, async (transaction) => {
-        const walletDoc = await transaction.get(walletRef);
-        const tripDoc = await transaction.get(tripRef);
-
-        if (tripDoc.data().estado !== 'BUSCANDO') throw "El viaje ya fue tomado por otro mototaxi.";
-
-        const saldoActual = walletDoc.data().saldo || 0;
-        if (saldoActual < comision) throw "Fondos insuficientes al verificar en el servidor.";
-
-        // OPERACIÓN 1: Descontar comisión (Billetera App)
-        transaction.update(walletRef, {
-          saldo: saldoActual - comision,
-          lastUpdate: serverTimestamp()
-        });
-
-        // OPERACIÓN 2: Actualizar Viaje
-        transaction.update(tripRef, {
-          estado: 'ACEPTADO',
-          mototaxiId: user.uid,
-          mototaxiNombre: user.displayName || 'Mototaxi CIMCO',
-          aceptadoAt: serverTimestamp()
-        });
-
-        // OPERACIÓN 3: Registro de Auditoría
-        transaction.set(transRef, {
-          monto: comision,
-          tipo: 'DEBITO_COMISION',
-          viajeId: viaje.id,
-          concepto: `Comisión 10% - Viaje de ${viaje.pasajeroNombre || 'Pasajero'}`,
-          fecha: serverTimestamp(),
-          saldoResultante: saldoActual - comision
-        });
+      const viajeRef = doc(db, "artifacts/taxiacimco-app/public/data/viajes", viaje.id);
+      await updateDoc(viajeRef, {
+        conductorId: user.uid,
+        conductorNombre: user.displayName || 'Unidad CIMCO',
+        estado: 'aceptado',
+        aceptadoEn: serverTimestamp()
       });
-
-      setViajeActivo(viaje);
-    } catch (e) {
-      alert("Error en la transacción financiera: " + e);
+      console.log("🚀 Viaje capturado con éxito.");
+    } catch (err) {
+      console.error("⚠️ ALERTA DE ARQUITECTURA: Fallo en captura de viaje", err);
     }
   };
 
-  // 5. FINALIZAR VIAJE (Cierre de Ciclo e Impacto de Ganancia)
+  // 🏁 ACCIÓN: FINALIZAR VIAJE CON LIQUIDACIÓN ATÓMICA DEL 10%
   const finalizarViaje = async () => {
     if (!viajeActivo) return;
 
     try {
-      const tripRef = doc(db, "artifacts/taxiacimco-app/public/data/viajes", viajeActivo.id);
-      
-      await updateDoc(tripRef, {
-        estado: 'FINALIZADO',
-        finalizadoAt: serverTimestamp()
+      await runTransaction(db, async (transaction) => {
+        const viajeRef = doc(db, "artifacts/taxiacimco-app/public/data/viajes", viajeActivo.id);
+        const walletRef = doc(db, "artifacts/taxiacimco-app/public/data/wallets", user.uid);
+
+        // Obtener estado actual de la billetera en la transacción
+        const walletDoc = await transaction.get(walletRef);
+        if (!walletDoc.exists()) {
+          throw new Error("⚠️ Error Crítico: Billetera no encontrada. Operación abortada.");
+        }
+
+        const saldoActual = walletDoc.data().balance || 0;
+        const valorServicio = viajeActivo.oferta || 0;
+        const COMISION_CIMCO = valorServicio * 0.10; 
+
+        // Doble validación de seguridad
+        if (saldoActual < COMISION_CIMCO) {
+          throw new Error(`❌ Saldo insuficiente para liquidar comisión ($${COMISION_CIMCO}).`);
+        }
+
+        // Ejecución de cambios en el Path Sagrado
+        transaction.update(viajeRef, {
+          estado: 'completado',
+          finalizadoEn: serverTimestamp(),
+          comisionAplicada: COMISION_CIMCO,
+          valorTotal: valorServicio
+        });
+
+        transaction.update(walletRef, {
+          balance: saldoActual - COMISION_CIMCO,
+          ultimaOperacion: 'comision_viaje',
+          fechaUltimaOperacion: serverTimestamp()
+        });
       });
 
-      setViajeActivo(null);
-      alert("✅ ¡Servicio Finalizado! Tu ganancia se ha sumado a la caja del día.");
+      console.log("✅ Liquidación exitosa. Comisión del 10% descontada.");
+      setMostrandoChat(false);
+      
     } catch (err) {
-      alert("Error de red al finalizar el servicio.");
+      console.error("❌ Fallo en liquidación atómica:", err);
+      alert(err.message || err); 
     }
   };
 
-  if (loading) return <div className="h-screen bg-black flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-t-4 border-yellow-500"></div></div>;
+  const enviarMensaje = async (e) => {
+    e.preventDefault();
+    if (!nuevoMensaje.trim() || !viajeActivo) return;
+
+    try {
+      await addDoc(collection(db, `artifacts/taxiacimco-app/public/data/viajes/${viajeActivo.id}/chats`), {
+        texto: nuevoMensaje,
+        senderId: user.uid,
+        senderNombre: user.displayName || 'Conductor',
+        timestamp: serverTimestamp()
+      });
+      setNuevoMensaje('');
+    } catch (err) {
+      console.error("Error en terminal de chat:", err);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] text-white font-sans p-4">
-      
-      {/* HEADER */}
-      <div className="flex justify-between items-center mb-6 border-b-2 border-yellow-500 pb-2">
+    <div className="min-h-screen bg-zinc-950 flex flex-col font-mono">
+      {/* HEADER CONDUCTOR - CIBER-NEO-BRUTALISTA */}
+      <header className="bg-black border-b-4 border-white p-4 flex justify-between items-center z-50">
         <div>
-          <h1 className="text-yellow-500 font-black text-2xl uppercase tracking-tighter">TAXIA CIMCO</h1>
-          <p className="text-green-500 text-xs font-bold">CONDUCTOR ONLINE</p>
-        </div>
-        <div className="text-right">
-          <p className="text-gray-400 text-xs font-bold">ID: {user?.uid.slice(0, 5)}</p>
-        </div>
-      </div>
-
-      {/* DASHBOARD DE ESTADÍSTICAS (Neo-Brutalismo Híbrido) */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div className="bg-[#1A1A1A] border-l-4 border-yellow-500 p-4 shadow-lg border border-gray-800">
-          <div className="flex items-center gap-2 text-gray-400 mb-1">
-            <Wallet size={14} className="text-yellow-500" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Billetera App</span>
+          <h1 className="text-xl font-black italic tracking-tighter uppercase">Driver <span className="text-yellow-500">Cimco</span></h1>
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_5px_#22c55e]" />
+            <span className="text-[8px] font-black uppercase text-zinc-500 italic">Core: {user?.uid?.substring(0,6).toUpperCase()}</span>
           </div>
-          <div className="text-xl font-black text-white">${saldoBilletera.toLocaleString()}</div>
-          <div className="text-[8px] text-gray-500 mt-1 uppercase">Para pagar comisiones</div>
         </div>
+        <div className="bg-zinc-900 border-2 border-white px-3 py-1 flex items-center gap-2 shadow-[3px_3px_0px_0px_#eab308]">
+          <Wallet size={16} className="text-yellow-500" />
+          <span className="font-black text-sm">${balance?.toLocaleString() || '0'}</span>
+        </div>
+      </header>
+
+      {/* TERMINAL OPERATIVA */}
+      <main className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">
         
-        <div className="bg-[#1A1A1A] border-l-4 border-green-500 p-4 shadow-lg border border-gray-800">
-          <div className="flex items-center gap-2 text-gray-400 mb-1">
-            <TrendingUp size={14} className="text-green-500" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Ganancia Hoy</span>
-          </div>
-          <div className="text-xl font-black text-white">${ingresosHoy.toLocaleString()}</div>
-          <div className="text-[8px] text-gray-500 mt-1 uppercase">Dinero en tu bolsillo</div>
-        </div>
-      </div>
-
-      {/* ESTADO DE SERVICIO */}
-      {viajeActivo ? (
-        <div className="bg-yellow-500 text-black p-5 border-4 border-white shadow-[8px_8px_0px_0px_rgba(255,255,255,0.2)] mb-8">
-          <div className="flex justify-between items-start mb-4">
-            <h2 className="font-black italic uppercase text-xl">Servicio en Curso</h2>
-            <div className="bg-black text-white text-[10px] px-2 py-1 font-bold animate-pulse">ACTIVO</div>
-          </div>
-          
-          <div className="space-y-3 mb-6">
-            <div className="flex items-start gap-2">
-              <MapPin size={18} className="mt-1" />
-              <div>
-                <p className="text-[10px] font-bold opacity-70 uppercase text-black">Pasajero / Destino:</p>
-                <p className="font-black text-lg leading-tight uppercase">{viajeActivo.pasajeroNombre} → {viajeActivo.detallesManuales?.destino || viajeActivo.destino}</p>
+        {!viajeActivo ? (
+          <>
+            <h2 className="text-[10px] font-black uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+              <Navigation size={12} className="text-yellow-500" /> Radar de Ofertas
+            </h2>
+            
+            {ofertasDisponibles.length === 0 ? (
+              <div className="border-2 border-dashed border-zinc-800 p-8 text-center opacity-40">
+                <AlertCircle size={32} className="mx-auto mb-2 text-zinc-600" />
+                <p className="text-[10px] font-black uppercase tracking-widest">Escaneando Red de La Jagua...</p>
+              </div>
+            ) : (
+              ofertasDisponibles.map((oferta) => (
+                <div key={oferta.id} className="bg-black border-4 border-white p-4 shadow-[6px_6px_0px_0px_#fff] active:translate-x-1 active:translate-y-1 transition-all">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-xl font-black text-yellow-500 font-mono italic">${oferta.oferta?.toLocaleString()}</span>
+                    <span className="bg-white text-black px-2 py-0.5 text-[8px] font-black uppercase">{oferta.distancia || '0'} KM</span>
+                  </div>
+                  <p className="text-xs font-bold text-zinc-400 mb-4 uppercase tracking-tighter">Pasajero: {oferta.pasajeroNombre}</p>
+                  <button 
+                    onClick={() => aceptarViaje(oferta)}
+                    className="w-full bg-yellow-500 text-black py-3 font-black uppercase italic hover:bg-white transition-colors flex items-center justify-center gap-2 border-2 border-black"
+                  >
+                    <CheckCircle size={18} /> Capturar Servicio
+                  </button>
+                </div>
+              ))
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="bg-yellow-500 text-black p-4 border-4 border-black shadow-[6px_6px_0px_0px_#fff]">
+              <div className="flex justify-between items-center mb-2">
+                <span className="font-black uppercase text-xs italic tracking-tighter">Misión en curso</span>
+                <button 
+                  onClick={() => setMostrandoChat(!mostrandoChat)} 
+                  className="bg-black text-white p-2 border-2 border-black shadow-[2px_2px_0px_0px_#000]"
+                >
+                  <MessageSquare size={20} />
+                </button>
+              </div>
+              <p className="text-2xl font-black italic mb-4 uppercase leading-none">Punto: {viajeActivo.pasajeroNombre}</p>
+              <div className="grid grid-cols-2 gap-2 font-black text-[10px] uppercase">
+                <div className="bg-black/10 p-2 border border-black/20 italic">Ruta: {viajeActivo.distancia} km</div>
+                <div className="bg-black/10 p-2 border border-black/20 italic">Bóveda: ${viajeActivo.oferta}</div>
               </div>
             </div>
-            <div className="flex items-center justify-between bg-black/10 p-2 border border-black/20">
-              <span className="font-bold uppercase text-sm">Cobrar al usuario:</span>
-              <span className="text-2xl font-black">${(viajeActivo.pago?.tarifaOfertada || viajeActivo.oferta || 0).toLocaleString()}</span>
-            </div>
-          </div>
 
-          <button 
-            onClick={finalizarViaje}
-            className="w-full bg-black text-white font-black py-4 uppercase border-2 border-black hover:bg-gray-900 transition-all active:scale-95"
-          >
-            Finalizar y Registrar Ingreso
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-4 pb-20">
-          <div className="flex items-center gap-2 mb-2">
-            <Clock size={16} className="text-yellow-500" />
-            <h3 className="font-black uppercase text-xs tracking-tighter text-gray-300">Radar La Jagua</h3>
+            <button 
+              onClick={finalizarViaje}
+              className="w-full bg-white text-black border-4 border-black py-4 font-black uppercase hover:bg-green-500 transition-colors shadow-[6px_6px_0px_0px_#eab308]"
+            >
+              Finalizar y Cobrar Tasa
+            </button>
           </div>
+        )}
+      </main>
 
-          {viajesDisponibles.length === 0 ? (
-            <div className="py-10 text-center border-2 border-dashed border-gray-800 opacity-60">
-              <p className="text-sm font-bold text-gray-500 uppercase">Esperando solicitudes...</p>
-            </div>
-          ) : (
-            viajesDisponibles.map((v) => {
-              const valorOferta = v.pago?.tarifaOfertada || v.oferta || 0;
-              const comisionCalculada = valorOferta * 0.10;
-              
-              return (
-                <div key={v.id} className="bg-[#151515] border-2 border-gray-800 p-4 flex justify-between items-center group hover:border-yellow-500 transition-colors">
-                  <div className="flex-1 pr-2">
-                    <p className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
-                      {v.detallesManuales?.recogida || v.origen || 'Ubicación GPS'}
-                    </p>
-                    <p className="font-black text-white uppercase tracking-tight mt-1 truncate">
-                      {v.detallesManuales?.destino || v.destino}
-                    </p>
-                    <p className="text-[10px] text-red-400 font-bold mt-1">Comisión App: -${comisionCalculada}</p>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xl font-black text-green-500 mb-2">${valorOferta}</div>
-                    <button 
-                      onClick={() => aceptarViaje(v)}
-                      className="bg-yellow-500 text-black text-[10px] font-black px-6 py-2 uppercase border-2 border-black shadow-[3px_3px_0px_0px_rgba(255,255,255,1)] active:shadow-none active:translate-x-[3px] active:translate-y-[3px] transition-all"
-                    >
-                      Aceptar
-                    </button>
-                  </div>
+      {/* OVERLAY DE COMUNICACIÓN BRUTALISTA */}
+      {mostrandoChat && viajeActivo && (
+        <div className="absolute inset-0 bg-black/98 z-[100] flex flex-col p-4 animate-in fade-in duration-300">
+          <div className="flex justify-between items-center border-b-4 border-white pb-4 mb-4">
+            <h2 className="text-xl font-black italic uppercase tracking-tighter">Terminal Chat</h2>
+            <button onClick={() => setMostrandoChat(false)} className="text-white hover:text-yellow-500 transition-colors">
+              <XCircle size={32}/>
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto space-y-4 p-2 scrollbar-hide">
+            {mensajes.map((m) => (
+              <div key={m.id} className={`flex ${m.senderId === user.uid ? 'justify-end' : 'justify-start'}`}>
+                <div className={`p-3 max-w-[85%] border-2 ${m.senderId === user.uid ? 'bg-yellow-500 text-black border-black shadow-[4px_4px_0_0_#fff]' : 'bg-zinc-900 text-white border-zinc-700 shadow-[-4px_4px_0_0_#333]'}`}>
+                  <p className="text-[8px] font-black uppercase opacity-50 mb-1">{m.senderNombre}</p>
+                  <p className="text-xs font-bold leading-tight">{m.texto}</p>
                 </div>
-              );
-            })
-          )}
+              </div>
+            ))}
+          </div>
+
+          <form onSubmit={enviarMensaje} className="mt-4 flex gap-2">
+            <input 
+              className="flex-1 bg-zinc-900 border-2 border-zinc-700 p-3 text-xs font-bold outline-none focus:border-yellow-500 text-white placeholder-zinc-600"
+              placeholder="Instrucción de llegada..."
+              value={nuevoMensaje}
+              onChange={(e) => setNuevoMensaje(e.target.value)}
+            />
+            <button type="submit" className="bg-yellow-500 text-black p-3 border-2 border-black hover:bg-white transition-all shadow-[2px_2px_0_0_#fff]">
+              <Send size={20} />
+            </button>
+          </form>
         </div>
       )}
 
-      {/* FOOTER NAV CIBER-NEO-BRUTALISTA */}
-      <div className="fixed bottom-0 left-0 w-full bg-[#0A0A0A] border-t-4 border-yellow-500 p-3 flex justify-around items-center z-50">
-        <button className="flex flex-col items-center gap-1 text-yellow-500">
-          <Navigation size={22} />
-          <span className="text-[9px] font-black uppercase">Radar</span>
+      {/* FOOTER NAVEGACIÓN */}
+      <footer className="fixed bottom-0 left-0 w-full bg-black border-t-4 border-white p-4 flex justify-around items-center z-50">
+        <button className="text-yellow-500 flex flex-col items-center gap-1 transition-transform active:scale-90">
+          <Navigation size={24} />
+          <span className="text-[8px] font-black uppercase tracking-tighter">Radar</span>
         </button>
-        <button className="flex flex-col items-center gap-1 text-gray-500 hover:text-white transition-colors">
-          <CheckCircle size={22} />
-          <span className="text-[9px] font-black uppercase">Historial</span>
+        <button className="text-zinc-700 flex flex-col items-center gap-1 opacity-50 cursor-not-allowed">
+          <Clock size={24} />
+          <span className="text-[8px] font-black uppercase tracking-tighter">Log</span>
         </button>
-      </div>
+        <button className="text-zinc-700 flex flex-col items-center gap-1 opacity-50 cursor-not-allowed">
+          <TrendingUp size={24} />
+          <span className="text-[8px] font-black uppercase tracking-tighter">Caja</span>
+        </button>
+      </footer>
     </div>
   );
 };

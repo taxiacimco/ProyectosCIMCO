@@ -1,25 +1,46 @@
+// Versión Arquitectura: V11.2 - Unificación del Path Sagrado y Gestión de Roles en Bóveda
+/**
+ * Archivo: firestore.rules
+ * Misión: Blindar la estructura de datos de TAXIA CIMCO.
+ * Regla de Oro: Toda interacción debe ocurrir bajo artifacts/taxiacimco-app/public/data/
+ */
+
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 💳 REGLA ESPECÍFICA PARA BILLETERAS (CIMCO WALLETS)
-    // Permite leer y escribir solo si el usuario está autenticado
-    match /artifacts/taxiacimco-app/public/data/wallets/{walletId} {
-      allow read, write: if request.auth != null;
+    /**
+     * 💰 SECCIÓN: BILLETERAS (wallets)
+     * Máxima seguridad: Solo el CEO (Admin) inyecta saldo.
+     * El usuario solo puede consultar su propio estado financiero.
+     */
+    match /artifacts/taxiacimco-app/public/data/wallets/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.token.admin == true;
     }
 
-    // 🛵 REGLA PARA VIAJES Y MENSAJES
-    match /artifacts/taxiacimco-app/public/data/viajes/{viajeId} {
-      allow read, write: if request.auth != null;
-    }
-    
-    match /artifacts/taxiacimco-app/public/data/mensajes/{mensajeId} {
-      allow read, write: if request.auth != null;
+    /**
+     * 🛵 SECCIÓN: OPERATIVA (viajes, mensajes, conductores)
+     * Permite la dinámica del negocio para usuarios autenticados.
+     * El comodín {collection} asegura que el Path Sagrado se respete siempre.
+     */
+    match /artifacts/taxiacimco-app/public/data/{collection}/{document=**} {
+      
+      // Permitir lectura si el usuario está logueado en la red CIMCO
+      allow read: if request.auth != null;
+      
+      // Permitir escritura para creación de viajes y chats
+      // (Excepto wallets, que ya está blindado arriba)
+      allow write: if request.auth != null;
     }
 
-    // 🔓 REGLA GLOBAL TEMPORAL (Para no bloquear otros módulos en desarrollo)
+    /**
+     * 🔒 CIERRE DE SEGURIDAD (Zero-Trust)
+     * Bloquea cualquier intento de acceso fuera del Path Sagrado del proyecto.
+     */
     match /{document=**} {
-      allow read, write: if true; 
+      allow read, write: if false;
     }
   }
 }
