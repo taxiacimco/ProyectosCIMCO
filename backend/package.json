@@ -1,11 +1,11 @@
 {
   "name": "taxia-cimco-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Servidor Central Local - TAXIA CIMCO",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
-    "dev": "node src/server.js"
+    "dev": "nodemon src/server.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -14,5 +14,8 @@
     "express": "^4.22.2",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.24.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

@@ -1,17 +1,18 @@
-// Versión Arquitectura: V5.3 - Corrección Sintáctica de Ordenamiento en Consulta de Billeteras
+// Versión Arquitectura: V7.4 - Corrección de bloque de cierre (finally) en inyección remota
 /**
- * AdminDashboard.jsx - Súper Terminal CEO Centralizada
- * Ecosistema: TAXIA CIMCO
- * Ajuste: Limpieza de caracteres de escape en la función query de Firestore (línea 56).
- * Estética: Ciber-Neo-Brutalismo / CIMCO-UI (Modo oscuro, alto contraste, bordes gruesos).
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
+ * Misión: Asegurar la continuidad operativa de la terminal CEO con inyección atómica paralela en wallets (Firebase) y pasarela (Express Backend API).
+ * UI Standard: CIMCO-UI V9.3 (Glassmorphism premium, backdrop-blur-md, bg-[#121214]/80).
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
-    collection, 
-    onSnapshot, 
-    doc, 
-    runTransaction, 
+import { QRCodeSVG } from 'qrcode.react';
+import axios from 'axios'; // 🚀 Canal de transporte unificado para el backend en puerto 3000
+import {
+    collection,
+    onSnapshot,
+    doc,
+    runTransaction,
     serverTimestamp,
     query,
     orderBy
@@ -27,368 +28,349 @@ import {
     DollarSign, 
     Users, 
     Zap,
-    Activity
+    Activity,
+    Download,
+    ShieldCheck,
+    Loader
 } from 'lucide-react';
 
 const AdminDashboard = () => {
     const { user } = useAuth();
     const [billeteras, setBilleteras] = useState([]);
     const [filtro, setFiltro] = useState('');
-    const [montoRecarga, setMontoRecarga] = useState('');
-    const [conductorSeleccionado, setConductorSeleccionado] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [statusMsg, setStatusMsg] = useState({ type: '', text: '' });
+    const [seleccionado, setSeleccionado] = useState(null);
+    const [montoInyeccion, setMontoInyeccion] = useState('');
+    const [transaccionExitosa, setTransaccionExitosa] = useState(false);
+    const [errorTransaccion, setErrorTransaccion] = useState('');
+    const [loadingRemoto, setLoadingRemoto] = useState(false); // Guarda de estado de red
 
-    // Estados analíticos para las tarjetas globales fusionadas
-    const [metricas, setMetricas] = useState({
-        balanceTotal: 0,
-        conductoresActivos: 0,
-        operacionesSeguras: 100
-    });
-
-    // 1. ESCUCHA ACTIVA DE BILLETERAS (PATH SAGRADO) Y CÁLCULO DE MÉTRICAS GLOBALES
+    // Escucha activa del bus de datos distribuido en Firebase Firestore
     useEffect(() => {
-        const walletsPath = "artifacts/taxiacimco-app/public/data/wallets";
-        
-        // 🛡️ Guardia de consulta corregida sin caracteres de escape corruptos
-        const q = query(collection(db, walletsPath), orderBy("updatedAt", "desc"));
-        
-        const unsub = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
-            
+        const q = query(collection(db, 'billeteras'), orderBy('nombre', 'asc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const data = snapshot.docs.map(doc => {
+                const docData = doc.data();
+                // 🛡️ GUARDA DE SEGURIDAD ANTI-UNDEFINED
+                return {
+                    id: doc.id,
+                    conductorId: docData?.conductorId || doc.id,
+                    nombre: docData?.nombre || 'Operador No Identificado',
+                    email: docData?.email || 'N/A',
+                    saldo: typeof docData?.saldo === 'number' ? docData.saldo : 0,
+                    estado: docData?.estado || 'inactive',
+                    rol: docData?.rol || 'conductor'
+                };
+            });
             setBilleteras(data);
 
-            // 📊 Fusión Atómica: Cálculo de estadísticas globales en tiempo real
-            const totalCirculante = data.reduce((acc, curr) => acc + (Number(curr.saldo) || 0), 0);
-            const conteoConductores = data.filter(w => w.rol === 'conductor').length;
-
-            setMetricas({
-                balanceTotal: totalCirculante,
-                conductoresActivos: conteoConductores,
-                operacionesSeguras: 100
-            });
-
-            setLoading(false);
+            // Mantener reactividad sobre el nodo enfocado bajo mutación
+            if (seleccionado) {
+                const actualizado = data.find(b => b.id === seleccionado.id);
+                if (actualizado) setSeleccionado(actualizado);
+            }
         }, (error) => {
-            console.error("❌ Error en escucha activa de la Súper Terminal:", error);
-            setLoading(false);
+            console.error("⚠️ [CIMCO-ERROR] Falla en el bus de Firestore:", error);
         });
 
-        return () => unsub();
-    }, []);
+        return () => unsubscribe();
+    }, [seleccionado]);
 
-    // 2. FILTRADO INTELIGENTE DE CONDUCTORES / USUARIOS
+    // Filtrado perimetral por cadena de caracteres
     const billeterasFiltradas = billeteras.filter(b => {
         const busqueda = filtro.toLowerCase();
         return (
-            (b.nombre && b.nombre.toLowerCase().includes(busqueda)) ||
-            (b.email && b.email.toLowerCase().includes(busqueda)) ||
-            (b.id && b.id.toLowerCase().includes(busqueda))
+            b.nombre.toLowerCase().includes(busqueda) ||
+            b.email.toLowerCase().includes(busqueda) ||
+            b.conductorId.toLowerCase().includes(busqueda)
         );
     });
 
-    // 3. PASARELA TRANSACCIONAL ATÓMICA CON GUARDA DE SEGURIDAD
-    const ejecutarRecargaManual = async (e) => {
+    // MÁQUINA DE INYECCIÓN INTEGRADA (Fusión Atómica Firebase + Express Backend API)
+    const procesarInyeccionSoberana = async (e) => {
         e.preventDefault();
+        setTransaccionExitosa(false);
+        setErrorTransaccion('');
         
-        // 🛡️ Guardas de Seguridad Obligatorias (Anti-Undefined)
-        if (!user) {
-            setStatusMsg({ type: 'error', text: 'Sesión inválida o expirada.' });
+        const valorMonto = parseInt(montoInyeccion, 10);
+
+        // 🛡️ ALERTA DE ARQUITECTURA: Validaciones de Reglas de Negocio Contables
+        if (!seleccionado || !seleccionado.id) {
+            setErrorTransaccion('⚠️ ALERTA DE ARQUITECTURA: Nodo de destino ausente o corrupto.');
+            return;
+        }
+        if (isNaN(valorMonto) || valorMonto <= 0) {
+            setErrorTransaccion('⚠️ REGLA DE NEGOCIO VIOLADA: El monto de inyección debe ser estrictamente superior a $0 COP.');
+            return;
+        }
+        if (valorMonto > 500000) {
+            setErrorTransaccion('⚠️ LÍMITE SOBERANO: No se permiten inyecciones unilaterales mayores a $500.000 COP por operación.');
             return;
         }
 
-        if (!conductorSeleccionado || !conductorSeleccionado.id) {
-            setStatusMsg({ type: 'error', text: 'Error crítico: No se ha seleccionado un destino válido.' });
-            return;
-        }
-
-        const valorNumeric = parseFloat(montoRecarga);
-        if (isNaN(valorNumeric) || valorNumeric <= 0) {
-            setStatusMsg({ type: 'error', text: 'Monto de recarga inválido.' });
-            return;
-        }
-
-        // Alerta de Arquitectura preventiva para recargas excesivas de testing
-        if (valorNumeric > 500000) {
-            setStatusMsg({ type: 'error', text: '⚠️ ALERTA: Supera el límite de recarga manual permitido por turno.' });
-            return;
-        }
-
-        setLoading(true);
-        setStatusMsg({ type: '', text: '' });
-
-        const walletRef = doc(db, `artifacts/taxiacimco-app/public/data/wallets/${conductorSeleccionado.id}`);
-        const logRef = doc(collection(db, "artifacts/taxiacimco-app/public/data/logs_ceo"));
+        setLoadingRemoto(true);
 
         try {
+            // =========================================================================
+            // FASE 1: INYECCIÓN REMOTA EN EL BACKEND CORE (MongoDB Atlas + Historial Contable)
+            // =========================================================================
+            const tokenJWT = localStorage.getItem('token') || ''; // Extrae firma digital segura
+            
+            // Si tu middleware de backend exige token, se adjunta automáticamente.
+            await axios.post('http://localhost:3000/api/conductores/recargar', {
+                conductorId: seleccionado.conductorId,
+                monto: valorMonto,
+                administradorId: user?.uid || 'SYSTEM_ADMIN_CEO',
+                rol: seleccionado.rol || 'conductor'
+            }, {
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${tokenJWT}`
+                }
+            });
+
+            console.log('✅ [CIMCO-REST] Inyección autorizada y registrada en MongoDB / Historial.');
+
+            // =========================================================================
+            // FASE 2: MUTACIÓN TRANSACCIONAL ATÓMICA EN FIREBASE (Sincronización en Tiempo Real UI)
+            // =========================================================================
+            const sfDocRef = doc(db, 'billeteras', seleccionado.id);
             await runTransaction(db, async (transaction) => {
-                const walletDoc = await transaction.get(walletRef);
-                
-                if (!walletDoc.exists()) {
-                    throw new Error("La billetera destino no existe en la red.");
+                const sfDoc = await transaction.get(sfDocRef);
+                if (!sfDoc.exists()) {
+                    throw new Error("El documento destino no tiene persistencia física en Firebase.");
                 }
 
-                const saldoActual = parseFloat(walletDoc.data().saldo) || 0;
-                const nuevoSaldo = saldoActual + valorNumeric;
+                const saldoActual = sfDoc.data().saldo || 0;
+                const nuevoSaldo = saldoActual + valorMonto;
 
-                // Mutación atómica del saldo del usuario
-                transaction.update(walletRef, {
-                    saldo: nuevoSaldo,
-                    updatedAt: serverTimestamp()
-                });
+                transaction.update(sfDocRef, { saldo: nuevoSaldo });
 
-                // Inyección del registro log transaccional para auditoría de Tesorería
-                transaction.set(logRef, {
-                    tipoOperacion: 'RECARGA_MANUAL_CEO',
-                    monto: valorNumeric,
-                    destinoUid: conductorSeleccionado.id,
-                    destinoEmail: conductorSeleccionado.email || 'N/A',
-                    ejecutadoPor: user.email,
+                const historialRef = doc(collection(db, 'historial_billeteras'));
+                transaction.set(historialRef, {
+                    billeteraId: seleccionado.id,
+                    conductorId: seleccionado.conductorId,
+                    monto: valorMonto,
+                    tipo: 'inyeccion_admin',
+                    saldoAnterior: saldoActual,
+                    nuevoSaldo: nuevoSaldo,
+                    auditor: user?.email || 'SYSTEM_CEO',
                     timestamp: serverTimestamp()
                 });
             });
 
-            setStatusMsg({ 
-                type: 'success', 
-                text: `¡Recarga de $${valorNumeric.toLocaleString()} exitosa para ${conductorSeleccionado.nombre || 'Conductor'}!` 
-            });
-            setMontoRecarga('');
-            setConductorSeleccionado(null);
+            console.log('✅ [CIMCO-FIRESTORE] Sincronización reactiva del ledger completada.');
+
+            // Ciclo de Cierre Exitoso
+            setTransaccionExitosa(true);
+            setMontoInyeccion('');
+            
         } catch (error) {
-            console.error("❌ Fallo en transacción de recarga:", error);
-            setStatusMsg({ type: 'error', text: error.message || 'Error interno en la base de datos.' });
-        } finally {
-            setLoading(false);
+            console.error('❌ Falla Crítica en Transmisión de Fondos:', error);
+            setErrorTransaccion(`FALLA OPERATIVA: ${error.response?.data?.message || error.message || 'Error de red con backend puerto 3000'}`);
+        } finally { // 🛠️ CORRECCIÓN APLICADA AQUÍ (antes decía 'fill')
+            setLoadingRemoto(false);
         }
     };
 
-    if (loading && billeteras.length === 0) {
-        return (
-            <div className="flex h-screen w-full items-center justify-center bg-black text-white font-mono">
-                <div className="animate-pulse text-yellow-400 text-xl tracking-widest uppercase">
-                    Sincronizando Terminal CEO con Firebase...
-                </div>
-            </div>
-        );
-    }
-
     return (
-        <div className="min-h-screen bg-slate-950 p-4 md:p-8 text-white font-mono selection:bg-yellow-400 selection:text-black">
-            {/* ENCABEZADO CIMCO UI */}
-            <header className="mb-8 border-4 border-black p-6 bg-zinc-900 shadow-[8px_8px_0px_0px_#000] relative overflow-hidden">
-                <div className="absolute top-0 right-0 bg-yellow-400 text-black font-black px-4 py-1 text-xs uppercase tracking-wider animate-pulse">
-                    Acceso Máster CEO Active
+        <div className="min-h-screen bg-[#09090b] text-zinc-100 p-6 font-sans antialiased selection:bg-yellow-500/30 selection:text-yellow-200">
+            
+            {/* ENCABEZADO TÁCTICO */}
+            <header className="mb-8 flex items-center justify-between border-b border-zinc-800/40 pb-5">
+                <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-yellow-500/10 rounded-xl border border-yellow-500/20 text-yellow-500">
+                        <Activity size={22} className="animate-pulse" />
+                    </div>
+                    <div>
+                        <h1 className="text-sm font-mono font-bold tracking-widest text-zinc-200 uppercase">CIMCO-CORE ENGINE</h1>
+                        <p className="text-[10px] font-mono text-zinc-500 tracking-wider mt-0.5">TERMINAL INTEGRAL DEL ADMINISTRADOR • v9.3 UI STANDARD</p>
+                    </div>
                 </div>
-                <h1 className="text-3xl md:text-4xl font-black tracking-tighter uppercase text-yellow-400 flex items-center gap-3">
-                    <Zap className="text-yellow-400 fill-yellow-400 animate-bounce" size={32} />
-                    SÚPER TERMINAL DE OPERACIONES CEO
-                </h1>
-                <p className="text-zinc-400 text-xs mt-2 uppercase tracking-widest">
-                    Control de Liquidez, Billeteras Híbridas y Auditoría Central TAXIA CIMCO
-                </p>
+
+                <div className="backdrop-blur-md bg-[#121214]/40 px-4 py-2 rounded-xl border border-zinc-800/60 flex items-center gap-3 text-xs font-mono">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                    <span className="text-zinc-400">BUS DE CONTROL OPERATIVO ACTIVO</span>
+                </div>
             </header>
 
-            {/* SECCIÓN FUSIONADA: TARJETAS DE ESTADÍSTICAS GLOBALES BRUTALISTAS */}
-            <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                {/* Balance General en Red */}
-                <div className="bg-zinc-900 border-4 border-black p-6 shadow-[6px_6px_0px_0px_#facc15] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all">
-                    <div className="flex justify-between items-center mb-4">
-                        <span className="text-xs font-black text-zinc-400 uppercase tracking-widest">Balance Global Red</span>
-                        <DollarSign className="text-yellow-400" size={24} />
-                    </div>
-                    <p className="text-3xl font-black text-white">
-                        ${metricas.balanceTotal.toLocaleString('es-CO')}
-                    </p>
-                    <div className="mt-2 text-[10px] text-emerald-400 font-bold uppercase flex items-center gap-1">
-                        <TrendingUp size={12} /> Flujo de capital activo en Atlas & Firestore
-                    </div>
-                </div>
-
-                {/* Conductores Operando */}
-                <div className="bg-zinc-900 border-4 border-black p-6 shadow-[6px_6px_0px_0px_#22d3ee] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all">
-                    <div className="flex justify-between items-center mb-4">
-                        <span className="text-xs font-black text-zinc-400 uppercase tracking-widest">Billeteras Registradas</span>
-                        <Users className="text-cyan-400" size={24} />
-                    </div>
-                    <p className="text-3xl font-black text-white">
-                        {metricas.conductoresActivos} <span className="text-sm font-normal text-zinc-500">Cuentas</span>
-                    </p>
-                    <div className="mt-2 text-[10px] text-cyan-400 font-bold uppercase flex items-center gap-1">
-                        <Activity size={12} className="animate-spin" /> Escucha de red en tiempo real en La Jagua
-                    </div>
-                </div>
-
-                {/* Estado del Núcleo de Seguridad */}
-                <div className="bg-zinc-900 border-4 border-black p-6 shadow-[6px_6px_0px_0px_#a855f7] hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all">
-                    <div className="flex justify-between items-center mb-4">
-                        <span className="text-xs font-black text-zinc-400 uppercase tracking-widest">Integridad del Núcleo</span>
-                        <ShieldAlert className="text-purple-400" size={24} />
-                    </div>
-                    <p className="text-3xl font-black text-purple-400">
-                        {metricas.operacionesSeguras}%
-                    </p>
-                    <div className="mt-2 text-[10px] text-purple-400 font-bold uppercase">
-                        🔐 Transacciones Atómicas Habilitadas
-                    </div>
-                </div>
-            </section>
-
-            {/* PANEL PRINCIPAL: DISTRIBUCIÓN EN 2 COLUMNAS */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* RETÍCULA DE CONTROL PRINCIPAL */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
                 
-                {/* COLUMNA IZQUIERDA: MOTOR DE BÚSQUEDA Y RADAR DE BILLETERAS */}
-                <div className="lg:col-span-2 bg-zinc-900 border-4 border-black p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                    <h2 className="text-xl font-black uppercase text-yellow-400 mb-4 flex items-center gap-2">
-                        <Wallet size={20} /> RADAR GLOBAL DE BILLETERAS
-                    </h2>
-                    
-                    {/* Input Buscador Brutalista */}
-                    <div className="relative mb-6">
-                        <input 
-                            type="text"
-                            value={filtro}
-                            onChange={(e) => setFiltro(e.target.value)}
-                            placeholder="BUSCAR CONDUCTOR POR NOMBRE, EMAIL O UID..."
-                            className="w-full bg-black border-4 border-black p-4 text-white placeholder-zinc-600 font-black focus:outline-none focus:border-yellow-400 focus:shadow-[4px_4px_0px_0px_#facc15] transition-all"
-                        />
-                        <Search className="absolute right-4 top-5 text-zinc-600" size={20} />
+                {/* COLUMNA 1 Y 2: RADAR DE TELEMETRÍA Y CUENTAS */}
+                <div className="lg:col-span-2 backdrop-blur-md bg-[#121214]/80 border border-zinc-800/50 rounded-2xl p-5 shadow-2xl">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                        <div className="flex items-center gap-2">
+                            <Users size={16} className="text-zinc-400" />
+                            <h2 className="text-xs font-mono font-bold tracking-widest text-zinc-300 uppercase">Nodos de Telemetría ({billeterasFiltradas.length})</h2>
+                        </div>
+                        
+                        {/* INPUT DE BÚSQUEDA PERIMETRAL */}
+                        <div className="relative w-full sm:w-64">
+                            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+                            <input 
+                                type="text"
+                                value={filtro}
+                                onChange={(e) => setFiltro(e.target.value)}
+                                placeholder="BUSCAR POR NOMBRE, ID, CORREO..."
+                                className="w-full bg-zinc-950/60 border border-zinc-800/60 rounded-xl pl-9 pr-4 py-2 text-[10px] font-mono tracking-wider uppercase text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-yellow-500/40 transition-colors"
+                            />
+                        </div>
                     </div>
 
-                    {/* Tabla / Lista de Billeteras */}
-                    <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                    {/* REPOSITORIO FLUIDO DE CUENTAS */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[580px] overflow-y-auto pr-2">
                         {billeterasFiltradas.length === 0 ? (
-                            <p className="text-zinc-500 text-center py-8 border-4 border-dashed border-zinc-800 uppercase font-bold">
-                                No se encontraron registros con los criterios ingresados
-                            </p>
+                            <div className="col-span-full text-center py-12 border border-dashed border-zinc-800/40 rounded-xl text-zinc-500 font-mono text-[10px] uppercase tracking-widest">
+                                No se detectan nodos activos con el criterio ingresado.
+                            </div>
                         ) : (
-                            billeterasFiltradas.map((wallet) => (
-                                <div 
-                                    key={wallet.id}
-                                    onClick={() => setConductorSeleccionado(wallet)}
-                                    className={`p-4 border-4 transition-all cursor-pointer flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
-                                        conductorSeleccionado?.id === wallet.id
-                                            ? 'bg-yellow-400 border-black text-black shadow-none translate-x-1 translate-y-1'
-                                            : 'bg-black border-zinc-800 text-white hover:border-white shadow-[4px_4px_0px_0px_rgba(255,255,255,0.1)]'
-                                    }`}
-                                >
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-black text-base uppercase">
-                                                {wallet.nombre || 'Usuario sin nombre'}
-                                            </span>
-                                            <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase ${
-                                                wallet.rol === 'conductor' ? 'bg-cyan-500 text-black' : 'bg-purple-600 text-white'
+                            billeterasFiltradas.map((b) => {
+                                const esEnfocado = seleccionado?.id === b.id;
+                                return (
+                                    <div 
+                                        key={b.id}
+                                        onClick={() => {
+                                            setSeleccionado(b);
+                                            setTransaccionExitosa(false);
+                                            setErrorTransaccion('');
+                                        }}
+                                        className={`p-4 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col justify-between h-32 ${
+                                            esEnfocado 
+                                            ? 'bg-yellow-500/[0.04] border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.05)]' 
+                                            : 'bg-zinc-900/20 border-zinc-800/40 hover:bg-zinc-900/40 hover:border-zinc-800'
+                                        }`}
+                                    >
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="truncate">
+                                                <h3 className="text-[11px] font-bold tracking-wide text-zinc-200 uppercase truncate">{b.nombre}</h3>
+                                                <p className="text-[9px] font-mono text-zinc-500 truncate mt-0.5">{b.email}</p>
+                                            </div>
+                                            <span className={`text-[8px] font-mono px-2 py-0.5 rounded uppercase tracking-wider font-bold border ${
+                                                b.estado === 'active' 
+                                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                                                : 'bg-zinc-800/40 text-zinc-500 border-zinc-700/30'
                                             }`}>
-                                                {wallet.rol || 'Pasajero'}
+                                                {b.estado}
                                             </span>
                                         </div>
-                                        <p className={`text-xs mt-1 font-mono ${
-                                            conductorSeleccionado?.id === wallet.id ? 'text-zinc-800' : 'text-zinc-400'
-                                        }`}>
-                                            ✉️ {wallet.email || 'Sin correo asociado'}
-                                        </p>
-                                        <p className="text-[10px] opacity-60 font-mono mt-1 break-all">
-                                            UID: {wallet.id}
-                                        </p>
-                                    </div>
 
-                                    <div className="text-right w-full md:w-auto border-t md:border-t-0 border-zinc-800 md:pt-0 pt-2 flex md:flex-col justify-between items-center md:items-end">
-                                        <span className={`text-[10px] uppercase font-bold block ${
-                                            conductorSeleccionado?.id === wallet.id ? 'text-zinc-900' : 'text-zinc-400'
-                                        }`}>
-                                            Saldo Neto:
-                                        </span>
-                                        <span className="text-xl font-black tracking-tight">
-                                            ${(Number(wallet.saldo) || 0).toLocaleString('es-CO')}
-                                        </span>
+                                        <div className="flex items-end justify-between border-t border-zinc-800/30 pt-2 mt-2">
+                                            <div>
+                                                <p className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest">ID CONSTRUCTOR</p>
+                                                <p className="text-[10px] font-mono font-bold text-zinc-400 uppercase mt-0.5">{b.conductorId.substring(0, 12)}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest">BALANCE</p>
+                                                <p className="text-xs font-mono font-bold text-yellow-500 tracking-wide mt-0.5">
+                                                    ${b.saldo.toLocaleString('es-CO')} COP
+                                                </p>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 </div>
 
-                {/* COLUMNA DERECHA: PASARELA INYECTORA DE SALDO */}
-                <div className="bg-zinc-900 border-4 border-black p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] flex flex-col justify-between">
+                {/* COLUMNA 3: PANEL OPERATIVO DE ACCIONES Y FORMULARIO DE INYECCIÓN */}
+                <div className="backdrop-blur-md bg-[#121214]/80 border border-zinc-800/50 rounded-2xl p-5 shadow-2xl lg:h-[650px] flex flex-col justify-between">
                     <div>
-                        <h2 className="text-xl font-black uppercase text-yellow-400 mb-6 flex items-center gap-2">
-                            <DollarSign size={20} /> INYECTOR DE CAPITAL
-                        </h2>
+                        <div className="flex items-center gap-2 mb-6">
+                            <Wallet size={16} className="text-yellow-500" />
+                            <h2 className="text-xs font-mono font-bold tracking-widest text-zinc-300 uppercase">Inyección Atómica Remota</h2>
+                        </div>
 
-                        {conductorSeleccionado ? (
-                            <form onSubmit={ejecutarRecargaManual} className="space-y-6">
-                                <div className="bg-black border-4 border-yellow-400 p-4 text-xs space-y-2">
-                                    <p className="text-yellow-400 font-black uppercase tracking-wider">🎯 DESTINO CONFIRMADO:</p>
-                                    <p><strong className="text-zinc-400">Nombre:</strong> {conductorSeleccionado.nombre}</p>
-                                    <p><strong className="text-zinc-400">Email:</strong> {conductorSeleccionado.email}</p>
-                                    <p><strong className="text-zinc-400">Saldo actual:</strong> ${(Number(conductorSeleccionado.saldo) || 0).toLocaleString('es-CO')}</p>
+                        {seleccionado ? (
+                            <form onSubmit={procesarInyeccionSoberana} className="space-y-5">
+                                
+                                {/* DETALLE DEL DESTINATARIO */}
+                                <div className="p-3.5 bg-zinc-950/60 border border-zinc-800/60 rounded-xl font-mono text-[10px] tracking-wider space-y-2">
+                                    <div className="flex justify-between text-zinc-500"><span className="uppercase">BENEFICIARIO:</span> <span className="text-zinc-300 font-bold uppercase truncate max-w-[140px]">{seleccionado.nombre}</span></div>
+                                    <div className="flex justify-between text-zinc-500"><span className="uppercase">DRV TARGET ID:</span> <span className="text-zinc-400 font-bold">{seleccionado.conductorId}</span></div>
+                                    <div className="flex justify-between text-zinc-500"><span className="uppercase">SALDO ACTUAL:</span> <span className="text-yellow-500 font-bold">${seleccionado.saldo.toLocaleString('es-CO')} COP</span></div>
                                 </div>
 
+                                {/* INPUT DE MONTO CONTABLE */}
                                 <div className="space-y-2">
-                                    <label className="text-xs font-black uppercase text-zinc-400 tracking-wider block">
-                                        Valor en Efectivo Recibido (COP):
-                                    </label>
+                                    <label className="block text-[9px] font-mono text-zinc-400 tracking-widest uppercase">MONTO A INYECTAR (COP)</label>
                                     <div className="relative">
-                                        <span className="absolute left-4 top-4 text-xl font-black text-yellow-400">$</span>
+                                        <DollarSign size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
                                         <input 
                                             type="number"
-                                            value={montoRecarga}
-                                            onChange={(e) => setMontoRecarga(e.target.value)}
-                                            placeholder="0.00"
                                             required
-                                            className="w-full bg-black border-4 border-black p-4 pl-10 text-xl font-black text-yellow-400 focus:outline-none focus:border-yellow-400 transition-all"
+                                            value={montoInyeccion}
+                                            onChange={(e) => setMontoInyeccion(e.target.value)}
+                                            placeholder="EJ: 20000"
+                                            disabled={loadingRemoto}
+                                            className="w-full bg-zinc-950/50 border border-zinc-800/60 rounded-xl pl-9 pr-4 py-3 font-mono text-xs text-zinc-200 focus:outline-none focus:border-yellow-500/40 placeholder-zinc-700 transition-colors"
                                         />
                                     </div>
-                                    <span className="text-[10px] text-zinc-500 uppercase font-bold block">
-                                        * Este proceso alterará la base de datos de manera irreversible.
-                                    </span>
                                 </div>
 
-                                {statusMsg.text && (
-                                    <div className={`p-4 border-4 text-xs font-black uppercase flex items-center gap-2 ${
-                                        statusMsg.type === 'success' 
-                                            ? 'bg-black border-emerald-500 text-emerald-400 shadow-[4px_4px_0px_0px_#10b981]' 
-                                            : 'bg-black border-red-500 text-red-500 shadow-[4px_4px_0px_0px_#ef4444]'
-                                    }`}>
-                                        {statusMsg.type === 'success' ? <CheckCircle size={16} /> : <ShieldAlert size={16} />}
-                                        {statusMsg.text}
+                                {/* MANEJO DE FEEDBACKS ALENTADORES O ALERTAS */}
+                                {transaccionExitosa && (
+                                    <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl text-emerald-400 flex items-start gap-2.5 font-mono text-[9px] tracking-wide leading-relaxed uppercase animate-fadeIn">
+                                        <CheckCircle size={14} className="shrink-0 text-emerald-500 mt-0.5" />
+                                        <div>
+                                            <p className="font-bold">Inyección Confirmada exitosamente.</p>
+                                            <p className="text-zinc-500 text-[8px] mt-0.5">Los balances han sido actualizados en tiempo real en MongoDB Atlas y Firebase Engine.</p>
+                                        </div>
                                     </div>
                                 )}
 
-                                <button 
+                                {errorTransaccion && (
+                                    <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-xl text-red-400 flex items-start gap-2.5 font-mono text-[9px] tracking-wide leading-relaxed uppercase">
+                                        <ShieldAlert size={14} className="shrink-0 text-red-500 mt-0.5" />
+                                        <span className="font-bold">{errorTransaccion}</span>
+                                    </div>
+                                )}
+
+                                {/* BOTÓN ACCIONADOR DE CRÉDITO */}
+                                <button
                                     type="submit"
-                                    disabled={loading}
-                                    className="w-full bg-yellow-400 text-black font-black uppercase text-xl py-5 border-4 border-black hover:bg-yellow-300 active:translate-y-1 shadow-[4px_4px_0px_0px_rgba(255,255,255,1)] disabled:opacity-50 transition-all"
+                                    disabled={loadingRemoto}
+                                    className="w-full bg-gradient-to-r from-yellow-600 to-yellow-500 hover:from-yellow-500 hover:to-yellow-400 text-zinc-950 font-mono font-bold uppercase text-[10px] tracking-widest py-3.5 rounded-xl transition-all duration-200 shadow-lg shadow-yellow-600/10 active:scale-[0.99] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
                                 >
-                                    {loading ? 'PROCESANDO...' : 'EJECUTAR RECARGA'}
+                                    {loadingRemoto ? (
+                                        <>
+                                            <Loader size={14} className="animate-spin text-zinc-950" />
+                                            AUTORIZANDO INYECTOR CORE...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Zap size={14} className="fill-current" />
+                                            EJECUTAR INYECTOR ATÓMICO
+                                        </>
+                                    )}
                                 </button>
-                                
-                                <button 
+
+                                <button
                                     type="button"
                                     onClick={() => {
-                                        setConductorSeleccionado(null);
-                                        setStatusMsg({ type: '', text: '' });
+                                        setSeleccionado(null);
+                                        setMontoInyeccion('');
+                                        setTransaccionExitosa(false);
+                                        setErrorTransaccion('');
                                     }}
-                                    className="w-full text-zinc-400 font-black uppercase text-xs hover:text-white transition-colors block text-center"
+                                    disabled={loadingRemoto}
+                                    className="w-full text-zinc-500 font-mono font-bold uppercase text-[10px] tracking-widest hover:text-zinc-300 transition-colors block text-center mt-2.5 disabled:opacity-30"
                                 >
-                                    ← CANCELAR SELECCIÓN
+                                    ← CANCELAR OPERACIÓN
                                 </button>
                             </form>
                         ) : (
-                            <div className="text-center py-20 border-4 border-black border-dashed bg-black text-zinc-600">
-                                <ShieldAlert size={48} className="mx-auto mb-4 animate-pulse text-zinc-700" />
-                                <p className="font-black uppercase text-xs px-4 tracking-widest">
-                                    Selecciona una cuenta del radar para abrir la pasarela de inyección de capital
+                            <div className="text-center py-24 border border-dashed border-zinc-800/40 bg-zinc-950/10 rounded-xl text-zinc-500 flex flex-col items-center justify-center p-5">
+                                <ShieldAlert size={32} className="mb-3 text-zinc-700 animate-pulse" />
+                                <p className="font-mono uppercase text-[10px] tracking-widest leading-relaxed max-w-xs mx-auto">
+                                    Selecciona una cuenta del radar de telemetría para habilitar los controles de inyección atómica.
                                 </p>
                             </div>
                         )}
                     </div>
 
-                    <div className="mt-6 border-t-2 border-zinc-800 pt-4 text-center text-[10px] text-zinc-500 uppercase font-mono">
-                        Auditor: {user?.email || "Terminal Desconectada"}
+                    <div className="mt-8 border-t border-zinc-800/40 pt-4 text-center text-[9px] text-zinc-600 uppercase font-mono tracking-widest">
+                        Auditor Firmado: <span className="text-zinc-400 font-bold">{user?.email || "Terminal Desconectada"}</span>
                     </div>
                 </div>
 

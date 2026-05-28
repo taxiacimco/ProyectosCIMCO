@@ -1,20 +1,17 @@
-// Versión Arquitectura: V9.5 - Inyección Quirúrgica de Controlador iniciarViaje y Mantenimiento de Motor Haversine
+// Versión Arquitectura: V10.2 - Blindaje Transaccional, Validación de Saldos y Normalización de Liquidación (10%)
 /**
- * Controlador de Gestión de Viajes - TAXIA CIMCO Core
- * Misión: Procesar solicitudes de viajes calculando matemáticamente la distancia y tarifa por geofencing.
- * Seguridad: Validación estricta anti-undefined en payloads y persistencia contable del 10% para mototaxis.
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
+ * Misión: Procesar flujos operativos, liquidación contable y sincronización de billeteras.
+ * Seguridad: Validación estricta anti-undefined, bloqueo por saldo insuficiente (<$2000 COP) y persistencia contable.
  */
 
 import Viaje from '../../models/Viaje.js';
 import Conductor from '../../models/Conductor.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js'; 
+import crypto from 'crypto';
 
-/**
- * Función de Utilidad Geoespacial (Haversine Formula)
- * Determina la distancia ortodrómica entre dos puntos del globo terráqueo en Kilómetros.
- */
 const calcularDistanciaHaversine = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Radio de la Tierra en Kilómetros
+    const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -24,224 +21,106 @@ const calcularDistanciaHaversine = (lat1, lon1, lat2, lon2) => {
     return R * c; 
 };
 
-// 1. Controlador para que un pasajero solicite un viaje con cálculo dinámico de geofencing
 export const crearViaje = async (req, res) => {
     try {
-        const { pasajeroId, origenTexto, destinoTexto, coordenadasOrigen, coordenadasDestino } = req.body;
-
-        // 🛡️ Guarda de Seguridad - Blindaje Obligatorio Anti-Undefined (Regla de Oro #2)
-        if (!pasajeroId || !coordenadasOrigen || !coordenadasDestino || !origenTexto || !destinoTexto) {
-            return res.status(400).json({
-                success: false,
-                message: '⚠️ ALERTA DE ARQUITECTURA: Parámetros geoespaciales o ID de usuario faltantes para procesar el viaje.'
-            });
+        const { pasajeroId, origen, destino, tarifaEstimada } = req.body;
+        if (!pasajeroId || !origen || !destino || typeof origen.lat === 'undefined' || typeof origen.lng === 'undefined' || typeof destino.lat === 'undefined' || typeof destino.lng === 'undefined') {
+            return res.status(400).json({ success: false, message: '⚠️ ALERTA DE ARQUITECTURA: Parámetros geoespaciales o ID de usuario faltantes.' });
         }
-
-        // 1. Ejecutar cálculo matemático de distancia real en la malla vial simulada
-        const km = calcularDistanciaHaversine(
-            coordenadasOrigen[0], coordenadasOrigen[1],
-            coordenadasDestino[0], coordenadasDestino[1]
-        );
-
-        // 2. Aplicar matriz de tarifas dinámicas oficiales de TAXIA CIMCO
-        const tarifaBase = 3000;
-        const costoPorKm = 1500;
-        const tarifaCalculada = Math.round(tarifaBase + (km * costoPorKm));
-
-        // 3. Persistencia atómica en MongoDB Atlas vinculando coordenadas mapeadas
-        const nuevoViaje = new Viaje({
-            pasajeroId,
-            origen: coordenadasOrigen,       // Registra array [lat, lon]
-            destino: coordenadasDestino,     // Registra array [lat, lon]
-            origenTexto,
-            destinoTexto,
-            tarifa: tarifaCalculada,
-            distanciaKm: parseFloat(km.toFixed(2)),
-            estadoViaje: 'buscando'
-        });
-
+        const latOrigen = Number(origen.lat), lngOrigen = Number(origen.lng), latDestino = Number(destino.lat), lngDestino = Number(destino.lng);
+        if (isNaN(latOrigen) || isNaN(lngOrigen) || isNaN(latDestino) || isNaN(lngDestino)) {
+            return res.status(400).json({ success: false, message: 'Coordenadas GPS no válidas.' });
+        }
+        const km = calcularDistanciaHaversine(latOrigen, lngOrigen, latDestino, lngDestino);
+        const tarifaCalculada = tarifaEstimada ? Number(tarifaEstimada) : Math.round(3000 + (km * 1500));
+        const nuevoViaje = new Viaje({ pasajeroId, origen: { lat: latOrigen, lng: lngOrigen }, destino: { lat: latDestino, lng: lngDestino }, origenTexto: origen.direccion || 'Ubicación GPS', destinoTexto: destino.direccion || 'Destino GPS', tarifa: isNaN(tarifaCalculada) ? 3000 : tarifaCalculada, estadoViaje: 'buscando' });
         await nuevoViaje.save();
-
-        res.status(201).json({
-            success: true,
-            message: '🚕 ¡Solicitud de viaje creada mediante motor de geofencing! Buscando mototaxi...',
-            data: nuevoViaje
-        });
-
+        res.status(201).json({ success: true, message: '🚕 Solicitud creada.', data: nuevoViaje });
     } catch (error) {
-        console.error('❌ Error crítico en crearViaje (Geofencing Engine):', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error interno de infraestructura al procesar la solicitud geoespacial.',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Error interno.', error: error.message });
     }
 };
 
-// 2. Controlador para que los mototaxis vean los viajes buscando conductor
 export const obtenerViajesDisponibles = async (req, res) => {
     try {
         const viajesDisponibles = await Viaje.find({ estadoViaje: 'buscando' });
-        res.status(200).json({
-            success: true,
-            data: viajesDisponibles
-        });
+        res.status(200).json({ success: true, data: viajesDisponibles });
     } catch (error) {
-        console.error('❌ Error en obtenerViajesDisponibles:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al obtener viajes disponibles de la base de datos transaccional.'
-        });
+        res.status(500).json({ success: false, message: 'Error al obtener viajes.' });
     }
 };
 
-// 3. Controlador para que un mototaxi acepte un viaje
 export const aceptarViaje = async (req, res) => {
     try {
-        const { viajeId } = req.params;
-        const { conductorId, conductorNombre, placa } = req.body;
-
-        // 🛡️ Guarda de Seguridad - Validación de payload entrante
-        if (!viajeId || !conductorId || !conductorNombre || !placa) {
-            return res.status(400).json({
-                success: false,
-                message: 'Parámetros insuficientes para procesar la aceptación del servicio.'
-            });
-        }
-
-        const viaje = await Viaje.findById(viajeId);
-        if (!viaje) {
-            return res.status(404).json({ success: false, message: 'Viaje no encontrado en el sistema central.' });
-        }
-
-        if (viaje.estadoViaje !== 'buscando') {
-            return res.status(400).json({ success: false, message: 'Este viaje ya fue tomado por otro conductor en tiempo real.' });
-        }
-
-        // Asignación de recursos de telemetría hibridada
-        viaje.conductorId = conductorId;
-        viaje.conductorNombre = conductorNombre;
-        viaje.placa = placa;
+        const { viajeId, conductorId } = req.body;
+        const [viaje, conductor] = await Promise.all([Viaje.findById(viajeId), Conductor.findOne({ $or: [{ _id: conductorId }, { conductorId: conductorId }] })]);
+        if (!viaje || !conductor) return res.status(404).json({ success: false, message: 'Recurso no encontrado.' });
+        if (viaje.estadoViaje !== 'buscando') return res.status(400).json({ success: false, message: 'Viaje no disponible.' });
+        const saldoActual = typeof conductor.saldo === 'number' ? conductor.saldo : 0;
+        if (saldoActual < 2000) return res.status(403).json({ success: false, message: `Saldo insuficiente (${saldoActual} COP).` });
+        viaje.conductorId = conductor.conductorId || conductor._id;
         viaje.estadoViaje = 'aceptado';
-        await viaje.save();
-
-        res.status(200).json({
-            success: true,
-            message: '🏍️ ¡Viaje aceptado de forma exitosa! Conéctate con el pasajero.',
-            data: viaje
-        });
-
+        conductor.estado = 'busy';
+        await Promise.all([viaje.save(), conductor.save()]);
+        res.status(200).json({ success: true, message: '🏍️ Viaje aceptado.', data: viaje });
     } catch (error) {
-        console.error('❌ Error en aceptarViaje:', error);
-        res.status(500).json({ success: false, message: 'Error al enganchar conductor al viaje.' });
+        res.status(500).json({ success: false, message: 'Error de infraestructura.', error: error.message });
     }
 };
 
-// 🚀 NUEVO INYECTADO: Controlador para que un mototaxi indique que el viaje ha iniciado
 export const iniciarViaje = async (req, res) => {
     try {
-        const { viajeId } = req.params;
-
-        // 🛡️ Guarda de Seguridad Obligatoria
-        if (!viajeId) {
-            return res.status(400).json({ success: false, message: 'Identificador de viaje obligatorio.' });
-        }
-
+        const { viajeId } = req.body;
         const viaje = await Viaje.findById(viajeId);
-        if (!viaje) {
-            return res.status(404).json({ success: false, message: 'Viaje no encontrado en el sistema central.' });
-        }
-
-        // Validar lógica de negocio de flujo de estados
-        if (viaje.estadoViaje !== 'aceptado') {
-            return res.status(400).json({ 
-                success: false, 
-                message: '⚠️ ALERTA DE ARQUITECTURA: El viaje debe estar en estado "aceptado" antes de poder iniciarse.' 
-            });
-        }
-
-        // Transición atómica de estado
-        viaje.estadoViaje = 'iniciado';
+        if (!viaje || viaje.estadoViaje !== 'aceptado') return res.status(400).json({ success: false, message: 'Estado inválido.' });
+        viaje.estadoViaje = 'en_ruta';
         await viaje.save();
-
-        res.status(200).json({
-            success: true,
-            message: '🚀 Transbordo Activo. El viaje ha iniciado su curso.',
-            data: viaje
-        });
-
+        res.status(200).json({ success: true, message: '🚀 Viaje en curso.' });
     } catch (error) {
-        console.error('❌ Error en iniciarViaje:', error);
-        res.status(500).json({ success: false, message: 'Error de infraestructura al iniciar el viaje.' });
+        res.status(500).json({ success: false, message: 'Error al iniciar.' });
     }
 };
 
-// 4. Controlador para finalizar un viaje y aplicar la retención contable del 10%
 export const completarViaje = async (req, res) => {
     try {
-        const { viajeId } = req.params;
-
-        if (!viajeId) {
-            return res.status(400).json({ success: false, message: 'Identificador de viaje obligatorio.' });
-        }
-
+        const { viajeId } = req.body;
         const viaje = await Viaje.findById(viajeId);
-        if (!viaje) {
-            return res.status(404).json({ success: false, message: 'Viaje no encontrado.' });
-        }
-
-        if (viaje.estadoViaje === 'completado') {
-            return res.status(400).json({ success: false, message: 'Este viaje ya fue completado previamente.' });
-        }
-
-        const tarifaManual = viaje.tarifa || 0;
-        const comisionPlataforma = Math.round(tarifaManual * 0.10); // Liquidación del 10% de comisión corporativa
-
-        // Descuento en Billetera Virtual del Conductor
-        const conductor = await Conductor.findOne({ uid: viaje.conductorId });
-        let saldoAntesDelDescuento = 0;
-        let conductorActualizado = null;
-
+        if (!viaje || viaje.estadoViaje === 'completado') return res.status(400).json({ success: false, message: 'Viaje inexistente o ya finalizado.' });
+        const tarifa = viaje.tarifa || 0;
+        const comision = Math.round(tarifa * 0.10); 
+        const conductor = await Conductor.findOne({ $or: [{ _id: viaje.conductorId }, { conductorId: viaje.conductorId }] });
+        let nuevoSaldo = 0;
         if (conductor) {
-            saldoAntesDelDescuento = conductor.saldo || 0;
-            conductor.saldo = saldoAntesDelDescuento - comisionPlataforma;
-            conductorActualizado = await conductor.save();
-            console.log(`💰 [CONTABILIDAD] Conductor ${viaje.conductorNombre} liquidado. Saldo anterior: $${saldoAntesDelDescuento}, Nuevo Saldo: $${conductor.saldo}`);
+            const saldoAnterior = typeof conductor.saldo === 'number' ? conductor.saldo : 0;
+            nuevoSaldo = Math.max(0, saldoAnterior - comision);
+            conductor.saldo = nuevoSaldo;
+            conductor.estado = 'active'; 
+            await conductor.save();
+            await HistorialSaldo.create({ conductorId: conductor._id, viajeId: viaje._id, tipo: 'descuento_comision', monto: comision, saldoAnterior, saldoNuevo: nuevoSaldo, descripcion: `Comisión 10% retenida.` });
         }
-
-        if (!conductor) {
-            console.warn(`⚠️ [ADVERTENCIA] El viaje finalizó, pero no se encontró el conductor para descontar la comisión.`);
-        } else {
-            // 🔥 Asentar registro histórico financiero en auditoría
-            const nuevoRegistroHistorial = new HistorialSaldo({
-                conductorId: viaje.conductorId,
-                viajeId: viaje._id,
-                tipo: 'descuento_comision',
-                monto: comisionPlataforma,
-                saldoAnterior: saldoAntesDelDescuento,
-                saldoNuevo: conductorActualizado.saldo,
-                descripcion: `Comisión del 10% retenida por viaje finalizado. Tarifa del viaje: $${tarifaManual} COP.`
-            });
-            await nuevoRegistroHistorial.save();
-        }
-
-        // Actualización final del documento
         viaje.estadoViaje = 'completado';
         await viaje.save();
-
-        res.status(200).json({
-            success: true,
-            message: '🏁 ¡Viaje completado con éxito! Destino alcanzado, comisión liquidada e historial asentado.',
-            comisionDescontada: comisionPlataforma,
-            nuevoSaldoConductor: conductorActualizado ? conductorActualizado.saldo : 'N/A',
-            data: viaje
-        });
-
+        res.status(200).json({ success: true, message: '🏁 Viaje completado.', comisionDescontada: comision, nuevoSaldo: nuevoSaldo });
     } catch (error) {
-        console.error('❌ Error en completarViaje con liquidación e historial:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al finalizar el viaje y procesar la contabilidad.'
-        });
+        res.status(500).json({ success: false, message: 'Error al finalizar.' });
+    }
+};
+
+export const recibirAlertaWompiLocal = async (req, res) => {
+    try {
+        const { event, data, timestamp, signature } = req.body;
+        if (!data?.transaction || !signature) return res.status(200).json({ status: 'ignored', message: 'Datos incompletos.' });
+        const secret = process.env.WOMPI_EVENTS_SECRET;
+        const cadenaFirma = `${data.transaction.id}${data.transaction.status}${data.transaction.amount_in_cents}${timestamp}${secret}`;
+        const hashLocal = crypto.createHash('sha256').update(cadenaFirma).digest('hex');
+        if (hashLocal !== signature.checksum) return res.status(200).json({ status: 'failed', message: 'Firma inválida.' });
+        if (data.transaction.payment_method_type?.toUpperCase() === 'CARD') return res.status(200).json({ status: 'ignored', message: 'Tarjetas deshabilitadas.' });
+        if (data.transaction.status === 'APPROVED' && event === 'transaction.updated') {
+            const monto = Math.round(data.transaction.amount_in_cents / 100);
+            console.log(`✅ [CIMCO-TRANSACCION] Recarga aprobada: $${monto} COP.`);
+        }
+        return res.status(200).json({ success: true, message: 'Procesado.' });
+    } catch (error) {
+        return res.status(500).json({ error: 'Error interno.' });
     }
 };

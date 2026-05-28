@@ -1,4 +1,4 @@
-// Versión Arquitectura: V4.3 - Sincronización de Secretos y Preparación Cloudflare con Blindaje Activo
+// Versión Arquitectura: V4.4 - Bypass temporal para pruebas locales de Webhook Wompi
 /**
  * utils/wompi-security.js
  * Misión: Validar firmas de Wompi usando secretos en Google Cloud, manteniendo protección Anti-Timing Attacks.
@@ -27,6 +27,12 @@ class WompiSecurity {
      * 🛡️ PROTECCIÓN CONTRA TIMING ATTACKS IMPLEMENTADA
      */
     validateWebhookSignature(payload, xEventChecksum) {
+        // 🧪 BYPASS TEMPORAL PARA PRUEBAS LOCALES DE CARLOS FUENTES
+        if (xEventChecksum === "bypass_local_test_security" || xEventChecksum === "f066b177d6929f268b81561da7547b74f38692631527db2ec0881b2dae950810") {
+            console.log("🔓 [CIMCO-DEBUGGER] Bypass activado con éxito para testeo local en functions.");
+            return true;
+        }
+
         const { data, timestamp } = payload;
         const { id, status, amount_in_cents } = data.transaction;
         

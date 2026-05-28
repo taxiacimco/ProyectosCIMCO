@@ -1,6 +1,6 @@
-// Versión Arquitectura: V5.7 - Normalización de Rutas y Resolución de Point-of-Failure (Cannot POST)
+// Versión Arquitectura: V5.13 - Alineación Quirúrgica: Enlace Estricto a recibirAlertaWompi (Preservando Recursos)
 /**
- * functions/src/index.js
+ * Ubicación: functions/src/index.js
  * Misión: Punto de entrada único para Cloud Functions V2.
  * Configura Express para manejar el tráfico del Webhook de Wompi de forma resiliente.
  */
@@ -8,37 +8,28 @@
 import { onRequest } from "firebase-functions/v2/https";
 import express from "express";
 import cors from "cors";
+import admin from "firebase-admin";
+
+// 🚀 ENLACE CORREGIDO: Importación del controlador unificado con el nombre exacto
+import { recibirAlertaWompi } from "./modules/wallet/controllers/webhook.controller.js";
+
+// 🛡️ INICIALIZACIÓN CRÍTICA: Firebase Admin SDK
+if (!admin.apps.length) {
+    admin.initializeApp();
+    console.log("[CIMCO-FIREBASE] Admin SDK inicializado correctamente.");
+}
 
 // 🚀 Inicialización de Express
 const app = express();
 
-// 🛡️ Middleware de Seguridad y Parseo
+// 🛡️ Middleware de Seguridad y Parseo (Regla de Fusión Atómica)
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-/**
- * 💡 ESTRATEGIA DE RUTEO:
- * Para evitar el error "Cannot POST" debido a la jerarquía de Firebase (/api/api/v1...), 
- * definimos las rutas de forma que respondan correctamente al prefijo de la función.
- */
 const router = express.Router();
 
-// Registro del Webhook dentro del router
-router.post("/v1/wallet/webhook", async (req, res) => {
-    try {
-        console.log("📥 Webhook recibido en /v1/wallet/webhook");
-        // Carga dinámica del controlador para optimizar el inicio de la función
-        const { webhookController } = await import("./modules/wallet/controllers/webhook.controller.js");
-        return await webhookController(req, res);
-    } catch (error) {
-        console.error("❌ Error crítico en el ruteo del Webhook:", error);
-        return res.status(500).json({ 
-            success: false, 
-            message: "Internal Server Error",
-            error: error.message 
-        });
-    }
-});
+// 🚀 RUTA VINCULADA: Registro del Webhook enlazado a la función renombrada
+router.post("/v1/wallet/webhook", recibirAlertaWompi);
 
 // Health check para monitoreo del sistema
 router.get("/health", (req, res) => {
@@ -49,16 +40,11 @@ router.get("/health", (req, res) => {
     });
 });
 
-/**
- * Inyección del Router:
- * Montamos el router en '/api' para que la URL final sea:
- * .../us-central1/api/v1/wallet/webhook (si Firebase no añade el nombre de la función)
- * o .../us-central1/api/api/v1/wallet/webhook (comportamiento estándar del emulador)
- */
+// Preservación del doble montaje de rutas para compatibilidad de clientes API y Root
 app.use("/api", router);
-app.use("/", router); // Fallback para asegurar captura en cualquier nivel
+app.use("/", router);
 
-// 🌏 Exportación de la Cloud Function V2
+// 🌏 Exportación de la Cloud Function V2 con Blindaje de Recursos Preservado
 export const api = onRequest({ 
     region: "us-central1",
     maxInstances: 10,

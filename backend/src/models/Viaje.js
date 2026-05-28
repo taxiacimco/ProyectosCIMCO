@@ -1,3 +1,9 @@
+// Versión Arquitectura: V1.3 - Flexibilización de Esquema para IDs Mixtos (Producción/Pruebas)
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Viaje.js
+ * Misión: Esquema de persistencia transaccional del viaje en Atlas.
+ */
+
 import mongoose from 'mongoose';
 
 const ViajeSchema = new mongoose.Schema({
@@ -5,9 +11,9 @@ const ViajeSchema = new mongoose.Schema({
         type: String, 
         required: true 
     },
+    // 🛡️ Ajuste Quirúrgico: Soporte híbrido para ObjectIds (Producción) o Strings puros (Pruebas Ngrok/Postman)
     conductorId: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'Conductor', 
+        type: mongoose.Schema.Types.Mixed, 
         default: null 
     },
     // 📍 GPS interno (Coordenadas reales exactas)
