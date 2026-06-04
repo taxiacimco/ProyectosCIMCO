@@ -1,4 +1,4 @@
-// Versión Arquitectura: V2.0 - Suscripción Polimórfica Real-Time con Blindaje de Identificadores Cruzados
+// Versión Arquitectura: V2.1 - Suscripción Polimórfica Real-Time con Blindaje de Identificadores Cruzados
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
  * Misión: Escuchar en tiempo real el balance financiero del conductor en Firestore.

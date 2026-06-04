@@ -1,12 +1,13 @@
-// Versión Arquitectura: V9.3 - Sincronización de Historial Transaccional y Blindaje Anti-Undefined
+// Versión Arquitectura: V9.6 - Migración a Glassmorphism CIMCO-UI e Integración de API_CORE
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HistorialViajes.jsx
  * Misión: Renderizar el registro histórico de trayectos finalizados consumiendo el Core de MongoDB.
- * Estética: Ciber-Neo-Brutalismo / CIMCO-UI (Bordes gruesos, alto contraste, sombras duras).
+ * Estética: Migrado a CIMCO-UI V9.3 (Glassmorphism, backdrop-blur-md, sin bordes brutalistas).
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../hooks/useAuth';
+import { API_CORE_URL } from '../../config/api'; // 📡 Importación central
 import { Calendar, MapPin, DollarSign, Clock, Loader, AlertTriangle } from 'lucide-react';
 
 const HistorialViajes = () => {
@@ -17,7 +18,6 @@ const HistorialViajes = () => {
 
     useEffect(() => {
         // 🛡️ GUARDA DE SEGURIDAD OBLIGATORIA (Anti-Undefined)
-        // Bloquea cualquier petición hasta que el estado global de autenticación esté inicializado con éxito.
         if (!user || !user.uid) {
             console.warn("⚠️ [Historial] Esperando inicialización del estado de autenticación...");
             return;
@@ -26,25 +26,19 @@ const HistorialViajes = () => {
         const cargarHistorial = async () => {
             try {
                 setLoading(true);
-                // 📡 Consumo directo del Backend Core Node.js / MongoDB Atlas
-                const respuesta = await fetch(`http://localhost:3000/api/viajes/pasajero/${user.uid}`, {
+                // 📡 Uso dinámico del API_CORE_URL
+                const respuesta = await fetch(`${API_CORE_URL}/api/viajes/pasajero/${user.uid}`, {
                     method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    }
+                    headers: { 'Content-Type': 'application/json' }
                 });
 
                 const data = await respuesta.json();
-
-                if (!respuesta.ok) {
-                    throw new Error(data.message || 'Error al recuperar el historial transaccional.');
-                }
-
+                if (!respuesta.ok) throw new Error(data.message || 'Falla de lectura.');
                 setViajes(data.success ? data.viajes : []);
             } catch (err) {
                 console.error("❌ Error de Arquitectura en Historial:", err.message);
                 setError(err.message);
-                // Fallback de desarrollo con datos mock estructurados bajo el esquema sagrado
+                // Fallback de desarrollo con datos mock estructurados
                 setViajes([
                     { id: 'mock_1', origen: 'Plaza Principal La Jagua', destino: 'Barrio El Cruce', oferta: 5000, distancia: 2.5, fecha: '2026-05-18', conductorNombre: 'Juan Pérez' },
                     { id: 'mock_2', origen: 'Sector Industrial', destino: 'Centro Médico CIMCO', oferta: 7000, distancia: 4.1, fecha: '2026-05-15', conductorNombre: 'Marlon Castro' }
@@ -59,103 +53,81 @@ const HistorialViajes = () => {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#050505] flex items-center justify-center font-sans text-white">
-                <div className="flex flex-col items-center gap-3 border-4 border-white p-6 bg-zinc-900 shadow-[8px_8px_0px_0px_#eab308]">
+            <div className="min-h-screen bg-[#09090b] flex items-center justify-center font-sans text-zinc-100">
+                <div className="flex flex-col items-center gap-3 backdrop-blur-md bg-[#121214]/80 p-6 rounded-2xl border border-zinc-800/50 shadow-xl">
                     <Loader className="animate-spin text-yellow-500" size={32} />
-                    <span className="font-black tracking-tighter uppercase text-xs">Sincronizando con MongoDB Atlas...</span>
+                    <span className="font-mono tracking-widest uppercase text-[10px] text-zinc-400">SINCRONIZANDO CORE MONGODB...</span>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-[#050505] text-white p-6 font-sans overflow-x-hidden">
+        <div className="min-h-screen bg-[#09090b] text-zinc-100 p-6 font-sans antialiased">
             <div className="max-w-4xl mx-auto">
-                
-                {/* Encabezado Neo-Brutalista */}
-                <header className="border-b-4 border-white pb-4 mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <header className="backdrop-blur-md bg-[#121214]/80 border border-zinc-800/40 p-5 rounded-2xl mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-lg">
                     <div>
-                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">
-                            MIS <span className="text-yellow-500">VIAJES</span>
+                        <h1 className="text-xl font-black uppercase tracking-tight text-zinc-200 flex items-center gap-2">
+                            <Clock className="text-yellow-500" size={24} /> Historial Transaccional
                         </h1>
-                        <p className="text-[10px] font-bold uppercase text-zinc-500 tracking-widest mt-1">
-                            Registro de Servicios • Terminal de Auditoría Pasajero
+                        <p className="text-[10px] font-mono text-zinc-500 tracking-widest mt-1 uppercase">
+                            Registros Auditoría Pasajero
                         </p>
                     </div>
-                    <div className="bg-yellow-500 text-black px-4 py-1.5 text-xs font-black uppercase border-2 border-black shadow-[4px_4px_0px_0px_#fff]">
+                    <div className="bg-zinc-950/50 border border-zinc-800/80 px-4 py-2 rounded-xl text-xs font-mono font-bold text-yellow-500 uppercase">
                         Total Trayectos: {viajes.length}
                     </div>
                 </header>
 
                 {error && (
-                    <div className="bg-red-500/10 border-4 border-red-600 p-4 mb-6 text-red-400 font-bold text-sm flex items-center gap-3 shadow-[4px_4px_0px_0px_#000]">
-                        <AlertTriangle size={20} />
-                        <span>Modo Sandbox: Mostrando logs de contingencia local activa ({error})</span>
+                    <div className="mb-6 p-4 rounded-xl bg-red-950/20 border border-red-900/40 text-red-400 text-[11px] font-mono uppercase tracking-wide flex items-start gap-2.5">
+                        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                        <span className="leading-relaxed">Modo Sandbox: Mostrando logs locales ({error})</span>
                     </div>
                 )}
 
-                {/* Lista de Viajes */}
-                <div className="space-y-6">
+                <div className="space-y-4">
                     {viajes.length === 0 ? (
-                        <div className="border-4 border-zinc-800 p-8 text-center bg-zinc-950 shadow-[6px_6px_0px_0px_#333]">
-                            <p className="text-zinc-500 font-black uppercase text-sm tracking-wide">No se registran transacciones previas en La Jagua.</p>
+                        <div className="backdrop-blur-md bg-[#121214]/60 border border-dashed border-zinc-800/50 p-12 text-center rounded-2xl">
+                            <p className="text-zinc-500 font-mono uppercase text-xs tracking-widest">No hay transacciones registradas.</p>
                         </div>
                     ) : (
                         viajes.map((viaje) => (
-                            <div 
-                                key={viaje.id} 
-                                className="bg-zinc-900 border-4 border-white p-5 shadow-[8px_8px_0px_0px_#fff] hover:shadow-[8px_8px_0px_0px_#eab308] hover:border-yellow-500 transition-all group"
-                            >
-                                <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 border-b-2 border-zinc-800 pb-3 mb-4">
-                                    <div className="flex items-center gap-3">
-                                        <Calendar className="text-yellow-500" size={18} />
-                                        <span className="font-black uppercase text-xs text-zinc-300">
+                            <div key={viaje.id} className="backdrop-blur-md bg-[#121214]/80 border border-zinc-800/50 p-5 rounded-2xl shadow-xl transition-all hover:border-zinc-700/60 flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div className="w-full md:w-auto flex-1 space-y-2">
+                                    <div className="flex items-center gap-3 mb-3">
+                                        <div className="p-1.5 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                                            <Calendar className="text-yellow-500" size={14} />
+                                        </div>
+                                        <span className="font-mono font-bold uppercase text-[10px] text-zinc-400 tracking-wider">
                                             {viaje.fecha || 'Fecha No Registrada'}
                                         </span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] bg-zinc-800 text-zinc-400 font-black px-2 py-0.5 border border-zinc-700">
+                                        <span className="text-[10px] bg-zinc-900 text-zinc-400 font-mono px-2 py-0.5 rounded-md border border-zinc-800 ml-2">
                                             ID: {viaje.id.substring(0, 10)}
                                         </span>
-                                        <span className="bg-green-500 text-black font-black px-3 py-0.5 text-xs uppercase border border-black">
+                                    </div>
+                                    <div className="space-y-1.5 text-[11px] font-mono uppercase">
+                                        <div className="flex items-start gap-2">
+                                            <MapPin size={14} className="text-emerald-500 shrink-0 mt-0.5" />
+                                            <span className="text-zinc-300 truncate"><span className="text-zinc-600">Origen:</span> {viaje.origen}</span>
+                                        </div>
+                                        <div className="flex items-start gap-2">
+                                            <MapPin size={14} className="text-red-400 shrink-0 mt-0.5" />
+                                            <span className="text-zinc-300 truncate"><span className="text-zinc-600">Destino:</span> {viaje.destino}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div className="w-full md:w-auto bg-zinc-950/60 border border-zinc-800/80 p-4 rounded-xl flex flex-col items-end gap-1">
+                                    <div className="flex w-full justify-between items-center md:hidden mb-2">
+                                       <span className="text-[10px] font-mono text-zinc-500">LIQUIDACIÓN:</span>
+                                    </div>
+                                    <p className="text-lg font-mono font-bold text-yellow-500">${(viaje.oferta || 0).toLocaleString()} COP</p>
+                                    <div className="flex flex-col items-end gap-1">
+                                        <span className="text-[9px] font-mono text-zinc-500">{viaje.distancia} Km</span>
+                                        <span className="mt-1 text-[9px] px-2 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded font-mono uppercase tracking-wider">
                                             COMPLETADO
                                         </span>
-                                    </div>
-                                </div>
-
-                                {/* Ruta */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-bold text-sm mb-4">
-                                    <div className="flex items-start gap-2 bg-zinc-950 p-3 border border-zinc-800">
-                                        <MapPin className="text-green-500 shrink-0 mt-0.5" size={16} />
-                                        <div>
-                                            <p className="text-[9px] uppercase text-zinc-500 font-black">Punto de Recogida</p>
-                                            <p className="text-zinc-200 tracking-tight">{viaje.origen}</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-start gap-2 bg-zinc-950 p-3 border border-zinc-800">
-                                        <MapPin className="text-red-500 shrink-0 mt-0.5" size={16} />
-                                        <div>
-                                            <p className="text-[9px] uppercase text-zinc-500 font-black">Destino Final</p>
-                                            <p className="text-zinc-200 tracking-tight">{viaje.destino}</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Métricas Financieras */}
-                                <div className="grid grid-cols-3 gap-2 md:gap-4 font-black text-center uppercase">
-                                    <div className="border-2 border-zinc-800 p-2 bg-zinc-950">
-                                        <p className="text-[8px] text-zinc-500 flex items-center justify-center gap-1"><Clock size={10}/> Distancia</p>
-                                        <p className="text-lg text-white mt-0.5">{viaje.distancia} <span className="text-xs text-zinc-500">Km</span></p>
-                                    </div>
-                                    <div className="border-2 border-zinc-800 p-2 bg-zinc-950">
-                                        <p className="text-[8px] text-zinc-500 flex items-center justify-center gap-1"><DollarSign size={10}/> Costo</p>
-                                        <p className="text-lg text-yellow-500 mt-0.5">${viaje.oferta.toLocaleString()}</p>
-                                    </div>
-                                    <div className="border-2 border-zinc-800 p-2 bg-zinc-950 flex flex-col justify-center items-center">
-                                        <p className="text-[8px] text-zinc-500">Conductor</p>
-                                        <p className="text-xs text-zinc-300 truncate w-full mt-1 font-extrabold italic tracking-tight">
-                                            {viaje.conductorNombre || 'UNIDAD CIMCO'}
-                                        </p>
                                     </div>
                                 </div>
                             </div>

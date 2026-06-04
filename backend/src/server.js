@@ -1,8 +1,8 @@
-// Versión Arquitectura: V3.14 - Consolidación de Gateways Operativos y Blindaje de Conexión Industrial
+// Versión Arquitectura: V4.3 - Consolidación de Políticas CORS y Gateways Operativos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
- * Misión: Integración de red centralizada, habilitación de CORS, montaje de enrutadores del núcleo y diagnóstico analítico.
- * Estatus: Producción / Estabilidad V9.3.
+ * Misión: Integración de red centralizada, habilitación explícita de CORS para Frontend Vite, montaje de enrutadores del núcleo y diagnóstico analítico.
+ * Estatus: Producción / Estabilidad V9.3 - Preparado para flujos QR e Inyecciones de Tesorería.
  */
 import dotenv from 'dotenv';
 import express from 'express';
@@ -17,9 +17,9 @@ import viajeRoutes from './modules/viajes/viaje.routes.js';
 dotenv.config();
 const app = express();
 
-// 🛡️ CONFIGURACIÓN CORS DE ARQUITECTURA
+// 🛡️ CONFIGURACIÓN CORS DE ARQUITECTURA (Inyección Atómica Aplicada)
 const corsOptions = {
-    origin: 'http://localhost:5173', // Origen explícito de tu frontend
+    origin: 'http://localhost:5173', // Permitir peticiones explícitas desde el puerto nativo de Vite
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
@@ -28,6 +28,14 @@ const corsOptions = {
 // Aplicación de middlewares globales antes de las rutas
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// 📡 MIDDLEWARE GLOBAL DE TELEMETRÍA (Diagnóstico de Payload)
+app.use((req, res, next) => {
+    if (req.method === 'POST' || req.method === 'PUT') {
+        console.log(`[CIMCO-TRAFFIC] ${req.method} ${req.originalUrl} | Payload Keys Recibidos:`, Object.keys(req.body));
+    }
+    next();
+});
 
 // 🟢 ENDPOINT DE DIAGNÓSTICO (Health Check)
 app.get('/api/health', (req, res) => {
@@ -39,7 +47,6 @@ app.get('/api/health', (req, res) => {
 });
 
 // 🛣️ MONTAJE FORMAL DE ENRUTADORES EN EL BUS DE DATOS EXPRESS
-// 🛡️ Guarda de Seguridad Anti-Undefined implícita al enrutar
 app.use('/api/auth', authRoutes);
 app.use('/api/conductores', conductorRoutes);
 app.use('/api/viajes', viajeRoutes);

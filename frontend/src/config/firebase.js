@@ -1,14 +1,15 @@
-// Versión Arquitectura: V10.6 - Enrutamiento Forzado a Cloud Real (Bypass de Emuladores)
+// Versión Arquitectura: V10.8 - Reconexión de Emuladores Locales (Cierre de Bypass)
 /**
- * src/config/firebase.js
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\firebase.js
  * Misión: Gestionar la conectividad de TAXIA CIMCO.
  * Lógica:
- * - Se comentan los emuladores locales para obligar al Login a usar la infraestructura real en la nube.
+ * - Se reactivan los emuladores locales para sincronizar el clúster local y evitar
+ * bloqueos por invalid-credential en el entorno de producción.
  */
 
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 
 // 🔐 Credenciales del Proyecto (Inyectadas desde .env.local)
 const firebaseConfig = {
@@ -27,18 +28,16 @@ const db = getFirestore(app);
 
 // 🛡️ DETECTOR DE ENTORNO (Lógica Híbrida Modificada)
 const hostname = window.location.hostname;
-const isLocal = hostname === "localhost" || hostname === "127.0.0.1";
+// Ampliamos la guarda para que cubra localhost, 127.0.0.1 y las IPs de tu red local en La Jagua
+const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname.includes("192.168.");
 
 if (isLocal) {
-    // 💻 MODO DESARROLLO CON REDIRECCIÓN A CLOUD
-    console.log("📡 [CIMCO-INTERNAL] Bypass de emuladores activo. Conectando a Firebase Cloud Real...");
+    // 💻 MODO DESARROLLO CON EMULADORES LOCALES ACTIVOS
+    console.log("📡 [CIMCO-INTERNAL] Entorno local detectado. Enlazando con Emuladores Firebase (Auth/Firestore)...");
     
-    /* ⚠️ CONTROL DE ARQUITECTURA: Bloque de Emuladores Desactivado temporalmente
-       Para volver a usar emuladores locales en el futuro, remueve los comentarios '//' de abajo:
-       
-       connectAuthEmulator(auth, "http://127.0.0.1:9099");
-       connectFirestoreEmulator(db, "127.0.0.1", 8080);
-    */
+    // 🛡️ REGLA INQUEBRANTABLE: Conexión atómica a los puertos de tu Terminal 1
+    connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+    connectFirestoreEmulator(db, "127.0.0.1", 8080);
 }
 
 export { app, auth, db };

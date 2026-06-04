@@ -1,13 +1,14 @@
-// Versión Arquitectura: V7.4 - Corrección de bloque de cierre (finally) en inyección remota
+// Versión Arquitectura: V8.0 - Fusión Atómica: Integración de Matriz de Nodos QR de Telemetría Multi-Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
- * Misión: Asegurar la continuidad operativa de la terminal CEO con inyección atómica paralela en wallets (Firebase) y pasarela (Express Backend API).
- * UI Standard: CIMCO-UI V9.3 (Glassmorphism premium, backdrop-blur-md, bg-[#121214]/80).
+ * Misión: Asegurar la continuidad operativa de la terminal CEO con inyección atómica paralela en wallets (Firebase),
+ * pasarela (Express Backend API) y la visualización/descarga de QR de red local para los 6 roles del ecosistema.
+ * Resolución: Sincronización del Handshake de Red mediante la instancia global de axios ('api') y variables de entorno homologadas.
  */
 
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import axios from 'axios'; // 🚀 Canal de transporte unificado para el backend en puerto 3000
+import api, { HOST_IP, API_CORE_URL } from '../../config/api'; // 🚀 FUSIÓN ATÓMICA: Handshake restaurado
 import {
     collection,
     onSnapshot,
@@ -18,20 +19,20 @@ import {
     orderBy
 } from 'firebase/firestore';
 import { db } from '../../config/firebase'; 
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../hooks/useAuth.jsx';
 import { 
     Wallet, 
     ShieldAlert, 
     CheckCircle, 
     Search, 
-    TrendingUp, 
+    Activity,
     DollarSign, 
     Users, 
     Zap,
-    Activity,
+    Loader,
+    QrCode,
     Download,
-    ShieldCheck,
-    Loader
+    Layers
 } from 'lucide-react';
 
 const AdminDashboard = () => {
@@ -42,9 +43,18 @@ const AdminDashboard = () => {
     const [montoInyeccion, setMontoInyeccion] = useState('');
     const [transaccionExitosa, setTransaccionExitosa] = useState(false);
     const [errorTransaccion, setErrorTransaccion] = useState('');
-    const [loadingRemoto, setLoadingRemoto] = useState(false); // Guarda de estado de red
+    const [loadingRemoto, setLoadingRemoto] = useState(false); 
 
-    // Escucha activa del bus de datos distribuido en Firebase Firestore
+    // Lista Maestra de Roles Operativos TAXIA CIMCO
+    const rolesDisponibles = [
+        { id: 'mototaxi', etiqueta: 'Mototaxi', color: '#eab308' },
+        { id: 'moto-parrillero', etiqueta: 'Moto Parrillero', color: '#38bdf8' },
+        { id: 'motocarga', etiqueta: 'Motocarga', color: '#a855f7' },
+        { id: 'pasajero', etiqueta: 'Pasajero', color: '#10b981' },
+        { id: 'despachador', etiqueta: 'Despachador', color: '#f97316' },
+        { id: 'intermunicipal', etiqueta: 'Conductor Intermunicipal', color: '#ef4444' }
+    ];
+
     useEffect(() => {
         const q = query(collection(db, 'billeteras'), orderBy('nombre', 'asc'));
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -63,7 +73,6 @@ const AdminDashboard = () => {
             });
             setBilleteras(data);
 
-            // Mantener reactividad sobre el nodo enfocado bajo mutación
             if (seleccionado) {
                 const actualizado = data.find(b => b.id === seleccionado.id);
                 if (actualizado) setSeleccionado(actualizado);
@@ -75,7 +84,28 @@ const AdminDashboard = () => {
         return () => unsubscribe();
     }, [seleccionado]);
 
-    // Filtrado perimetral por cadena de caracteres
+    const downloadQR = (id, label) => {
+        const svg = document.getElementById(id);
+        if (!svg) return;
+        const source = new XMLSerializer().serializeToString(svg);
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const img = new Image();
+        
+        img.onload = () => {
+            canvas.width = 400; 
+            canvas.height = 400;
+            ctx.fillStyle = "#ffffff"; 
+            ctx.fillRect(0, 0, 400, 400);
+            ctx.drawImage(img, 0, 0, 400, 400);
+            const link = document.createElement("a");
+            link.download = `QR_TAXIA_CIMCO_${label.toUpperCase()}.png`;
+            link.href = canvas.toDataURL("image/png");
+            link.click();
+        };
+        img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+    };
+
     const billeterasFiltradas = billeteras.filter(b => {
         const busqueda = filtro.toLowerCase();
         return (
@@ -85,7 +115,6 @@ const AdminDashboard = () => {
         );
     });
 
-    // MÁQUINA DE INYECCIÓN INTEGRADA (Fusión Atómica Firebase + Express Backend API)
     const procesarInyeccionSoberana = async (e) => {
         e.preventDefault();
         setTransaccionExitosa(false);
@@ -93,7 +122,6 @@ const AdminDashboard = () => {
         
         const valorMonto = parseInt(montoInyeccion, 10);
 
-        // 🛡️ ALERTA DE ARQUITECTURA: Validaciones de Reglas de Negocio Contables
         if (!seleccionado || !seleccionado.id) {
             setErrorTransaccion('⚠️ ALERTA DE ARQUITECTURA: Nodo de destino ausente o corrupto.');
             return;
@@ -110,29 +138,14 @@ const AdminDashboard = () => {
         setLoadingRemoto(true);
 
         try {
-            // =========================================================================
-            // FASE 1: INYECCIÓN REMOTA EN EL BACKEND CORE (MongoDB Atlas + Historial Contable)
-            // =========================================================================
-            const tokenJWT = localStorage.getItem('token') || ''; // Extrae firma digital segura
-            
-            // Si tu middleware de backend exige token, se adjunta automáticamente.
-            await axios.post('http://localhost:3000/api/conductores/recargar', {
+            await api.post(`/conductores/admin/recargar-saldo`, {
                 conductorId: seleccionado.conductorId,
                 monto: valorMonto,
-                administradorId: user?.uid || 'SYSTEM_ADMIN_CEO',
-                rol: seleccionado.rol || 'conductor'
-            }, {
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${tokenJWT}`
-                }
+                operador: user?.email || 'SYSTEM_ADMIN_CEO'
             });
 
             console.log('✅ [CIMCO-REST] Inyección autorizada y registrada en MongoDB / Historial.');
 
-            // =========================================================================
-            // FASE 2: MUTACIÓN TRANSACCIONAL ATÓMICA EN FIREBASE (Sincronización en Tiempo Real UI)
-            // =========================================================================
             const sfDocRef = doc(db, 'billeteras', seleccionado.id);
             await runTransaction(db, async (transaction) => {
                 const sfDoc = await transaction.get(sfDocRef);
@@ -160,14 +173,13 @@ const AdminDashboard = () => {
 
             console.log('✅ [CIMCO-FIRESTORE] Sincronización reactiva del ledger completada.');
 
-            // Ciclo de Cierre Exitoso
             setTransaccionExitosa(true);
             setMontoInyeccion('');
             
         } catch (error) {
             console.error('❌ Falla Crítica en Transmisión de Fondos:', error);
-            setErrorTransaccion(`FALLA OPERATIVA: ${error.response?.data?.message || error.message || 'Error de red con backend puerto 3000'}`);
-        } finally { // 🛠️ CORRECCIÓN APLICADA AQUÍ (antes decía 'fill')
+            setErrorTransaccion(`FALLA OPERATIVA: ${error.response?.data?.message || error.message || 'Error de red con el backend central'}`);
+        } finally { 
             setLoadingRemoto(false);
         }
     };
@@ -175,7 +187,6 @@ const AdminDashboard = () => {
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 p-6 font-sans antialiased selection:bg-yellow-500/30 selection:text-yellow-200">
             
-            {/* ENCABEZADO TÁCTICO */}
             <header className="mb-8 flex items-center justify-between border-b border-zinc-800/40 pb-5">
                 <div className="flex items-center gap-3">
                     <div className="p-2.5 bg-yellow-500/10 rounded-xl border border-yellow-500/20 text-yellow-500">
@@ -183,7 +194,7 @@ const AdminDashboard = () => {
                     </div>
                     <div>
                         <h1 className="text-sm font-mono font-bold tracking-widest text-zinc-200 uppercase">CIMCO-CORE ENGINE</h1>
-                        <p className="text-[10px] font-mono text-zinc-500 tracking-wider mt-0.5">TERMINAL INTEGRAL DEL ADMINISTRADOR • v9.3 UI STANDARD</p>
+                        <p className="text-[10px] font-mono text-zinc-500 tracking-wider mt-0.5">TERMINAL CEO • HOST LOCAL: {HOST_IP}</p>
                     </div>
                 </div>
 
@@ -193,10 +204,49 @@ const AdminDashboard = () => {
                 </div>
             </header>
 
-            {/* RETÍCULA DE CONTROL PRINCIPAL */}
+            {/* SECCIÓN SUPERIOR: Matriz de Despliegue de Códigos QR */}
+            <section className="mb-8 backdrop-blur-md bg-[#121214]/60 border border-zinc-800/50 rounded-2xl p-5 shadow-2xl">
+                <div className="flex items-center gap-2 mb-5 border-b border-zinc-800/30 pb-3">
+                    <QrCode size={16} className="text-cyan-400" />
+                    <h2 className="text-xs font-mono font-bold tracking-widest text-zinc-300 uppercase">Matriz de Despliegue de Enlaces Híbridos QR</h2>
+                </div>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                    {rolesDisponibles.map((rol) => {
+                        // Construcción de la URL de redirección directa con el rol inyectado
+                        const urlAcceso = `http://192.168.100.34:5173/login?role=${rol.id}`;
+                        const idElemento = `qr-${rol.id}`;
+
+                        return (
+                            <div key={rol.id} className="bg-[#161619]/80 border border-zinc-800/80 rounded-xl p-4 flex flex-col items-center justify-between transition-all duration-200 hover:border-zinc-700/60">
+                                <span className="text-[9px] font-mono uppercase font-bold tracking-wider mb-2 text-center truncate w-full" style={{ color: rol.color }}>
+                                    {rol.etiqueta}
+                                </span>
+                                
+                                <div className="bg-white p-2 rounded-lg shadow-md flex items-center justify-center">
+                                    <QRCodeSVG 
+                                        id={idElemento} 
+                                        value={urlAcceso} 
+                                        size={100} 
+                                        level="M" 
+                                        includeMargin={false} 
+                                    />
+                                </div>
+                                
+                                <button 
+                                    onClick={() => downloadQR(idElemento, rol.id)}
+                                    className="mt-3 w-full bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 font-mono text-[8px] uppercase tracking-wider py-1.5 rounded-md transition-colors border border-zinc-800 flex items-center justify-center gap-1"
+                                >
+                                    <Download size={10} /> Descargar
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+            </section>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
                 
-                {/* COLUMNA 1 Y 2: RADAR DE TELEMETRÍA Y CUENTAS */}
                 <div className="lg:col-span-2 backdrop-blur-md bg-[#121214]/80 border border-zinc-800/50 rounded-2xl p-5 shadow-2xl">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                         <div className="flex items-center gap-2">
@@ -204,7 +254,6 @@ const AdminDashboard = () => {
                             <h2 className="text-xs font-mono font-bold tracking-widest text-zinc-300 uppercase">Nodos de Telemetría ({billeterasFiltradas.length})</h2>
                         </div>
                         
-                        {/* INPUT DE BÚSQUEDA PERIMETRAL */}
                         <div className="relative w-full sm:w-64">
                             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
                             <input 
@@ -217,7 +266,6 @@ const AdminDashboard = () => {
                         </div>
                     </div>
 
-                    {/* REPOSITORIO FLUIDO DE CUENTAS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[580px] overflow-y-auto pr-2">
                         {billeterasFiltradas.length === 0 ? (
                             <div className="col-span-full text-center py-12 border border-dashed border-zinc-800/40 rounded-xl text-zinc-500 font-mono text-[10px] uppercase tracking-widest">
@@ -273,7 +321,6 @@ const AdminDashboard = () => {
                     </div>
                 </div>
 
-                {/* COLUMNA 3: PANEL OPERATIVO DE ACCIONES Y FORMULARIO DE INYECCIÓN */}
                 <div className="backdrop-blur-md bg-[#121214]/80 border border-zinc-800/50 rounded-2xl p-5 shadow-2xl lg:h-[650px] flex flex-col justify-between">
                     <div>
                         <div className="flex items-center gap-2 mb-6">
@@ -284,14 +331,12 @@ const AdminDashboard = () => {
                         {seleccionado ? (
                             <form onSubmit={procesarInyeccionSoberana} className="space-y-5">
                                 
-                                {/* DETALLE DEL DESTINATARIO */}
                                 <div className="p-3.5 bg-zinc-950/60 border border-zinc-800/60 rounded-xl font-mono text-[10px] tracking-wider space-y-2">
                                     <div className="flex justify-between text-zinc-500"><span className="uppercase">BENEFICIARIO:</span> <span className="text-zinc-300 font-bold uppercase truncate max-w-[140px]">{seleccionado.nombre}</span></div>
                                     <div className="flex justify-between text-zinc-500"><span className="uppercase">DRV TARGET ID:</span> <span className="text-zinc-400 font-bold">{seleccionado.conductorId}</span></div>
                                     <div className="flex justify-between text-zinc-500"><span className="uppercase">SALDO ACTUAL:</span> <span className="text-yellow-500 font-bold">${seleccionado.saldo.toLocaleString('es-CO')} COP</span></div>
                                 </div>
 
-                                {/* INPUT DE MONTO CONTABLE */}
                                 <div className="space-y-2">
                                     <label className="block text-[9px] font-mono text-zinc-400 tracking-widest uppercase">MONTO A INYECTAR (COP)</label>
                                     <div className="relative">
@@ -308,7 +353,6 @@ const AdminDashboard = () => {
                                     </div>
                                 </div>
 
-                                {/* MANEJO DE FEEDBACKS ALENTADORES O ALERTAS */}
                                 {transaccionExitosa && (
                                     <div className="p-3 bg-emerald-500/5 border border-emerald-500/20 rounded-xl text-emerald-400 flex items-start gap-2.5 font-mono text-[9px] tracking-wide leading-relaxed uppercase animate-fadeIn">
                                         <CheckCircle size={14} className="shrink-0 text-emerald-500 mt-0.5" />
@@ -326,7 +370,6 @@ const AdminDashboard = () => {
                                     </div>
                                 )}
 
-                                {/* BOTÓN ACCIONADOR DE CRÉDITO */}
                                 <button
                                     type="submit"
                                     disabled={loadingRemoto}

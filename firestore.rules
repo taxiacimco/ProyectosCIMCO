@@ -1,9 +1,9 @@
-// Versión Arquitectura: V11.6 - Blindaje Perimetral de Bóvedas y Bloqueo de Superposición de Permisos
+// Versión Arquitectura: V13.0 - Fusión Atómica: Puente Híbrido y Permisos de Radar (Conductores/Viajes)
 /**
- * Archivo: firestore.rules
- * Misión: Blindar la estructura de datos de TAXIA CIMCO.
- * Regla de Oro: Toda interacción operativa debe ocurrir bajo artifacts/taxiacimco-app/public/data/
- * FIX ARQUITECTURA: Se bloqueó la superposición del comodín {collection} para proteger wallets e historial_saldo.
+ * Archivo: C:\Users\Carlos Fuentes\ProyectosCIMCO\firestore.rules
+ * Misión: Blindar la estructura de datos de TAXIA CIMCO integrando Modo Contingencia y el Puente Híbrido.
+ * FIX ARQUITECTURA: Se habilitan los permisos de lectura pública para el radar de conductores 
+ * y la creación de viajes para pasajeros anónimos/híbridos, manteniendo intactas las bóvedas financieras.
  */
 
 rules_version = '2';
@@ -11,41 +11,62 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 🚀 REGLA: Permiso atómico para la creación del perfil en el registro
+    // 🚀 REGLA 1: Permiso atómico para la creación del perfil en el registro
     match /usuarios/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    /**
-     * 💰 SECCIÓN: BILLETERAS (wallets)
-     * Máxima seguridad: Solo el CEO (Admin) inyecta saldo.
-     * Lectura permitida para el dueño o para el CEO.
-     */
+    // 💰 REGLA 2: BILLETERAS (wallets) - [MANTENIDO INTACTO]
+    // Máxima seguridad: Solo el CEO (Admin) inyecta saldo. Lectura permitida para el dueño o para el CEO.
     match /artifacts/taxiacimco-app/public/data/wallets/{userId} {
       allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
       allow write: if request.auth != null && request.auth.token.admin == true;
     }
 
-    /**
-     * 📊 SECCIÓN: AUDITORÍA FINANCIERA (historial_saldo)
-     * Trazabilidad de inyecciones y débitos. Solo Admin inyecta, usuario solo lee sus movimientos.
-     */
+    // 📊 REGLA 3: AUDITORÍA FINANCIERA (historial_saldo) - [MANTENIDO INTACTO]
+    // Trazabilidad de inyecciones y débitos. Solo Admin inyecta, usuario solo lee sus movimientos.
     match /artifacts/taxiacimco-app/public/data/historial_saldo/{docId} {
       allow read: if request.auth != null && (resource.data.userId == request.auth.uid || request.auth.token.admin == true);
       allow write: if request.auth != null && request.auth.token.admin == true;
     }
 
-    /**
-     * 🛵 SECCIÓN: OPERATIVA (viajes, mensajes, conductores)
-     * Permite la dinámica del negocio para usuarios autenticados.
-     */
+    // 🛵 REGLA 4: RADAR DE CONDUCTORES (Puente Híbrido Inyectado)
+    // Permite lectura a usuarios anónimos/logueados para evitar el colapso del mapa.
+    match /conductores/{document} {
+      allow read: if true; 
+      allow write: if request.auth != null;
+    }
+
+    // 🚗 REGLA 5: VIAJES RAÍZ (Ajuste para Pasajeros y Puente Híbrido)
+    // Permite que un pasajero interactúe con el nodo central para solicitar un servicio
+    match /viajes/{viajeId} {
+      allow create: if true;
+      allow read, update: if true; 
+    }
+
+    // 🚗 REGLA 5.1: VIAJES ARTIFACTS (Legacy/Alterno)
+    match /artifacts/taxiacimco-app/public/data/viajes/{viajeId} {
+      allow read: if request.auth != null; 
+      allow write: if request.auth != null && request.auth.token.role == 'conductor';
+    }
+
+    // ⚙️ REGLA 6: OPERATIVA GENERAL (Resto de colecciones bajo artifacts)
     match /artifacts/taxiacimco-app/public/data/{collection}/{document=**} {
+      // Habilita Modo Contingencia para lectura operativa
       allow read: if request.auth != null;
-      
-      // ⚠️ GUARDA DE SEGURIDAD MAESTRA: El comodín NO puede escribir en tesorería.
+      // Guarda de seguridad maestra: El comodín NO puede escribir en tesorería ni viajes
       allow write: if request.auth != null 
                    && collection != 'wallets' 
-                   && collection != 'historial_saldo';
+                   && collection != 'historial_saldo'
+                   && collection != 'viajes';
+    }
+
+    // 📡 REGLA 7: Telemetría y otros documentos globales (Escudo Raíz)
+    // Acceso restringido a usuarios registrados o puente anónimo (auth != null)
+    match /{document=**} {
+      allow read: if request.auth != null;
+      // Prevención contra escritura global indiscriminada
+      allow write: if false; 
     }
   }
 }

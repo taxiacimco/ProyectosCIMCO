@@ -1,7 +1,7 @@
-/* Versión Arquitectura: V10.0 - Sanitización de Capas para Tailwind CSS v4 Core */
+/* Versión Arquitectura: V10.1 - Sanitización de Capas y Eliminación de Importación JS Prohibida */
 /**
  * Ubicación: frontend/src/index.css
- * Misión: Integrar las directivas oficiales de Tailwind v4 y corregir el error de utilidades desconocidas.
+ * Misión: Integración pura de Tailwind v4 y blindaje de estilos para el radar Leaflet.
  */
 
 @import "tailwindcss";
@@ -21,17 +21,22 @@
   }
 }
 
-/* 🛡️ FIX PARA LEAFLET */
+/* 🛡️ FIX PARA CONTENEDORES MAPA LEAFLET */
 .leaflet-container {
   width: 100%;
   height: 100%;
   background: #09090b !important;
 }
 
+/* Estética CIMCO-UI Glassmorphism para los Popups del Radar */
 .leaflet-popup-content-wrapper {
   background: rgba(18, 18, 20, 0.95) !important;
   color: #f4f4f5 !important;
   border: 1px solid rgba(63, 63, 70, 0.4) !important;
   backdrop-filter: blur(8px) !important;
   border-radius: 12px !important;
+}
+
+.leaflet-popup-tip {
+  background: rgba(18, 18, 20, 0.95) !important;
 }

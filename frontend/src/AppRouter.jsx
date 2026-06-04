@@ -1,67 +1,89 @@
-// Versión Arquitectura: V13.0 - Integración Total de Árbol de Navegación Operativa y Consumo Aislado de useAuth
+// Versión Arquitectura: V16.1 - Enrutamiento Sincronizado para UX V9.4
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
- * Misión: Orquestar el árbol de navegación del ecosistema TAXIA CIMCO mapeando flujos públicos y privados.
- * Sincroniza el estado reactivo global con pantallas de carga premium bajo lineamientos CIMCO-UI V9.3.
+ * Misión: Orquestar el direccionamiento limpio del tráfico según rol.
+ * Integridad: Fusión Atómica con useAuth V16.0 y sincronización de ruta /recuperar.
  */
 
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './hooks/useAuth.jsx';
 
-// Páginas Operativas Básicas
+// 🛡️ VERIFICACIÓN ATÓMICA: Importación única desde el punto central de verdad
+import { useAuth } from './hooks/useAuth';
+
+// Páginas Operativas
 import HomePasajero from './pages/pasajero/HomePasajero';
-import Login from './pages/Login.jsx';
-import Register from './pages/Register.jsx';
-
-// Componentes y Paneles de Control Centralizado (CEO & Tools)
+import Login from './pages/Login';
 import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminPanel from './pages/admin/AdminPanel'; 
 import QrGenerator from './pages/admin/QrGenerator';
 
-const AppRouter = () => {
-  const { user, loading } = useAuth();
+// Pasarelas Segmentadas
+import RegisterPasajero from './pages/RegisterPasajero';
+import RegisterDespachador from './pages/RegisterDespachador';
+import RegisterMoto from './pages/RegisterMoto';
+import ForgotPassword from './pages/ForgotPassword';
 
-  // 🛡️ Pantalla de hidratación de estado con Estética Clean Dark Premium (CIMCO-UI V9.3)
-  if (loading) {
+/**
+ * 🛡️ HOC GUARDIÁN DE SEGURIDAD OPERACIONAL (RutaProtegidaAdmin)
+ * Aplica la "Guarda de Seguridad" anti-undefined antes de validar roles.
+ */
+const RutaProtegidaAdmin = ({ children }) => {
+    const auth = useAuth();
+    
+    // Si el contexto está nulo o no hay usuario, redirección de seguridad
+    if (!auth || !auth.user) return <Navigate to="/login" replace />;
+    
+    // Verificación de privilegios jerárquicos
+    if (auth.user.rol !== 'admin' && auth.user.rol !== 'despachador') return <Navigate to="/" replace />;
+    
+    return children;
+};
+
+export const AppRouter = () => {
+    const auth = useAuth();
+    
+    // 🛡️ MATRIZ DE REDIRECCIÓN INTELIGENTE (Anti-Crash)
+    const obtenerDestinoUsuario = () => {
+        // Manejo de carga de sesión
+        if (auth && auth.loading) return <div className="flex h-screen w-full items-center justify-center bg-[#09090b] text-zinc-500 font-mono text-[10px] tracking-widest">CARGANDO NODO...</div>;
+        
+        // Si no hay usuario, login forzado
+        if (!auth || !auth.user) return <Login />;
+        
+        // Direccionamiento según el rol detectado en la matriz de identidades
+        if (auth.user.rol === 'admin' || auth.user.rol === 'despachador') return <AdminDashboard />;
+        
+        // Retorno a consola civil por defecto
+        return <HomePasajero />;
+    };
+
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-[#09090b] text-zinc-100 font-sans antialiased">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-800 border-t-cyan-500" />
-          <div className="animate-pulse font-mono text-[10px] tracking-[0.2em] uppercase text-zinc-400">
-            Cargando Infraestructura CIMCO...
-          </div>
-        </div>
-      </div>
+        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+            <Routes>
+                {/* 🚀 Pasarelas Abiertas */}
+                <Route path="/login" element={<Login />} />
+                
+                {/* 🔄 AQUI EL CAMBIO: Ruta sincronizada con el botón del Login */}
+                <Route path="/recuperar" element={<ForgotPassword />} />
+
+                {/* 📝 Registros Transaccionales Unificados */}
+                <Route path="/register" element={<RegisterPasajero />} />
+                <Route path="/register/despachador" element={<RegisterDespachador />} />
+                <Route path="/register/moto" element={<RegisterMoto />} />
+
+                {/* 🎛️ Suite Administrativa Protegida */}
+                <Route path="/qr" element={<QrGenerator />} />
+                <Route path="/admin" element={<RutaProtegidaAdmin><AdminDashboard /></RutaProtegidaAdmin>} />
+                <Route path="/admin/panel" element={<RutaProtegidaAdmin><AdminPanel /></RutaProtegidaAdmin>} />
+                <Route path="/admin/tesoreria" element={<RutaProtegidaAdmin><AdminPanel /></RutaProtegidaAdmin>} />
+                
+                {/* 🏠 Home Central - Redirección Inteligente Operativa */}
+                <Route path="/" element={obtenerDestinoUsuario()} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+        </Router>
     );
-  }
-
-  return (
-    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Routes>
-        {/* 🔓 Rutas Públicas Obligatorias */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        
-        {/* 🛰️ Ruta Exclusiva del Generador QR */}
-        <Route path="/qr" element={<QrGenerator />} />
-
-        {/* 👑 Ruta del Súper Terminal CEO */}
-        <Route 
-          path="/admin" 
-          element={user && user.rol === 'admin' ? <AdminDashboard /> : <Navigate to="/login" />} 
-        />
-        
-        {/* 🏠 Ruta Núcleo (Pasajero / Flujo Dinámico) */}
-        <Route 
-          path="/" 
-          element={user ? (user.rol === 'admin' ? <Navigate to="/admin" /> : <HomePasajero />) : <Navigate to="/login" />} 
-        />
-
-        {/* 🔄 Ruta de Contingencia de Desbordamiento */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Router>
-  );
 };
 
 export default AppRouter;
