@@ -1,14 +1,28 @@
-/* Versión Arquitectura: V10.1 - Sanitización de Capas y Eliminación de Importación JS Prohibida */
+/* Versión Arquitectura: V10.3 - Alineación Estricta de Glassmorphism a la Regla border-white/5 */
 /**
- * Ubicación: frontend/src/index.css
- * Misión: Integración pura de Tailwind v4 y blindaje de estilos para el radar Leaflet.
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\index.css
+ * Misión: Configuración centralizada de diseño, utilidades de Glassmorphism puro y compatibilidad con Leaflet sin capas intermedias.
+ * Ajuste: Se ajusta el border de glass-panel a 0.05 para cumplir la regla estética "border-white/5".
  */
 
 @import "tailwindcss";
 
+@theme {
+  /* Configuración del sistema de diseño core CIMCO-UI V9.3 */
+  --color-cimco-bg: #121214;
+  --color-cimco-glass: rgba(18, 18, 20, 0.8);
+  
+  /* Manteniendo compatibilidad de paleta con los estilos previos */
+  --color-zinc-100: #f4f4f5;
+  --color-zinc-900: #09090b;
+}
+
 @layer base {
   body {
-    @apply bg-[#09090b] text-zinc-100 antialiased selection:bg-yellow-500/30 selection:text-yellow-200;
+    background-color: var(--color-cimco-bg);
+    color: var(--color-zinc-100);
+    font-family: system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
     margin: 0;
     padding: 0;
     min-width: 320px;
@@ -19,24 +33,42 @@
     width: 100%;
     height: 100vh;
   }
+
+  /* Selección de texto adaptada a la identidad visual de la app */
+  ::selection {
+    background-color: rgba(234, 179, 8, 0.3);
+    color: #fef08a;
+  }
 }
 
-/* 🛡️ FIX PARA CONTENEDORES MAPA LEAFLET */
+/* 🛡️ FIX PARA CONTENEDORES MAPA LEAFLET - Fusión Atómica Asegurada */
 .leaflet-container {
   width: 100%;
   height: 100%;
-  background: #09090b !important;
+  background: var(--color-zinc-900) !important;
 }
 
 /* Estética CIMCO-UI Glassmorphism para los Popups del Radar */
 .leaflet-popup-content-wrapper {
   background: rgba(18, 18, 20, 0.95) !important;
-  color: #f4f4f5 !important;
-  border: 1px solid rgba(63, 63, 70, 0.4) !important;
+  color: var(--color-zinc-100) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
   backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
   border-radius: 12px !important;
 }
 
 .leaflet-popup-tip {
   background: rgba(18, 18, 20, 0.95) !important;
+}
+
+/* ✨ UTILIDADES GLOBALES E INQUEBRANTABLES DE GLASSMORPHISM CIMCO-UI V9.3 */
+@utility glass-panel {
+  background-color: var(--color-cimco-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  /* 🛡️ Regla Estricta: border-white/5 */
+  border: 1px solid rgba(255, 255, 255, 0.05); 
+  border-radius: 1rem;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }

@@ -1,23 +1,18 @@
-// Versión Arquitectura: V9.5 - Consola Motoparrillero (Radar GPS + Glassmorphism)
-/**
- * Ubicación: frontend/src/pages/motoparrillero/HomeMotoparrillero.jsx
- * Misión: Dashboard del conductor de pasajeros. Integra mapa interactivo Leaflet y radar de ofertas.
- * Seguridad: Validación de Billetera (Min $2.000 COP) y guardas Anti-Undefined.
- */
-
+// Versión Arquitectura: V11.1 - PROD READY: Integración Quirúrgica Motor Telemetría GPS en Motoparrillero
 import React, { useState, useEffect } from 'react';
 import { 
   doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, addDoc, orderBy 
 } from 'firebase/firestore';
-import { db } from '../../config/firebase';
-import { useAuth } from '../../hooks/useAuth';
-import { useWallet } from '../../hooks/useWallet';
+import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
+import { API_FUNCTIONS_URL } from '@/config/api'; 
+import { useAuth } from '@/hooks/useAuth';
+import { useWallet } from '@/hooks/useWallet';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
 import { 
-  Navigation, Wallet, MapPin, AlertCircle, MessageSquare, Send, CheckCircle, Navigation2
+  Navigation, Wallet, MapPin, AlertCircle, MessageSquare, Send, CheckCircle, Navigation2, Truck
 } from 'lucide-react';
 
 // Corrección de Iconos Leaflet
@@ -31,96 +26,114 @@ const DefaultIcon = L.icon({
     iconAnchor: [12, 41] 
 });
 
-const ParrilleroIcon = L.icon({
-    iconUrl: 'https://cdn-icons-png.flaticon.com/512/854/854878.png', // Icono Moto
-    iconSize: [38, 38],
-    iconAnchor: [19, 38]
-});
-
-// Auto-enfoque del Mapa en el GPS
-function RadarLocalizador({ center }) {
-    const map = useMap();
-    useEffect(() => {
-        if (center) map.flyTo(center, 16);
-    }, [center, map]);
-    return null;
-}
-
 const HomeMotoparrillero = () => {
   const { user } = useAuth();
   const { balance, loading: walletLoading } = useWallet();
   
-  const [position, setPosition] = useState([9.566, -73.333]); // La Jagua
+  // 📡 ESTADOS DE TELEMETRÍA (Reemplazo atómico de posición estática)
+  const [posicionActual, setPosicionActual] = useState([7.4, -73.6]);
   const [gpsActivo, setGpsActivo] = useState(false);
+  
   const [ofertas, setOfertas] = useState([]);
-  const [viajeActivo, setViajeActivo] = useState(null);
-  const [mensajes, setMensajes] = useState([]);
-  const [nuevoMensaje, setNuevoMensaje] = useState('');
+  const [viajeActivo, setViajeActivo] = useState(null); // Necesario para el contexto de telemetría
   const [errorOperativo, setErrorOperativo] = useState('');
   const [loadingAccion, setLoadingAccion] = useState(false);
 
-  // 1. 📡 TELEMETRÍA GPS
-  useEffect(() => {
-      const watchId = navigator.geolocation.watchPosition(
-          (pos) => {
-              setPosition([pos.coords.latitude, pos.coords.longitude]);
-              setGpsActivo(true);
-          },
-          (err) => console.error("Error GPS:", err),
-          { enableHighAccuracy: true }
-      );
-      return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
-
-  // 2. 📡 RADAR DE OFERTAS
+  // 🛰️ MOTOR DE RASTREO EN TIEMPO REAL (RADAR)
   useEffect(() => {
     if (!user?.email) return;
-    const q = query(
-      collection(db, 'artifacts/taxiacimco-app/public/data/viajes'),
-      where('estadoViaje', '==', 'buscando')
+  
+    const watchId = navigator.geolocation.watchPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setPosicionActual([lat, lng]);
+        setGpsActivo(true);
+  
+        try {
+          // 1. Actualizar presencia global del conductor en el Radar
+          const conductorRef = doc(db, FIRESTORE_PATHS.usuarios || 'usuarios', user.email);
+          await updateDoc(conductorRef, {
+            location: { latitude: lat, longitude: lng },
+            ultimaConexion: serverTimestamp(),
+            estadoRadar: 'ONLINE'
+          });
+  
+          // 2. Si hay un viaje activo, transmitir coordenadas al pasajero
+          if (viajeActivo?.id) {
+            const viajeRef = doc(db, FIRESTORE_PATHS.viajes, viajeActivo.id);
+            await updateDoc(viajeRef, {
+              "conductorLocation.latitude": lat,
+              "conductorLocation.longitude": lng
+            });
+          }
+        } catch (err) {
+          console.error("❌ Falla de sincronización telemétrica:", err);
+        }
+      },
+      (err) => {
+        console.error("⚠️ Señal GPS perdida:", err);
+        setGpsActivo(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
     );
-    const unsub = onSnapshot(q, (snap) => setOfertas(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    return () => unsub();
-  }, [user]);
+  
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [user, viajeActivo]);
 
-  // 3. 📡 MONITOREO DE VIAJE ASIGNADO
+  // Efecto para escuchar ofertas en tiempo real
   useEffect(() => {
-    if (!user?.email) return;
+    if (!user) return;
+    
     const q = query(
-      collection(db, 'artifacts/taxiacimco-app/public/data/viajes'),
-      where('conductorId', '==', user.email)
+      collection(db, FIRESTORE_PATHS.viajes),
+      where('estadoViaje', '==', 'pendiente')
     );
-    const unsub = onSnapshot(q, (snap) => {
-      const asignados = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const activo = asignados.find(v => ['aceptado', 'en_ruta'].includes(v.estadoViaje));
-      setViajeActivo(activo || null);
+
+    const unsub = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setOfertas(data);
     });
+
     return () => unsub();
   }, [user]);
 
-  // 🏍️ ACEPTAR VIAJE (Regla Billetera + Core Node)
+  // Lógica de Aceptar Viaje con integración de telemetría
   const handleAceptarViaje = async (viaje) => {
     setErrorOperativo('');
-    if (walletLoading || balance < 2000) {
-      setErrorOperativo(`⛔ Denegado: Saldo insuficiente ($${balance || 0}). Mínimo $2.000 COP.`);
+    
+    const tarifaViaje = parseFloat(viaje.tarifa) || 0;
+    const comision = tarifaViaje * 0.10;
+
+    if (walletLoading || balance < comision) {
+      setErrorOperativo(`⛔ Denegado: Saldo insuficiente. La comisión requerida es del 10% ($${comision.toLocaleString()} COP).`);
       return;
     }
+
     setLoadingAccion(true);
     try {
-      const response = await fetch('http://localhost:5000/api/viajes/aceptar', {
+      const response = await fetch(`${API_FUNCTIONS_URL}/api/viajes/aceptar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ viajeId: viaje.id, conductorId: user.email })
+        body: JSON.stringify({ 
+            viajeId: viaje.id, 
+            conductorId: user.email,
+            comision: comision 
+        })
       });
+      
       const resData = await response.json();
       if (!response.ok) throw new Error(resData.message || 'Viaje no disponible.');
 
-      await updateDoc(doc(db, 'artifacts/taxiacimco-app/public/data/viajes', viaje.id), {
+      await updateDoc(doc(db, FIRESTORE_PATHS.viajes, viaje.id), {
         estadoViaje: 'aceptado',
         conductorId: user.email,
-        conductorUbicacion: { lat: position[0], lng: position[1] },
+        comisionCobrada: comision, 
+        conductorUbicacion: { lat: posicionActual[0], lng: posicionActual[1] },
         fechaAsignacion: serverTimestamp()
       });
+      
+      setViajeActivo({ id: viaje.id }); // Sincronización del estado de monitoreo
     } catch (err) {
       setErrorOperativo(err.message);
     } finally {
@@ -128,118 +141,71 @@ const HomeMotoparrillero = () => {
     }
   };
 
-  // 🏁 COMPLETAR VIAJE
-  const handleCompletar = async () => {
-    setLoadingAccion(true);
-    try {
-      const response = await fetch('http://localhost:5000/api/viajes/completar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ viajeId: viajeActivo.id })
-      });
-      if (response.ok) {
-        await updateDoc(doc(db, 'artifacts/taxiacimco-app/public/data/viajes', viajeActivo.id), {
-          estadoViaje: 'completado', fechaFinalizacion: serverTimestamp()
-        });
-      }
-    } catch (err) {
-      setErrorOperativo('Error al liquidar.');
-    } finally {
-      setLoadingAccion(false);
-    }
-  };
-
   return (
-    <div className="h-screen w-full flex flex-col bg-[#09090b] font-sans relative overflow-hidden">
-      
-      {/* MAPA DE FONDO */}
-      <div className="absolute inset-0 z-0">
-          <MapContainer center={position} zoom={16} className="h-full w-full" zoomControl={false}>
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-              <Marker position={position} icon={ParrilleroIcon}>
-                  <Popup>Unidad Motoparrillero Activa</Popup>
-              </Marker>
-              <RadarLocalizador center={position} />
-              
-              {!viajeActivo && ofertas.map(o => (
-                o.origen && <Marker key={o.id} position={[o.origen.lat, o.origen.lng]} icon={DefaultIcon} />
-              ))}
-          </MapContainer>
+    <div className="min-h-screen bg-[#09090b] font-mono text-zinc-100 p-4 pb-24">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-xl font-black text-white uppercase tracking-tighter">
+          Modo <span className="text-cyan-500">Motoparrillero</span>
+        </h1>
+        <div className="backdrop-blur-md bg-[#121214]/80 px-3 py-1 rounded-full border border-white/5 flex items-center gap-2 shadow-lg relative">
+          <div className={`w-2 h-2 rounded-full ${gpsActivo ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+          <span className="text-[10px] text-zinc-400 font-bold uppercase">{gpsActivo ? 'Online' : 'GPS Offline'}</span>
+        </div>
       </div>
 
-      {/* HEADER GLASSMORPHISM */}
-      <header className="z-10 m-4 backdrop-blur-md bg-[#121214]/80 border border-zinc-800/60 p-4 rounded-2xl flex items-center justify-between shadow-lg">
-        <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-xl border ${gpsActivo ? 'bg-emerald-900/40 border-emerald-500/50 text-emerald-400' : 'bg-zinc-900/60 border-zinc-800/60 text-yellow-500 animate-pulse'}`}>
-            <Navigation2 size={20} />
-          </div>
-          <div>
-            <h1 className="text-xs font-bold uppercase tracking-tight text-zinc-100">Motoparrillero</h1>
-            <p className="text-[10px] text-zinc-400 uppercase">{gpsActivo ? 'GPS Conectado' : 'Buscando Satélite...'}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 bg-zinc-950/70 border border-zinc-800/80 px-3 py-2 rounded-xl">
-          <Wallet size={14} className="text-yellow-500" />
-          <p className="text-xs font-bold text-yellow-500">${balance?.toLocaleString() || 0}</p>
-        </div>
-      </header>
-
       {errorOperativo && (
-        <div className="z-10 mx-4 p-3 rounded-xl bg-red-950/80 border border-red-500/50 text-red-300 text-xs uppercase flex items-center gap-2 backdrop-blur-sm">
-          <AlertCircle size={16} /> {errorOperativo}
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs flex items-center gap-2 animate-in fade-in">
+          <AlertCircle size={14} className="shrink-0" />
+          {errorOperativo}
         </div>
       )}
 
-      {/* PANEL INFERIOR DINÁMICO */}
-      <div className="z-10 mt-auto bg-gradient-to-t from-[#09090b] via-[#09090b]/90 to-transparent pt-10 pb-6 px-4">
+      <div className="h-64 rounded-3xl overflow-hidden mb-6 border border-white/5 shadow-2xl relative z-0">
+         <MapContainer center={posicionActual} zoom={13} style={{ height: '100%', width: '100%' }}>
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <Marker position={posicionActual} icon={DefaultIcon}>
+                <Popup>Tu ubicación en tiempo real</Popup>
+            </Marker>
+         </MapContainer>
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest px-1">Ofertas Disponibles</h2>
         
-        {viajeActivo ? (
-          <div className="backdrop-blur-md bg-[#121214]/90 border border-yellow-500/30 rounded-2xl p-5 shadow-xl">
-            <h2 className="text-yellow-500 text-xs font-bold uppercase mb-3 flex items-center gap-2">
-              <CheckCircle size={14} /> Servicio en Curso
-            </h2>
-            <div className="bg-zinc-950/50 border border-zinc-800 p-3 rounded-xl space-y-2 mb-4 text-xs text-zinc-300">
-              <p><span className="text-zinc-500 uppercase">Desde:</span> {viajeActivo.origenTexto}</p>
-              <p><span className="text-zinc-500 uppercase">Hacia:</span> {viajeActivo.destinoTexto}</p>
-            </div>
-            <button 
-              onClick={handleCompletar} disabled={loadingAccion}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs py-3 rounded-xl uppercase transition-all shadow-lg"
-            >
-              {loadingAccion ? 'Liquidando...' : 'Finalizar Viaje'}
-            </button>
+        {ofertas.length === 0 ? (
+          <div className="backdrop-blur-md bg-[#121214]/40 p-8 text-center text-zinc-500 border border-dashed border-white/5 rounded-2xl shadow-lg">
+            <p className="text-xs uppercase font-bold tracking-widest">Buscando pasajeros cerca...</p>
           </div>
         ) : (
-          <div className="space-y-3">
-             <h2 className="text-xs font-bold uppercase text-zinc-400 drop-shadow-md">
-               Ofertas Cercanas ({ofertas.length})
-             </h2>
-             <div className="max-h-60 overflow-y-auto space-y-3 pr-1">
-               {ofertas.length === 0 ? (
-                 <div className="backdrop-blur-md bg-[#121214]/60 border border-zinc-800/50 p-6 rounded-xl text-center text-zinc-500 text-xs uppercase">
-                   Escaneando la zona...
-                 </div>
-               ) : (
-                 ofertas.map(o => (
-                   <div key={o.id} className="backdrop-blur-md bg-[#121214]/90 border border-zinc-800 p-4 rounded-xl flex flex-col gap-3 shadow-lg">
-                     <div className="text-xs text-zinc-300 space-y-1">
-                       <p className="truncate"><strong className="text-emerald-400">A:</strong> {o.origenTexto}</p>
-                       <p className="truncate"><strong className="text-red-400">B:</strong> {o.destinoTexto}</p>
-                     </div>
-                     <div className="flex justify-between items-center border-t border-zinc-800/60 pt-3">
-                       <span className="text-sm font-bold text-yellow-500">${(o.tarifa || 0).toLocaleString()}</span>
-                       <button 
-                         onClick={() => handleAceptarViaje(o)} disabled={balance < 2000 || loadingAccion}
-                         className="bg-yellow-600 text-black px-4 py-2 rounded-lg text-xs font-bold uppercase disabled:bg-zinc-800 disabled:text-zinc-500"
-                       >
-                         Aceptar
-                       </button>
-                     </div>
-                   </div>
-                 ))
-               )}
-             </div>
-          </div>
+          ofertas.map(o => (
+            <div key={o.id} className="backdrop-blur-md bg-[#121214]/80 border border-white/5 p-4 rounded-2xl flex flex-col gap-3 shadow-lg hover:border-white/10 transition-all">
+              <div className="text-xs text-zinc-300 space-y-1">
+                <div className="flex items-start gap-2">
+                  <MapPin size={13} className="text-cyan-400 mt-0.5 shrink-0" />
+                  <p className="truncate"><strong className="text-zinc-500 uppercase tracking-widest text-[10px]">Desde:</strong> {o.origen?.direccion || 'N/A'}</p>
+                </div>
+                <div className="flex items-start gap-2 border-t border-white/5 pt-1">
+                  <MapPin size={13} className="text-amber-400 mt-0.5 shrink-0" />
+                  <p className="truncate"><strong className="text-zinc-500 uppercase tracking-widest text-[10px]">Hacia:</strong> {o.destino?.direccion || 'N/A'}</p>
+                </div>
+              </div>
+              
+              <div className="flex justify-between items-center border-t border-white/5 pt-3">
+                <div className="flex flex-col bg-[#09090b]/60 px-3 py-1 rounded-lg border border-white/5">
+                    <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Tarifa</span>
+                    <span className="text-sm font-black text-emerald-400">${(parseFloat(o.tarifa) || 0).toLocaleString()}</span>
+                </div>
+                
+                <button 
+                  onClick={() => handleAceptarViaje(o)} 
+                  disabled={loadingAccion || balance < (parseFloat(o.tarifa) * 0.1)}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-zinc-950 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase disabled:bg-[#121214] disabled:text-zinc-600 disabled:border-white/5 border border-cyan-400 transition-all shadow-md"
+                >
+                  {loadingAccion ? 'Procesando...' : 'Aceptar Servicio'}
+                </button>
+              </div>
+            </div>
+          ))
         )}
       </div>
     </div>

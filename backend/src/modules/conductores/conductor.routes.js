@@ -1,4 +1,4 @@
-// Versión Arquitectura: V10.7 - Consolidación de Ruta de Recargas Manuales
+// Versión Arquitectura: V10.8 - Activación de Blindaje de Seguridad en Rutas de Recarga Financiera
 /**
  * Ubicación: backend/src/modules/conductores/conductor.routes.js
  * Misión: Gestión de rutas de conductores con blindaje de acceso, telemetría de estado, sanitización radial y recargas manuales.
@@ -73,9 +73,8 @@ router.get('/:conductorId/historial', verificarToken, obtenerHistorialConductor)
 /**
  * 💰 RUTA CRÍTICA: Recargas Manuales por el Administrador/CEO
  * @route   POST /api/conductores/recargar-saldo
- * Nota: Descomentar 'verificarToken, esAdmin' en producción para restringir el acceso.
+ * Nota: Ruta blindada con verificación de Token y control de acceso (esAdmin) activado para Producción.
  */
-// router.post('/recargar-saldo', verificarToken, esAdmin, recargarBilleteraPorAdmin);
-router.post('/recargar-saldo', recargarBilleteraPorAdmin); 
+router.post('/recargar-saldo', verificarToken, esAdmin, recargarBilleteraPorAdmin); 
 
 export default router;

@@ -1,15 +1,15 @@
-// Versión Arquitectura: V1.2 - Sincronización de Endpoint de Recargas (API_URL Modular)
+// Versión Arquitectura: V1.5 - Blindaje Interno de Transacciones (Firewall ACL Nivel 90)
 /**
  * Ubicación: frontend/src/pages/admin/AdminPanel.jsx
  * Misión: Gestión atómica manual de saldos de conductores mediante el bus Express/MongoDB.
- * Seguridad: Componente blindado. Solo renderizable bajo rol 'admin'.
+ * Seguridad: Componente ultra-blindado. Validación dura de access_level antes del disparo al core.
  */
 
 import React, { useState } from 'react';
-import axios from 'axios';
 import { DollarSign, User, ShieldCheck, AlertTriangle, Loader, Zap } from 'lucide-react';
-import { API_URL } from '../../config/api'; 
-import { useAuth } from '../../hooks/useAuth';
+// 🚀 GOBERNANZA DE RUTAS: Alias absolutos aplicados
+import api from '@/config/api'; 
+import { useAuth } from '@/hooks/useAuth';
 
 const AdminPanel = () => {
     const { user } = useAuth();
@@ -29,85 +29,89 @@ const AdminPanel = () => {
                 throw new Error("Parámetros de inyección incompletos.");
             }
 
-            const tokenJWT = localStorage.getItem('token') || '';
+            // 🔐 ALERTA DE ARQUITECTURA: FIREWALL DE GOBERNANZA
+            // Validación estricta en el controlador antes de consumir el API Gateway
+            const accessLevel = user?.access_level || 0;
+            if (accessLevel < 90) {
+                setStatus({ type: 'error', message: 'ERROR CRÍTICO: PERMISOS INSUFICIENTES (REQUERIDO: NIVEL 90+)' });
+                setLoading(false);
+                return;
+            }
 
-            // 📡 Disparo atómico al endpoint modularizado (/api/conductores/recargar-saldo)
-            const response = await axios.post(`${API_URL}/recargar-saldo`, {
+            // 📡 Fusión Atómica: Disparo a través de la API Central
+            const res = await api.post('/api/saldos/admin/recargar', {
                 conductorId: conductorId.trim(),
-                monto: parseFloat(monto),
-                operador: user?.email || 'ADMIN_UI_PANEL'
-            }, {
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${tokenJWT}`
-                }
+                monto: parseFloat(monto)
             });
 
-            if (response.data.success) {
-                setStatus({ type: 'success', message: `✅ Inyección Atómica Exitosa. Balance Actualizado.` });
+            if (res.data.success) {
+                setStatus({ 
+                    type: 'success', 
+                    message: `INYECCIÓN APROBADA: Nuevo saldo del operador $${res.data.nuevoSaldo}` 
+                });
                 setConductorId('');
                 setMonto('');
+            } else {
+                throw new Error(res.data.message || "Falla en la inyección de saldo.");
             }
         } catch (error) {
-            console.error("❌ Falla en la inyección de capital:", error);
-            setStatus({ type: 'error', message: error.response?.data?.message || error.message || "❌ Error crítico de comunicación con Express MDB." });
+            console.error("❌ Falla Atómica de Recarga:", error);
+            setStatus({ 
+                type: 'error', 
+                message: error.response?.data?.message || error.message || "Error fatal de conexión con el Core."
+            });
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-[#09090b] p-8 font-sans text-zinc-100 antialiased selection:bg-yellow-500/30">
-            <div className="max-w-md mx-auto space-y-6">
-                
-                {/* CABECERA */}
-                <div className="backdrop-blur-md bg-[#121214]/60 border border-zinc-800/40 p-4 rounded-2xl mb-2 flex items-center justify-between">
-                    <div>
-                        <h1 className="text-sm font-black flex items-center gap-2 uppercase tracking-widest text-zinc-200">
-                            <ShieldCheck className="text-yellow-500" size={20} /> Tesorería Admin
-                        </h1>
-                        <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest mt-0.5">Operador: {user?.email || "No Identificado"}</p>
-                    </div>
+        <div className="bg-[#121214]/80 border border-white/5 rounded-2xl p-8 backdrop-blur-md max-w-xl mx-auto shadow-2xl">
+            <div className="flex items-center gap-3 mb-6 border-b border-white/5 pb-4">
+                <div className="p-3 bg-yellow-500/10 rounded-xl border border-yellow-500/20">
+                    <DollarSign size={24} className="text-yellow-500" />
                 </div>
+                <div>
+                    <h2 className="text-xl font-bold tracking-tighter text-white">Inyección de Efectivo</h2>
+                    <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest mt-1">Bus de Datos Financiero</p>
+                </div>
+            </div>
 
-                {/* FORMULARIO GLASSMORPHISM */}
-                <form onSubmit={handleRecargar} className="backdrop-blur-xl bg-[#121214]/80 border border-zinc-800/60 p-6 rounded-2xl shadow-2xl space-y-5">
-                    
-                    <div className="space-y-2">
-                        <label className="text-[9px] font-mono text-zinc-400 uppercase tracking-widest">Target ID (Conductor Hex/UID)</label>
-                        <div className="relative flex items-center">
-                            <User size={14} className="absolute left-3.5 text-zinc-500" />
-                            <input 
-                                required
-                                disabled={loading}
-                                value={conductorId}
-                                onChange={(e) => setConductorId(e.target.value)}
-                                className="w-full bg-zinc-950/60 border border-zinc-800/80 rounded-xl py-3 pl-9 pr-4 text-xs font-mono text-zinc-200 focus:border-yellow-500/50 outline-none placeholder-zinc-700 transition-colors"
-                                placeholder="Ej: 64b7c89..."
-                            />
-                        </div>
+            <div className="space-y-6">
+                <form onSubmit={handleRecargar} className="space-y-5">
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-mono uppercase tracking-widest text-zinc-400 font-bold flex items-center gap-2">
+                            <User size={12} className="text-cyan-500" /> ID Único Operador (UID)
+                        </label>
+                        <input
+                            type="text"
+                            value={conductorId}
+                            onChange={(e) => setConductorId(e.target.value)}
+                            placeholder="Ej: A8b9Xp..."
+                            className="w-full bg-zinc-950/50 border border-white/10 p-3.5 rounded-xl text-white placeholder:text-zinc-700 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 outline-none transition-all font-mono text-sm"
+                            required
+                        />
                     </div>
 
-                    <div className="space-y-2">
-                        <label className="text-[9px] font-mono text-zinc-400 uppercase tracking-widest">Monto a Inyectar ($ COP)</label>
-                        <div className="relative flex items-center">
-                            <DollarSign size={14} className="absolute left-3.5 text-yellow-500" />
-                            <input 
-                                type="number"
-                                required
-                                disabled={loading}
-                                min="1"
-                                value={monto}
-                                onChange={(e) => setMonto(e.target.value)}
-                                className="w-full bg-zinc-950/60 border border-zinc-800/80 rounded-xl py-3 pl-9 pr-4 text-xs font-mono text-yellow-500 font-bold focus:border-yellow-500/50 outline-none placeholder-zinc-700 transition-colors"
-                                placeholder="Ej: 50000"
-                            />
-                        </div>
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-mono uppercase tracking-widest text-zinc-400 font-bold flex items-center gap-2">
+                            <DollarSign size={12} className="text-emerald-500" /> Capital a Inyectar (COP)
+                        </label>
+                        <input
+                            type="number"
+                            value={monto}
+                            onChange={(e) => setMonto(e.target.value)}
+                            placeholder="Ej: 50000"
+                            className="w-full bg-zinc-950/50 border border-white/10 p-3.5 rounded-xl text-white placeholder:text-zinc-700 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 outline-none transition-all font-mono text-lg font-bold"
+                            required
+                            min="1"
+                        />
                     </div>
 
                     <button 
+                        type="submit" 
                         disabled={loading}
-                        className="w-full bg-yellow-600 hover:bg-yellow-500 text-zinc-950 py-3.5 rounded-xl text-[10px] font-mono font-bold uppercase tracking-widest transition-all shadow-lg shadow-yellow-600/10 active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                        className="w-full mt-4 bg-yellow-500 text-zinc-950 py-3.5 rounded-xl text-[10px] font-mono font-bold uppercase tracking-widest transition-all shadow-lg shadow-yellow-600/10 active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none hover:bg-yellow-400"
                     >
                         {loading ? (
                             <><Loader className="animate-spin" size={14} /> Transmitiendo al Core...</>

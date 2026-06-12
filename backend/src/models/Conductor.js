@@ -1,7 +1,7 @@
-// Versión Arquitectura: V7.0 - Esquema Unificado de Telemetría GeoJSON y Billetera Atómica Manual
+// Versión Arquitectura: V7.1 - Esquema Unificado Multi-Rol y Billetera Atómica Manual
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
- * Misión: Defición del documento del Conductor (Taxis/Mototaxis) con soporte Geoespacial 2dsphere y balance financiero blindado.
+ * Misión: Definición del documento del Conductor (y personal operativo) con soporte Multi-Rol, Geoespacial 2dsphere y balance financiero blindado.
  * Regla de Negocio: Prohibido saldos inferiores a $0. Garantiza consistencia transaccional ACID local.
  */
 
@@ -33,6 +33,23 @@ const ConductorSchema = new mongoose.Schema({
     password: {
         type: String,
         required: false
+    },
+    // 🛡️ PARCHE DE GOBERNANZA V7.1: Flexibilización Multi-Rol
+    role: {
+        type: String,
+        default: 'conductor',
+        lowercase: true,
+        trim: true
+    },
+    rol: {
+        type: String,
+        default: 'conductor',
+        lowercase: true,
+        trim: true
+    },
+    access_level: {
+        type: Number,
+        default: 10
     },
     // 🚦 Estado operativo sincronizado con minúsculas estrictas para equivalencia en Firestore
     estado: { 

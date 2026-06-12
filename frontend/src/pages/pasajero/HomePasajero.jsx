@@ -1,19 +1,21 @@
-// Versión Arquitectura: V11.5 - Puente Híbrido Firebase y Manejo de Excepciones de Seguridad (Anti-Crash)
+// Versión Arquitectura: V12.2 - Integración Quirúrgica Rastreo Telemétrico del Conductor en Mapa
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
- * Misión: Proveer la consola de despacho de servicios civiles e intermunicipales con micro-interacciones de selección.
- * Estilo: Glassmorphism Premium, fondos oscuros desinfectados de rasgos brutalistas.
- * Integración: Puente Híbrido de Autenticación para lectura de Firestore y evasión de bloqueos.
+ * Misión: Proveer el nodo central operativo para el pasajero, permitiendo lanzar solicitudes al radar
+ * en tiempo real utilizando la nueva colección homologada 'rides' y renderizar dinámicamente la posición del conductor.
+ * Integridad: Salvaguardas estrictas Anti-Undefined en el contexto de autenticación y estados reactivos.
+ * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism.
  */
 
 import React, { useState, useEffect } from 'react';
-import { db, auth as firebaseAuth } from '../../config/firebase'; 
-import { collection, onSnapshot, query, where, addDoc, serverTimestamp, doc } from 'firebase/firestore';
+import { db, auth as firebaseAuth, FIRESTORE_PATHS } from '@/config/firebase'; 
+import { collection, onSnapshot, query, where, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '@/hooks/useAuth';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { MapPin, Compass, ShieldCheck, Clock, CheckCircle, Navigation, DollarSign, Bike, Users, Package, Milestone, LogOut, User as UserIcon } from 'lucide-react';
+import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, User as UserIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import ModalCalificacion from '@/components/ModalCalificacion';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -24,191 +26,303 @@ const iconConductor = new L.Icon({
     popupAnchor: [0, -15]
 });
 
+const iconPasajero = new L.Icon({
+    iconUrl: 'https://cdn-icons-png.flaticon.com/512/2984/2984132.png',
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -15]
+});
+
 const CambiarCentroMapa = ({ centro }) => {
     const mapa = useMap();
     useEffect(() => {
-        if (centro) mapa.setView(centro, 15, { animate: true });
+        if (centro && centro[0] && centro[1]) {
+            mapa.setView(centro, 15, { animate: true });
+        }
     }, [centro, mapa]);
     return null;
 };
 
 const HomePasajero = () => {
+    const { user, logout } = useAuth();
     const navigate = useNavigate();
-    const auth = useAuth();
-    const user = auth ? auth.user : null;
 
-    const [conductores, setConductores] = useState([]);
-    const [origenTexto, setOrigenTexto] = useState('');
-    const [destinoTexto, setDestinoTexto] = useState('');
-    const [tarifaPropuesta, setTarifaPropuesta] = useState('');
-    const [loadingSolicitud, setLoadingSolicitud] = useState(false);
+    // 📡 ESTADOS CORE DE LOCALIZACIÓN Y SERVICIO
+    const [origen, setOrigen] = useState('Plaza Principal - La Jagua de Ibirico');
+    const [destino, setDestino] = useState('');
+    const [latitudOrigen, setLatitudOrigen] = useState(9.5620);
+    const [longitudOrigen, setLongitudOrigen] = useState(-73.3333);
+    const [latitudDestino, setLatitudDestino] = useState(9.5650);
+    const [longitudDestino, setLongitudDestino] = useState(-73.3370);
     
-    const [estadoOperativo, setEstadoOperativo] = useState('IDLE');
-    const [viajeActivoId, setViajeActivoId] = useState(null);
-    const [datosViaje, setDatosViaje] = useState(null);
-    const [posicionMapa, setPosicionMapa] = useState([9.5740, -73.3421]); 
+    const [centroMapa, setCentroMapa] = useState([9.5620, -73.3333]);
+    const [tipoVehiculo, setTipoVehiculo] = useState('mototaxi'); 
+    const [ofertaPasajero, setOfertaPasajero] = useState('');
+    
+    // ⚙️ ESTADOS OPERATIVOS DE FLUJO
+    const [estadoOperativo, setEstadoOperativo] = useState('IDLE'); 
+    const [loadingSolicitud, setLoadingSolicitud] = useState(false);
+    const [error, setError] = useState('');
+    const [rideId, setRideId] = useState(null);
+    const [datosConductor, setDatosConductor] = useState(null);
+    const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
+    
+    // 🛰️ NUEVO ESTADO: Telemetría del Conductor
+    const [posicionConductor, setPosicionConductor] = useState(null);
 
+    // 🛡️ GUARDA ANTI-UNDEFINED: Autenticación Anónima de respaldo si no hay sesión activa en Firebase
     useEffect(() => {
-        // 🛡️ GUARDA DE SEGURIDAD: Puente Híbrido Firebase
-        const habilitarLecturaFirebase = async () => {
-            try {
-                if (!firebaseAuth.currentUser) {
-                    await signInAnonymously(firebaseAuth);
-                    console.log("🔥 [CIMCO-BRIDGE] Autenticación anónima establecida con Firebase para lectura de radar.");
+        if (!firebaseAuth.currentUser) {
+            signInAnonymously(firebaseAuth).catch((err) => console.error("⚠️ Falla de handshake anónimo:", err));
+        }
+    }, []);
+
+    // 🔄 SUSCRIPCIÓN EN TIEMPO REAL AL RADAR DE LA SOLICITUD ACTIVA (Colección 'rides')
+    useEffect(() => {
+        if (!rideId || !FIRESTORE_PATHS.rides) return;
+
+        const docRef = doc(db, FIRESTORE_PATHS.rides, rideId);
+        const unsubscribe = onSnapshot(docRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
+                
+                // Blindaje de seguridad Anti-Undefined ante lecturas de cambios de estado
+                if (data && data.status) {
+                    if (data.status === 'accepted') {
+                        setEstadoOperativo('CONFIRMADO');
+                        setDatosConductor(data.conductor || { nombre: 'Unidad Asignada', telefono: '3000000000', placa: 'X-000' });
+                    } else if (data.status === 'completed') {
+                        setEstadoOperativo('FINALIZADO');
+                        setMostrarModalCalificacion(true);
+                    } else if (data.status === 'cancelled') {
+                        resetearConsola();
+                        setError('El servicio fue cancelado o rechazado por el sistema.');
+                    }
+
+                    // 🛡️ TELEMETRÍA DINÁMICA: Lectura atómica de coordenadas del conductor
+                    if (data.conductorLocation && typeof data.conductorLocation.latitude === 'number' && typeof data.conductorLocation.longitude === 'number') {
+                        setPosicionConductor([data.conductorLocation.latitude, data.conductorLocation.longitude]);
+                    }
                 }
-            } catch (error) {
-                console.warn("⚠️ [CIMCO-BRIDGE] Fallo en puente híbrido. Las reglas de Firestore podrían bloquear la lectura:", error.message);
             }
-        };
-
-        habilitarLecturaFirebase();
-
-        const q = query(collection(db, "conductores"), where("estado", "==", "active"));
-        
-        // 🛡️ BLINDAJE ANTI-CRASH: Captura del error de Firestore
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(doc => {
-                const docData = doc.data();
-                return { 
-                    id: doc.id, 
-                    ...docData,
-                    lastLocation: docData.coordenadas?.coordinates ? {
-                        lat: docData.coordenadas.coordinates[1],
-                        lng: docData.coordenadas.coordinates[0]
-                    } : null
-                };
-            }).filter(c => c.lastLocation !== null); 
-            setConductores(data);
-        }, (error) => {
-            console.error("❌ [CIMCO-FIRESTORE] Permiso denegado al leer conductores de la flota. Verifique Reglas en Firebase Console.", error.message);
+        }, (err) => {
+            console.error("❌ Error en telemetría de suscripción:", err);
         });
 
         return () => unsubscribe();
-    }, []);
+    }, [rideId]);
 
-    const manejarSolicitudViaje = async (e) => {
+    // 🚀 LANZAR SOLICITUD AL RADAR CENTRAL
+    const handleLanzarRadar = async (e) => {
         e.preventDefault();
-        if (!origenTexto || !destinoTexto || !tarifaPropuesta) return;
+        setError('');
+        
+        // Blindaje Anti-Undefined: Validar existencia de usuario antes de operar
+        if (!user || !user.uid) {
+            setError('Error de Identidad: Usuario no autenticado o sesión expirada.');
+            return;
+        }
+
+        if (!destino.trim()) {
+            setError('Debe especificar un destino válido para indexar el trazo.');
+            return;
+        }
+
         setLoadingSolicitud(true);
-        setEstadoOperativo('BUSCANDO');
 
         try {
-            const payloadViaje = {
-                pasajeroId: user?.uid || user?.id || 'ANÓNIMO',
-                pasajeroNombre: user?.nombre || 'Pasajero CIMCO',
-                origenTexto,
-                destinoTexto,
-                origen: { lat: 9.5740, lng: -73.3421 },
-                destino: { lat: 9.5710, lng: -73.3421 },
-                tarifa: Number(tarifaPropuesta),
-                estadoViaje: 'solicitado',
-                createdAt: serverTimestamp()
+            // Regla de Gobernanza de Rutas: Consumir exclusivamente el objeto global homologado
+            const coleccionRides = FIRESTORE_PATHS.rides || 'rides';
+
+            // 🏛️ INYECCIÓN QUIRÚRGICA: Estructura de coordenadas basada en mapas con Doubles numéricos
+            const payloadRide = {
+                usuarioId: user.uid,
+                origenNombre: origen,
+                destinoNombre: destino,
+                tipoVehiculo: tipoVehiculo,
+                oferta: parseFloat(ofertaPasajero) || 2000,
+                startLocation: {
+                    latitude: parseFloat(latitudOrigen),
+                    longitude: parseFloat(longitudOrigen)
+                },
+                endLocation: {
+                    latitude: parseFloat(latitudDestino),
+                    longitude: parseFloat(longitudDestino)
+                },
+                status: "pending",
+                timestamp: serverTimestamp()
             };
 
-            const docRef = await addDoc(collection(db, "viajes"), payloadViaje);
-            setViajeActivoId(docRef.id);
-            
-            const viajeRef = doc(db, "viajes", docRef.id);
-            
-            // 🛡️ BLINDAJE ANTI-CRASH
-            const unsubViaje = onSnapshot(viajeRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    const currentViaje = docSnap.data();
-                    setDatosViaje(currentViaje);
-                    if (currentViaje.estadoViaje === 'aceptado') setEstadoOperativo('CONFIRMADO');
-                    else if (currentViaje.estadoViaje === 'en_viaje') setEstadoOperativo('EN_VIAJE');
-                    else if (currentViaje.estadoViaje === 'finalizado') {
-                        setEstadoOperativo('COMPLETADO');
-                        unsubViaje();
-                    }
-                }
-            }, (error) => {
-                console.error("❌ [CIMCO-FIRESTORE] Pérdida de telemetría en el viaje activo:", error.message);
-            });
-        } catch (error) {
-            console.error("❌ [CIMCO-CORE] Error al despachar la solicitud:", error);
-            setEstadoOperativo('IDLE');
+            const docRef = await addDoc(collection(db, coleccionRides), payloadRide);
+            setRideId(docRef.id);
+            setEstadoOperativo('BUSCANDO');
+        } catch (err) {
+            console.error("❌ Error crítico en lanzamiento de servicio:", err);
+            setError("Error de red con el clúster: " + err.message);
         } finally {
             setLoadingSolicitud(false);
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('cimco_token'); // Homologado a la V16
-        localStorage.removeItem('userRole');
-        if (auth && auth.setUser) auth.setUser(null);
-        navigate('/login');
-    };
-
-    const resetearConsola = () => {
+    // 🔄 CANCELAR O RESETEAR CONSOLA OPERATIVA
+    const resetearConsola = async () => {
+        if (rideId && estadoOperativo === 'BUSCANDO') {
+            try {
+                const docRef = doc(db, FIRESTORE_PATHS.rides || 'rides', rideId);
+                await updateDoc(docRef, { status: 'cancelled' });
+            } catch (err) {
+                console.error("No se pudo dar de baja el servicio remoto:", err);
+            }
+        }
+        setRideId(null);
         setEstadoOperativo('IDLE');
-        setViajeActivoId(null);
-        setDatosViaje(null);
-        setOrigenTexto('');
-        setDestinoTexto('');
-        setTarifaPropuesta('');
+        setDatosConductor(null);
+        setPosicionConductor(null); // Limpieza de telemetría en memoria
+        setError('');
     };
 
-    const servicios = [
-        { id: 'mototaxi', titulo: 'MOTOTAXI', subtitulo: 'FLOTA PANTERA', icon: Bike, color: 'text-yellow-500', border: 'hover:border-yellow-500/40' },
-        { id: 'motoparrillero', titulo: 'MOTOPARRILLERO', subtitulo: 'ACOMPAÑANTE SEGURO', icon: Users, color: 'text-cyan-400', border: 'hover:border-cyan-500/40' },
-        { id: 'motocarga', titulo: 'MOTOCARGA', subtitulo: 'LOGÍSTICA INTERNA', icon: Package, color: 'text-emerald-400', border: 'hover:border-emerald-500/40' },
-        { id: 'intermunicipal', titulo: 'INTERMUNICIPAL', subtitulo: 'RUTAS TERMINAL', icon: Milestone, color: 'text-purple-400', border: 'hover:border-purple-500/40' }
-    ];
+    const handleCierreCalificacion = () => {
+        setMostrarModalCalificacion(false);
+        setEstadoOperativo('IDLE');
+        setRideId(null);
+        setDestino('');
+        setOfertaPasajero('');
+        setPosicionConductor(null); // Limpieza de telemetría tras finalizar servicio
+    };
 
     return (
-        <div className="h-screen w-full flex flex-col bg-[#121214] font-mono text-zinc-100 overflow-hidden relative">
-            <header className="w-full bg-[#121214]/80 backdrop-blur-md border-b border-zinc-800/50 px-6 py-4 flex items-center justify-between z-50 shadow-md">
-                <div className="flex items-center gap-2.5">
-                    <div className="h-2 w-2 bg-emerald-500 rounded-full animate-pulse" />
-                    <div><h1 className="text-xs font-bold uppercase tracking-widest text-zinc-100">TAXIA CIMCO</h1><p className="text-[9px] text-zinc-500 uppercase tracking-wider">La Jagua de Ibirico</p></div>
-                </div>
-                <div className="flex items-center gap-4">
-                    <div className="hidden sm:flex items-center gap-2 bg-zinc-950/40 border border-zinc-800 px-3 py-1.5 rounded-xl"><UserIcon size={12} className="text-zinc-500" /><span className="text-[10px] uppercase text-zinc-400 tracking-wider font-bold">{user ? (user.nombre || 'Pasajero Activo') : 'Pasajero Civil'}</span></div>
-                    <button onClick={handleLogout} className="p-2 bg-red-950/20 border border-red-500/30 hover:border-red-500/60 rounded-xl text-red-400 transition-all"><LogOut size={13} /></button>
-                </div>
-            </header>
+        <div className="relative min-h-screen bg-[#09090b] text-zinc-100 flex flex-col md:flex-row overflow-hidden">
+            {/* VISUALIZADOR CARTOGRÁFICO INTERACTIVO */}
+            <div className="flex-1 h-[50vh] md:h-screen relative z-0">
+                <MapContainer 
+                    center={centroMapa} 
+                    zoom={15} 
+                    style={{ width: '100%', height: '100%' }}
+                    zoomControl={false}
+                >
+                    <TileLayer
+                        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                    />
+                    <CambiarCentroMapa centro={centroMapa} />
+                    
+                    <Marker position={[latitudOrigen, longitudOrigen]} icon={iconPasajero}>
+                        <Popup>
+                            <span className="font-mono text-xs text-zinc-900">Punto de Origen</span>
+                        </Popup>
+                    </Marker>
 
-            <div className="flex-1 w-full relative z-10">
-                <MapContainer center={posicionMapa} zoom={14} className="h-full w-full" zoomControl={false}>
-                    <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
-                    <CambiarCentroMapa centro={posicionMapa} />
-                    {conductores.map((cond) => (
-                        <Marker key={cond.id} position={[cond.lastLocation.lat, cond.lastLocation.lng]} icon={iconConductor}>
-                            <Popup className="custom-popup"><div className="p-2 bg-zinc-950 rounded-lg border border-zinc-800 text-[10px]"><p className="font-bold text-white">MOTO: {cond.nombre}</p></div></Popup>
+                    {/* 🛰️ RENDERIZADO DINÁMICO DE TELEMETRÍA DEL CONDUCTOR */}
+                    {posicionConductor && (
+                        <Marker position={posicionConductor} icon={iconConductor}>
+                            <Popup>
+                                <span className="font-mono text-xs text-zinc-900 font-bold uppercase">Unidad en Camino</span>
+                            </Popup>
                         </Marker>
-                    ))}
+                    )}
                 </MapContainer>
-                <button onClick={() => setPosicionMapa([9.5740, -73.3421])} className="absolute bottom-6 right-6 z-[500] p-3 rounded-full bg-zinc-900/90 border border-zinc-800 text-cyan-500 backdrop-blur-md shadow-lg active:scale-95 transition-transform"><Compass size={20} className="animate-pulse" /></button>
             </div>
 
-            <div className="w-full max-h-[55vh] bg-[#121214]/90 backdrop-blur-xl border-t border-zinc-800/80 z-20 shadow-2xl overflow-y-auto px-6 py-5 rounded-t-3xl">
-                <div className="max-w-3xl mx-auto flex flex-col md:flex-row gap-6">
-                    {/* MÁQUINA DE SERVICIOS */}
-                    <div className="flex-1">
-                        <div className="mb-4"><h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-400">Selección de Flota</h2></div>
-                        <div className="grid grid-cols-2 gap-3">
-                            {servicios.map((srv) => {
-                                const IconComp = srv.icon;
-                                return (
-                                    <div key={srv.id} className={`bg-zinc-900/40 border border-zinc-800/60 rounded-xl p-3 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${srv.border} hover:bg-zinc-800/40`}>
-                                        <IconComp size={20} className={`mb-2 ${srv.color}`} />
-                                        <h3 className="text-[10px] font-bold tracking-widest text-zinc-200">{srv.titulo}</h3>
-                                        <span className="text-[8px] text-zinc-500 tracking-wider mt-1">{srv.subtitulo}</span>
-                                    </div>
-                                );
-                            })}
+            {/* PANEL DE CONTROL DE OPERACIONES (GLASSMORPHISM PREMIUM) */}
+            <div className="w-full md:w-[420px] backdrop-blur-md bg-[#121214]/80 border-l border-white/5 p-6 flex flex-col justify-between z-10 shrink-0 shadow-2xl overflow-y-auto">
+                <div className="space-y-6">
+                    {/* ENCABEZADO TÁCTICO */}
+                    <div className="flex items-center justify-between border-b border-white/[0.05] pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2.5 bg-cyan-500/10 rounded-xl border border-cyan-500/20 text-cyan-400">
+                                <Compass className="animate-spin-slow" size={20} />
+                            </div>
+                            <div>
+                                <h1 className="text-sm font-mono font-bold uppercase tracking-wider text-white">TAXIA CIMCO</h1>
+                                <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Consola Pasajero</p>
+                            </div>
                         </div>
+                        <button 
+                            onClick={() => logout ? logout() : navigate('/login')}
+                            className="p-2 text-zinc-500 hover:text-red-400 transition-colors"
+                            title="Desconectar Terminal"
+                        >
+                            <LogOut size={16} />
+                        </button>
                     </div>
 
-                    {/* PANEL DE SOLICITUD */}
-                    <div className="flex-1 bg-zinc-900/30 p-4 rounded-2xl border border-zinc-800/50">
+                    {/* MENSAJES DE ERROR DE COMUNICACIÓN */}
+                    {error && (
+                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] font-mono text-red-400 flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0"></span>
+                            <p>{error}</p>
+                        </div>
+                    )}
+
+                    {/* NÚCLEO DINÁMICO DE ESTADOS DE RENDERIZADO */}
+                    <div className="space-y-4">
                         {estadoOperativo === 'IDLE' && (
-                            <form onSubmit={manejarSolicitudViaje} className="space-y-3">
-                                <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-yellow-500 flex items-center gap-2 mb-4"><Navigation size={12}/> Despachar Solicitud</h2>
-                                <input type="text" required value={origenTexto} onChange={(e) => setOrigenTexto(e.target.value)} placeholder="📍 Punto de Recogida" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg py-2.5 px-3 text-[10px] focus:border-cyan-500 outline-none placeholder-zinc-600" />
-                                <input type="text" required value={destinoTexto} onChange={(e) => setDestinoTexto(e.target.value)} placeholder="🏁 Destino" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg py-2.5 px-3 text-[10px] focus:border-cyan-500 outline-none placeholder-zinc-600" />
-                                <input type="number" required min="2000" step="500" value={tarifaPropuesta} onChange={(e) => setTarifaPropuesta(e.target.value)} placeholder="💲 Tarifa Mínima $2000" className="w-full bg-zinc-950 border border-zinc-800 rounded-lg py-2.5 px-3 text-[10px] text-yellow-500 font-bold focus:border-cyan-500 outline-none placeholder-zinc-600" />
+                            <form onSubmit={handleLanzarRadar} className="space-y-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-bold flex items-center gap-1">
+                                        <MapPin size={12} className="text-emerald-400" /> Punto de Abordaje
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        value={origen}
+                                        onChange={(e) => setOrigen(e.target.value)}
+                                        className="w-full bg-black/40 border border-white/5 p-3.5 rounded-xl text-zinc-100 text-xs focus:border-cyan-500/40 outline-none font-mono transition-all"
+                                        required
+                                    />
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-bold flex items-center gap-1">
+                                        <Navigation size={12} className="text-cyan-400" /> Punto de Destino
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="¿A dónde se dirige?"
+                                        value={destino}
+                                        onChange={(e) => setDestino(e.target.value)}
+                                        className="w-full bg-black/40 border border-white/5 p-3.5 rounded-xl text-zinc-100 text-xs focus:border-cyan-500/40 outline-none font-mono transition-all"
+                                        required
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-2">
+                                    {[
+                                        { id: 'mototaxi', label: 'Moto', icon: Bike },
+                                        { id: 'taxi', label: 'Taxi', icon: Users },
+                                        { id: 'intermunicipal', label: 'Ruta', icon: Package }
+                                    ].map((veh) => {
+                                        const IconComp = veh.icon;
+                                        return (
+                                            <button
+                                                key={veh.id}
+                                                type="button"
+                                                onClick={() => setTipoVehiculo(veh.id)}
+                                                className={`p-3 border rounded-xl flex flex-col items-center gap-1 transition-all ${
+                                                    tipoVehiculo === veh.id 
+                                                        ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400' 
+                                                        : 'bg-black/20 border-white/5 text-zinc-500 hover:text-zinc-300'
+                                                }`}
+                                            >
+                                                <IconComp size={16} />
+                                                <span className="text-[9px] font-mono font-bold uppercase">{veh.label}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-bold flex items-center gap-1">
+                                        <Milestone size={12} className="text-yellow-500" /> Oferta en COP
+                                    </label>
+                                    <input 
+                                        type="number" 
+                                        placeholder="Ej. 2000"
+                                        value={ofertaPasajero}
+                                        onChange={(e) => setOfertaPasajero(e.target.value)}
+                                        className="w-full bg-black/40 border border-white/5 p-3.5 rounded-xl text-zinc-100 text-xs focus:border-cyan-500/40 outline-none font-mono transition-all"
+                                    />
+                                </div>
+
                                 <button type="submit" disabled={loadingSolicitud} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-3 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all mt-2 disabled:opacity-50">Lanzar al Radar</button>
                             </form>
                         )}
@@ -228,7 +342,18 @@ const HomePasajero = () => {
                     </div>
                 </div>
             </div>
+
+            {/* INCLUSIÓN DE MODAL DE CALIFICACIÓN AL FINALIZAR TRAYECTOS */}
+            {mostrarModalCalificacion && (
+                <ModalCalificacion 
+                    isOpen={mostrarModalCalificacion}
+                    onClose={handleCierreCalificacion}
+                    rideId={rideId}
+                    datosConductor={datosConductor}
+                />
+            )}
         </div>
     );
 };
+
 export default HomePasajero;

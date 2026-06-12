@@ -1,12 +1,17 @@
-// Versión Arquitectura: V3.1 - Consolidación Atómica de Recargas Administrativas y Telemetría GPS
+// Versión Arquitectura: V4.0 - Integración Quirúrgica del Puente de Sincronización en Tiempo Real con Firestore
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión de conductores, telemetría de estado, búsquedas radiales geoespaciales, recargas matemáticas exactas y procesar ráfagas de coordenadas de la malla vial.
+ * Misión: Gestión de conductores, telemetría de estado, búsquedas radiales geoespaciales, recargas matemáticas exactas, 
+ * y procesamiento de ráfagas de coordenadas con duplicación síncrona hacia Firebase Firestore.
  */
 
 import mongoose from 'mongoose';
 import Conductor from '../../models/Conductor.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
+
+// 🚀 GOBERNANZA DE TIEMPO REAL: Importación del SDK Administrativo y las Rutas Globales de Firestore
+import { dbFirestore } from '../../config/firebase.js'; 
+import { FIRESTORE_PATHS } from '../../config/firebase.js'; 
 
 // 📡 FUNCIÓN DE TELEMETRÍA: Obtener conductores activos
 export const obtenerConductoresDisponibles = async (req, res) => {
@@ -136,7 +141,7 @@ export const recargarBilleteraPorAdmin = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Recarga procesada de forma atómica.",
+            message: "Recarga processed de forma atómica.",
             saldo: conductorActualizado.saldo,
             data: {
                 conductor: conductorActualizado.nombre,
@@ -225,7 +230,7 @@ export const obtenerConductoresCercanos = async (req, res) => {
 
 /**
  * 📡 ENDPOINT: Actualización de Ubicación GPS a Alta Velocidad (Ráfaga de Telemetría)
- * Optimizado para minimizar ciclos de CPU de computadoras locales.
+ * Optimizado para minimizar ciclos de CPU de computadoras locales y sincronizar en paralelo con Firebase Firestore.
  */
 export const actualizarUbicacionGPS = async (req, res) => {
     try {
@@ -250,7 +255,7 @@ export const actualizarUbicacionGPS = async (req, res) => {
             coordinates: [parsedLng, parsedLat]
         };
 
-        // Actualización directa sin instanciar documentos completos (Ahorro masivo de procesamiento de CPU)
+        // ⚡ PASO 1: Actualización directa en MongoDB Atlas (Optimización CPU mediante Lean)
         const conductorActualizado = await Conductor.findByIdAndUpdate(
             conductorId,
             { 
@@ -259,24 +264,43 @@ export const actualizarUbicacionGPS = async (req, res) => {
                     estado: estadoLcase
                 } 
             },
-            { new: true, select: '_id nombre estado' } // Retorna solo campos mínimos
+            { new: true, select: '_id nombre estado' }
         ).lean();
 
         if (!conductorActualizado) {
-            return res.status(404).json({ success: false, message: "❌ Unidad de transporte no registrada." });
+            return res.status(404).json({ success: false, message: "❌ Unidad de transporte no registrada en la base central MDB." });
+        }
+
+        // ⚡ PASO 2: PUENTE DE FUEGO SÍNCRONO - Inyección en tiempo real en la colección global de Firestore
+        if (dbFirestore && FIRESTORE_PATHS && FIRESTORE_PATHS.conductores) {
+            // Se utiliza la ruta centralizada gobernada por el objeto global FIRESTORE_PATHS
+            const firestoreDocRef = dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(conductorId);
+            
+            await firestoreDocRef.set({
+                id: conductorId,
+                nombre: conductorActualizado.nombre,
+                estado: estadoLcase,
+                coordenadas: {
+                    latitude: parsedLat,
+                    longitude: parsedLng
+                },
+                updatedAt: new Date().toISOString()
+            }, { merge: true }); // Merge evita la destrucción de metadatos previamente guardados en el nodo móvil
+        } else {
+            console.warn("⚠️ [CIMCO-FIREBASE-WARN] El puente Firestore no está inicializado o FIRESTORE_PATHS está ausente.");
         }
 
         // Trazabilidad premium compacta para la terminal de Nodemon
-        console.log(`📡 [GPS] ID: ${conductorId.substring(18)}... | Est: ${estadoLcase.toUpperCase()} | Coord: [${parsedLat.toFixed(5)}, ${parsedLng.toFixed(5)}]`);
+        console.log(`📡 [MDB ↔ FIRESTORE] ID: ${conductorId.substring(18)}... | Est: ${estadoLcase.toUpperCase()} | Coord: [${parsedLat.toFixed(5)}, ${parsedLng.toFixed(5)}]`);
 
         return res.status(200).json({
             success: true,
-            message: "📡 Telemetría GPS inyectada correctamente en malla vial local.",
+            message: "📡 Telemetría GPS inyectada correctamente en la base central y sincronizada con Firestore en tiempo real.",
             estadoActual: conductorActualizado.estado
         });
 
     } catch (error) {
-        console.error('❌ [CIMCO-GPS-ERR] Error en ráfaga de posicionamiento:', error.message);
-        return res.status(500).json({ success: false, message: "Falla crítica en el canal de telemetría.", error: error.message });
+        console.error('❌ [CIMCO-GPS-ERR] Error en ráfaga de posicionamiento híbrido:', error.message);
+        return res.status(500).json({ success: false, message: "Falla crítica en el canal de telemetría híbrido.", error: error.message });
     }
 };

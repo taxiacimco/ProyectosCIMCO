@@ -1,3 +1,4 @@
+// Versión Arquitectura: V4.1 - Consolidación de Gobernanza de Rutas FIRESTORE_PATHS y Alias dbFirestore
 // Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\config\firebase.js
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -8,8 +9,18 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// 📐 CONSTANTE TOPOLÓGICA: Ruta Maestra unificada para evitar conflictos de mapeo
+// ==================================================================
+// 📐 GOBERNANZA DE RUTAS TOPOLÓGICAS (FIRESTORE_PATHS)
+// ==================================================================
+// Ruta Maestra unificada heredada
 export const RUTA_VIAJES_PROD = "artifacts/taxiacimco-app/public/data/viajes";
+
+// Nueva estructura centralizada de colecciones para sincronización en tiempo real
+export const FIRESTORE_PATHS = {
+    conductores: 'conductores',
+    viajes: 'viajes',
+    transacciones: 'transacciones'
+};
 
 let app;
 
@@ -34,7 +45,12 @@ if (process.env.FIRESTORE_EMULATOR_HOST || true) {
     });
 }
 
+// Exportación original para mantener compatibilidad con el código anterior
 export const db = getFirestore(app);
+
+// 🛡️ ALIAS DE COMPATIBILIDAD ARQUITECTÓNICA
+// Exportamos dbFirestore apuntando a db para satisfacer el puente de telemetría sin romper otros módulos
+export const dbFirestore = db;
 
 // Forzamos los settings explícitos en el objeto db para asegurar el puerto 8080
 db.settings({

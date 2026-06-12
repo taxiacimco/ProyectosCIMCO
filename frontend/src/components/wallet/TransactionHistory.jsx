@@ -1,116 +1,120 @@
-// Versión Arquitectura: V1.1 - Sincronización de Historial Post-Auth
+// Versión Arquitectura: V12.0 - PROD READY: Normalización Divisa (COP Neto) y Consulta Inyectada
 /**
- * PROYECTO: TAXIA CIMCO - Módulo de Billetera
- * Arquitectura: Hexagonal (Capa de Adaptadores de Entrada)
- * Misión: Resolver el aborto prematuro del listener asegurando la existencia del UID.
+ * Ubicación: @/components/wallet/TransactionHistory.jsx
+ * Misión: Auditar y renderizar la trazabilidad financiera del usuario. 
+ * Ajuste: Eliminación de parseo de céntimos para sincronizar con la Inyección Atómica del AdminPanel.
  */
 
 import React, { useState, useEffect } from 'react';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  onSnapshot 
-} from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
+import { useAuth } from '@/hooks/useAuth';
 import { Clock, ArrowUpRight, ArrowDownLeft, Loader2 } from 'lucide-react';
 
-const auth = getAuth();
-const db = getFirestore();
-
-// [REGLA DE ORO 1]: Estructura de Datos Sagrada
-const SACRED_PATH = "artifacts/taxiacimco-app/public/data/transacciones";
-
 const TransactionHistory = () => {
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
+    const { user, loading: authLoading } = useAuth();
+    const [transactions, setTransactions] = useState([]);
+    const [loadingTx, setLoadingTx] = useState(true);
 
-  useEffect(() => {
-    // 🛡️ PROTOCOLO DE ESCUCHA ASÍNCROMA
-    // Escuchamos el cambio de estado de Auth para garantizar que el UID esté presente
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log("✅ [History] Usuario detectado:", user.uid);
-        
+    useEffect(() => {
+        // 🛡️ Guarda Anti-Undefined
+        if (!user?.uid) {
+            setLoadingTx(false);
+            return;
+        }
+
+        // 🚀 Consulta optimizada a la ruta limpia inyectada
+        const pathColeccion = FIRESTORE_PATHS.transacciones || 'transacciones';
         const q = query(
-          collection(db, SACRED_PATH),
-          where("targetUid", "==", user.uid),
-          orderBy("createdAt", "desc")
+            collection(db, pathColeccion),
+            where("targetUid", "==", user.uid),
+            orderBy("createdAt", "desc")
         );
 
-        const unsubscribeSnapshot = onSnapshot(q, (snapshot) => {
-          const docs = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          setTransactions(docs);
-          setLoading(false);
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const docs = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    type: data.type || "DESCONOCIDO",
+                    amount: data.amount || 0,
+                    createdAt: data.createdAt || null
+                };
+            });
+            setTransactions(docs);
+            setLoadingTx(false);
         }, (error) => {
-          console.error("❌ [History] Error en snapshot:", error);
-          setLoading(false);
+            console.error("❌ [History] Error crítico de lectura en snapshot:", error);
+            setLoadingTx(false);
         });
 
-        // Limpieza del listener de Firestore
-        return () => unsubscribeSnapshot();
-      } else {
-        console.warn("⚠️ [History] Esperando autenticación...");
-        setLoading(false);
-      }
-    });
+        return () => unsubscribe();
+    }, [user]);
 
-    return () => unsubscribeAuth();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4 opacity-50">
-        <Loader2 className="animate-spin text-cyan-500" size={32} />
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Sincronizando Historial...</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <h3 className="text-xs font-black text-white uppercase tracking-tighter flex items-center gap-2 mb-6">
-        Últimos <span className="text-cyan-500">Movimientos</span>
-      </h3>
-
-      {transactions.length === 0 ? (
-        <div className="text-center py-10 border border-dashed border-slate-800 rounded-3xl">
-          <p className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">
-            No se detectan transacciones en el historial.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {transactions.map((tx) => (
-            <div key={tx.id} className="bg-slate-900/40 border border-slate-800 p-4 rounded-2xl flex items-center justify-between hover:border-slate-700 transition-all">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-xl ${tx.type === 'RECARGA' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                  {tx.type === 'RECARGA' ? <ArrowDownLeft size={20} /> : <ArrowUpRight size={20} />}
-                </div>
-                <div>
-                  <p className="text-xs font-black text-white uppercase">{tx.type}</p>
-                  <p className="text-[9px] text-slate-500 font-mono italic">Ref: {tx.id.substring(0, 8)}</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className={`text-sm font-black ${tx.type === 'RECARGA' ? 'text-green-400' : 'text-slate-300'}`}>
-                  {tx.type === 'RECARGA' ? '+' : '-'}${ (tx.amount / 100).toLocaleString() }
-                </p>
-                <p className="text-[8px] text-slate-600 font-bold uppercase tracking-tighter flex items-center gap-1 justify-end">
-                  <Clock size={8} /> {tx.createdAt?.toDate().toLocaleDateString() || 'Reciente'}
-                </p>
-              </div>
+    if (authLoading || loadingTx) {
+        return (
+            <div className="flex flex-col items-center justify-center py-12 space-y-4 bg-[#121214]/60 backdrop-blur-md rounded-2xl border border-white/5">
+                <Loader2 className="animate-spin text-emerald-500" size={32} />
+                <p className="text-xs font-mono text-zinc-400 uppercase tracking-widest">Auditoria en curso...</p>
             </div>
-          ))}
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between px-2">
+                <h3 className="text-xs font-bold text-white uppercase tracking-widest">Libro Mayor</h3>
+                <span className="text-[9px] text-zinc-500 font-mono bg-white/5 px-2 py-1 rounded-md">{transactions.length} Mvts</span>
+            </div>
+
+            {transactions.length === 0 ? (
+                <div className="text-center py-12 bg-[#121214]/40 backdrop-blur-md border border-white/5 rounded-2xl">
+                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
+                        Libro contable en cero.
+                    </p>
+                </div>
+            ) : (
+                <div className="space-y-2.5">
+                    {transactions.map((tx) => {
+                        // Clasificación de la naturaleza del movimiento
+                        const isRecarga = tx.type === 'RECARGA' || tx.type === 'DEPOSITO';
+                        
+                        return (
+                            <div 
+                                key={tx.id} 
+                                className="bg-[#121214]/60 backdrop-blur-md border border-white/5 p-4 rounded-xl flex items-center justify-between hover:border-white/10 hover:bg-[#121214]/80 transition-all duration-300 group"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className={`p-2 rounded-xl border transition-all ${
+                                        isRecarga 
+                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 group-hover:bg-emerald-500/20' 
+                                            : 'bg-rose-500/10 text-rose-400 border-rose-500/20 group-hover:bg-rose-500/20'
+                                    }`}>
+                                        {isRecarga ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-zinc-200 uppercase tracking-widest">{tx.type}</p>
+                                        <p className="text-[9px] text-zinc-500 font-mono">Ref: {tx.id.substring(0, 8)}</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="text-right">
+                                    {/* 🛡️ Normalización COP: Se elimina la división por 100 */}
+                                    <p className={`text-sm font-bold font-mono ${isRecarga ? 'text-emerald-400' : 'text-zinc-300'}`}>
+                                        {isRecarga ? '+' : '-'}${ parseFloat(tx.amount || 0).toLocaleString('es-CO') }
+                                    </p>
+                                    <p className="text-[8px] text-zinc-500 font-bold uppercase flex items-center gap-1 justify-end mt-0.5 tracking-wider">
+                                        <Clock className="opacity-60" size={10} /> 
+                                        {tx.createdAt ? new Date(tx.createdAt.toDate()).toLocaleString('es-CO', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
+                                    </p>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
         </div>
-      )}
-    </div>
-  );
+    );
 };
 
 export default TransactionHistory;

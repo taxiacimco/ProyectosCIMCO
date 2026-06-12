@@ -1,15 +1,15 @@
-// Versión Arquitectura: V17.5 - Interfaz Suave & Match de Errores Operativos (CIMCO-UI V9.4 Claro)
+// Versión Arquitectura: V18.2 - Rompe-Bucles Automático y Sincronización del Handshake V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Estilo: CIMCO-UI V9.4 Light Mode Glassmorphism
- * Misión: Detectar errores reales del backend y suavizar paleta de colores.
+ * Misión: Componente de autenticación de alta fidelidad con redirección predictiva para Operadores, Secretarias y CEO.
+ * Ajuste: Mitigación total del bucle de renders infinitos congelando el formulario tras validación exitosa.
  */
 
 import React, { useState } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '@/hooks/useAuth';
 import { useNavigate, Link } from 'react-router-dom';
-import api from '../config/api';
-import { Eye, EyeOff, ShieldAlert } from 'lucide-react';
+import api from '@/config/api';
+import { Eye, EyeOff, ShieldAlert, KeyRound, Terminal } from 'lucide-react';
 
 const Login = () => {
   const { loginLocal } = useAuth();
@@ -23,131 +23,188 @@ const Login = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (loading) return; // 🛡️ Cortafuegos 1: Previene ráfagas de ejecución concurrente
+
     setLoading(true);
     setError('');
 
-    try {
-      console.log('📡 [CIMCO-TELEMETRY] Iniciando handshake con /api/auth/login...');
-      const { data } = await api.post('/api/auth/login', { identifier, password });
-      
-      if (data.success) {
-        console.log('✅ [CIMCO-TELEMETRY] Respuesta recibida:', data);
-        loginLocal(data.user, data.token);
-        
-        const nivelAcceso = data.user.access_level;
-        const rol = data.user.role || data.user.rol;
+    // 🛡️ GUARDA DE SEGURIDAD: Validación preventiva estricta en el cliente
+    const cleanIdentifier = identifier ? identifier.trim() : '';
+    if (!cleanIdentifier || !password) {
+      setError('Por favor, complete todos los campos de autenticación.');
+      setLoading(false);
+      return;
+    }
 
-        if (rol === 'ADMIN' || nivelAcceso === 99) {
-            console.log('👑 [CIMCO-TELEMETRY] Perfil CEO detectado. Redirigiendo a Consola Central...');
-            navigate('/admin');
-        } else {
-            navigate('/');
+    try {
+      console.log('📡 [CIMCO-AUTH] Solicitando handshake de acceso al nodo central...');
+      
+      // Petición perimetral utilizando la API unificada (api.js con puerto 3000)
+      const res = await api.post('/auth/login', {
+        identifier: cleanIdentifier,
+        password: password
+      });
+
+      // 🛡️ Anti-Undefined: Verificación estricta de la estructura del payload
+      if (res.data && res.data.success && res.data.usuario && res.data.token) {
+        console.log('✅ [CIMCO-AUTH] Handshake exitoso. Payload de identidad recibido.');
+        
+        const userRole = res.data.usuario.role || res.data.usuario.rol;
+        
+        // Determinar mapa topológico de redirecciones por rol operativo
+        let redirectPath = '/';
+        switch (userRole) {
+          case 'admin':
+            redirectPath = '/admin/dashboard';
+            break;
+          case 'secretaria':
+            redirectPath = '/dashboard/operaciones';
+            break;
+          case 'pasajero':
+            redirectPath = '/pasajero/home';
+            break;
+          case 'despachador':
+            redirectPath = '/despachador/home';
+            break;
+          case 'intermunicipal':
+            redirectPath = '/intermunicipal/home';
+            break;
+          case 'motocarga':
+            redirectPath = '/motocarga/home';
+            break;
+          case 'mototaxi':
+          case 'motoparrillero':
+            redirectPath = '/mototaxi/home';
+            break;
+          default:
+            redirectPath = '/';
         }
+
+        console.log(`🚀 [CIMCO-AUTH] Sincronizando sesión local. Destino asignado: ${redirectPath}`);
+        
+        // 🔥 Sincronización atómica del contexto global de autenticación
+        await loginLocal(res.data.usuario, res.data.token);
+        
+        // 🛡️ Cortafuegos 2: Limpieza de credenciales en memoria local para romper re-renders accidentales
+        setIdentifier('');
+        setPassword('');
+        
+        // Transición instantánea y segura una vez asentada la data en memoria/storage
+        navigate(redirectPath);
+      } else {
+        setError(res.data?.message || 'Estructura de respuesta corrupta o token ausente.');
+        setLoading(false);
       }
     } catch (err) {
-      console.error('❌ [CIMCO-TELEMETRY] Error en pasarela:', err.response?.data || err.message);
-      
-      const status = err.response?.status;
-      // Capturamos el mensaje exacto que viene del servidor de desarrollo
-      const msgBackend = err.response?.data?.message || '';
-
-      // 🧠 LOGICA DE CAPTURA MEJORADA: Evaluamos tanto el status como el texto devuelto
-      if (
-        status === 404 || 
-        msgBackend.includes("no registrado") || 
-        msgBackend.includes("no existe") || 
-        msgBackend.includes("sector operativo") // Captura el error de usuario inexistente/inválido en sector operativo
-      ) {
-          // UI Proactiva: Alerta de registro guiado
-          setError('Este usuario no se encuentra registrado en el sector operativo. Redirigiendo al formulario de registro...');
-          
-          // Redirección automática tras 3 segundos
-          setTimeout(() => {
-              navigate('/register');
-          }, 3000);
+      console.error('🚨 [CIMCO-AUTH-FATAL] Quiebre en pasarela de acceso:', err);
+      if (err.response && err.response.data && err.response.data.message) {
+        setError(err.response.data.message);
       } else {
-          setError('Credenciales inválidas. Por favor, verifique su clave de acceso.');
+        setError('El servidor Express no responde. Verifique el estado del clúster central.');
       }
-    } finally {
       setLoading(false);
     }
   };
 
   return (
-    // 🎨 PALETA CLARA: Fondo gris suave/azulino ultra-limpio
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 transition-colors duration-500">
-      {/* Tarjeta con efecto cristal claro (Glassmorphism) y bordes sutiles */}
-      <div className="w-full max-w-md backdrop-blur-md bg-white/90 border border-slate-200/60 p-8 rounded-2xl shadow-xl shadow-slate-200/50">
+    <div className="relative min-h-screen w-full bg-[#0a0a0c] flex items-center justify-center p-4 overflow-hidden select-none">
+      
+      {/* CAPA DE AMBIENTE ESTÉTICO: CIMCO NEBULA */}
+      <div className="absolute top-1/4 left-1/4 w-[400px] h-[400px] bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse" />
+      <div className="absolute bottom-1/4 right-1/4 w-[300px] h-[300px] bg-purple-500/5 rounded-full blur-[100px] pointer-events-none" />
+
+      {/* RECIPIENTE PERIMETRAL PREMIUM CON ESTÉTICA GLASSMORPHISM */}
+      <div className="relative w-full max-w-md backdrop-blur-md bg-[#121214]/80 border border-white/[0.04] p-8 rounded-2xl shadow-[0_24px_60px_rgba(0,0,0,0.8)] transition-all duration-300">
         
-        <h1 className="text-slate-800 text-xl font-bold mb-6 tracking-widest text-center uppercase">
-          Acceso TAXIA CIMCO
-        </h1>
-        
+        {/* ENCABEZADO TÁCTICO */}
+        <div className="text-center mb-8 relative z-10">
+          <div className="inline-flex p-3 rounded-xl bg-white/[0.02] border border-white/[0.05] text-cyan-400 mb-4 shadow-inner">
+            <Terminal size={24} className="animate-pulse" />
+          </div>
+          <h1 className="text-xl font-black text-white uppercase tracking-[0.15em] font-mono">
+            TAXIA CIMCO
+          </h1>
+          <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest mt-1">
+            Módulo de Acceso Ecosistema Híbrido
+          </p>
+        </div>
+
+        {/* COMPUERTA DE GESTIÓN DE ERRORES SÓNICOS */}
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center text-red-600 text-[11px] uppercase font-mono transition-all animate-in fade-in zoom-in-95">
-            <ShieldAlert size={16} className="mr-2 flex-shrink-0 text-red-500" /> 
+          <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-mono flex items-start gap-3 animate-fade-in">
+            <ShieldAlert size={16} className="mt-0.5 shrink-0" />
             <span>{error}</span>
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        {/* FORMULARIO DE ACCESO INDUSTRIAL */}
+        <form onSubmit={handleLogin} className="space-y-5 relative z-10">
           <div>
-            <label className="block text-[10px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">
-              ID / Teléfono
+            <label className="block text-[10px] text-zinc-400 font-mono uppercase tracking-widest mb-2 font-bold">
+              Identificador (Celular o Correo)
             </label>
             <input 
-              type="text"
+              type="text" 
+              placeholder="Ej: 3001234567 o admin@cimco.com"
+              className="w-full bg-[#16161a]/90 border border-white/[0.05] p-3.5 rounded-xl text-zinc-100 text-sm focus:border-cyan-500/40 focus:bg-[#1a1a22] outline-none font-mono transition-all duration-200"
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg text-slate-800 focus:border-cyan-500 focus:bg-white outline-none transition-all"
-              placeholder="Ej. 3000000000"
-              required 
+              disabled={loading}
+              required
             />
           </div>
 
-          <div className="relative">
-            <label className="block text-[10px] uppercase tracking-widest text-slate-500 mb-1 font-semibold">
-              Clave de Acceso
+          <div>
+            <label className="block text-[10px] text-zinc-400 font-mono uppercase tracking-widest mb-2 font-bold">
+              Clave Operativa
             </label>
-            <input 
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg text-slate-800 focus:border-cyan-500 focus:bg-white outline-none transition-all"
-              placeholder="••••••"
-              required 
-            />
-            <button 
-              type="button" 
-              onClick={() => setShowPassword(!showPassword)} 
-              className="absolute right-3 top-9 text-slate-400 hover:text-slate-600 transition-colors"
-            >
+            <div className="relative">
+              <input 
+                type={showPassword ? "text" : "password"} 
+                placeholder="••••••••"
+                className="w-full bg-[#16161a]/90 border border-white/[0.05] p-3.5 pr-11 rounded-xl text-zinc-100 text-sm focus:border-cyan-500/40 focus:bg-[#1a1a22] outline-none font-mono tracking-widest transition-all duration-200"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                required
+              />
+              <button 
+                type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-zinc-500 hover:text-zinc-300 rounded-lg transition-colors"
+                onClick={() => setShowPassword(!showPassword)}
+                disabled={loading}
+              >
                 {showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}
-            </button>
+              </button>
+            </div>
           </div>
 
           <button 
             type="submit" 
             disabled={loading}
-            className={`w-full mt-6 py-4 text-xs font-mono uppercase tracking-[0.25em] rounded-xl transition-all duration-300 font-bold ${
-              loading 
-                ? 'bg-slate-200 text-slate-400 cursor-not-allowed' 
-                : 'bg-slate-800 text-white hover:bg-cyan-600 shadow-md hover:shadow-cyan-200'
-            }`}
+            className="w-full mt-6 py-4 text-xs font-mono uppercase tracking-[0.25em] rounded-xl bg-zinc-100 text-black hover:bg-cyan-500 hover:text-white font-black transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg hover:shadow-cyan-500/10 flex items-center justify-center gap-2"
           >
-            {loading ? 'Procesando...' : 'Acceder al Nodo Central'}
+            {loading ? (
+              <>
+                <span className="h-3 w-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                Sincronizando Nodo...
+              </>
+            ) : (
+              <>
+                <KeyRound size={12} /> Acceder al Nodo Central
+              </>
+            )}
           </button>
         </form>
 
-        {/* --- ESTRUCTURA DEL FOOTER ADAPTADO A COLORES SUAVES --- */}
-        <div className="mt-6 pt-4 border-t border-slate-100 flex flex-col gap-3 text-center">
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">
-                ¿Usuario nuevo? <Link to="/register" className="text-cyan-600 hover:text-cyan-700 font-bold transition-colors">REGISTRARSE</Link>
-            </p>
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">
-                ¿Olvidaste tu clave? <Link to="/recuperar" className="text-cyan-600 hover:text-cyan-700 font-bold transition-colors">RECUPERAR CUENTA</Link>
-            </p>
+        {/* PASARELA DE ENLACES PERIMETRALES */}
+        <div className="mt-8 pt-4 border-t border-white/[0.03] relative z-10">
+            <div className="flex justify-between text-[10px] text-zinc-500 font-mono uppercase tracking-widest">
+                <Link to="/register" className="hover:text-cyan-400 transition-colors">Crear cuenta</Link>
+                <Link to="/forgot-password" className="hover:text-cyan-400 transition-colors">¿Olvidó clave?</Link>
+            </div>
         </div>
+
       </div>
     </div>
   );

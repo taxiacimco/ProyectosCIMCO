@@ -1,12 +1,7 @@
-// Versión Arquitectura: V9.3 - Panel de Control de Perfil Pasajero con Blindaje Atómico y CIMCO-UI
-/**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\PerfilPasajero.jsx
- * Misión: Desplegar y gestionar los metadatos relacionales del perfil del pasajero desde MongoDB Atlas.
- * Estética: Ciber-Neo-Brutalismo / CIMCO-UI (Fondo plano oscuro, bordes macizos, acentos de alto contraste).
- */
-
+// Versión Arquitectura: V11.0 - PROD READY: Homologación Glassmorphism V9.3 y API_CORE_URL
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '@/hooks/useAuth';
+import { API_CORE_URL } from '@/config/api'; // 🚀 Consumo de la URL de producción
 import { User, Mail, Shield, ShieldCheck, Phone, Award, Loader } from 'lucide-react';
 
 const PerfilPasajero = () => {
@@ -15,34 +10,25 @@ const PerfilPasajero = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // 🛡️ GUARDA DE SEGURIDAD OBLIGATORIA (Anti-Undefined)
-        // Asegura el componente bloqueando peticiones asíncronas si el UID no está resuelto.
-        if (!user || !user.uid) {
-            console.warn("⚠️ [Perfil] Esperando resoluciones del módulo de identidad auth...");
-            return;
-        }
+        if (!user?.uid) return;
 
         const obtenerDatosPerfil = async () => {
             try {
                 setLoading(true);
-                // 📡 Extracción relacional desde MongoDB Atlas Core
-                const respuesta = await fetch(`http://localhost:3000/api/usuarios/perfil/${user.uid}`, {
+                // 📡 Consumo unificado mediante API_CORE_URL
+                const respuesta = await fetch(`${API_CORE_URL}/api/usuarios/perfil/${user.uid}`, {
                     method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    }
+                    headers: { 'Content-Type': 'application/json' }
                 });
 
                 const data = await respuesta.json();
-                
                 if (data.success) {
                     setPerfil(data.perfil);
                 } else {
-                    throw new Error("Estructura no inicializada en clúster central.");
+                    throw new Error("Estructura no inicializada.");
                 }
             } catch (err) {
-                console.log("💡 Usando datos en caché inyectados desde el contexto de autenticación local.");
-                // Fallback atómico resiliente para asegurar que la UI nunca quede vacía
+                console.log("💡 Resiliencia activa: Usando datos del contexto local.");
                 setPerfil({
                     nombre: user.displayName || 'Usuario CIMCO Pasajero',
                     correo: user.email || 'correo@taxiacimco.com',
@@ -61,22 +47,21 @@ const PerfilPasajero = () => {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#050505] flex items-center justify-center font-sans text-white">
-                <div className="flex flex-col items-center gap-3 border-4 border-white p-6 bg-zinc-900 shadow-[8px_8px_0px_0px_#eab308]">
+            <div className="min-h-screen bg-[#09090b] flex items-center justify-center font-mono text-white">
+                <div className="flex flex-col items-center gap-3 backdrop-blur-md bg-[#121214]/80 p-6 rounded-2xl border border-white/5 shadow-xl">
                     <Loader className="animate-spin text-yellow-500" size={32} />
-                    <span className="font-black tracking-tighter uppercase text-xs">Abriendo Expediente de Usuario...</span>
+                    <span className="tracking-widest uppercase text-[10px] text-zinc-400">Abriendo Expediente...</span>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-[#050505] text-white p-6 font-sans overflow-x-hidden">
+        <div className="min-h-screen bg-[#09090b] text-zinc-100 p-6 font-mono antialiased">
             <div className="max-w-2xl mx-auto">
                 
-                {/* Header Principal del Perfil */}
-                <header className="border-b-4 border-white pb-4 mb-8">
-                    <h1 className="text-4xl font-black italic tracking-tighter uppercase">
+                <header className="border-b border-white/5 pb-4 mb-8">
+                    <h1 className="text-2xl font-black tracking-widest uppercase text-white">
                         PERFIL <span className="text-yellow-500">PASAJERO</span>
                     </h1>
                     <p className="text-[10px] font-bold uppercase text-zinc-500 tracking-widest mt-1">
@@ -84,62 +69,58 @@ const PerfilPasajero = () => {
                     </p>
                 </header>
 
-                {/* Tarjeta de Identidad Ciber-Neo-Brutalista */}
-                <div className="bg-zinc-900 border-4 border-white p-6 shadow-[10px_10px_0px_0px_#fff] relative overflow-hidden mb-8">
-                    {/* Acento superior sólido */}
-                    <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-yellow-500 to-amber-500"></div>
+                {/* Contenedor Glassmorphism Premium */}
+                <div className="backdrop-blur-xl bg-[#121214]/80 border border-white/5 p-6 rounded-3xl shadow-xl relative overflow-hidden mb-8">
+                    <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-yellow-500 to-amber-500"></div>
 
                     <div className="flex flex-col md:flex-row items-center md:items-start gap-6 mt-2">
-                        {/* Avatar de Contraste Brutalista */}
-                        <div className="w-24 h-24 bg-zinc-950 border-4 border-yellow-500 flex items-center justify-center font-black text-3xl text-yellow-500 shadow-[4px_4px_0px_0px_#000] shrink-0 uppercase italic select-none">
+                        <div className="w-20 h-20 bg-zinc-950/60 rounded-2xl border border-yellow-500/20 flex items-center justify-center font-black text-2xl text-yellow-500 shrink-0 uppercase select-none">
                             {perfil?.nombre?.substring(0, 2)}
                         </div>
 
-                        <div className="flex-1 w-full text-center md:text-left">
+                        <div className="flex-1 w-full text-center md:text-left space-y-2">
                             <div className="flex flex-col md:flex-row md:items-center gap-2 justify-center md:justify-start">
-                                <h2 className="text-2xl font-black uppercase tracking-tight text-white">{perfil?.nombre}</h2>
-                                <span className="self-center bg-yellow-500 text-black font-black uppercase text-[9px] px-2 py-0.5 border border-black tracking-wider shadow-[2px_2px_0px_0px_#000]">
+                                <h2 className="text-xl font-black uppercase text-white">{perfil?.nombre}</h2>
+                                <span className="self-center bg-yellow-500/10 text-yellow-500 font-bold uppercase text-[9px] tracking-widest px-2.5 py-1 rounded-lg border border-yellow-500/20">
                                     {perfil?.rol}
                                 </span>
                             </div>
-                            <p className="text-zinc-500 font-bold text-xs font-mono mt-1">UID: {user?.uid}</p>
+                            <p className="text-zinc-500 text-[10px] font-bold">UID: {user?.uid}</p>
                             
-                            <div className="mt-4 inline-flex items-center gap-2 bg-emerald-950/50 border border-emerald-500 text-emerald-400 font-black text-[10px] uppercase px-3 py-1 rounded-sm">
+                            <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-bold text-[10px] uppercase px-3 py-1 rounded-lg">
                                 <ShieldCheck size={12} /> {perfil?.nivelSeguridad}
                             </div>
                         </div>
                     </div>
 
-                    {/* Bloques de Metadatos Relacionales */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8 pt-6 border-t-2 border-zinc-800 font-bold text-sm">
-                        <div className="bg-zinc-950 p-4 border border-zinc-800 flex items-center gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8 pt-6 border-t border-white/5 text-sm">
+                        <div className="bg-zinc-950/40 p-4 rounded-xl border border-white/5 flex items-center gap-3">
                             <Mail className="text-yellow-500 shrink-0" size={18} />
                             <div className="truncate">
-                                <p className="text-[8px] uppercase text-zinc-500 font-black">Correo Electrónico</p>
-                                <p className="text-zinc-200 text-xs font-semibold truncate">{perfil?.correo}</p>
+                                <p className="text-[9px] uppercase text-zinc-500 font-bold tracking-wider">Correo Electrónico</p>
+                                <p className="text-zinc-200 text-xs font-semibold truncate mt-0.5">{perfil?.correo}</p>
                             </div>
                         </div>
 
-                        <div className="bg-zinc-950 p-4 border border-zinc-800 flex items-center gap-3">
+                        <div className="bg-zinc-950/40 p-4 rounded-xl border border-white/5 flex items-center gap-3">
                             <Phone className="text-yellow-500 shrink-0" size={18} />
                             <div>
-                                <p className="text-[8px] uppercase text-zinc-500 font-black">Contacto Móvil</p>
-                                <p className="text-zinc-200 text-xs font-semibold">{perfil?.telefono}</p>
+                                <p className="text-[9px] uppercase text-zinc-500 font-bold tracking-wider">Contacto Móvil</p>
+                                <p className="text-zinc-200 text-xs font-semibold mt-0.5">{perfil?.telefono}</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Sección de Indicadores Operativos */}
-                <div className="grid grid-cols-2 gap-4 font-black text-center uppercase">
-                    <div className="bg-zinc-900 border-4 border-white p-4 shadow-[6px_6px_0px_0px_#fff]">
-                        <p className="text-[9px] text-zinc-500 flex items-center justify-center gap-1"><Award size={12}/> Trayectos</p>
-                        <p className="text-3xl text-yellow-500 mt-1">{perfil?.viajesTotales}</p>
-                        <p className="text-[8px] text-zinc-400 font-bold mt-1">Registrados en Core</p>
+                <div className="grid grid-cols-2 gap-4 font-bold text-center uppercase">
+                    <div className="backdrop-blur-md bg-[#121214]/60 border border-white/5 p-4 rounded-2xl shadow-md">
+                        <p className="text-[10px] text-zinc-500 flex items-center justify-center gap-1.5"><Award size={12}/> Trayectos</p>
+                        <p className="text-2xl font-black text-yellow-500 mt-1">{perfil?.viajesTotales}</p>
+                        <p className="text-[8px] text-zinc-500 font-bold mt-1 tracking-wider">Registrados en Core</p>
                     </div>
-                    <div className="bg-zinc-900 border-4 border-white p-4 shadow-[6px_6px_0px_0px_#fff] flex flex-col justify-center items-center">
-                        <p className="text-[9px] text-zinc-500 flex items-center justify-center gap-1"><Shield size={12}/> Estado Token</p>
-                        <div className="mt-2 text-[10px] bg-zinc-950 px-2 py-1 border border-zinc-800 text-zinc-400 font-mono tracking-tighter w-full truncate">
+                    <div className="backdrop-blur-md bg-[#121214]/60 border border-white/5 p-4 rounded-2xl shadow-md flex flex-col justify-center items-center">
+                        <p className="text-[10px] text-zinc-500 flex items-center justify-center gap-1.5"><Shield size={12}/> Estado Token</p>
+                        <div className="mt-2 text-[9px] bg-zinc-950/80 px-2 py-1.5 rounded-lg border border-white/5 text-zinc-400 tracking-wider w-full truncate font-bold">
                             JWT_ACTIVE_SESSION
                         </div>
                     </div>

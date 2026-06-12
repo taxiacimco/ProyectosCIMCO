@@ -1,65 +1,52 @@
-// Versión Arquitectura: V1.0 - Pasarela de Recargas Wompi
+// Versión Arquitectura: V11.1 - PROD READY: Billetera de Motocarga Homologada y con Historial de Transacciones Activo
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../hooks/useAuth';
-import { db } from '../../config/firebase';
+import { useAuth } from '@/hooks/useAuth';
+import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { Wallet, CreditCard, TrendingUp, ShieldCheck } from 'lucide-react';
+import { Wallet, Activity } from 'lucide-react';
+import BotonRecarga from '@/components/wallet/BotonRecarga';
+import TransactionHistory from '@/components/wallet/TransactionHistory';
 
 const WalletMotocarga = () => {
     const { user } = useAuth();
     const [balance, setBalance] = useState(0);
-    const [monto, setMonto] = useState(5000);
 
     useEffect(() => {
-        if (!user) return;
-        return onSnapshot(doc(db, `artifacts/taxiacimco-app/public/data/wallets`, user.uid), (snap) => {
-            if (snap.exists()) setBalance(snap.data().balance || 0);
+        if (!user?.uid) return;
+        
+        const pathColeccion = FIRESTORE_PATHS.wallets || 'wallets';
+        const unsubscribe = onSnapshot(doc(db, pathColeccion, user.uid), (snap) => {
+            if (snap.exists()) {
+                setBalance(snap.data().balance || snap.data().saldo || 0);
+            }
         });
+
+        return () => unsubscribe();
     }, [user]);
 
-    const abrirPasarelaWompi = () => {
-        const checkout = new WidgetCheckout({
-            currency: 'COP',
-            amountInCents: monto * 100,
-            reference: `RECARGA-${user.uid}-${Date.now()}`,
-            publicKey: 'pub_test_tu_llave_aqui', // Reemplazar con tu llave de Wompi
-            redirectUrl: 'https://tu-app-cimco.web.app/wallet'
-        });
-        checkout.open((result) => console.log("Wompi Result:", result));
-    };
-
     return (
-        <div className="min-h-screen bg-black text-white p-6 font-mono">
-            <div className="border-4 border-yellow-400 p-6 shadow-[8px_8px_0px_0px_#fff]">
-                <div className="flex justify-between items-start mb-8">
-                    <h1 className="text-3xl font-black italic uppercase">Billetera <span className="text-yellow-400">CIMCO</span></h1>
-                    <Wallet size={40} className="text-yellow-400" />
+        <div className="min-h-screen bg-[#09090b] font-mono text-zinc-100 p-6 flex flex-col gap-6">
+            <header className="flex items-center gap-3 border-b border-white/5 pb-4">
+                <Wallet className="text-amber-500" size={28} />
+                <h1 className="text-xl font-black uppercase tracking-widest text-white">Billetera Motocarga</h1>
+            </header>
+
+            <div className="backdrop-blur-xl bg-[#121214]/80 border border-amber-500/20 p-8 rounded-3xl shadow-[0_0_30px_rgba(245,158,11,0.05)] relative overflow-hidden">
+                <div className="absolute -top-10 -right-10 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <p className="text-xs text-zinc-400 uppercase tracking-widest mb-2 relative z-10">Saldo Disponible</p>
+                <h2 className="text-4xl font-black text-white mb-6 relative z-10">${balance.toLocaleString()} COP</h2>
+                <div className="flex gap-4 relative z-10 mt-4">
+                    <BotonRecarga usuarioId={user?.uid} rol={user?.role || user?.rol} />
                 </div>
-
-                <div className="bg-zinc-900 border-2 border-zinc-800 p-6 mb-8 text-center">
-                    <p className="text-zinc-500 font-bold uppercase text-xs mb-2">Saldo Disponible</p>
-                    <h2 className="text-5xl font-black text-green-400">${balance.toLocaleString()}</h2>
+            </div>
+            
+            <div className="flex-1 backdrop-blur-md bg-[#121214]/60 rounded-3xl p-6 border border-white/5 flex flex-col gap-4 shadow-lg">
+                <div className="flex items-center gap-2 border-b border-white/5 pb-3">
+                    <Activity size={18} className="text-amber-500" />
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-300">Historial Financiero Caja</h3>
                 </div>
-
-                <div className="space-y-4">
-                    <label className="block text-[10px] font-black text-yellow-400 uppercase">Selecciona monto a recargar</label>
-                    <div className="grid grid-cols-3 gap-2">
-                        {[5000, 10000, 20000].map(val => (
-                            <button key={val} onClick={() => setMonto(val)} 
-                                className={`p-3 border-2 font-black ${monto === val ? 'bg-yellow-400 text-black border-black' : 'border-zinc-800 text-zinc-500'}`}>
-                                ${val/1000}K
-                            </button>
-                        ))}
-                    </div>
-
-                    <button onClick={abrirPasarelaWompi} className="w-full bg-white text-black py-4 font-black uppercase text-lg border-4 border-black shadow-[6px_6px_0px_0px_#facc15] active:translate-x-1 active:translate-y-1 transition-all flex items-center justify-center gap-2 mt-4">
-                        <CreditCard /> Recargar con Wompi
-                    </button>
-                </div>
-
-                <div className="mt-8 border-t-2 border-zinc-800 pt-4 flex items-center gap-2 text-zinc-500">
-                    <ShieldCheck size={16} />
-                    <span className="text-[10px] font-bold uppercase">Transacción protegida por Wompi & CIMCO-Security</span>
+                <div className="flex-1 overflow-y-auto">
+                    <TransactionHistory usuarioId={user?.uid} />
                 </div>
             </div>
         </div>

@@ -1,10 +1,8 @@
-// Versión Arquitectura: V10.8 - Reconexión de Emuladores Locales (Cierre de Bypass)
+// Versión Arquitectura: V11.1 - Consolidación de Gobernanza de Rutas (Estándar Internacional Inglés)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\firebase.js
- * Misión: Gestionar la conectividad de TAXIA CIMCO.
- * Lógica:
- * - Se reactivan los emuladores locales para sincronizar el clúster local y evitar
- * bloqueos por invalid-credential en el entorno de producción.
+ * Misión: Estandarización de rutas de Firestore a inglés y mantenimiento de servicios core.
+ * Integridad: Objeto FIRESTORE_PATHS homologado para evitar fugas de datos en colecciones 'viajes' obsoletas.
  */
 
 import { initializeApp } from "firebase/app";
@@ -21,23 +19,31 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// 🏛️ Inicialización de la Instancia Central
+// 🏛️ Inicialización de la Instancia Central (Guarda Anti-Undefined Delegada a Firebase)
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// 🛡️ CONSTANTES DE RUTAS DE PRODUCCIÓN HOMOLOGADAS (Patrón de Inyección Centralizada)
+export const FIRESTORE_PATHS = {
+  users: 'users',
+  rides: 'rides',
+  notifications: 'driver_notifications',
+  wallets: 'wallets',
+  chats: 'chats',
+  transacciones: 'transacciones'
+};
+
 // 🛡️ DETECTOR DE ENTORNO (Lógica Híbrida Modificada)
 const hostname = window.location.hostname;
-// Ampliamos la guarda para que cubra localhost, 127.0.0.1 y las IPs de tu red local en La Jagua
+// Ampliamos la guarda para que cubra localhost, 127.0.0.1 y las IPs de tu red local
 const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname.includes("192.168.");
 
-if (isLocal) {
-    // 💻 MODO DESARROLLO CON EMULADORES LOCALES ACTIVOS
-    console.log("📡 [CIMCO-INTERNAL] Entorno local detectado. Enlazando con Emuladores Firebase (Auth/Firestore)...");
-    
-    // 🛡️ REGLA INQUEBRANTABLE: Conexión atómica a los puertos de tu Terminal 1
-    connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
-    connectFirestoreEmulator(db, "127.0.0.1", 8080);
+// 🚀 CONFIGURACIÓN DE EMULADORES (Solo en desarrollo local para blindar la data de producción)
+if (isLocal && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {
+  console.warn("⚠️ [CIMCO-ARCHITECTURE] Emuladores de Firebase activados para entorno de prueba.");
+  connectAuthEmulator(auth, "http://localhost:9099");
+  connectFirestoreEmulator(db, "localhost", 8080);
 }
 
 export { app, auth, db };

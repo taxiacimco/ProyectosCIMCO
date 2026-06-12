@@ -1,23 +1,20 @@
-// Versión Arquitectura: V16.6 - Sincronización Estricta de Importaciones, Ruteo API Centralizado y Blindaje Anti-Undefined
+// Versión Arquitectura: V12.2 - Blindaje de FormData (Multipart) y Homologación de Payload (rol/role)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
- * Estilo: CIMCO-UI V1.1 Light Mode Premium Glassmorphism (Unificado con Login).
- * Misión: Capturar el teléfono y bloquearlo visualmente como identidad inmutable, desplegando
- *         dinámicamente los campos según el rol (Pasajero, Operador, Despachador).
- * Sincronización: Importación limpia de useAuth y migración de axios manual a api.js global.
+ * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Yellow).
+ * Misión: Capturar identidad exclusivamente para PASAJEROS y enviar el payload con access_level: 0.
+ * Ajuste: Protección Anti-Undefined en inyecciones de FormData y estandarización de variables de rol.
  */
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
-import api from '../config/api';
-import { Phone, User, Mail, Lock, ShieldCheck } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth'; 
+import api from '@/config/api'; 
+import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
+import { Phone, User, Mail, Lock, ShieldCheck, Camera } from 'lucide-react';
 
 const RegisterPasajero = () => {
     const navigate = useNavigate();
-    const auth = useAuth();
-    
-    // 🛡️ GUARDA DE SEGURIDAD (Anti-Undefined): Previene desbordamiento si useAuth es ejecutado fuera de contexto
-    const setUser = auth ? auth.setUser : null;
+    const { loginLocal } = useAuth();
 
     // 🔄 CONTROL DE FLUJO PROGRESIVO
     const [step, setStep] = useState(1);
@@ -29,31 +26,24 @@ const RegisterPasajero = () => {
     const [nombre, setNombre] = useState('');
     const [correo, setCorreo] = useState('');
     const [clave, setClave] = useState('');
-    const [tipoRegistro, setTipoRegistro] = useState('pasajero'); // 'pasajero', 'conductor', 'despachador'
-
-    // 🚖 ESTADOS ESPECÍFICOS OPERATIVOS
-    const [tipoVehiculo, setTipoVehiculo] = useState('mototaxi');
-    const [placa, setPlaca] = useState('');
-    const [empresa, setEmpresa] = useState('');
-    const [numeroInterno, setNumeroInterno] = useState('');
-
-    // 📂 DOCUMENTOS
-    const [cedulaFile, setCedulaFile] = useState(null);
-    const [licenciaFile, setLicenciaFile] = useState(null);
-    const [vehiculoFile, setVehiculoFile] = useState(null);
+    const [fotoPerfilFile, setFotoPerfilFile] = useState(null);
 
     const handleCheckPhone = async (e) => {
         e.preventDefault();
-        if (!telefono.trim() || telefono.length < 7) {
+        
+        // 🛡️ GUARDA DE SEGURIDAD PREVENTIVA
+        if (!telefono || !telefono?.trim() || telefono.length < 7) {
             setError('El número de teléfono (mínimo 7 dígitos) es obligatorio.');
             return;
         }
+        
         setLoading(true);
         setError('');
+        
         try {
-            // Sincronización con el gateway de api.js centralizado
             const res = await api.post(`/api/auth/check-phone`, { telefono: telefono.trim() });
-            if (res.data.success && res.data.existe) {
+            
+            if (res?.data?.success && res?.data?.existe) {
                 setError('Este terminal ya posee una identidad indexada. Redirigiendo...');
                 setTimeout(() => navigate('/login'), 2500);
             } else {
@@ -70,159 +60,191 @@ const RegisterPasajero = () => {
         e.preventDefault();
         setError('');
 
-        if (!nombre.trim() || !correo.trim() || !clave.trim()) {
+        // 🛡️ GUARDA DE SEGURIDAD: Validación estructural local
+        if (!nombre?.trim() || !correo?.trim() || !clave?.trim()) {
             setError('Todos los campos básicos son estructuralmente requeridos.');
-            return;
-        }
-        if (tipoRegistro === 'conductor' && !placa.trim()) {
-            setError('La placa es obligatoria para registrar unidades operativas.');
-            return;
-        }
-        if (tipoRegistro === 'despachador' && !empresa.trim()) {
-            setError('El nombre de la cooperativa/base es obligatorio para despachadores.');
             return;
         }
 
         setLoading(true);
         try {
-            const payload = {
-                nombre: nombre.trim(),
-                email: correo.toLowerCase().trim(),
-                telefono: telefono.trim(),
-                password: clave,
-                rol: tipoRegistro,
-                ...(tipoRegistro === 'conductor' && { 
-                    placa: placa.toUpperCase().trim(), 
-                    sub_rol: tipoVehiculo,
-                    numero_interno: numeroInterno.trim(),
-                    empresa: empresa.trim() 
-                }),
-                ...(tipoRegistro === 'despachador' && {
-                    empresa: empresa.trim(),
-                    numero_interno: numeroInterno.trim(),
-                })
-            };
+            const targetRole = ROLES?.PASAJERO || 'pasajero';
+            const accessLevel = DEFAULT_ACCESS_LEVELS?.[targetRole] ?? 0;
 
-            // Ejecución mediante instancia axial limpia
-            const res = await api.post(`/api/auth/register`, payload);
+            // ⚠️ ALERTA DE ARQUITECTURA: Uso de FormData requiere blindaje Anti-Undefined
+            // para evitar que valores nulos se serialicen como strings "undefined".
+            const formData = new FormData();
+            formData.append('nombre', nombre.trim());
+            formData.append('email', correo.toLowerCase().trim());
+            formData.append('telefono', telefono.trim());
+            formData.append('password', clave);
             
-            if (res.data.success) {
-                if (res.data.token) localStorage.setItem('token', res.data.token);
-                if (setUser) setUser(res.data.usuario || { nombre, email: correo, telefono, rol: tipoRegistro });
+            // 🚀 Inyección Atómica de Gobernanza (Homologada con Moto/Intermunicipal)
+            formData.append('role', targetRole); // Para la validación de Middleware
+            formData.append('rol', targetRole);  // Para el mapeo en el Controlador
+            formData.append('access_level', accessLevel);
+
+            // Verificación binaria segura
+            if (fotoPerfilFile instanceof File) {
+                formData.append('foto_perfil', fotoPerfilFile);
+            }
+
+            // Llamada al endpoint con headers explícitos para Multer/Cloudinary
+            const res = await api.post(`/api/auth/register`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            
+            if (res?.data?.success) {
+                // Iniciar sesión automáticamente delegando el token
+                loginLocal(res.data.usuario, res.data.token);
                 navigate('/');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Error de sincronización con Express.');
+            console.error("❌ [CIMCO-GATEWAY] Error de Form-Data:", err);
+            setError(err.response?.data?.message || 'Error de sincronización con el servidor de carga binaria.');
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        // Contenedor General en Light Mode
-        <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-center p-4 font-sans selection:bg-teal-500/30 relative transition-colors duration-500">
-            {/* Difuminado de fondo turquesa adaptado a entornos claros */}
-            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-teal-500/[0.03] rounded-full blur-[100px] pointer-events-none" />
+        <div className="min-h-screen bg-[#0a0a0c] text-zinc-200 flex flex-col items-center justify-center p-4 font-sans selection:bg-yellow-500/30 relative transition-colors duration-500">
             
-            {/* Tarjeta Cristalina Unificada */}
-            <div className="w-full max-w-md bg-white/90 backdrop-blur-md border border-slate-200/60 rounded-2xl p-6 shadow-xl shadow-slate-200/50 relative z-10">
+            {/* Efecto de luz ambiental posterior (Glassmorphism Light Bleed) */}
+            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-yellow-500/[0.05] rounded-full blur-[100px] pointer-events-none" />
+            
+            {/* Contenedor Principal CIMCO-UI */}
+            <div className="w-full max-w-md bg-[#121214]/80 backdrop-blur-xl border border-white/5 rounded-2xl p-6 shadow-2xl relative z-10">
                 <div className="text-center mb-6">
-                    <h2 className="text-xs font-bold uppercase tracking-[0.25em] text-teal-600">TAXIA CIMCO</h2>
-                    <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-1 font-mono font-semibold">Matriz Satelital de Registro</p>
+                    <h2 className="text-xs font-bold uppercase tracking-[0.25em] text-yellow-500">TAXIA CIMCO</h2>
+                    <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1 font-mono font-semibold">Registro de Pasajero</p>
                 </div>
 
                 {error && (
-                    <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 text-xs font-mono rounded-lg">
-                        ⚠️ {error}
+                    <div className="mb-4 p-3 bg-red-950/40 border border-red-500/20 text-red-400 text-xs font-mono rounded-lg backdrop-blur-sm flex items-center gap-2">
+                        <span className="font-bold flex-shrink-0 text-red-500">⚠️ SYSTEM_FAULT:</span> 
+                        <span className="leading-tight">{error}</span>
                     </div>
                 )}
 
                 {step === 1 ? (
                     <form onSubmit={handleCheckPhone} className="space-y-4">
                         <div className="text-center mb-1">
-                            <span className="text-[10px] text-slate-500 uppercase tracking-widest font-mono font-bold">Fase 01: Vinculación Telefónica</span>
+                            <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">Fase 01: Vinculación Telefónica</span>
                         </div>
-                        <div className="relative">
-                            <Phone className="absolute left-3.5 top-3.5 text-slate-400" size={14} />
-                            <input type="tel" placeholder="INGRESAR NÚMERO CELULAR" value={telefono} onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))} className="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 pl-10 pr-4 text-xs font-mono uppercase tracking-wide text-slate-800 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:bg-white transition-all" disabled={loading} maxLength={10} required />
+                        <div className="relative group">
+                            <Phone className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
+                            <input 
+                                type="tel" 
+                                placeholder="INGRESAR NÚMERO CELULAR" 
+                                value={telefono} 
+                                onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))} 
+                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs font-mono uppercase tracking-wide text-zinc-200 focus:outline-none focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] transition-all placeholder:text-zinc-600" 
+                                disabled={loading} 
+                                maxLength={10} 
+                                required 
+                            />
                         </div>
-                        <button type="submit" disabled={loading} className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-50 text-white text-xs font-mono font-bold uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-md hover:shadow-teal-200">
+                        <button 
+                            type="submit" 
+                            disabled={loading} 
+                            className="w-full bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-black text-xs font-mono font-black uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_25px_rgba(234,179,8,0.4)]"
+                        >
                             {loading ? 'CONECTANDO CENTRAL...' : 'VERIFICAR DISPONIBILIDAD'}
                         </button>
                     </form>
                 ) : (
                     <form onSubmit={handleRegister} className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
-                        {/* 📱 BADGE TURQUESA: IDENTIDAD BLOQUEADA */}
-                        <div className="bg-teal-500/[0.06] border border-teal-500/20 rounded-xl p-3.5 flex items-center justify-between">
+                        
+                        <div className="bg-yellow-950/30 border border-yellow-500/20 rounded-xl p-3.5 flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <ShieldCheck className="text-teal-600" size={15} />
-                                <span className="text-[9px] text-teal-600 uppercase tracking-widest font-mono font-bold">Identidad Celular</span>
+                                <ShieldCheck className="text-yellow-500" size={15} />
+                                <span className="text-[9px] text-yellow-500 uppercase tracking-widest font-mono font-bold">Identidad Celular</span>
                             </div>
-                            <span className="text-xs text-slate-800 font-bold tracking-widest bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200 font-mono">
+                            <span className="text-xs text-yellow-100 font-bold tracking-widest bg-[#18181b] px-2.5 py-1 rounded-md border border-white/5 font-mono">
                                 {telefono}
                             </span>
                         </div>
 
-                        {/* SELECTOR DE PERFIL MULTI-ROL (Light Mode UI) */}
-                        <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-slate-100 rounded-xl border border-slate-200/60">
-                            <button type="button" className={`py-2 text-[9px] uppercase tracking-widest rounded-lg transition-all font-mono ${tipoRegistro === 'pasajero' ? 'bg-white text-teal-600 font-bold border border-slate-200/80 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`} onClick={() => setTipoRegistro('pasajero')}>📱 Pasajero</button>
-                            <button type="button" className={`py-2 text-[9px] uppercase tracking-widest rounded-lg transition-all font-mono ${tipoRegistro === 'conductor' ? 'bg-white text-amber-600 font-bold border border-slate-200/80 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`} onClick={() => setTipoRegistro('conductor')}>🚖 Operador</button>
-                            <button type="button" className={`py-2 text-[9px] uppercase tracking-widest rounded-lg transition-all font-mono ${tipoRegistro === 'despachador' ? 'bg-white text-indigo-600 font-bold border border-slate-200/80 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`} onClick={() => setTipoRegistro('despachador')}>🎧 Despacho</button>
-                        </div>
-
-                        <div className="relative">
-                            <User className="absolute left-3.5 top-3.5 text-slate-400" size={14} />
-                            <input type="text" placeholder="NOMBRE COMPLETO" value={nombre} onChange={(e) => setNombre(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 p-3 pl-10 pr-4 text-xs text-slate-800 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:bg-white outline-none transition-all" disabled={loading} required />
-                        </div>
-                        <div className="relative">
-                            <Mail className="absolute left-3.5 top-3.5 text-slate-400" size={14} />
-                            <input type="email" placeholder="CORREO ELECTRÓNICO" value={correo} onChange={(e) => setCorreo(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 p-3 pl-10 pr-4 text-xs text-slate-800 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:bg-white outline-none transition-all" disabled={loading} required />
-                        </div>
-                        <div className="relative">
-                            <Lock className="absolute left-3.5 top-3.5 text-slate-400" size={14} />
-                            <input type="password" placeholder="CONTRASEÑA SEGURA (Mín. 6)" value={clave} onChange={(e) => setClave(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 p-3 pl-10 pr-4 text-xs text-slate-800 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:bg-white outline-none transition-all tracking-widest" disabled={loading} required />
-                        </div>
-
-                        {/* CAMPOS OPERATIVOS (Conductores / Despachadores) */}
-                        {(tipoRegistro === 'conductor' || tipoRegistro === 'despachador') && (
-                            <div className="pt-3 border-t border-slate-200 space-y-3">
-                                {tipoRegistro === 'conductor' && (
-                                    <>
-                                        <select value={tipoVehiculo} onChange={(e) => setTipoVehiculo(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 px-4 text-[10px] uppercase text-slate-700 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:bg-white outline-none transition-all">
-                                            <option value="mototaxi">Mototaxi Individual</option>
-                                            <option value="motoparrillero">Moto Parrillero Autorizado</option>
-                                            <option value="motocarga">Motocarga Logística</option>
-                                            <option value="intermunicipal">Ruta Intermunicipal</option>
-                                        </select>
-                                        <input type="text" placeholder="PLACA (EJ. ABC123)" value={placa} onChange={(e) => setPlaca(e.target.value)} maxLength={6} className="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 px-4 text-xs uppercase text-center font-mono text-slate-800 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:bg-white outline-none transition-all" required />
-                                    </>
-                                )}
-                                <div className="grid grid-cols-2 gap-2">
-                                    <input type="text" placeholder="N° INTERNO" value={numeroInterno} onChange={(e) => setNumeroInterno(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 px-4 text-xs text-slate-800 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:bg-white outline-none transition-all" />
-                                    <input type="text" placeholder="COOPERATIVA/BASE" value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 px-4 text-xs text-slate-800 focus:border-teal-500 focus:ring-1 focus:ring-teal-500 focus:bg-white outline-none transition-all" required={tipoRegistro === 'despachador' || tipoVehiculo === 'intermunicipal'} />
-                                </div>
-                                {tipoRegistro === 'conductor' && (
-                                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
-                                        <div className="text-[9px] text-slate-500 uppercase tracking-widest text-center font-mono font-bold border-b border-slate-200 pb-1 mb-2">Bóveda de Documentos</div>
-                                        <div className="flex justify-between items-center bg-white border border-slate-200 p-2 rounded-lg text-[9px] font-mono"><span className="text-slate-500">📂 CÉDULA</span><input type="file" id="ced" className="hidden" onChange={(e)=>setCedulaFile(e.target.files[0])}/><label htmlFor="ced" className={`px-2 py-1 rounded cursor-pointer font-bold transition-colors ${cedulaFile?'bg-emerald-50 text-emerald-600 border border-emerald-200':'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>{cedulaFile?'OK':'SUBIR'}</label></div>
-                                        <div className="flex justify-between items-center bg-white border border-slate-200 p-2 rounded-lg text-[9px] font-mono"><span className="text-slate-500">📂 LICENCIA</span><input type="file" id="lic" className="hidden" onChange={(e)=>setLicenciaFile(e.target.files[0])}/><label htmlFor="lic" className={`px-2 py-1 rounded cursor-pointer font-bold transition-colors ${licenciaFile?'bg-emerald-50 text-emerald-600 border border-emerald-200':'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>{licenciaFile?'OK':'SUBIR'}</label></div>
-                                        <div className="flex justify-between items-center bg-white border border-slate-200 p-2 rounded-lg text-[9px] font-mono"><span className="text-slate-500">📂 SOAT/TECNICO</span><input type="file" id="soat" className="hidden" onChange={(e)=>setVehiculoFile(e.target.files[0])}/><label htmlFor="soat" className={`px-2 py-1 rounded cursor-pointer font-bold transition-colors ${vehiculoFile?'bg-emerald-50 text-emerald-600 border border-emerald-200':'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>{vehiculoFile?'OK':'SUBIR'}</label></div>
-                                    </div>
-                                )}
+                        {/* Módulo de Inyección Binaria (Foto) */}
+                        <div className="flex flex-col items-center justify-center p-3 bg-[#18181b]/60 border border-white/5 border-dashed rounded-xl transition-all hover:border-yellow-500/30 group">
+                            <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2 group-hover:text-zinc-400 transition-colors">Avatar / Foto de Perfil</div>
+                            <div className="flex items-center gap-3 w-full justify-center">
+                                <input 
+                                    type="file" 
+                                    id="avatar" 
+                                    accept="image/*" 
+                                    className="hidden" 
+                                    onChange={(e) => setFotoPerfilFile(e.target.files ? e.target.files[0] : null)} 
+                                />
+                                <label 
+                                    htmlFor="avatar" 
+                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-[10px] font-mono font-bold uppercase tracking-wide transition-all ${fotoPerfilFile ? 'bg-yellow-950/50 text-yellow-500 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.1)]' : 'bg-[#27272a] text-zinc-400 hover:bg-[#3f3f46] border border-transparent'}`}
+                                >
+                                    <Camera size={14} />
+                                    {fotoPerfilFile ? '✓ BINARIO LISTO' : 'SELECCIONAR FOTO'}
+                                </label>
+                                {fotoPerfilFile && <span className="text-[10px] font-mono text-zinc-400 truncate max-w-[120px]">{fotoPerfilFile.name}</span>}
                             </div>
-                        )}
+                        </div>
 
-                        <button type="submit" disabled={loading} className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-50 text-white text-xs font-mono font-bold uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-md hover:shadow-teal-200 mt-2">
-                            {loading ? 'ALMACENANDO...' : 'FINALIZAR INSCRIPCIÓN'}
+                        <div className="relative group">
+                            <User className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
+                            <input 
+                                type="text" 
+                                placeholder="NOMBRE COMPLETO" 
+                                value={nombre} 
+                                onChange={(e) => setNombre(e.target.value)} 
+                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600" 
+                                disabled={loading} 
+                                required 
+                            />
+                        </div>
+                        <div className="relative group">
+                            <Mail className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
+                            <input 
+                                type="email" 
+                                placeholder="CORREO ELECTRÓNICO" 
+                                value={correo} 
+                                onChange={(e) => setCorreo(e.target.value)} 
+                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600" 
+                                disabled={loading} 
+                                required 
+                            />
+                        </div>
+                        <div className="relative group">
+                            <Lock className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
+                            <input 
+                                type="password" 
+                                placeholder="CONTRASEÑA SEGURA (Mín. 6)" 
+                                value={clave} 
+                                onChange={(e) => setClave(e.target.value)} 
+                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all tracking-widest placeholder:text-zinc-600 placeholder:tracking-normal" 
+                                disabled={loading} 
+                                required 
+                            />
+                        </div>
+
+                        <button 
+                            type="submit" 
+                            disabled={loading} 
+                            className="w-full bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-black text-xs font-mono font-black uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_25px_rgba(234,179,8,0.4)] mt-2"
+                        >
+                            {loading ? 'ALMACENANDO EN CENTRAL...' : 'FINALIZAR INSCRIPCIÓN'}
                         </button>
-                        <button type="button" onClick={() => setStep(1)} className="w-full text-center text-slate-500 hover:text-slate-800 text-[9px] uppercase tracking-widest pt-2 transition-colors font-mono font-bold">
+                        
+                        <button 
+                            type="button" 
+                            onClick={() => setStep(1)} 
+                            className="w-full text-center text-zinc-500 hover:text-zinc-300 text-[9px] uppercase tracking-widest pt-2 transition-colors font-mono font-bold"
+                        >
                             ← MODIFICAR TERMINAL TELEFÓNICO
                         </button>
                     </form>
                 )}
 
-                <div className="mt-6 pt-4 border-t border-slate-200/60 text-center font-mono">
-                    <p className="text-[10px] text-slate-500 uppercase tracking-widest">¿Unidad ya indexada? <Link to="/login" className="text-teal-600 hover:text-teal-700 ml-1 font-bold transition-colors">LOGUEAR ENTRADA</Link></p>
+                <div className="mt-6 pt-4 border-t border-white/5 text-center font-mono">
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest">¿Ya tienes cuenta? <Link className="text-yellow-500 hover:text-yellow-400 ml-1 font-bold transition-colors" to="/login">LOGUEAR ENTRADA</Link></p>
                 </div>
             </div>
         </div>

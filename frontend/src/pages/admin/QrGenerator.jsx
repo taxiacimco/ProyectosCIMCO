@@ -1,11 +1,21 @@
-// Versión Arquitectura: V3.0 - Nodos QR Híbridos con Branding de Confianza Embebido
-import React from 'react';
+// Versión Arquitectura: V3.4 - Motor de Renderizado Canvas y Exportación Masiva de Nodos QR
+/**
+ * Ubicación: @/pages/admin/QrGenerator.jsx
+ * Misión: Generación de identificadores de red con inyección atómica de branding y exportación en lote.
+ * Resolución: Implementación de rasterización SVG-to-Canvas para descargas PNG confiables y bypass de bloqueos de navegador en descargas masivas.
+ */
+
+import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Download, ShieldCheck, QrCode } from 'lucide-react';
-import { HOST_IP } from '../../config/api';
+import { Download, QrCode, Layers, Loader } from 'lucide-react';
+
+// 🚀 GOBERNANZA DE RUTAS: Alias absoluto consumido
+import { HOST_IP } from '@/config/api'; 
 
 export default function QrGenerator() {
-    // 1. Matriz Operativa Integral (6 Roles)
+    const [procesandoMasivo, setProcesandoMasivo] = useState(false);
+
+    // 1. Matriz Operativa Integral
     const rolesDisponibles = [
         { id: 'mototaxi', etiqueta: 'Mototaxi', color: '#eab308' },
         { id: 'moto-parrillero', etiqueta: 'Moto Parrillero', color: '#38bdf8' },
@@ -15,97 +25,143 @@ export default function QrGenerator() {
         { id: 'intermunicipal', etiqueta: 'Intermunicipal', color: '#ef4444' }
     ];
 
-    // 2. Generador Atómico de Insignias SVG (Confianza Visual)
-    const generarLogoSVG = (etiqueta, color) => {
-        const svgString = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="130" height="45" viewBox="0 0 130 45">
-                <rect width="130" height="45" fill="#ffffff" rx="6" stroke="${color}" stroke-width="3"/>
-                <text x="50%" y="40%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="900" fill="#000000">TAXIA-CIMCO</text>
-                <text x="50%" y="75%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="bold" fill="${color}">${etiqueta.toUpperCase()}</text>
-            </svg>
-        `.trim();
-        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgString)}`;
+    // 2. Motor Atómico de Rasterización (SVG a PNG)
+    const exportarNodoPNG = (rolId, etiqueta, colorHex) => {
+        return new Promise((resolve) => {
+            const svgElement = document.getElementById(`qr-svg-${rolId}`);
+            if (!svgElement) {
+                console.error(`⚠️ [CIMCO-QR] Nodo SVG no encontrado para rasterización: ${rolId}`);
+                resolve();
+                return;
+            }
+
+            const svgData = new XMLSerializer().serializeToString(svgElement);
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            const img = new Image();
+
+            img.onload = () => {
+                // Dimensiones con margen para branding inferior
+                canvas.width = img.width + 40;
+                canvas.height = img.height + 80;
+
+                // Fondo Premium CIMCO
+                ctx.fillStyle = "#09090b"; 
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Marco sutil
+                ctx.strokeStyle = colorHex;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+
+                // Dibujar QR centrado
+                ctx.drawImage(img, 20, 20);
+
+                // Inyección de Branding Inferior
+                ctx.font = "bold 18px monospace";
+                ctx.fillStyle = colorHex;
+                ctx.textAlign = "center";
+                ctx.fillText(`[ NODO: ${etiqueta.toUpperCase()} ]`, canvas.width / 2, canvas.height - 25);
+
+                // Disparo de descarga
+                const pngFile = canvas.toDataURL("image/png");
+                const downloadLink = document.createElement("a");
+                downloadLink.download = `TAXIA_CIMCO_QR_${rolId.toUpperCase()}.png`;
+                downloadLink.href = pngFile;
+                downloadLink.click();
+                
+                resolve();
+            };
+
+            // 🛡️ Blindaje de codificación para evitar bloqueos del navegador
+            img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgData);
+        });
     };
 
-    // 3. Motor de Exportación a PNG
-    const downloadQR = (id, label) => {
-        const svg = document.getElementById(id);
-        const source = new XMLSerializer().serializeToString(svg);
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-        const img = new Image();
-        
-        img.onload = () => {
-            canvas.width = 400; 
-            canvas.height = 400;
-            ctx.fillStyle = "#ffffff"; 
-            ctx.fillRect(0, 0, 400, 400);
-            ctx.drawImage(img, 0, 0, 400, 400);
-            const link = document.createElement("a");
-            link.download = `QR_TAXIA_CIMCO_${label.toUpperCase()}.png`;
-            link.href = canvas.toDataURL("image/png");
-            link.click();
-        };
-        img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+    // 3. Orquestador de Descarga Masiva (Evita bloqueos por spam del navegador)
+    const ejecutarDescargaMasiva = async () => {
+        setProcesandoMasivo(true);
+        try {
+            for (const rol of rolesDisponibles) {
+                await exportarNodoPNG(rol.id, rol.etiqueta, rol.color);
+                // Delay táctico de 600ms entre descargas para simular acción humana y evitar bloqueos de seguridad del Chrome/Edge
+                await new Promise(r => setTimeout(r, 600)); 
+            }
+        } catch (error) {
+            console.error("❌ [CIMCO-QR-FATAL] Fallo en orquestación de descarga masiva:", error);
+        } finally {
+            setProcesandoMasivo(false);
+        }
     };
 
     return (
-        <div className="min-h-screen bg-[#09090b] text-zinc-100 p-8 font-sans antialiased">
-            <header className="mb-8 flex items-center gap-3 backdrop-blur-md bg-[#121214]/80 border border-zinc-800/40 p-5 rounded-2xl shadow-lg">
-                <ShieldCheck className="text-emerald-400" size={28} />
-                <div>
-                    <h1 className="text-sm font-bold tracking-widest uppercase text-zinc-200">Generador de Nodos Híbridos • Branding Seguro</h1>
-                    <p className="text-[10px] font-mono text-zinc-500 mt-1 uppercase">Red Activa: {HOST_IP}</p>
-                </div>
-            </header>
+        <div className="max-w-7xl mx-auto p-8 font-sans antialiased min-h-screen">
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                {rolesDisponibles.map((rol) => {
-                    const urlAcceso = `${HOST_IP}/login?role=${rol.id}`;
-                    const idElemento = `qr-${rol.id}`;
+            {/* ENCABEZADO Y CONTROLES MAESTROS */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 pb-6 border-b border-zinc-800/40 gap-6">
+                <div>
+                    <h1 className="text-xl font-black tracking-tight text-white uppercase font-mono flex items-center gap-3">
+                        <QrCode className="text-yellow-500" size={24} />
+                        Gestor de Nodos QR
+                    </h1>
+                    <p className="text-[10px] text-zinc-400 font-mono tracking-widest mt-2 uppercase">
+                        Generación y Rasterización de Identificadores de Red (IP: {HOST_IP})
+                    </p>
+                </div>
 
-                    return (
-                        <div key={rol.id} className="backdrop-blur-md bg-[#121214]/80 p-8 rounded-2xl border border-zinc-800/50 flex flex-col items-center shadow-xl transition-all hover:border-zinc-700/50 group">
-                            
-                            <div className="flex items-center gap-2 mb-6 w-full justify-center border-b border-zinc-800/40 pb-4">
-                                <QrCode size={18} style={{ color: rol.color }} />
-                                <h2 className="text-[11px] font-mono font-bold tracking-widest uppercase text-zinc-300">
-                                    {rol.etiqueta}
-                                </h2>
-                            </div>
+                <button 
+                    onClick={ejecutarDescargaMasiva}
+                    disabled={procesandoMasivo}
+                    className="bg-[#121214]/80 backdrop-blur-md border border-yellow-500/30 hover:border-yellow-500 hover:bg-yellow-500/10 text-yellow-500 py-3 px-6 rounded-xl text-[10px] font-mono font-bold uppercase tracking-widest transition-all shadow-[0_0_15px_rgba(234,179,8,0.1)] active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:pointer-events-none"
+                >
+                    {procesandoMasivo ? (
+                        <><Loader className="animate-spin" size={14} /> Rasterizando Lote...</>
+                    ) : (
+                        <><Layers size={14} /> Descarga Masiva (6 Nodos)</>
+                    )}
+                </button>
+            </div>
 
-                            <div className="bg-white p-4 rounded-xl shadow-inner relative group-hover:scale-105 transition-transform duration-300">
-                                <QRCodeSVG 
-                                    id={idElemento} 
-                                    value={urlAcceso} 
-                                    size={220} 
-                                    level="H" 
-                                    includeMargin={false}
-                                    imageSettings={{
-                                        src: generarLogoSVG(rol.etiqueta, rol.color),
-                                        x: undefined,
-                                        y: undefined,
-                                        height: 45,
-                                        width: 130,
-                                        excavate: true, // Esto limpia los pixeles detrás del logo para asegurar lectura perfecta
-                                    }}
-                                />
-                            </div>
-                            
-                            <button 
-                                onClick={() => downloadQR(idElemento, rol.id)} 
-                                className="mt-8 w-full font-mono py-3 rounded-xl text-[10px] uppercase font-bold tracking-widest transition-all flex items-center justify-center gap-2 border hover:bg-opacity-80"
-                                style={{
-                                    backgroundColor: `${rol.color}15`, 
-                                    color: rol.color,
-                                    borderColor: `${rol.color}40` 
-                                }}
-                            >
-                                <Download size={14} /> Descargar Identificador
-                            </button>
+            {/* MATRIZ DE RENDERIZADO */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {rolesDisponibles.map((rol) => (
+                    <div key={rol.id} className="bg-[#121214]/80 backdrop-blur-md border border-white/5 p-8 rounded-2xl flex flex-col items-center shadow-[0_4px_30px_rgba(0,0,0,0.4)] group hover:border-zinc-700 transition-colors">
+                        
+                        {/* Contenedor del QR con ID para la extracción */}
+                        <div className="bg-white p-4 rounded-xl shadow-inner mb-6">
+                            <QRCodeSVG 
+                                id={`qr-svg-${rol.id}`}
+                                value={`http://${HOST_IP}:5173/${rol.id}`} 
+                                size={160} 
+                                fgColor="#000000" 
+                                bgColor="#ffffff" 
+                                level="H"
+                            />
                         </div>
-                    );
-                })}
+
+                        <div className="text-center mb-6 w-full">
+                            <h3 className="font-mono text-sm font-bold tracking-widest uppercase mb-1" style={{ color: rol.color }}>
+                                {rol.etiqueta}
+                            </h3>
+                            <p className="text-[9px] text-zinc-500 font-mono tracking-widest uppercase truncate px-2">
+                                /ruta/{rol.id}
+                            </p>
+                        </div>
+
+                        <button 
+                            onClick={() => exportarNodoPNG(rol.id, rol.etiqueta, rol.color)}
+                            disabled={procesandoMasivo}
+                            className="w-full py-3.5 rounded-xl text-[10px] uppercase font-bold tracking-widest flex items-center justify-center gap-2 border transition-all hover:bg-opacity-80 active:scale-95 disabled:opacity-30"
+                            style={{ 
+                                backgroundColor: `${rol.color}15`, 
+                                color: rol.color, 
+                                borderColor: `${rol.color}40` 
+                            }}
+                        >
+                            <Download size={14} /> Rasterizar PNG
+                        </button>
+                    </div>
+                ))}
             </div>
         </div>
     );

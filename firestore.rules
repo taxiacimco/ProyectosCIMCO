@@ -1,9 +1,9 @@
-// Versión Arquitectura: V13.0 - Fusión Atómica: Puente Híbrido y Permisos de Radar (Conductores/Viajes)
+// Versión Arquitectura: V14.0 - Estandarización Internacional: Migración Completa de Nodos a English Standard (users/role)
 /**
  * Archivo: C:\Users\Carlos Fuentes\ProyectosCIMCO\firestore.rules
  * Misión: Blindar la estructura de datos de TAXIA CIMCO integrando Modo Contingencia y el Puente Híbrido.
- * FIX ARQUITECTURA: Se habilitan los permisos de lectura pública para el radar de conductores 
- * y la creación de viajes para pasajeros anónimos/híbridos, manteniendo intactas las bóvedas financieras.
+ * FIX ARQUITECTURA (V14.0): Estandarización total a nomenclatura inglesa. Se mutan los matches de 'usuarios'
+ * a 'users' y la propiedad de lectura interna de 'rol' a 'role' con guardas de cortocircuito estrictas.
  */
 
 rules_version = '2';
@@ -11,23 +11,37 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // 🚀 REGLA 1: Permiso atómico para la creación del perfil en el registro
-    match /usuarios/{userId} {
+    // 🛡️ FUNCIONES DE SOBREGOBERNANZA Y BLINDAJE (Anti-Undefined Guards)
+    function esAdmin() {
+      return request.auth != null 
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // 🚀 REGLA 1.A: Permiso de Radar Administrador Internacional (Propagación Profunda)
+    // Requerido explícitamente para operaciones de listado masivo (onSnapshot) en el AdminDashboard sobre 'users'
+    match /users/{document=**} {
+      allow read, write: if esAdmin();
+    }
+
+    // 🚀 REGLA 1.B: Permiso atómico para dueños de perfil (Pasajeros/Conductores Standard)
+    // Protege la integridad del documento individual de cada cuenta en el nodo internacional
+    match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // 💰 REGLA 2: BILLETERAS (wallets) - [MANTENIDO INTACTO]
+    // 💰 REGLA 2: BILLETERAS (wallets) - [MANTENIDO INTACTO + EXTENSIÓN ESADMIN MIGRADA]
     // Máxima seguridad: Solo el CEO (Admin) inyecta saldo. Lectura permitida para el dueño o para el CEO.
     match /artifacts/taxiacimco-app/public/data/wallets/{userId} {
-      allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true);
-      allow write: if request.auth != null && request.auth.token.admin == true;
+      allow read: if request.auth != null && (request.auth.uid == userId || request.auth.token.admin == true || esAdmin());
+      allow write: if request.auth != null && (request.auth.token.admin == true || esAdmin());
     }
 
-    // 📊 REGLA 3: AUDITORÍA FINANCIERA (historial_saldo) - [MANTENIDO INTACTO]
+    // 📊 REGLA 3: AUDITORÍA FINANCIERA (historial_saldo) - [MANTENIDO INTACTO + EXTENSIÓN ESADMIN MIGRADA]
     // Trazabilidad de inyecciones y débitos. Solo Admin inyecta, usuario solo lee sus movimientos.
     match /artifacts/taxiacimco-app/public/data/historial_saldo/{docId} {
-      allow read: if request.auth != null && (resource.data.userId == request.auth.uid || request.auth.token.admin == true);
-      allow write: if request.auth != null && request.auth.token.admin == true;
+      allow read: if request.auth != null && (resource.data.userId == request.auth.uid || request.auth.token.admin == true || esAdmin());
+      allow write: if request.auth != null && (request.auth.token.admin == true || esAdmin());
     }
 
     // 🛵 REGLA 4: RADAR DE CONDUCTORES (Puente Híbrido Inyectado)
@@ -50,18 +64,30 @@ service cloud.firestore {
       allow write: if request.auth != null && request.auth.token.role == 'conductor';
     }
 
-    // ⚙️ REGLA 6: OPERATIVA GENERAL (Resto de colecciones bajo artifacts)
+    // ⭐ REGLA 6: SISTEMA DE CALIFICACIONES (Módulo de Reputación)
+    // Colección raíz para almacenar el feedback de ambas partes
+    match /calificaciones/{docId} {
+      // Lectura pública requerida para calcular promedios de estrellas en el frontend
+      allow read: if true;
+      // Creación permitida mediante puente híbrido o auth completo
+      allow create: if request.auth != null;
+      // Solo el autor puede actualizar o eliminar su propia reseña
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.evaluadorId;
+    }
+
+    // ⚙️ REGLA 7: OPERATIVA GENERAL (Resto de colecciones bajo artifacts)
     match /artifacts/taxiacimco-app/public/data/{collection}/{document=**} {
       // Habilita Modo Contingencia para lectura operativa
       allow read: if request.auth != null;
-      // Guarda de seguridad maestra: El comodín NO puede escribir en tesorería ni viajes
+      // Guarda de seguridad maestra: El comodín NO puede escribir en tesorería, viajes ni calificaciones
       allow write: if request.auth != null 
                    && collection != 'wallets' 
                    && collection != 'historial_saldo'
-                   && collection != 'viajes';
+                   && collection != 'viajes'
+                   && collection != 'calificaciones';
     }
 
-    // 📡 REGLA 7: Telemetría y otros documentos globales (Escudo Raíz)
+    // 📡 REGLA 8: Telemetría y otros documentos globales (Escudo Raíz)
     // Acceso restringido a usuarios registrados o puente anónimo (auth != null)
     match /{document=**} {
       allow read: if request.auth != null;
