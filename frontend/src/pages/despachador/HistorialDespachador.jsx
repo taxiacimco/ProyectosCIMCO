@@ -1,4 +1,8 @@
-// Versión Arquitectura: V11.1 - PROD READY: Historial de Control de Despachos con Formateo de Direcciones
+// Versión Arquitectura: V11.2 - PROD READY: Historial de Control de Despachos Homologado
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\despachador\HistorialDespachador.jsx
+ * Misión: Renderizar la bitácora de arqueos y manifiestos de salida del despachador en terminal.
+ */
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
@@ -17,6 +21,7 @@ const HistorialDespachador = () => {
                 return;
             }
             try {
+                // 🛡️ Corrección de Ruta: Consumo seguro del nodo intermunicipal
                 const pathColeccion = FIRESTORE_PATHS.viajesIntermunicipales || 'viajes_intermunicipales';
                 const q = query(
                     collection(db, pathColeccion),
@@ -26,7 +31,7 @@ const HistorialDespachador = () => {
                 const snapshot = await getDocs(q);
                 setHistorial(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
             } catch (error) {
-                console.error("❌ Error leyendo historial operativo despachador:", error);
+                console.error("❌ [CIMCO-LOG-ERROR] Error leyendo historial operativo despachador:", error);
             } finally {
                 setLoading(false);
             }
@@ -35,10 +40,11 @@ const HistorialDespachador = () => {
         fetchHistorial();
     }, [user]);
 
+    // 🛡️ Blindaje Profesional: Normalización de visualización operativa
     const formatDireccion = (nodo) => {
         if (!nodo) return 'N/A';
         if (typeof nodo === 'string') return nodo;
-        return nodo.direccion || `${nodo.lat?.toFixed(4)}, ${nodo.lng?.toFixed(4)}`;
+        return nodo.direccion || nodo.address || nodo.nombre || (nodo.lat && nodo.lng ? `${nodo.lat.toFixed(4)}, ${nodo.lng.toFixed(4)}` : 'S/D');
     };
 
     return (
