@@ -1,101 +1,146 @@
-// Versión Arquitectura: V20.1 - Purga de Vulnerabilidad de Escalada de Privilegios y Consolidación JWT
+// Versión Arquitectura: V20.5 - Resolución de Exportación useAuth para HMR
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
- * Misión: Proveedor de contexto global para la gestión de identidad y sincronización de sesiones (JWT).
- * Ajuste: Remoción de brecha crítica de seguridad (Fallback Admin Lvl 99) y fortalecimiento del escudo Anti-Undefined.
+ * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO.
+ * Ajuste: Inyección del hook useAuth exportado para compatibilidad con AdminDashboard y Vite HMR.
  */
 
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { createContext, useState, useEffect, useContext } from 'react';
+import api from '@/config/api';
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-// 🛡️ Gobernanza de Importaciones: Consumir el Contexto desde su nodo inmutable nativo
-import { AuthContext } from './AuthContext';
+// 🛡️ Importaciones nativas del SDK de Firebase
+import { getAuth, signInAnonymously, signOut } from 'firebase/auth'; 
+
+export const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [initialized, setInitialized] = useState(false);
 
-    // 🔄 Función asíncrona blindada contra el parpadeo de rutas (Race Conditions)
-    const loginLocal = async (userData, token) => {
-        // Enclavar el estado de carga antes de mutar la memoria
-        setLoading(true);
+    // 📡 Inicialización analítica perimetral de la sesión
+    useEffect(() => {
+        const initializeSession = async () => {
+            try {
+                localStorage.removeItem('token');
+                localStorage.removeItem('taxia_token');
 
-        // 🛡️ Anti-Undefined: Validar existencia y consistencia del token
-        if (token && token !== 'undefined' && token !== 'null') {
-            localStorage.setItem('cimco_token', token);
-            localStorage.setItem('taxia_token', token);
-            localStorage.setItem('token', token);
-            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-        }
-        
-        // 🚀 Saneamiento de Rol y Nivel de Acceso usando Gobernanza Central
-        const assignedRole = userData?.role || userData?.rol || ROLES.PASAJERO;
-        const assignedAccess = userData?.access_level !== undefined 
-                               ? userData.access_level 
-                               : (DEFAULT_ACCESS_LEVELS[assignedRole] || 0);
+                const token = localStorage.getItem('cimco_token');
+                
+                if (token && token !== 'undefined' && token !== 'null') {
+                    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+                    const savedUserRaw = localStorage.getItem('cimco_user');
+                    
+                    if (savedUserRaw && savedUserRaw !== 'undefined' && savedUserRaw !== 'null') {
+                        setUser(JSON.parse(savedUserRaw));
+                    } else {
+                        console.warn("⚠️ [CIMCO-SECURITY] Matriz de usuario ausente o corrupta. Purgando sesión...");
+                        localStorage.removeItem('cimco_token');
+                        delete api.defaults.headers.common['Authorization'];
+                    }
+                } else {
+                    localStorage.removeItem('cimco_token');
+                    localStorage.removeItem('cimco_user');
+                    delete api.defaults.headers.common['Authorization'];
+                }
 
-        const normalizedUser = { 
-            ...userData, 
-            role: assignedRole,
-            access_level: assignedAccess
+                const authFirebase = getAuth();
+                
+                if (!authFirebase.currentUser) {
+                    await signInAnonymously(authFirebase)
+                        .then(() => {
+                            console.log("📡 [CIMCO-AUTH] Handshake anónimo con Firebase completado con éxito.");
+                        })
+                        .catch((firebaseError) => {
+                            console.warn("⚠️ [CIMCO-AUTH-WARN] Firebase Auth Anónimo deshabilitado o rechazado. Modo Contingencia Activo:", firebaseError.message);
+                        });
+                }
+
+            } catch (error) {
+                console.error("🚨 [CIMCO-AUTH-CRITIC] Falla atómica al inicializar la sesión global:", error.message);
+                localStorage.removeItem('cimco_user');
+                localStorage.removeItem('cimco_token');
+                delete api.defaults.headers.common['Authorization'];
+                setUser(null);
+            } finally {
+                setLoading(false);
+                setInitialized(true);
+            }
         };
 
-        // Persistencia atómica en almacenamiento local
-        localStorage.setItem('cimco_user', JSON.stringify(normalizedUser));
-        
-        // Mutación del estado de React
-        setUser(normalizedUser);
-
-        // ⏱️ Micro-Tick de sincronización para que el Contexto inunde el árbol de componentes
-        await new Promise(resolve => setTimeout(resolve, 80));
-
-        // Liberación segura del flujo de rutas
-        setLoading(false);
-    };
-
-    const logout = () => {
-        localStorage.removeItem('cimco_token');
-        localStorage.removeItem('token');
-        localStorage.removeItem('taxia_token');
-        localStorage.removeItem('cimco_user');
-        delete axios.defaults.headers.common['Authorization'];
-        setUser(null);
-    };
-
-    useEffect(() => {
-        const token = localStorage.getItem('cimco_token') || localStorage.getItem('token') || localStorage.getItem('taxia_token');
-        
-        if (token && token !== 'undefined' && token !== 'null') {
-            axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-            
-            try {
-                const savedUserRaw = localStorage.getItem('cimco_user');
-                
-                // 🛡️ Guarda de Seguridad Interna (Anti-Undefined estricto)
-                if (savedUserRaw && savedUserRaw !== 'undefined' && savedUserRaw !== 'null') {
-                    const savedUser = JSON.parse(savedUserRaw);
-                    setUser(savedUser);
-                } else {
-                    // 🛡️ CIERRE DE BRECHA: Purga de credenciales corruptas
-                    console.warn("⚠️ [CIMCO-SECURITY] Token detectado pero matriz de usuario ausente o corrupta. Purgando sesión...");
-                    localStorage.removeItem('cimco_token');
-                    localStorage.removeItem('token');
-                    localStorage.removeItem('taxia_token');
-                    delete axios.defaults.headers.common['Authorization'];
-                    setUser(null);
-                }
-            } catch (e) {
-                console.error("❌ [CIMCO-AUTH-FATAL] Falla estructural al leer datos de identidad local:", e);
-                localStorage.removeItem('cimco_user');
-                setUser(null);
-            }
-        }
-        setLoading(false);
+        initializeSession();
     }, []);
 
+    const loginLocal = async (userData, token) => {
+        setLoading(true);
+        try {
+            localStorage.removeItem('token');
+            localStorage.removeItem('taxia_token');
+
+            if (token && token !== 'undefined' && token !== 'null') {
+                localStorage.setItem('cimco_token', token);
+                api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+            }
+            
+            const assignedRole = userData?.role || userData?.rol || ROLES.PASAJERO;
+            const assignedAccess = userData?.access_level !== undefined 
+                                   ? userData.access_level 
+                                   : (DEFAULT_ACCESS_LEVELS[assignedRole] || 0);
+    
+            const normalizedUser = { 
+                ...userData, 
+                role: assignedRole,
+                access_level: assignedAccess
+            };
+    
+            localStorage.setItem('cimco_user', JSON.stringify(normalizedUser));
+            setUser(normalizedUser);
+
+            const authFirebase = getAuth();
+            if (!authFirebase.currentUser) {
+                await signInAnonymously(authFirebase).catch(() => {});
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error("❌ Error en compuerta loginLocal:", error.message);
+            return { success: false, message: "Falla estructural al persistir credenciales locales." };
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const logout = async () => {
+        localStorage.removeItem('cimco_token');
+        localStorage.removeItem('cimco_user');
+        localStorage.removeItem('token');
+        localStorage.removeItem('taxia_token');
+        
+        delete api.defaults.headers.common['Authorization'];
+        setUser(null);
+        
+        try {
+            const authFirebase = getAuth();
+            if (authFirebase.currentUser) {
+                await signOut(authFirebase);
+            }
+        } catch (error) {
+            console.error("Error al cerrar sesión en Firebase:", error);
+        }
+    };
+
     return (
-        <AuthContext.Provider value={{ user, setUser, loginLocal, logout, loading }}>
-            {children}
+        <AuthContext.Provider value={{ user, setUser, loading, initialized, loginLocal, logout }}>
+            {!loading && children}
         </AuthContext.Provider>
     );
+};
+
+// 🛡️ EXPORTACIÓN NOMBRADA DEL HOOK DE AUTENTICACIÓN
+export const useAuth = () => {
+    const context = useContext(AuthContext);
+    if (!context) {
+        throw new Error("🚨 [CIMCO-UI-ERR] useAuth debe ser consumido estrictamente dentro de un AuthProvider.");
+    }
+    return context;
 };

@@ -1,8 +1,8 @@
-// Versión Arquitectura: V18.2 - Rompe-Bucles Automático y Sincronización del Handshake V9.3
+// Versión Arquitectura: V18.3 - Homologación de Payload y Sincronización del Handshake V9.4
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Componente de autenticación de alta fidelidad con redirección predictiva para Operadores, Secretarias y CEO.
- * Ajuste: Mitigación total del bucle de renders infinitos congelando el formulario tras validación exitosa.
+ * Misión: Componente de autenticación de alta fidelidad con redirección predictiva.
+ * Ajuste: Flexibilización de validación del payload (user/usuario) para asegurar inyección en LocalStorage.
  */
 
 import React, { useState } from 'react';
@@ -39,21 +39,26 @@ const Login = () => {
     try {
       console.log('📡 [CIMCO-AUTH] Solicitando handshake de acceso al nodo central...');
       
-      // Petición perimetral utilizando la API unificada (api.js con puerto 3000)
+      // Petición perimetral utilizando la API unificada
       const res = await api.post('/auth/login', {
         identifier: cleanIdentifier,
         password: password
       });
 
-      // 🛡️ Anti-Undefined: Verificación estricta de la estructura del payload
-      if (res.data && res.data.success && res.data.usuario && res.data.token) {
+      // 🛡️ HOMOLOGACIÓN CRÍTICA: Flexibilidad para capturar 'user' o 'usuario' desde el backend
+      const responseData = res.data;
+      const validUser = responseData.user || responseData.usuario;
+      const validToken = responseData.token;
+
+      if (validUser && validToken) {
         console.log('✅ [CIMCO-AUTH] Handshake exitoso. Payload de identidad recibido.');
         
-        const userRole = res.data.usuario.role || res.data.usuario.rol;
+        const userRole = validUser.role || validUser.rol;
+        const normalizedRole = userRole ? userRole.toLowerCase() : '';
         
         // Determinar mapa topológico de redirecciones por rol operativo
         let redirectPath = '/';
-        switch (userRole) {
+        switch (normalizedRole) {
           case 'admin':
             redirectPath = '/admin/dashboard';
             break;
@@ -83,16 +88,16 @@ const Login = () => {
         console.log(`🚀 [CIMCO-AUTH] Sincronizando sesión local. Destino asignado: ${redirectPath}`);
         
         // 🔥 Sincronización atómica del contexto global de autenticación
-        await loginLocal(res.data.usuario, res.data.token);
+        await loginLocal(validUser, validToken);
         
-        // 🛡️ Cortafuegos 2: Limpieza de credenciales en memoria local para romper re-renders accidentales
+        // 🛡️ Cortafuegos 2: Limpieza de credenciales en memoria local
         setIdentifier('');
         setPassword('');
         
-        // Transición instantánea y segura una vez asentada la data en memoria/storage
+        // Transición instantánea y segura
         navigate(redirectPath);
       } else {
-        setError(res.data?.message || 'Estructura de respuesta corrupta o token ausente.');
+        setError(res.data?.message || 'Estructura de respuesta del servidor no contiene token o datos de usuario.');
         setLoading(false);
       }
     } catch (err) {

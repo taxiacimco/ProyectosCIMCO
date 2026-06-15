@@ -1,8 +1,8 @@
-// Versión Arquitectura: V10.3 - Sincronización Síncrona Firestore y Liquidación de Flota (10%)
+// Versión Arquitectura: V10.4 - Sincronización Síncrona Firestore y Liquidación Atómica de Flota (10%)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
  * Misión: Procesar flujos operativos, liquidación contable (10% comisión), y sincronización de estado de viaje hacia Firebase Firestore.
- * Seguridad: Validación estricta anti-undefined, bloqueo por saldo insuficiente (<$2000 COP) y persistencia contable.
+ * Ajuste: Blindaje de condición de carrera en liquidación utilizando operador atómico $inc.
  */
 
 import Viaje from '../../models/Viaje.js';
@@ -164,35 +164,50 @@ export const completarViaje = async (req, res) => {
         // 💰 REGLA MATEMÁTICA: Extracción exacta del 10% para la plataforma
         const comision = Math.round(tarifa * 0.10); 
         
-        const conductor = await Conductor.findOne({ $or: [{ _id: viaje.conductorId }, { conductorId: viaje.conductorId }] });
-        let nuevoSaldo = 0;
+        const conductorPrevio = await Conductor.findOne({ $or: [{ _id: viaje.conductorId }, { conductorId: viaje.conductorId }] });
         
-        if (conductor) {
-            const saldoAnterior = typeof conductor.saldo === 'number' ? conductor.saldo : 0;
-            nuevoSaldo = Math.max(0, saldoAnterior - comision);
-            conductor.saldo = nuevoSaldo;
-            conductor.estado = 'active'; 
-            
-            await conductor.save();
-            await HistorialSaldo.create({ 
-                conductorId: conductor._id, 
-                viajeId: viaje._id, 
-                tipo: 'descuento_comision', 
-                monto: comision, 
-                saldoAnterior, 
-                saldoNuevo: nuevoSaldo, 
-                descripcion: `Liquidación: 10% retenido del viaje ${viaje._id}.` 
-            });
+        if (!conductorPrevio) {
+            return res.status(404).json({ success: false, message: 'No se encontró la unidad operativa para la liquidación.' });
         }
+
+        const saldoAnterior = typeof conductorPrevio.saldo === 'number' ? conductorPrevio.saldo : 0;
+        
+        // ⚡ MODIFICACIÓN MATEMÁTICA ATÓMICA: Descuento directo en la base de datos
+        const conductorActualizado = await Conductor.findByIdAndUpdate(
+            conductorPrevio._id,
+            { 
+                $inc: { saldo: -comision },
+                $set: { estado: 'active' }
+            },
+            { new: true, runValidators: true }
+        );
+
+        // Prevenir saldos negativos por errores atípicos (Ajuste a cero si baja de cero)
+        if (conductorActualizado.saldo < 0) {
+             conductorActualizado.saldo = 0;
+             await conductorActualizado.save();
+        }
+        
+        const nuevoSaldo = conductorActualizado.saldo;
+
+        await HistorialSaldo.create({ 
+            conductorId: conductorActualizado._id, 
+            viajeId: viaje._id, 
+            tipo: 'descuento_comision', 
+            monto: comision, 
+            saldoAnterior, 
+            saldoNuevo: nuevoSaldo, 
+            descripcion: `Liquidación: 10% retenido del viaje ${viaje._id}.` 
+        });
         
         viaje.estadoViaje = 'completado';
         await viaje.save();
 
         // ⚡ PUENTE FIRESTORE: Liberar unidad y cerrar viaje en el mapa
-        if (dbFirestore && FIRESTORE_PATHS.viajes && FIRESTORE_PATHS.conductores && conductor) {
+        if (dbFirestore && FIRESTORE_PATHS.viajes && FIRESTORE_PATHS.conductores) {
             const batch = dbFirestore.batch();
             batch.update(dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(viaje._id.toString()), { estado: 'completado' });
-            batch.update(dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(conductor._id.toString()), { estado: 'active' });
+            batch.update(dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(conductorActualizado._id.toString()), { estado: 'active' });
             await batch.commit();
         }
 

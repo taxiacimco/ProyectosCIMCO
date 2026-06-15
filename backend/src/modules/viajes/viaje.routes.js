@@ -1,7 +1,8 @@
-// Versión Arquitectura: V9.9 - Middleware de Blindaje de Payload y Trazabilidad Operativa
+// Versión Arquitectura: V10.0 - Blindaje Perimetral JWT en Nodos de Despacho
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.routes.js
  * Misión: Enrutador centralizado con interceptación de payloads para TAXIA CIMCO Core.
+ * Ajuste: Inyección de verificarToken para cerrar brecha de endpoints operativos públicos.
  */
 
 import express from 'express';
@@ -13,6 +14,9 @@ import {
     completarViaje,
     recibirAlertaWompiLocal 
 } from './viaje.controller.js';
+
+// 🛡️ Inyección de Middleware de Seguridad
+import { verificarToken } from '../../middleware/auth.middleware.js';
 
 const router = express.Router();
 
@@ -31,11 +35,14 @@ router.use((req, res, next) => {
     next();
 });
 
-router.post('/solicitar', verificarPayloadViaje, crearViaje);
-router.get('/disponibles', obtenerViajesDisponibles);
-router.post('/aceptar', verificarPayloadViaje, aceptarViaje);
-router.post('/iniciar', verificarPayloadViaje, iniciarViaje);
-router.post('/completar', verificarPayloadViaje, completarViaje);
+// 🛡️ RUTAS BLINDADAS: Requieren Token de sesión válido
+router.post('/solicitar', verificarToken, verificarPayloadViaje, crearViaje);
+router.get('/disponibles', verificarToken, obtenerViajesDisponibles);
+router.post('/aceptar', verificarToken, verificarPayloadViaje, aceptarViaje);
+router.post('/iniciar', verificarToken, verificarPayloadViaje, iniciarViaje);
+router.post('/completar', verificarToken, verificarPayloadViaje, completarViaje);
+
+// 🌐 RUTAS DE INTEGRACIÓN: Webhooks (Validación mediante firma criptográfica local)
 router.post('/webhook-wompi', verificarPayloadViaje, recibirAlertaWompiLocal);
 
 export default router;

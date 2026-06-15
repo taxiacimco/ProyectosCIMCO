@@ -1,13 +1,12 @@
-// Versión Arquitectura: V1.5 - Blindaje Interno de Transacciones (Firewall ACL Nivel 90)
+// Versión Arquitectura: V1.9 - Alineación de Endpoint de Recarga y Resolución 404
 /**
  * Ubicación: frontend/src/pages/admin/AdminPanel.jsx
- * Misión: Gestión atómica manual de saldos de conductores mediante el bus Express/MongoDB.
- * Seguridad: Componente ultra-blindado. Validación dura de access_level antes del disparo al core.
+ * Misión: Gestión atómica manual de saldos permitiendo indexación por UID, Celular o Correo.
+ * Ajuste: Se corrige la ruta de Axios apuntando a '/conductores/saldos/admin/recargar' para homologar con el Router de Express.
  */
 
 import React, { useState } from 'react';
 import { DollarSign, User, ShieldCheck, AlertTriangle, Loader, Zap } from 'lucide-react';
-// 🚀 GOBERNANZA DE RUTAS: Alias absolutos aplicados
 import api from '@/config/api'; 
 import { useAuth } from '@/hooks/useAuth';
 
@@ -24,13 +23,10 @@ const AdminPanel = () => {
         setStatus({ type: '', message: '' });
 
         try {
-            // 🛡️ GUARDA ANTI-UNDEFINED OBLIGATORIA
             if (!conductorId.trim() || !monto) {
                 throw new Error("Parámetros de inyección incompletos.");
             }
 
-            // 🔐 ALERTA DE ARQUITECTURA: FIREWALL DE GOBERNANZA
-            // Validación estricta en el controlador antes de consumir el API Gateway
             const accessLevel = user?.access_level || 0;
             if (accessLevel < 90) {
                 setStatus({ type: 'error', message: 'ERROR CRÍTICO: PERMISOS INSUFICIENTES (REQUERIDO: NIVEL 90+)' });
@@ -38,16 +34,17 @@ const AdminPanel = () => {
                 return;
             }
 
-            // 📡 Fusión Atómica: Disparo a través de la API Central
-            const res = await api.post('/api/saldos/admin/recargar', {
+            // 🛠️ RESOLUCIÓN 404: Apuntando al prefijo correcto en Express (/conductores)
+            const res = await api.post('/conductores/saldos/admin/recargar', {
                 conductorId: conductorId.trim(),
-                monto: parseFloat(monto)
+                monto: parseFloat(monto),
+                operador: user?.nombre || 'CEO_DESCONOCIDO' // Agregamos trazabilidad del operador actual
             });
 
             if (res.data.success) {
                 setStatus({ 
                     type: 'success', 
-                    message: `INYECCIÓN APROBADA: Nuevo saldo del operador $${res.data.nuevoSaldo}` 
+                    message: `INYECCIÓN APROBADA: ${res.data.message || 'Saldo actualizado correctamente.'}` 
                 });
                 setConductorId('');
                 setMonto('');
@@ -81,14 +78,14 @@ const AdminPanel = () => {
                 <form onSubmit={handleRecargar} className="space-y-5">
                     <div className="space-y-1.5">
                         <label className="text-[10px] font-mono uppercase tracking-widest text-zinc-400 font-bold flex items-center gap-2">
-                            <User size={12} className="text-cyan-500" /> ID Único Operador (UID)
+                            <User size={12} className="text-cyan-500" /> Identificador del Operador
                         </label>
                         <input
                             type="text"
                             value={conductorId}
                             onChange={(e) => setConductorId(e.target.value)}
-                            placeholder="Ej: A8b9Xp..."
-                            className="w-full bg-zinc-950/50 border border-white/10 p-3.5 rounded-xl text-white placeholder:text-zinc-700 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 outline-none transition-all font-mono text-sm"
+                            placeholder="Ej: UID de MongoDB, Celular (10 dígitos) o Correo Electrónico"
+                            className="w-full bg-zinc-950/50 border border-white/10 p-3.5 rounded-xl text-white placeholder:text-zinc-600 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 outline-none transition-all font-mono text-sm"
                             required
                         />
                     </div>
@@ -121,7 +118,6 @@ const AdminPanel = () => {
                     </button>
                 </form>
 
-                {/* SISTEMA DE NOTIFICACIONES */}
                 {status.message && (
                     <div className={`p-4 rounded-xl text-[10px] font-mono uppercase tracking-wide leading-relaxed border flex items-start gap-2.5 animate-in fade-in zoom-in-95 ${
                         status.type === 'success' 

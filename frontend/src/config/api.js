@@ -1,15 +1,22 @@
-// Versión Arquitectura: V5.3 - Ajuste de Puerto Homologado Express a Puerto 3000
+// Versión Arquitectura: V5.8 - Homologación de Clave Token Perimetral (cimco_token)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
  * Misión: Configurar el cliente Axios centralizado (CIMCO-NEXUS) para peticiones perimetrales al backend.
- * Ajuste: Sincronización exacta con el puerto 3000 según reporte de telemetría de consola industrial.
+ * Ajuste: Sustitución de clave token genérica por 'cimco_token' en interceptor de salida para sincronización de sesión.
  */
 
 import axios from 'axios';
 
-// 📡 [CIMCO-NEXUS] Canal Único activado para la infraestructura del clúster
-// Ajustado al puerto 3000 de acuerdo al despliegue real del backend Express
-const API_URL = "http://localhost:3000/api"; 
+// 📡 [CIMCO-NEXUS] Definición y Exportación de Nodos de Red
+// Extraído de la telemetría de red local para permitir el escaneo de QRs desde dispositivos móviles
+export const HOST_IP = "192.168.100.34";
+
+// Canal Único activado para la infraestructura del clúster (Puerto 3000)
+export const API_URL = `http://${HOST_IP}:3000/api`;
+
+// 🔄 [COMPATIBILIDAD] Inyección de alias redundantes para mitigar fricciones en componentes legacy
+export const API_CORE_URL = API_URL;
+export const API_FUNCTIONS_URL = API_URL;
 
 const api = axios.create({
     baseURL: API_URL,
@@ -25,7 +32,8 @@ api.interceptors.request.use(
     (config) => {
         // 🛡️ Guarda de Seguridad Anti-Undefined: Validación de acceso al localStorage local
         try {
-            const token = localStorage.getItem('token');
+            // 🚨 HOMOLOGACIÓN CRÍTICA: Se consume 'cimco_token' para unificar con el AuthProvider
+            const token = localStorage.getItem('cimco_token');
             if (token) {
                 // Inyecta el token sanitizado bajo el estándar Bearer en la cabecera de la petición
                 config.headers.Authorization = `Bearer ${token}`;

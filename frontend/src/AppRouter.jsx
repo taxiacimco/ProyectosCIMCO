@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.7 - Blindaje Anti-Undefined en Redirección Dinámica y ACL
+// Versión Arquitectura: V19.8 - Blindaje Anti-Undefined, Redirección Dinámica y ACL Híbrido
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
  * Misión: Orquestar el direccionamiento centralizado con alias absolutos y aduanas perimetrales.
- * Ajuste: Inyección de guardas seguras (user?.rol || user?.role) para evitar quiebres si muta el payload del backend.
+ * Ajuste: Inyección de guardas seguras tolerantes a fallos para validación de roles de Administrador.
  */
 
 import React from 'react';
@@ -35,8 +35,8 @@ import HistorialMotocarga from '@/pages/motocarga/HistorialMotocarga';
 import HomeMototaxi from '@/pages/mototaxi/HomeMototaxi';
 import HomeMotoparrillero from '@/pages/motoparrillero/HomeMotoparrillero';
 
-// 🛡️ COMPONENTE DE ADUANA (Guard Perimetral)
-// Bloquea el acceso a cualquier entidad que no posea el nivel máximo de autoridad (99).
+// 🛡️ COMPONENTE DE ADUANA (Guard Perimetral Ajustado)
+// Bloquea el acceso a cualquier entidad que no posea el nivel de autoridad correspondiente.
 const AdminRoute = ({ children }) => {
     // 🛡️ Fusión Atómica: Se extrae 'loading' para evitar evaluaciones prematuras
     const { user, loading } = useAuth();
@@ -51,9 +51,13 @@ const AdminRoute = ({ children }) => {
         );
     }
     
-    // Guarda Anti-Undefined y validación estricta de ACL (Control de Lista de Acceso)
-    if (!user || user?.access_level !== 99) {
-        console.warn("⚠️ [CIMCO-SECURITY] Intento de acceso denegado a ruta administrativa. Nivel insuficiente.");
+    // 🛡️ Extracción Segura de Rol: Tolerancia a fallos si falta access_level 99
+    const userRole = user?.rol || user?.role;
+    const isAdmin = userRole === 'admin' || user?.access_level === 99;
+
+    // Guarda Anti-Undefined y validación estricta unificada (Control de Lista de Acceso)
+    if (!user || !isAdmin) {
+        console.warn(`⚠️ [CIMCO-SECURITY] Acceso denegado a ruta administrativa. Nivel insuficiente o Rol incorrecto: ${userRole}`);
         return <Navigate to="/" replace />;
     }
     
@@ -72,7 +76,7 @@ const AppRouter = () => {
                 <Route path="/register-despachador" element={<RegisterDespachador />} />
                 <Route path="/register-intermunicipal" element={<RegisterIntermunicipal />} />
                 
-                {/* 🛡️ RUTAS ADMINISTRATIVAS PROTEGIDAS (Requieren Nivel 99) */}
+                {/* 🛡️ RUTAS ADMINISTRATIVAS PROTEGIDAS (Requieren Nivel Admin) */}
                 <Route path="/admin/dashboard" element={
                     <AdminRoute>
                         <AdminDashboard />

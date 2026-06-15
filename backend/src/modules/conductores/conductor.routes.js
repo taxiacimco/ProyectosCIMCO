@@ -1,7 +1,8 @@
-// Versión Arquitectura: V10.8 - Activación de Blindaje de Seguridad en Rutas de Recarga Financiera
+// Versión Arquitectura: V11.0 - Homologación de Pasarela Polimórfica y Resolución 404
 /**
  * Ubicación: backend/src/modules/conductores/conductor.routes.js
  * Misión: Gestión de rutas de conductores con blindaje de acceso, telemetría de estado, sanitización radial y recargas manuales.
+ * Ajuste: Se corrige el endpoint de recarga a '/saldos/admin/recargar' para acoplar perfectamente con el llamado del frontend.
  */
 
 import express from 'express';
@@ -11,7 +12,7 @@ import {
     obtenerHistorialConductor, 
     obtenerConductoresDisponibles,
     obtenerConductoresCercanos, 
-    recargarBilleteraPorAdmin,  // 💰 Controlador consolidado de recargas
+    recargarBilleteraPorAdmin,
     actualizarUbicacionGPS      
 } from './conductor.controller.js';
 import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
@@ -25,27 +26,22 @@ const validarTelemetriaRadar = (req, res, next) => {
     const { lat, lng, radioMaxKm } = req.query;
 
     if (!lat || !lng) {
-        return res.status(400).json({ success: false, message: "⚠️ [SEGURIDAD] Coordenadas GPS (lat, lng) obligatorias." });
+        return res.status(400).json({ success: false, message: "⚠️ [SEGURIDAD] Coordenadas GPS (lat, lng) requeridas para el escaneo." });
     }
 
     const parsedLat = parseFloat(lat);
     const parsedLng = parseFloat(lng);
-    const parsedRadio = parseFloat(radioMaxKm) || 5;
+    const parsedRadio = radioMaxKm ? parseFloat(radioMaxKm) : 5;
 
-    // Prevención de inyección NaN o ubicaciones imposibles en la tierra
-    if (isNaN(parsedLat) || parsedLat < -90 || parsedLat > 90) {
-        return res.status(400).json({ success: false, message: "⚠️ [SEGURIDAD] Latitud corrupta o fuera de rango." });
-    }
-    if (isNaN(parsedLng) || parsedLng < -180 || parsedLng > 180) {
-        return res.status(400).json({ success: false, message: "⚠️ [SEGURIDAD] Longitud corrupta o fuera de rango." });
+    if (isNaN(parsedLat) || isNaN(parsedLng) || isNaN(parsedRadio)) {
+        return res.status(400).json({ success: false, message: "⚠️ [SEGURIDAD] Tipado numérico inválido en parámetros de telemetría geoespacial." });
     }
 
-    // Limitador de Búsqueda Radial: Máximo 25 KM de radio para proteger CPU de MongoDB Atlas
-    if (parsedRadio <= 0 || parsedRadio > 25) {
-         return res.status(400).json({ success: false, message: "⚠️ [SEGURIDAD] El radio de escaneo debe estar entre 0.1 y 25 Km." });
+    if (parsedRadio < 0.1 || parsedRadio > 25) {
+        return res.status(400).json({ success: false, message: "⚠️ [SEGURIDAD] El radio de escaneo debe estar entre 0.1 y 25 Km." });
     }
 
-    next(); // Parámetros limpios y seguros, permitir paso al controlador
+    next(); 
 };
 
 // 🛡️ RUTAS PÚBLICAS Y DE CONSULTA
@@ -72,9 +68,9 @@ router.get('/:conductorId/historial', verificarToken, obtenerHistorialConductor)
 
 /**
  * 💰 RUTA CRÍTICA: Recargas Manuales por el Administrador/CEO
- * @route   POST /api/conductores/recargar-saldo
- * Nota: Ruta blindada con verificación de Token y control de acceso (esAdmin) activado para Producción.
+ * @route   POST /api/conductores/saldos/admin/recargar
+ * Ajuste: Endpoint sincronizado con el bus del Frontend (AdminPanel.jsx) para fulminar el Error 404.
  */
-router.post('/recargar-saldo', verificarToken, esAdmin, recargarBilleteraPorAdmin); 
+router.post('/saldos/admin/recargar', verificarToken, esAdmin, recargarBilleteraPorAdmin);
 
 export default router;

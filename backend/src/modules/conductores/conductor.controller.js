@@ -1,17 +1,17 @@
-// Versión Arquitectura: V4.0 - Integración Quirúrgica del Puente de Sincronización en Tiempo Real con Firestore
+// Versión Arquitectura: V4.3 - Motor Polimórfico Estricto y Telemetría Híbrida Consolidada
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
  * Misión: Gestión de conductores, telemetría de estado, búsquedas radiales geoespaciales, recargas matemáticas exactas, 
  * y procesamiento de ráfagas de coordenadas con duplicación síncrona hacia Firebase Firestore.
+ * Ajuste: Importación unificada del SDK para evitar el Error 500 por desconexión de FIRESTORE_PATHS.
  */
 
 import mongoose from 'mongoose';
 import Conductor from '../../models/Conductor.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
 
-// 🚀 GOBERNANZA DE TIEMPO REAL: Importación del SDK Administrativo y las Rutas Globales de Firestore
-import { dbFirestore } from '../../config/firebase.js'; 
-import { FIRESTORE_PATHS } from '../../config/firebase.js'; 
+// 🚀 GOBERNANZA DE TIEMPO REAL: Importación Unificada del SDK Administrativo
+import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js'; 
 
 // 📡 FUNCIÓN DE TELEMETRÍA: Obtener conductores activos
 export const obtenerConductoresDisponibles = async (req, res) => {
@@ -105,22 +105,36 @@ export const recargarBilleteraPorAdmin = async (req, res) => {
             return res.status(400).json({ success: false, message: "⚠️ El monto de recarga debe ser superior a $0 COP." });
         }
 
-        // Obtener el estado previo del saldo para la traza del historial usando conductorId (String) o _id (ObjectId)
-        const queryTarget = mongoose.Types.ObjectId.isValid(conductorId) 
-            ? { _id: conductorId } 
-            : { conductorId: conductorId };
+        // 🧠 MOTOR DE BÚSQUEDA POLIMÓRFICA ESTRICTA
+        const paramBusqueda = String(conductorId).trim();
+        let queryTarget;
 
+        if (paramBusqueda.includes('@')) {
+            // Caso 1: Correo Electrónico
+            queryTarget = { email: paramBusqueda.toLowerCase() };
+        } else if (/^\d{10}$/.test(paramBusqueda)) {
+            // Caso 2: Número de celular (10 dígitos exactos)
+            queryTarget = { telefono: paramBusqueda };
+        } else if (mongoose.Types.ObjectId.isValid(paramBusqueda)) {
+            // Caso 3: ID de MongoDB
+            queryTarget = { _id: paramBusqueda };
+        } else {
+            // Caso 4: Custom ID Legacy (Ej: DRV-1234)
+            queryTarget = { conductorId: paramBusqueda };
+        }
+
+        // Búsqueda inicial estricta para resolver la identidad del operador
         const conductorPrevio = await Conductor.findOne(queryTarget).lean();
         
         if (!conductorPrevio) {
-            return res.status(404).json({ success: false, message: "❌ Conductor no localizado en el clúster." });
+            return res.status(404).json({ success: false, message: `❌ Operador no localizado mediante el identificador provisto: ${paramBusqueda}` });
         }
 
         const saldoAnterior = conductorPrevio.saldo || 0;
 
-        // ⚡ MODIFICACIÓN MATEMÁTICA ATÓMICA DIRECTA: Previene condiciones de carrera
+        // ⚡ MODIFICACIÓN MATEMÁTICA ATÓMICA DIRECTA (Anclado al _id exacto resuelto)
         const conductorActualizado = await Conductor.findOneAndUpdate(
-            queryTarget,
+            { _id: conductorPrevio._id },
             { $inc: { saldo: montoNumerico } },
             { new: true, runValidators: true }
         );
@@ -137,11 +151,11 @@ export const recargarBilleteraPorAdmin = async (req, res) => {
         });
         await registroContable.save();
 
-        console.log(`💰 [CIMCO-TESORERÍA] CEO/Secretaría inyectó +$${montoNumerico} al ID: ${conductorId}. Saldo Actual: $${conductorActualizado.saldo}`);
+        console.log(`💰 [CIMCO-TESORERÍA] CEO/Secretaría inyectó +$${montoNumerico} al Operador: ${conductorActualizado.nombre}. Saldo Actual: $${conductorActualizado.saldo}`);
 
         return res.status(200).json({
             success: true,
-            message: "Recarga processed de forma atómica.",
+            message: "Recarga procesada de forma atómica.",
             saldo: conductorActualizado.saldo,
             data: {
                 conductor: conductorActualizado.nombre,
@@ -159,15 +173,11 @@ export const recargarBilleteraPorAdmin = async (req, res) => {
 // ==================================================================
 // 📍 EXTENSIÓN GEOLOCALIZADA: MOTOR DEL RADAR RADIAL Y ACTUALIZACIÓN GPS
 // ==================================================================
-/**
- * Misión: Consultar conductores activos dentro de un radio geográfico en La Jagua de Ibirico.
- * Operador Atómico: MongoDB $geoNear (Requiere índice 2dsphere activo en el campo 'coordenadas').
- */
 export const obtenerConductoresCercanos = async (req, res) => {
     try {
         const { lat, lng, radioMaxKm } = req.query;
 
-        // 🛡️ GUARDA DE SEGURIDAD INTERNA: Validar presencia de parámetros de telemetría GPS
+        // 🛡️ GUARDA DE SEGURIDAD INTERNA
         if (!lat || !lng) {
             return res.status(400).json({
                 ok: false,
@@ -176,30 +186,26 @@ export const obtenerConductoresCercanos = async (req, res) => {
             });
         }
 
-        // Conversión estricta de tipos de datos y asignación de radio por defecto (5 Km si no se especifica)
         const latitud = parseFloat(lat);
         const longitud = parseFloat(lng);
         const radioMetros = (parseFloat(radioMaxKm) || 5) * 1000; 
 
         console.log(`📡 [CIMCO-RADAR] Ejecutando escaneo radial desde: [Lat: ${latitud}, Lng: ${longitud}] | Radio: ${radioMetros}mts`);
 
-        // 🚀 PIPELINE DE AGREGACIÓN GEOESPACIAL ATÓMICA
         const conductoresCercanos = await Conductor.aggregate([
             {
                 $geoNear: {
                     near: {
                         type: "Point",
-                        // ⚠️ REGLA GEOJSON OBLIGATORIA: El orden siempre es [Longitud, Latitud]
                         coordinates: [longitud, latitud]
                     },
-                    distanceField: "distanciaMetros", // Inyecta dinámicamente la distancia calculada en cada documento
+                    distanceField: "distanciaMetros",
                     maxDistance: radioMetros,
-                    query: { estado: "active" }, // Filtrado indexado: Solo conductores listos para recibir ofertas
+                    query: { estado: "active" },
                     spherical: true
                 }
             },
             {
-                // Limitamos la proyección para optimizar el ancho de banda del satélite de datos
                 $project: {
                     _id: 1,
                     nombre: 1,
@@ -207,7 +213,7 @@ export const obtenerConductoresCercanos = async (req, res) => {
                     telefono: 1,
                     estado: 1,
                     coordenadas: 1,
-                    distanciaKm: { $divide: ["$distanciaMetros", 1000] } // Transforma metros a kilómetros para el frontend
+                    distanciaKm: { $divide: ["$distanciaMetros", 1000] } 
                 }
             }
         ]);
@@ -228,15 +234,10 @@ export const obtenerConductoresCercanos = async (req, res) => {
     }
 };
 
-/**
- * 📡 ENDPOINT: Actualización de Ubicación GPS a Alta Velocidad (Ráfaga de Telemetría)
- * Optimizado para minimizar ciclos de CPU de computadoras locales y sincronizar en paralelo con Firebase Firestore.
- */
 export const actualizarUbicacionGPS = async (req, res) => {
     try {
         const { conductorId, latitud, longitud, estado } = req.body;
 
-        // 🛡️ GUARDA ANTI-UNDEFINED PERIMETRAL
         if (!conductorId || latitud === undefined || longitud === undefined || !estado) {
             return res.status(400).json({ success: false, message: "⚠️ [CIMCO-TELEMETRÍA] Telemetría corrupta. Payload incompleto." });
         }
@@ -249,13 +250,11 @@ export const actualizarUbicacionGPS = async (req, res) => {
             return res.status(400).json({ success: false, message: "⚠️ [CIMCO-TELEMETRÍA] Coordenadas no numéricas detectadas." });
         }
 
-        // Mapeo rápido al formato estricto GeoJSON [Lng, Lat] de MongoDB
         const nuevasCoordenadas = {
             type: 'Point',
             coordinates: [parsedLng, parsedLat]
         };
 
-        // ⚡ PASO 1: Actualización directa en MongoDB Atlas (Optimización CPU mediante Lean)
         const conductorActualizado = await Conductor.findByIdAndUpdate(
             conductorId,
             { 
@@ -271,9 +270,7 @@ export const actualizarUbicacionGPS = async (req, res) => {
             return res.status(404).json({ success: false, message: "❌ Unidad de transporte no registrada en la base central MDB." });
         }
 
-        // ⚡ PASO 2: PUENTE DE FUEGO SÍNCRONO - Inyección en tiempo real en la colección global de Firestore
         if (dbFirestore && FIRESTORE_PATHS && FIRESTORE_PATHS.conductores) {
-            // Se utiliza la ruta centralizada gobernada por el objeto global FIRESTORE_PATHS
             const firestoreDocRef = dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(conductorId);
             
             await firestoreDocRef.set({
@@ -285,13 +282,10 @@ export const actualizarUbicacionGPS = async (req, res) => {
                     longitude: parsedLng
                 },
                 updatedAt: new Date().toISOString()
-            }, { merge: true }); // Merge evita la destrucción de metadatos previamente guardados en el nodo móvil
+            }, { merge: true }); 
         } else {
             console.warn("⚠️ [CIMCO-FIREBASE-WARN] El puente Firestore no está inicializado o FIRESTORE_PATHS está ausente.");
         }
-
-        // Trazabilidad premium compacta para la terminal de Nodemon
-        console.log(`📡 [MDB ↔ FIRESTORE] ID: ${conductorId.substring(18)}... | Est: ${estadoLcase.toUpperCase()} | Coord: [${parsedLat.toFixed(5)}, ${parsedLng.toFixed(5)}]`);
 
         return res.status(200).json({
             success: true,

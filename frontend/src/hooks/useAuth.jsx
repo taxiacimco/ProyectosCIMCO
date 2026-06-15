@@ -1,23 +1,24 @@
-// Versión Arquitectura: V20.3 - Hook de Consumo Puro (Fast Refresh Compliant)
+// Versión Arquitectura: V20.4 - Aislamiento HMR Vite y Consumo Seguro del Contexto
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useAuth.jsx
- * Misión: Proporcionar acceso seguro al contexto de autenticación (CIMCO-NEXUS).
- * Integridad: Consumo directo del nodo inmutable AuthContext para evitar invalidaciones HMR de Vite.
+ * Misión: Proporcionar acceso seguro al contexto de autenticación (CIMCO-NEXUS) sin romper el Fast Refresh.
+ * Integridad: Consumo directo del nodo inmutable AuthContext mediante alias absoluto.
  */
 
 import { useContext } from 'react';
-// 🛡️ Importación directa desde el nodo de contexto inmutable (AuthContext.js)
-// Esto evita que Vite rompa el Fast Refresh al intentar recargar el Provider.
-import { AuthContext } from './AuthContext';
+// 🛡️ Gobernanza de Importaciones: Uso estricto de alias absoluto @/ para blindar el motor Vite
+import { AuthContext } from '@/hooks/AuthProvider';
 
 export const useAuth = () => {
     const context = useContext(AuthContext);
     
-    // 🛡️ Blindaje anti-undefined: 
-    // Retorna un estado seguro y controlado si el componente intenta acceder 
-    // al contexto fuera del alcance del AuthProvider.
+    // 🛡️ Fusión Atómica y Blindaje Anti-Undefined:
+    // Mantiene la alerta crítica solicitada mientras preserva el retorno seguro del código base
+    // para evitar quiebres descontrolados en el renderizado si ocurre un desbordamiento.
     if (!context) {
+        console.error("🚨 [CIMCO-UI-ERR] useAuth debe ser consumido estrictamente dentro de un AuthProvider.");
         console.warn("⚠️ [CIMCO-SECURITY] Intento de acceso a Auth fuera del Provider. Retornando estado nulo seguro.");
+        
         return { 
             user: null, 
             setUser: () => {}, 
