@@ -1,93 +1,107 @@
-// Versión Arquitectura: V2.0 - Test de Concurrencia HTTP Masiva Paralela
 // Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\stress_test.js
+// Versión: V22.0 - Sincronización Total vía Endpoint Dedicado de Pruebas
 
-const BASE_URL = "http://localhost:3000/api/viajes";
-const TOTAL_CONCURRENTE = 10; // Número de hilos paralelos simultáneos
+const BASE_URL_VIAJES = "http://localhost:3000/api/viajes";
+const BASE_URL_CONDUCTORES = "http://localhost:3000/api/conductores"; 
+const TOTAL_CONCURRENTE = 10; 
+
+let ID_CONDUCTOR_REAL = "6a29c73cc8d7b14cd8f85876"; 
+const ID_PASAJERO_BASE = "6a29b491c8d7b14cd8f85871";
+
+const LOCAL_JWT_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiI2YTI5YjQ5MWM4ZDdiMTRjZDhmODU4NzEiLCJub21icreOiJDYXJsb3MgTWFyaW8gRnVlbnRlcyIsImVtYWlsIjoiY2FybG9zbWFyaW9mdWVudGVzZ2FyY2lhQGdtYWlsLmNvbSIsInJvbGUiOiJwYXNhamVybyIsImVzdGFkbyI6ImFjdGl2byIsImlhdCI6MTg4MjUzNzYwMH0.CIMCO_SIGNATURE_MOCK_SECRET_FOR_LOCAL_STRESS_TESTING_V9";
+
+const CABECERAS_BYPASS = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${LOCAL_JWT_TOKEN}`,
+    'User-Agent': 'StressTestAgent',      
+    'x-stress-test': 'true'
+};
+
+async function recargarBilleteraBypass() {
+    console.log(`💳 [PRE-FLIGHT] Forzando inyección de $150,000 COP al ID: ${ID_CONDUCTOR_REAL}...`);
+    try {
+        const res = await fetch(`${BASE_URL_CONDUCTORES}/bypass-stress-saldo`, {
+            method: 'PUT',
+            headers: CABECERAS_BYPASS,
+            body: JSON.stringify({
+                conductorId: ID_CONDUCTOR_REAL,
+                saldo: 150000
+            })
+        });
+        const data = await res.json();
+        if (data && data.success) {
+            console.log(`✅ [PRE-FLIGHT] Saldo inyectado con éxito en Atlas. Saldo actual: $${data.data.saldo} COP.`);
+            return true;
+        }
+        console.warn("⚠️ [PRE-FLIGHT] El endpoint de bypass no respondió éxito. Intenta recargar el ID desde Compass.");
+        return false;
+    } catch (e) {
+        console.error("❌ [PRE-FLIGHT] Error conectando al endpoint de bypass:", e.message);
+        return false;
+    }
+}
 
 async function simularCicloViajeConcurrente(idHijo) {
     const payloadSolicitud = {
-        pasajeroId: `6a29b491c8d7b14cd8f85871`, // Reutiliza el ID de prueba funcional
-        origen: {
-            lat: 9.56215,
-            lng: -73.33418,
-            direccion: `Terminal La Jagua Hilo-${idHijo}`
-        },
-        destino: {
-            lat: 9.56800,
-            lng: -73.33900,
-            direccion: `Barrio Central Hilo-${idHijo}`
-        },
-        tarifaEstimada: 5000
+        pasajeroId: ID_PASAJERO_BASE,
+        origen: { lat: 9.56215, lng: -73.33418, direccion: `Terminal La Jagua Hilo-${idHijo}` },
+        destino: { lat: 9.56800, lng: -73.33900, direccion: `Barrio Central Hilo-${idHijo}` },
+        origenTexto: `Terminal La Jagua Hilo-${idHijo}`,   
+        destinoTexto: `Barrio Central Hilo-${idHijo}`,  
+        tarifa: 5000,
+        metodoPago: 'EFECTIVO',
+        tipoServicio: 'mototaxi'
     };
 
     try {
-        // ----------------------------------------------------------------
-        // PASO 1: Lanzar la Solicitud del Viaje vía HTTP POST
-        // ----------------------------------------------------------------
-        const resSolicitud = await fetch(`${BASE_URL}/solicitar`, {
+        const resSolicitud = await fetch(`${BASE_URL_VIAJES}/solicitar`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: CABECERAS_BYPASS,
             body: JSON.stringify(payloadSolicitud)
         });
 
         const dataSolicitud = await resSolicitud.json();
+        if (!dataSolicitud || !dataSolicitud.success || !dataSolicitud.viajeId) return;
 
-        if (!dataSolicitud.success) {
-            console.error(`❌ [HILO-${idHijo}] Falló la creación:`, dataSolicitud.message);
-            return;
-        }
+        const idViajeCreado = dataSolicitud.viajeId;
+        console.log(`✅ [HILO-${idHijo}] Viaje Solicitado Exitosamente. ID: ${idViajeCreado}`);
 
-        const viajeId = dataSolicitud.data._id;
-        console.log(`✅ [HILO-${idHijo}] Viaje Creado en Gateway. ID: ${viajeId}`);
-
-        // ----------------------------------------------------------------
-        // PASO 2: Aceptación Inmediata Concurrentizada (Simulando Moto)
-        // ----------------------------------------------------------------
-        const payloadAceptar = {
-            viajeId: viajeId,
-            conductorId: "6a29c73cc8d7b14cd8f85876" // ID de Pantera Rosa
-        };
-
-        const resAceptar = await fetch(`${BASE_URL}/aceptar`, {
+        const resAceptar = await fetch(`${BASE_URL_VIAJES}/aceptar`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payloadAceptar)
+            headers: CABECERAS_BYPASS,
+            body: JSON.stringify({ viajeId: idViajeCreado, conductorId: ID_CONDUCTOR_REAL })
         });
 
         const dataAceptar = await resAceptar.json();
-        
-        if (dataAceptar.success) {
-            console.log(`  🏍️ -> [HILO-${idHijo}] Asignación Exitosa y Sincronizada.`);
+        if (dataAceptar && dataAceptar.success) {
+            console.log(`  🏍️ -> [HILO-${idHijo}] Asignación Atómica Exitosa y Sincronizada en La Jagua.`);
         } else {
-            console.warn(`  ⚠️ -> [HILO-${idHijo}] Bloqueado o Rechazado:`, dataAceptar.message);
+            console.warn(`  ⚠️ -> [HILO-${idHijo}] Rechazado:`, dataAceptar?.message);
         }
-
     } catch (error) {
-        console.error(`❌ [HILO-${idHijo}] Error de red / comunicación HTTP:`, error.message);
+        console.error(`❌ [HILO-${idHijo}] Error HTTP:`, error.message);
     }
 }
 
 async function ejecutarStressTestConcurrente() {
     console.log("==================================================================");
-    console.log("🚀 [CIMCO-STRESS HTTP] Iniciando Ataque Masivo Paralelo...");
-    console.log(`📍 Endpoint Objetivo: ${BASE_URL}`);
-    console.log(`🔥 Total de Peticiones Simultáneas: ${TOTAL_CONCURRENTE}`);
+    console.log("🚀 [CIMCO-STRESS HTTP] Sincronizando Ataque Masivo Paralelo...");
     console.log("==================================================================");
 
+    // Ejecutamos la recarga forzada pre-vuelo
+    await recargarBilleteraBypass();
+
+    console.log("🔥 Ejecutando ráfaga síncrona paralela...");
     const startTime = Date.now();
     const promesas = [];
 
-    // Llenamos el array de promesas para dispararlas en ráfaga paralela
     for (let i = 0; i < TOTAL_CONCURRENTE; i++) {
         promesas.push(simularCicloViajeConcurrente(i));
     }
 
-    // 🔥 Aquí ocurre la magia de la concurrencia: se ejecutan al mismo tiempo
     await Promise.all(promesas);
-
-    const duration = Date.now() - startTime;
     console.log("==================================================================");
-    console.log(`🏁 [STRESS TERMINADO] Ráfaga procesada en ${duration}ms`);
+    console.log(`🏁 [STRESS TERMINADO] Malla procesada en: ${Date.now() - startTime}ms`);
     console.log("==================================================================");
 }
 

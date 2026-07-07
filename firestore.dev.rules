@@ -1,0 +1,31 @@
+// Versión Arquitectura: V1.3 - Reglas de Seguridad de Desarrollo Homologadas (Anti-Mismatched)
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Funciones Globales de Validación Operativa
+    function esUsuarioAutenticado() {
+      return request.auth != null;
+    }
+
+    function esPropietario(userId) {
+      return esUsuarioAutenticado() && request.auth.uid == userId;
+    }
+
+    // Regla Global Perimetral para Entorno de Desarrollo (Permisiva controlada)
+    match /{document=**} {
+      allow read, write: if true; 
+    }
+    
+    // Nodo de Colección Central de Usuarios / Conductores
+    match /usuarios/{userId} {
+      allow read, update: if esUsuarioAutenticado();
+      allow create, delete: if esUsuarioAutenticado() && esPropietario(userId);
+    }
+
+    // Nodo de Colección de Viajes Intermunicipales e Historial
+    match /viajes_intermunicipales/{viajeId} {
+      allow read, write: if esUsuarioAutenticado();
+    }
+  }
+}

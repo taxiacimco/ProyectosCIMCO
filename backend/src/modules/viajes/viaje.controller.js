@@ -1,17 +1,22 @@
-// Versión Arquitectura: V10.4 - Sincronización Síncrona Firestore y Liquidación Atómica de Flota (10%)
+// Versión Arquitectura: V14.5 - Blindaje Transaccional Homólogo y Despacho Inmediato de Terminal
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
- * Misión: Procesar flujos operativos, liquidación contable (10% comisión), y sincronización de estado de viaje hacia Firebase Firestore.
- * Ajuste: Blindaje de condición de carrera en liquidación utilizando operador atómico $inc.
+ * Misión: Procesar flujos operativos, liquidación contable (10% comisión) y sincronización Firestore.
+ * Ajuste V14.5: Consolidación de 'crearYDespacharViajeAtomico' e integración definitiva de la guarda 
+ *               'estadoOperativo' ('DISPONIBLE'/'OCUPADO') en todas las mutaciones ACID.
  */
 
-import Viaje from '../../models/Viaje.js';
-import Conductor from '../../models/Conductor.js';
-import HistorialSaldo from '../../models/HistorialSaldo.js'; 
+import Viaje from '#models/Viaje.js';
+import Conductor from '#models/Conductor.js';
+import Usuario from '#models/Usuario.js';
+import HistorialSaldo from '#models/HistorialSaldo.js';
 import crypto from 'crypto';
+import mongoose from 'mongoose';
+import { dbFirestore, FIRESTORE_PATHS } from '#config/firebase.js';
+import { FieldValue } from 'firebase-admin/firestore';
 
-// 🚀 GOBERNANZA DE RUTAS: Puente Híbrido con Firestore
-import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
+// Auxiliar de retardo con aleatoriedad (Jitter) para dispersar la ráfaga concurrentemente
+const esperarGarantizado = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // 🧠 Algoritmo de Distancia Esférica (Haversine)
 const calcularDistanciaHaversine = (lat1, lon1, lat2, lon2) => {
@@ -25,204 +30,469 @@ const calcularDistanciaHaversine = (lat1, lon1, lat2, lon2) => {
     return R * c; 
 };
 
-// 1. CREACIÓN DEL VIAJE (PASAJERO)
-export const crearViaje = async (req, res) => {
-    try {
-        const { pasajeroId, origen, destino, tarifaEstimada } = req.body;
-        
-        // 🛡️ GUARDA DE SEGURIDAD GEOESPACIAL
-        if (!pasajeroId || !origen || !destino || typeof origen.lat === 'undefined' || typeof origen.lng === 'undefined' || typeof destino.lat === 'undefined' || typeof destino.lng === 'undefined') {
-            return res.status(400).json({ success: false, message: '⚠️ ALERTA DE ARQUITECTURA: Parámetros geoespaciales o ID de usuario faltantes.' });
-        }
-        
-        const latOrigen = Number(origen.lat), lngOrigen = Number(origen.lng), latDestino = Number(destino.lat), lngDestino = Number(destino.lng);
-        
-        if (isNaN(latOrigen) || isNaN(lngOrigen) || isNaN(latDestino) || isNaN(lngDestino)) {
-            return res.status(400).json({ success: false, message: 'Coordenadas GPS no válidas.' });
-        }
-        
-        // 🧮 CALIBRACIÓN DEL ALGORITMO DE TARIFA (Base $3000 + $1500/Km)
-        const km = calcularDistanciaHaversine(latOrigen, lngOrigen, latDestino, lngDestino);
-        const tarifaCalculada = tarifaEstimada ? Number(tarifaEstimada) : Math.round(3000 + (km * 1500));
-        
-        const nuevoViaje = new Viaje({ 
-            pasajeroId, 
-            origen: { lat: latOrigen, lng: lngOrigen }, 
-            destino: { lat: latDestino, lng: lngDestino }, 
-            origenTexto: origen.direccion || 'Ubicación GPS', 
-            destinoTexto: destino.direccion || 'Destino GPS', 
-            tarifa: isNaN(tarifaCalculada) ? 3000 : tarifaCalculada, 
-            estadoViaje: 'buscando' 
-        });
-        
-        await nuevoViaje.save();
+// ==================================================================
+// 0. CREACIÓN Y DESPACHO INMEDIATO (BLOQUEO TRANSACCIONAL DESDE ANDÉN)
+// ==================================================================
+export const crearYDespacharViajeAtomico = async (req, res) => {
+    if (!req || !req.body) {
+        return res.status(400).json({ success: false, message: 'Payload de inyección logística corrupto o ausente.' });
+    }
 
-        // ⚡ PUENTE FIRESTORE: Publicar solicitud en tiempo real para el Radar Geoespacial
-        if (dbFirestore && FIRESTORE_PATHS.viajes) {
-            await dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(nuevoViaje._id.toString()).set({
-                id: nuevoViaje._id.toString(),
-                pasajeroId,
-                estado: 'buscando',
-                origen: { latitude: latOrigen, longitude: lngOrigen },
-                destino: { latitude: latDestino, longitude: lngDestino },
-                tarifa: tarifaCalculada,
-                createdAt: new Date().toISOString()
+    const { pasajeroId, origen, destino, origenTexto, destinoTexto, tarifa, metodoPago, conductorId } = req.body;
+
+    if (!pasajeroId || !origen || !destino || !origenTexto || !destinoTexto || !tarifa || !conductorId) {
+        return res.status(400).json({ success: false, message: 'Parámetros obligatorios incompletos para forzar el despacho atómico.' });
+    }
+
+    if (!req.usuario || !req.usuario.id) {
+        return res.status(401).json({ success: false, message: 'Credenciales de operador ausentes en la terminal de despacho.' });
+    }
+
+    const despachadorId = String(req.usuario.id);
+    const despachadorRol = String(req.usuario.rol || req.usuario.role || '').toLowerCase();
+
+    if (despachadorRol !== 'despachador' && despachadorRol !== 'admin' && despachadorRol !== 'ceo') {
+        return res.status(403).json({ success: false, message: 'Acceso denegado. Su rol no cuenta con privilegios de asignación en andén.' });
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // 1. Bloqueo transaccional utilizando el control estricto de estado operativo
+        const conductor = await Conductor.findOne({ _id: conductorId }).session(session);
+        if (!conductor) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ success: false, message: 'El conductor asignado no existe en la base de datos central.' });
+        }
+
+        if (conductor.estadoOperativo !== 'DISPONIBLE') {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(409).json({
+                success: false,
+                code: 'DRIVER_CONCURRENT_CONFLICT',
+                message: 'Conflicto de despacho. El conductor ya se encuentra en estado OCUPADO o en ruta activa.'
             });
         }
 
-        console.log(`🚕 [CIMCO-DESPACHO] Viaje solicitado. ID: ${nuevoViaje._id} | Tarifa: $${tarifaCalculada}`);
-        res.status(201).json({ success: true, message: '🚕 Solicitud creada exitosamente en el clúster.', data: nuevoViaje });
-        
-    } catch (error) {
-        console.error('❌ Error en creación de viaje:', error.message);
-        res.status(500).json({ success: false, message: 'Falla crítica interna en creación de servicio.', error: error.message });
-    }
-};
-
-export const obtenerViajesDisponibles = async (req, res) => {
-    try {
-        const viajesDisponibles = await Viaje.find({ estadoViaje: 'buscando' }).lean();
-        res.status(200).json({ success: true, count: viajesDisponibles.length, data: viajesDisponibles });
-    } catch (error) {
-        res.status(500).json({ success: false, message: 'Error al obtener bolsa de viajes disponibles.' });
-    }
-};
-
-// 2. ASIGNACIÓN DEL VIAJE (CONDUCTOR)
-export const aceptarViaje = async (req, res) => {
-    try {
-        const { viajeId, conductorId } = req.body;
-        const [viaje, conductor] = await Promise.all([
-            Viaje.findById(viajeId), 
-            Conductor.findOne({ $or: [{ _id: conductorId }, { conductorId: conductorId }] })
-        ]);
-
-        if (!viaje || !conductor) return res.status(404).json({ success: false, message: 'Viaje o unidad de transporte no localizados.' });
-        if (viaje.estadoViaje !== 'buscando') return res.status(400).json({ success: false, message: 'El servicio ya ha sido asignado a otra unidad.' });
-        
-        // 🛡️ REGLA INQUEBRANTABLE DE NEGOCIO: Bloqueo de Billetera Exhausta
-        const saldoActual = typeof conductor.saldo === 'number' ? conductor.saldo : 0;
-        if (saldoActual < 2000) {
-            console.warn(`⚠️ [CIMCO-TESORERÍA] Unidad ${conductor.nombre} rechazada. Saldo: $${saldoActual}`);
-            return res.status(403).json({ success: false, message: `Billetera bloqueada. Saldo insuficiente ($${saldoActual} COP). Requiere mínimo $2000 COP.` });
+        if ((conductor.saldo || 0) < 2000) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                message: `Despacho denegado. El conductor posee saldo insuficiente en billetera ($${conductor.saldo || 0} COP).`
+            });
         }
 
-        viaje.conductorId = conductor.conductorId || conductor._id;
-        viaje.estadoViaje = 'aceptado';
+        // 2. Inserción aislada del nuevo viaje asignado directamente
+        const [nuevoViaje] = await Viaje.create([{
+            pasajeroId,
+            conductorId,
+            despachadorId,
+            origen,
+            destino,
+            origenTexto,
+            destinoTexto,
+            tarifa,
+            valor: tarifa,
+            metodoPago: metodoPago || 'EFECTIVO',
+            estado: 'accepted',
+            estadoViaje: 'aceptado'
+        }], { session });
+
+        // 3. Mutación inmediata del control semántico del conductor
         conductor.estado = 'busy';
-        
-        await Promise.all([viaje.save(), conductor.save()]);
+        conductor.estadoOperativo = 'OCUPADO';
+        conductor.viajeActualId = String(nuevoViaje._id);
+        await conductor.save({ session });
 
-        // ⚡ PUENTE FIRESTORE: Actualizar estado de viaje y bloquear nodo en el mapa
-        if (dbFirestore && FIRESTORE_PATHS.viajes && FIRESTORE_PATHS.conductores) {
-            const batch = dbFirestore.batch();
-            const viajeRef = dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(viaje._id.toString());
-            const conductorRef = dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(conductor._id.toString());
-            
-            batch.update(viajeRef, { estado: 'aceptado', conductorId: conductor._id.toString() });
-            batch.update(conductorRef, { estado: 'busy' });
-            await batch.commit();
+        await session.commitTransaction();
+        session.endSession();
+
+        // 📡 Sincronización post-commit en Firebase Firestore
+        if (dbFirestore) {
+            const viajeRef = dbFirestore.collection(FIRESTORE_PATHS.viajes || 'viajes').doc(String(nuevoViaje._id));
+            const conductorRef = dbFirestore.collection(FIRESTORE_PATHS.conductores || 'conductores').doc(String(conductorId));
+
+            await Promise.all([
+                viajeRef.set({
+                    viajeId: String(nuevoViaje._id),
+                    pasajeroId: String(pasajeroId),
+                    conductorId: String(conductorId),
+                    despachadorId: despachadorId,
+                    origen,
+                    destino,
+                    origenTexto,
+                    destinoTexto,
+                    tarifa: parseFloat(tarifa),
+                    metodoPago: metodoPago || 'EFECTIVO',
+                    estadoViaje: 'aceptado',
+                    createdAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp()
+                }),
+                conductorRef.update({
+                    estado: 'busy',
+                    estadoOperativo: 'OCUPADO',
+                    viajeActualId: String(nuevoViaje._id),
+                    updatedAt: FieldValue.serverTimestamp()
+                })
+            ]).catch(e => console.error("🚨 Error diferido Firestore en creación atómica:", e));
         }
 
-        console.log(`🏍️ [CIMCO-DESPACHO] Viaje ${viaje._id} asignado a ${conductor.nombre}.`);
-        res.status(200).json({ success: true, message: '🏍️ Viaje asignado y sincronizado.', data: viaje });
-        
+        return res.status(201).json({
+            success: true,
+            message: "Viaje intermunicipal creado e inyectado limpiamente bajo aislamiento ACID.",
+            viajeId: nuevoViaje._id,
+            data: nuevoViaje
+        });
+
     } catch (error) {
-        console.error('❌ Error en aceptación de viaje:', error.message);
-        res.status(500).json({ success: false, message: 'Error de infraestructura en el nodo de despacho.', error: error.message });
+        await session.abortTransaction();
+        session.endSession();
+        console.error("❌ [CIMCO-CREAR-DESPACHO-ERR]:", error.message);
+        return res.status(500).json({ success: false, message: 'Fallo crítico transaccional al originar la orden de andén.' });
     }
 };
 
-export const iniciarViaje = async (req, res) => {
+// ==================================================================
+// 1. SOLICITUD DE SERVICIO (RADAR RADIAL DE CERCANÍA)
+// ==================================================================
+export const solicitarViaje = async (req, res) => {
     try {
-        const { viajeId } = req.body;
-        const viaje = await Viaje.findById(viajeId);
-        if (!viaje || viaje.estadoViaje !== 'aceptado') return res.status(400).json({ success: false, message: 'Estado operativo inválido para inicio.' });
-        
-        viaje.estadoViaje = 'en_ruta';
-        await viaje.save();
-
-        if (dbFirestore && FIRESTORE_PATHS.viajes) {
-            await dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(viaje._id.toString()).update({ estado: 'en_ruta' });
+        if (!req || !req.body) {
+            return res.status(400).json({ success: false, message: 'Payload de solicitud nulo o inválido.' });
         }
 
-        res.status(200).json({ success: true, message: '🚀 Ruta iniciada.' });
+        const { pasajeroId, origen, destino, origenTexto, destinoTexto, tarifa, metodoPago } = req.body;
+
+        if (!pasajeroId || !origen || !destino || !origenTexto || !destinoTexto || !tarifa) {
+            return res.status(400).json({ success: false, message: 'Parámetros obligatorios incompletos para procesar despacho.' });
+        }
+
+        if (String(metodoPago).toUpperCase() === 'WALLET') {
+            const pasajero = await Usuario.findById(pasajeroId).lean();
+            if (!pasajero) {
+                return res.status(404).json({ success: false, message: 'El perfil de pasajero no se encuentra en el sistema central.' });
+            }
+
+            const saldoDisponible = pasajero.saldo || pasajero.balance || 0;
+            if (saldoDisponible < parseFloat(tarifa)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Fondos insuficientes en tu billetera digital para realizar este viaje."
+                });
+            }
+        }
+
+        const nuevoViaje = await Viaje.create({
+            pasajeroId,
+            origen,
+            destino,
+            origenTexto,
+            destinoTexto,
+            tarifa,
+            valor: tarifa,
+            metodoPago: metodoPago || 'EFECTIVO',
+            estado: 'solicitado',
+            estadoViaje: 'solicitado'
+        });
+
+        if (dbFirestore && FIRESTORE_PATHS?.viajes) {
+            await dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(String(nuevoViaje._id)).set({
+                viajeId: String(nuevoViaje._id),
+                pasajeroId: String(pasajeroId),
+                origen,
+                destino,
+                origenTexto,
+                destinoTexto,
+                tarifa: parseFloat(tarifa),
+                metodoPago: metodoPago || 'EFECTIVO',
+                estadoViaje: 'solicitado',
+                conductorId: null,
+                createdAt: FieldValue.serverTimestamp()
+            });
+        }
+
+        // Búsqueda radial consumiendo de forma estricta el control semántico operativo
+        const conductoresCercanos = await Conductor.find({
+            estadoOperativo: 'DISPONIBLE',
+            ubicacion: {
+                $near: {
+                    $geometry: {
+                        type: 'Point',
+                        coordinates: [parseFloat(origen.lng), parseFloat(origen.lat)]
+                    },
+                    $maxDistance: 5000 
+                }
+            }
+        }).lean();
+
+        const aptos = (conductoresCercanos || []).filter(c => (c.saldo || 0) >= 2000);
+
+        return res.status(201).json({
+            success: true,
+            viajeId: nuevoViaje._id,
+            conductoresNotificados: aptos.length,
+            data: nuevoViaje
+        });
+
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Error al cambiar estado operativo.' });
+        console.error("🚨 [CIMCO-DESPACHO-ERR]:", error);
+        return res.status(500).json({ success: false, message: 'Fallo crítico al inicializar la orden radial.' });
     }
 };
 
-// 3. FINALIZACIÓN Y LIQUIDACIÓN CONTABLE (10% COMISIÓN)
-export const completarViaje = async (req, res) => {
+// ==================================================================
+// 2. ASIGNACIÓN ATÓMICA CON LOCK ANTI-COLLISION (RACE CONDITION FIX)
+// ==================================================================
+export const aceptarViaje = async (req, res) => {
+    if (!req || !req.body) {
+        return res.status(400).json({ success: false, message: 'Payload de aceptación corrupto.' });
+    }
+
+    const { viajeId, conductorId } = req.body;
+
+    if (!viajeId || !conductorId) {
+        return res.status(400).json({ success: false, message: 'ID de viaje y de conductor mandatorios.' });
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
     try {
-        const { viajeId } = req.body;
-        const viaje = await Viaje.findById(viajeId);
-        
-        if (!viaje || viaje.estadoViaje === 'completado') return res.status(400).json({ success: false, message: 'Viaje inexistente o ya liquidado en el clúster.' });
-        
-        const tarifa = viaje.tarifa || 0;
-        // 💰 REGLA MATEMÁTICA: Extracción exacta del 10% para la plataforma
-        const comision = Math.round(tarifa * 0.10); 
-        
-        const conductorPrevio = await Conductor.findOne({ $or: [{ _id: viaje.conductorId }, { conductorId: viaje.conductorId }] });
-        
-        if (!conductorPrevio) {
-            return res.status(404).json({ success: false, message: 'No se encontró la unidad operativa para la liquidación.' });
+        const conductor = await Conductor.findOne({ _id: conductorId }).session(session);
+        if (!conductor) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ success: false, message: 'El conductor especificado no existe en el sistema.' });
         }
 
-        const saldoAnterior = typeof conductorPrevio.saldo === 'number' ? conductorPrevio.saldo : 0;
-        
-        // ⚡ MODIFICACIÓN MATEMÁTICA ATÓMICA: Descuento directo en la base de datos
-        const conductorActualizado = await Conductor.findByIdAndUpdate(
-            conductorPrevio._id,
-            { 
-                $inc: { saldo: -comision },
-                $set: { estado: 'active' }
-            },
-            { new: true, runValidators: true }
+        const saldoConductor = conductor.saldo || 0;
+        if (saldoConductor < 2000) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({
+                success: false,
+                message: `Transacción rechazada. Saldo de billetera insuficiente ($${saldoConductor} COP). El mínimo requerido para aceptar servicios es $2,000 COP.`
+            });
+        }
+
+        // 🛡️ VALIDACIÓN EN CALIENTE DEL CONTROL SEMÁNTICO OPERATIVO
+        if (conductor.estadoOperativo !== 'DISPONIBLE') {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(409).json({
+                success: false,
+                code: 'DRIVER_BUSY_OR_OFFLINE',
+                message: 'Operación declinada. El conductor ya se encuentra en estado OCUPADO o cambió su perfil operativo.'
+            });
+        }
+
+        const viajeAsignado = await Viaje.findOneAndUpdate(
+            { _id: viajeId, estado: 'solicitado' }, 
+            { $set: { conductorId: conductorId, estado: 'accepted', estadoViaje: 'aceptado' } },
+            { new: true, session }
         );
 
-        // Prevenir saldos negativos por errores atípicos (Ajuste a cero si baja de cero)
-        if (conductorActualizado.saldo < 0) {
-             conductorActualizado.saldo = 0;
-             await conductorActualizado.save();
+        if (!viajeAsignado) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(409).json({
+                success: false,
+                code: 'RACE_CONDITION_DETECTED',
+                message: 'Lo sentimos, este servicio ya fue asignado o tomado por otro conductor en tránsito.'
+            });
         }
-        
-        const nuevoSaldo = conductorActualizado.saldo;
 
-        await HistorialSaldo.create({ 
-            conductorId: conductorActualizado._id, 
-            viajeId: viaje._id, 
-            tipo: 'descuento_comision', 
-            monto: comision, 
-            saldoAnterior, 
-            saldoNuevo: nuevoSaldo, 
-            descripcion: `Liquidación: 10% retenido del viaje ${viaje._id}.` 
+        // Mutación coordinada hacia OCUPADO
+        conductor.estado = 'busy';
+        conductor.estadoOperativo = 'OCUPADO';
+        conductor.viajeActualId = String(viajeId);
+        await conductor.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        if (dbFirestore && FIRESTORE_PATHS?.viajes) {
+            await dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(String(viajeId)).update({
+                conductorId: String(conductorId),
+                estadoViaje: 'aceptado',
+                updatedAt: FieldValue.serverTimestamp()
+            }).catch(e => console.error("🚨 Error diferido Firestore al actualizar Viaje:", e));
+        }
+
+        if (dbFirestore && FIRESTORE_PATHS?.conductores) {
+            await dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(String(conductorId)).update({
+                estado: 'busy',
+                estadoOperativo: 'OCUPADO',
+                viajeActualId: String(viajeId),
+                updatedAt: FieldValue.serverTimestamp()
+            }).catch(e => console.error("🚨 Error diferido Firestore al actualizar Conductor:", e));
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Servicio bloqueado y asignado a su terminal con éxito bajo aislamiento ACID.',
+            data: viajeAsignado
         });
-        
-        viaje.estadoViaje = 'completado';
-        await viaje.save();
 
-        // ⚡ PUENTE FIRESTORE: Liberar unidad y cerrar viaje en el mapa
-        if (dbFirestore && FIRESTORE_PATHS.viajes && FIRESTORE_PATHS.conductores) {
-            const batch = dbFirestore.batch();
-            batch.update(dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(viaje._id.toString()), { estado: 'completado' });
-            batch.update(dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(conductorActualizado._id.toString()), { estado: 'active' });
-            await batch.commit();
-        }
-
-        console.log(`🏁 [CIMCO-LIQUIDACIÓN] Viaje cerrado. Comisión (10%): $${comision} COP. Nuevo Saldo Operador: $${nuevoSaldo}`);
-        res.status(200).json({ success: true, message: '🏁 Liquidación de viaje completada y unidad liberada.', comisionDescontada: comision, nuevoSaldo: nuevoSaldo });
-        
     } catch (error) {
-        console.error('❌ Error en liquidación:', error.message);
-        res.status(500).json({ success: false, message: 'Falla atómica al liquidar el viaje.', error: error.message });
+        await session.abortTransaction();
+        session.endSession();
+        console.error("🚨 [CIMCO-LOCK-ERR]: Fallo de concurrencia en hilos de base de datos:", error);
+        return res.status(500).json({ success: false, message: 'Fallo de concurrencia en hilos de base de datos de asignación.' });
     }
 };
 
-// 4. WEBHOOK WOMPI (IGNORAR TARJETAS)
+// ==================================================================
+// 3. SUBSISTEMA DE LIQUIDACIÓN Y CIERRE DE SERVICIOS (VERSIÓN ACID V14.5)
+// ==================================================================
+export const completarViaje = async (req, res) => {
+    const MAX_REINTENTOS = 8;
+    let intento = 0;
+    const tiempoInicio = Date.now();
+
+    if (!req || !req.body) {
+        return res.status(400).json({ success: false, message: 'Payload de liquidación inválido.' });
+    }
+    
+    const { viajeId } = req.body;
+    if (!viajeId) {
+        return res.status(400).json({ success: false, message: 'ID del viaje requerido para cierre contable.' });
+    }
+
+    while (intento < MAX_REINTENTOS) {
+        intento++;
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            const viaje = await Viaje.findById(viajeId).session(session);
+            if (!viaje) {
+                throw new Error('Servicio no encontrado en el historial.');
+            }
+            if (viaje.estado === 'finalizado' || viaje.estadoViaje === 'completado') {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(200).json({
+                    success: true,
+                    message: 'Este servicio ya se encuentra liquidado y auditado por un hilo previo.',
+                    saldoRestante: 'MANTENIDO'
+                });
+            }
+
+            const conductorId = viaje.conductorId;
+            if (!conductorId) {
+                throw new Error('El viaje no tiene un conductor asociado para debitar.');
+            }
+
+            const valorReferencia = viaje.valor || viaje.tarifa || 0;
+            const comision = Math.round(valorReferencia * 0.10);
+
+            // Liberación explícita del control operativo de vuelta a DISPONIBLE
+            const conductorActualizado = await Conductor.findOneAndUpdate(
+                { _id: conductorId, saldo: { $gte: comision } },
+                { 
+                    $inc: { saldo: -comision, balance: -comision },
+                    $set: { estado: 'active', estadoOperativo: 'DISPONIBLE', viajeActualId: null }
+                },
+                { new: false, session }
+            );
+
+            if (!conductorActualizado) {
+                throw new Error('Conductor no hallado o fondos insuficientes para cubrir la comisión en tiempo real.');
+            }
+
+            const saldoAnterior = conductorActualizado.saldo || 0;
+            const saldoNuevo = saldoAnterior - comision;
+
+            viaje.estado = 'finalizado';
+            viaje.estadoViaje = 'completado';
+            await viaje.save({ session });
+
+            await HistorialSaldo.create([{
+                conductorId,
+                viajeId,
+                tipo: 'descuento_comision',
+                monto: comision,
+                saldoAnterior,
+                saldoNuevo,
+                procesadoPor: 'SISTEMA_DESPACHO_AUTOMATICO',
+                descripcion: `Débito automático del 10% por concepto de comisión del viaje ID: ${viaje._id}`
+            }], { session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            const latenciaTotal = Date.now() - tiempoInicio;
+            if (intento > 1) {
+                console.log(`📈 [CIMCO-PRODUCCION-AUDIT] Viaje ${viajeId} liquidado con éxito tras mitigar colisiones. Intentos: ${intento}. Latencia total: ${latenciaTotal}ms.`);
+            }
+
+            if (dbFirestore && FIRESTORE_PATHS?.conductores) {
+                dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(String(conductorId)).update({
+                    saldo: FieldValue.increment(-comision),
+                    balance: FieldValue.increment(-comision),
+                    estado: 'active',
+                    estadoOperativo: 'DISPONIBLE',
+                    viajeActualId: null,
+                    updatedAt: FieldValue.serverTimestamp()
+                }).catch(e => console.error("🚨 Error diferido Firestore (Conductor):", e));
+            }
+
+            if (dbFirestore && FIRESTORE_PATHS?.viajes) {
+                dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(String(viajeId)).update({
+                    estadoViaje: 'completado', 
+                    updatedAt: FieldValue.serverTimestamp()
+                }).catch(e => console.error("🚨 Error diferido Firestore (Viaje):", e));
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: 'Servicio completado y balance liquidado de forma segura.',
+                comisionDebitada: comision,
+                saldoRestante: saldoNuevo
+            });
+
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+
+            const esWriteConflict = error.code === 112 || 
+                                    error.code === 11600 ||
+                                    error.message.includes('Write conflict') || 
+                                    error.message.includes('WriteConflict') ||
+                                    (error.hasErrorLabel && error.hasErrorLabel('TransientTransactionError'));
+
+            if (esWriteConflict && intento < MAX_REINTENTOS) {
+                const baseMs = 50; 
+                const maxBackoffMs = 1200;
+                const tempBackoff = Math.min(maxBackoffMs, baseMs * Math.pow(2, intento));
+                const backoffMs = Math.floor(Math.random() * tempBackoff);
+                
+                console.warn(`⚠️ [CIMCO-CONCURRENCIA] WriteConflict detectado en liquidación. Reintentando (Intento ${intento}/${MAX_REINTENTOS}) en ${backoffMs}ms...`);
+                await esperarGarantizado(backoffMs);
+                continue; 
+            }
+
+            console.error("🚨 [CIMCO-FINANCE-ERR]: Transacción abortada definitivamente.", error.message);
+            const statusError = error.message.includes('insuficientes') ? 402 : 500;
+            return res.status(statusError).json({ success: false, message: error.message });
+        }
+    }
+};
+
+// ==================================================================
+// 4. WEBHOOK WOMPI
+// ==================================================================
 export const recibirAlertaWompiLocal = async (req, res) => {
     try {
+        if (!req || !req.body) {
+            return res.status(200).json({ status: 'ignored', message: 'Payload vacío.' });
+        }
+
         const { event, data, timestamp, signature } = req.body;
         if (!data?.transaction || !signature) return res.status(200).json({ status: 'ignored', message: 'Datos incompletos.' });
         
@@ -231,14 +501,135 @@ export const recibirAlertaWompiLocal = async (req, res) => {
         const hashLocal = crypto.createHash('sha256').update(cadenaFirma).digest('hex');
         
         if (hashLocal !== signature.checksum) return res.status(200).json({ status: 'failed', message: 'Firma inválida.' });
-        if (data.transaction.payment_method_type?.toUpperCase() === 'CARD') return res.status(200).json({ status: 'ignored', message: 'Tarjetas deshabilitadas por política CIMCO.' });
+        if (data.transaction.payment_method_type?.toUpperCase() === 'CARD') return res.status(200).json({ status: 'ignored', message: 'Tarjetas deshabilitadas.' });
         
         if (data.transaction.status === 'APPROVED' && event === 'transaction.updated') {
-            const monto = Math.round(data.transaction.amount_in_cents / 100);
-            console.log(`✅ [CIMCO-TRANSACCION] Recarga de tesorería aprobada (Wompi): $${monto} COP.`);
+            console.log(`✅ [CIMCO-TRANSACCION] Recarga Wompi processed.`);
         }
-        return res.status(200).json({ success: true, message: 'Evento analizado.' });
+        return res.status(200).json({ success: true, status: 'processed' });
     } catch (error) {
-        return res.status(500).json({ error: 'Falla interna en Webhook Wompi.' });
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ==================================================================
+// 5. DISTRIBUCIÓN LOGÍSTICA ATÓMICA (DESPACHADOR INTERMUNICIPAL DESDE EXISTENTE)
+// ==================================================================
+export const despacharViajeAtomico = async (req, res) => {
+    try {
+        if (!req || !req.body) {
+            return res.status(400).json({ success: false, message: 'Payload de despacho nulo o inválido.' });
+        }
+
+        const { viajeId, conductorId, tarifa, metodoPago } = req.body;
+        
+        if (!req.usuario || !req.usuario.id) {
+            return res.status(401).json({ success: false, message: 'Credenciales de operador ausentes en la terminal.' });
+        }
+
+        const despachadorId = String(req.usuario.id); 
+        const despachadorRol = String(req.usuario.rol || req.usuario.role).toLowerCase();
+
+        if (despachadorRol !== 'despachador' && despachadorRol !== 'admin' && despachadorRol !== 'ceo') {
+            return res.status(403).json({ success: false, message: 'Acceso denegado. Rol no autorizado para inyección logística.' });
+        }
+
+        if (!viajeId || !conductorId) {
+            return res.status(400).json({ success: false, message: 'Identificadores de viaje y conductor obligatorios.' });
+        }
+
+        if (!dbFirestore) {
+            throw new Error("Conexión con el motor de sincronización Firestore no disponible.");
+        }
+
+        const viajeRef = dbFirestore.collection(FIRESTORE_PATHS.viajes || 'viajes').doc(String(viajeId));
+        const conductorRef = dbFirestore.collection(FIRESTORE_PATHS.conductores || 'conductores').doc(String(conductorId));
+
+        await dbFirestore.runTransaction(async (transaction) => {
+            const viajeDoc = await transaction.get(viajeRef);
+            const conductorDoc = await transaction.get(conductorRef);
+
+            if (!viajeDoc.exists) throw new Error("El viaje solicitado no existe en la matriz operativa.");
+            if (!conductorDoc.exists) throw new Error("El conductor seleccionado no existe en el radar de la cooperativa.");
+
+            const viajeData = viajeDoc.data();
+            const conductorData = conductorDoc.data();
+
+            const estadoActual = String(viajeData.estadoViaje || '').toLowerCase();
+            if (estadoActual !== 'solicitado' && estadoActual !== 'pending') {
+                throw new Error("El viaje ya ha sido tomado, asignado o revocado por el sistema.");
+            }
+
+            const estadoConductorSemantico = String(conductorData.estadoOperativo || '').toUpperCase();
+            if (estadoConductorSemantico !== 'DISPONIBLE') {
+                throw new Error("El conductor objetivo ya no se encuentra en estado DISPONIBLE en la terminal.");
+            }
+
+            const actualizacionViaje = {
+                estadoViaje: 'asignado',
+                conductorId: String(conductorId),
+                despachadorId: despachadorId,
+                asignadoEn: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp()
+            };
+
+            if (tarifa !== undefined) {
+                actualizacionViaje.tarifa = parseFloat(tarifa);
+            }
+            if (metodoPago !== undefined) {
+                actualizacionViaje.metodoPago = String(metodoPago);
+            }
+
+            transaction.update(viajeRef, actualizacionViaje);
+
+            transaction.update(conductorRef, {
+                estado: 'busy',
+                estadoOperativo: 'OCUPADO',
+                viajeActualId: String(viajeId),
+                updatedAt: FieldValue.serverTimestamp()
+            });
+        });
+
+        const updateMongoViaje = { 
+            estado: 'asignado', 
+            estadoViaje: 'asignado', 
+            conductorId, 
+            despachadorId 
+        };
+        
+        if (tarifa !== undefined) {
+            updateMongoViaje.tarifa = parseFloat(tarifa);
+            updateMongoViaje.valor = parseFloat(tarifa);
+        }
+        if (metodoPago !== undefined) {
+            updateMongoViaje.metodoPago = String(metodoPago);
+        }
+
+        try {
+            await Promise.all([
+                Viaje.findOneAndUpdate(
+                    { _id: viajeId, estado: { $ne: 'completado' } }, 
+                    { $set: updateMongoViaje }
+                ),
+                Conductor.findOneAndUpdate(
+                    { _id: conductorId }, 
+                    { $set: { estado: 'busy', estadoOperativo: 'OCUPADO' } }
+                )
+            ]);
+        } catch (mongoError) {
+            console.error("🔥 [CRÍTICO] [CIMCO-DESCALCE-CONTABLE]: Error de sincronización diferida en MongoDB Atlas:", mongoError.message);
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Viaje interceptado e inyectado exitosamente al conductor intermunicipal."
+        });
+
+    } catch (error) {
+        console.error("❌ [CIMCO-ATOMIC-DISPATCH-ERR]:", error.message);
+        return res.status(400).json({
+            success: false,
+            message: error.message || "Fallo crítico en el despacho atómico."
+        });
     }
 };

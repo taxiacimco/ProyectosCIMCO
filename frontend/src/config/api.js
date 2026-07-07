@@ -1,71 +1,119 @@
-// Versión Arquitectura: V5.8 - Homologación de Clave Token Perimetral (cimco_token)
+// Versión Arquitectura: V11.9.2 - Resolución Estricta con Soporte de Retrocompatibilidad de Rutas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
- * Misión: Configurar el cliente Axios centralizado (CIMCO-NEXUS) para peticiones perimetrales al backend.
- * Ajuste: Sustitución de clave token genérica por 'cimco_token' en interceptor de salida para sincronización de sesión.
+ * Misión: Centralización de Axios e inyección de puente de compatibilidad API_CORE_URL para componentes hijos.
  */
 
 import axios from 'axios';
 
-// 📡 [CIMCO-NEXUS] Definición y Exportación de Nodos de Red
-// Extraído de la telemetría de red local para permitir el escaneo de QRs desde dispositivos móviles
-export const HOST_IP = "192.168.100.34";
+// 🔌 CONFIGURACIÓN ESTRICTA DEL NODO CENTRAL (Apunta directamente al puerto 3000)
+export const HOST_IP = import.meta.env.VITE_HOST_IP || '192.168.100.34';
+export const API_CORE_LOCAL = `http://${HOST_IP}:3000/api`;
 
-// Canal Único activado para la infraestructura del clúster (Puerto 3000)
-export const API_URL = `http://${HOST_IP}:3000/api`;
+// 🚀 PUENTE DE RETROCOMPATIBILIDAD EXTERNA (Requerido por PerfilPasajero.jsx y otros componentes)
+// Retorna la URL base dinámica resuelta para que los componentes que usen fetch no queden en el aire.
+export const API_CORE_URL = import.meta.env.VITE_API_BASE_URL || API_CORE_LOCAL;
 
-// 🔄 [COMPATIBILIDAD] Inyección de alias redundantes para mitigar fricciones en componentes legacy
-export const API_CORE_URL = API_URL;
-export const API_FUNCTIONS_URL = API_URL;
+// 🔍 RESOLUCIÓN DINÁMICA DEL ID DE PROYECTO (Cloud Functions)
+const PROJ_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'pelagic-chalice-467818-e1';
+export const API_FUNCTIONS_URL = `http://${HOST_IP}:5001/${PROJ_ID}/us-central1`;
 
-const api = axios.create({
-    baseURL: API_URL,
-    timeout: 15000, // 🛡️ Guarda de Seguridad: Rompe peticiones colgadas tras 15 segundos
+// 🔍 RESOLUCIÓN DINÁMICA DE LA URL BASE DE LA API PARA AXIOS
+const DETERMINAR_URL_BASE = () => {
+    try {
+        if (import.meta.env.VITE_API_BASE_URL) {
+            return import.meta.env.VITE_API_BASE_URL;
+        }
+        return API_CORE_LOCAL;
+    } catch (e) {
+        console.error('🚨 [CIMCO-NEXUS-RESOLUTION] Fallo en análisis perimetral de red:', e);
+        return API_CORE_LOCAL;
+    }
+};
+
+export const api = axios.create({
+    baseURL: DETERMINAR_URL_BASE(),
+    timeout: 15000,
     headers: {
         'Content-Type': 'application/json'
     },
-    withCredentials: true // Habilita el transporte seguro de cookies de sesión si el backend lo requiere
+    withCredentials: true
 });
 
-// 🔄 INTERCEPTOR PERIMETRAL DE SALIDA: Inyección automática de firmas digitales JWT
+// 🛡️ INTERCEPTOR DE PETICIONES: INYECCIÓN DE FIRMA JWT
 api.interceptors.request.use(
     (config) => {
-        // 🛡️ Guarda de Seguridad Anti-Undefined: Validación de acceso al localStorage local
         try {
-            // 🚨 HOMOLOGACIÓN CRÍTICA: Se consume 'cimco_token' para unificar con el AuthProvider
-            const token = localStorage.getItem('cimco_token');
-            if (token) {
-                // Inyecta el token sanitizado bajo el estándar Bearer en la cabecera de la petición
-                config.headers.Authorization = `Bearer ${token}`;
+            if (typeof window !== 'undefined' && window.localStorage) {
+                const token = localStorage.getItem('token') || localStorage.getItem('cimco_token');
+                if (token) {
+                    config.headers.Authorization = `Bearer ${token}`;
+                }
+            }
+            return config;
+        } catch (error) {
+            console.error('🚨 [CIMCO-NEXUS-REQ] Fallo al inyectar firma JWT:', error);
+            return config;
+        }
+    },
+    (error) => Promise.reject(error)
+);
+
+// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA AUTOMÁTICA
+api.interceptors.response.use(
+    (response) => {
+        try {
+            if (response && response.data) {
+                const payload = response.data;
+                if (payload.token) {
+                    localStorage.setItem('token', payload.token);
+                    localStorage.setItem('cimco_token', payload.token);
+                }
+                if (payload.usuario) {
+                    localStorage.setItem('user', JSON.stringify(payload.usuario));
+                } else if (payload.user) {
+                    localStorage.setItem('user', JSON.stringify(payload.user));
+                }
             }
         } catch (storageError) {
-            console.error("⚠️ [CIMCO-NEXUS-STORAGE] Error al leer el token del ecosistema local:", storageError);
+            console.error('🚨 [CIMCO-NEXUS-STORAGE] Error de escritura en almacenamiento local:', storageError);
         }
-        return config;
+        return response;
     },
     (error) => {
+        if (error && error.response) {
+            console.error(`🚨 [CIMCO-NEXUS-RESPONSE] Error de Servidor [${error.response.status}]:`, error.response.data);
+            
+            if (error.response.status === 401 || error.response.status === 403) {
+                localStorage.removeItem('token');
+                localStorage.removeItem('cimco_token');
+                localStorage.removeItem('user');
+            }
+        } else if (error && error.request) {
+            console.error('🚨 [CIMCO-NEXUS-NETWORK] Sin respuesta del nodo central. Verifique que el Backend (Puerto 3000) esté encendido.');
+        } else {
+            console.error('🚨 [CIMCO-NEXUS-FATAL] Quiebre estructural en la transmisión HTTP.');
+        }
         return Promise.reject(error);
     }
 );
 
-// 🔍 INTERCEPTOR DE ENTRADA: Diagnóstico de Errores Críticos y Caídas de Sesión
-api.interceptors.response.use(
-    (response) => response,
-    (error) => {
-        // Guarda global de auditoría en consola de desarrollo
-        if (error.response) {
-            console.error(`🚨 [CIMCO-NEXUS-RESPONSE] Error de Servidor [${error.response.status}]:`, error.response.data);
-            
-            if (error.response.status === 401) {
-                console.warn("🔒 [CIMCO-SEGURIDAD] Token inválido o expirado. Se sugiere redirección a Consola de Acceso.");
-            }
-        } else if (error.request) {
-            console.error("🚨 [CIMCO-NEXUS-TIMEOUT] El servidor Express no responde. Verifique el estado del nodo de backend.");
-        } else {
-            console.error("🚨 [CIMCO-NEXUS-FATAL] Error de configuración en la trama de red:", error.message);
-        }
-        return Promise.reject(error);
-    }
-);
+// 📡 GOBERNANZA DE ENDPOINTS
+export const AUTH_ENDPOINTS = {
+    login: '/auth/login',
+    register: '/auth/register',
+    logout: '/auth/logout',
+    me: '/auth/me',
+    verificar: '/auth/verificar'
+};
+
+export const VIAJES_ENDPOINTS = {
+    solicitar: '/viajes/solicitar',
+    aceptar: '/viajes/aceptar',
+    completar: '/viajes/completar',
+    despachar: '/viajes/despachar',
+    cancelar: '/viajes/cancelar',
+    historial: '/viajes/historial'
+};
 
 export default api;

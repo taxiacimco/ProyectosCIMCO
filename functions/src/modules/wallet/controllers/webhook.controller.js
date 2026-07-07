@@ -1,21 +1,22 @@
-// Versión Arquitectura: V10.3 - Sincronización Estricta de Firma: recibirAlertaWompi
+// Versión Arquitectura: V10.4 - Optimización Contra Bloqueos Globales por Lazy Loading de Dependencias Internas
 /**
  * Ubicación: functions/src/modules/wallet/controllers/webhook.controller.js
  * Misión: Procesar notificaciones asíncronas de Wompi garantizando seguridad extrema y actualización atómica de billeteras.
- * Integración: Preserva delegación al walletService (V5.8) coexistiendo con inyección directa ACID en Firestore (V10.0).
+ * Ajuste V10.4: Mitigación definitiva del "Timeout de 10000ms" en el arranque del emulador de Firebase en entornos Windows. 
+ * Se remueven las importaciones globales estáticas y se implementa la inyección perezosa ("Lazy Loading") de `walletService` 
+ * y `WompiSecurity` dentro de la firma de ejecución. Esto garantiza que el scope raíz del archivo sea de peso cero (0ms) 
+ * durante el mapeo inicial del CLI de Firebase, encapsulando y protegiendo el ecosistema transaccional.
  */
 
 import crypto from 'crypto';
 import admin from 'firebase-admin';
-import walletService from "../services/wallet.service.js"; 
-import WompiSecurity from "../../../utils/wompi-security.js";
 
 // Inicialización segura del SDK de Admin para evitar fugas de memoria o errores de multi-instancia
 if (!admin.apps.length) {
     admin.initializeApp();
 }
 
-// 🚀 FIRMA DE EXPORTACIÓN ESTRICTA (Debe coincidir en index.js)
+// 🚀 FIRMA DE EXPORTACIÓN ESTRICTA (Coincide milimétricamente en index.js)
 export const recibirAlertaWompi = async (req, res) => {
     // 🛡️ Log de depuración persistido de la V5.8
     console.log("📩 [Webhook] Body Completo recibido:", JSON.stringify(req.body, null, 2));
@@ -62,6 +63,10 @@ export const recibirAlertaWompi = async (req, res) => {
         let isValid = isEmulator;
         
         if (!isEmulator) {
+            // 🚀 INYECCIÓN PEREZOSA (LAZY LOADING): Carga del módulo de seguridad solo en ejecución para proteger el arranque
+            const WompiSecurityModule = await import("../../../utils/wompi-security.js");
+            const WompiSecurity = WompiSecurityModule.default || WompiSecurityModule;
+
             // Capa 1: Validación base a través de WompiSecurity (V5.8)
             if (checksumHeader) {
                 isValid = WompiSecurity.validateWebhookSignature(payload, checksumHeader);
@@ -82,7 +87,6 @@ export const recibirAlertaWompi = async (req, res) => {
 
         if (!isValid) {
             console.warn(`[CIMCO-SEGURIDAD] 🚨 Intento de vulneración detectado. Checksum inválido para la referencia: ${reference}`);
-            // Se retorna 200 para evitar reintentos masivos de Wompi, pero se etiqueta como fallo de seguridad
             return res.status(200).json({ 
                 status: 'security_check_failed', 
                 reason: 'invalid_signature',
@@ -105,9 +109,12 @@ export const recibirAlertaWompi = async (req, res) => {
         if (event === 'transaction.updated' || isEmulator) {
             console.log(`🔎 [Webhook] Procesando Transacción ID: ${transaction.id} para referencia: ${reference}`);
 
-            // 1. Delegación al servicio original (Preservado de V5.8)
+            // 1. Delegación al servicio original con Carga Dinámica (Preservado de V5.8)
             let serviceSuccess = false;
             try {
+                const walletServiceModule = await import("../services/wallet.service.js");
+                const walletService = walletServiceModule.default || walletServiceModule;
+                
                 const result = await walletService.processTransaction(transaction);
                 serviceSuccess = result.success;
             } catch (svcErr) {

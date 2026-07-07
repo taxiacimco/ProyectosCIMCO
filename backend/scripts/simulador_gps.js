@@ -1,15 +1,13 @@
-// Versión Arquitectura: V1.3 - Simulador Geoespacial Definitivo (Autocontenido y Blindado)
+// Versión Arquitectura: V1.4 - Inyección Táctica de Flota Real (Pantera Rosa, Juan, Pedro, Camilo)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\simulador_gps.js
- * Misión: Inyectar ráfagas GPS directas pasando la aduana perimetral de Firebase de forma aislada.
- * Integridad: Llaves de producción inyectadas estáticamente para evitar fallos de lectura dotenv.
+ * Misión: Transmitir telemetría GPS continua hacia Firestore simulando el movimiento físico de la flota de La Jagua.
  */
 
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth'; 
 
-// 🛡️ CONFIGURACIÓN ESTÁTICA DEFINITIVA (Extraída directamente de tu Maestro de Entorno V12.1)
 const firebaseConfig = {
     apiKey: "AIzaSyCseKkOoHY8pbSnUWSEWyPR8et1BVccr7s",
     authDomain: "pelagic-chalice-467818-e1.firebaseapp.com",
@@ -19,69 +17,70 @@ const firebaseConfig = {
     appId: "1:547432247321:web:531630ed4976c669176840"
 };
 
-// Inicialización de la instancia de Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// 📍 MATRIZ DE RUTAS GEOGRÁFICAS (Casco urbano de La Jagua de Ibirico)
+// 📍 FLOTA REAL DE LA JAGUA DE IBIRICO (Mapeo estricto de tus 4 roles)
 const unidadesSimuladas = [
     {
-        id: "MOTO_TACTICA_01",
-        conductor: "Alfonso Mendoza",
-        status: "en ruta",
-        tarifa: 5000,
+        id: "6a29c73cc8d7b14cd8f85876", // UID Pantera Rosa
+        conductor: "Pantera rosa",
+        placa: "MOT123",
+        numeroInterno: "#057",
+        role: "mototaxi",
+        status: "activo",
         coordenadas: [
-            { lat: 9.56215, lng: -73.33418 }, // Terminal de Transportes
-            { lat: 9.56310, lng: -73.33510 },
-            { lat: 9.56420, lng: -73.33600 },
-            { lat: 9.56530, lng: -73.33710 },
-            { lat: 9.56640, lng: -73.33820 }, // Fin trayecto
+            { lat: 9.56215, lng: -73.33418 }, // Terminal
+            { lat: 9.56280, lng: -73.33490 },
+            { lat: 9.56350, lng: -73.33560 },
+            { lat: 9.56420, lng: -73.33630 },
+            { lat: 9.56500, lng: -73.33700 }
         ]
     },
     {
-        id: "MOTO_TACTICA_02",
-        conductor: "Jairo Gutiérrez",
-        status: "buscando pasajero",
-        tarifa: 4000,
+        id: "6a29ca0bc8d7b14cd8f85879", // UID Juan
+        conductor: "Juan",
+        placa: "PAR123",
+        numeroInterno: "#056",
+        role: "moto-parrillero",
+        status: "activo",
         coordenadas: [
             { lat: 9.55390, lng: -73.35510 }, // Plaza Principal
-            { lat: 9.55450, lng: -73.35400 },
-            { lat: 9.55520, lng: -73.35310 },
-            { lat: 9.55600, lng: -73.35200 },
-            { lat: 9.55710, lng: -73.35100 }, // Fin trayecto
+            { lat: 9.55440, lng: -73.35450 },
+            { lat: 9.55500, lng: -73.35380 },
+            { lat: 9.55560, lng: -73.35310 },
+            { lat: 9.55620, lng: -73.35240 }
         ]
     },
     {
-        id: "MOTO_TACTICA_03",
-        conductor: "Luis Carlos Vega",
-        status: "en ruta",
-        tarifa: 6000,
+        id: "6a29ca9bc8d7b14cd8f8587c", // UID Pedro
+        conductor: "Pedro",
+        placa: "CAR123",
+        numeroInterno: "#059",
+        role: "motocarga",
+        status: "activo",
         coordenadas: [
-            { lat: 9.57010, lng: -73.34110 }, // Entrada Norte
-            { lat: 9.56910, lng: -73.34210 },
-            { lat: 9.56800, lng: -73.34320 },
-            { lat: 9.56700, lng: -73.34410 },
-            { lat: 9.56610, lng: -73.34500 }, // Fin trayecto
+            { lat: 9.57010, lng: -73.34110 }, // Salida Norte
+            { lat: 9.56930, lng: -73.34180 },
+            { lat: 9.56850, lng: -73.34250 },
+            { lat: 9.56770, lng: -73.34320 },
+            { lat: 9.56690, lng: -73.34390 }
         ]
     }
 ];
 
 async function iniciarSimulacion() {
     console.log("==================================================================");
-    console.log("🚀 [CIMCO-RADAR] Iniciando Generador de Ráfagas GPS Concurrentes");
-    console.log("📍 Cobertura Táctica: La Jagua de Ibirico, Cesar");
-    console.log("🔒 Autenticando canal mediante Handshake Anónimo Seguro...");
+    console.log("🚀 [CIMCO-TELEMETRÍA] Activando Radar de Flota en La Jagua");
+    console.log("🔒 Solicitando token de escritura satelital...");
     console.log("==================================================================");
 
     try {
-        // 🔐 CANAL ANÓNIMO: Obtiene un UID válido instantáneamente
-        // Cumple la directiva de seguridad de tus Reglas V15.0 para escribir en 'viajes'
         await signInAnonymously(auth);
-        console.log("✅ [HANDSHAKE OK] Canal autenticado y autorizado por Firebase.\n");
+        console.log("✅ [CANAL ABIERTO] Autenticación perimetral concedida.\n");
     } catch (authError) {
-        console.error("🚨 [FALLO CRÍTICO] La autenticación fue rechazada por Google:");
-        console.error(`Detalle: ${authError.message}`);
+        console.error("🚨 [BLINDADO] Firebase rechazó la conexión anónima:", authError.message);
         process.exit(1);
     }
 
@@ -90,47 +89,49 @@ async function iniciarSimulacion() {
 
     const intervalo = setInterval(async () => {
         if (paso >= totalPasos) {
-            console.log("\n🏁 [SIMULACIÓN COMPLETADA] Limpiando nodos de telemetría de prueba...");
+            console.log("\n🏁 [CICLO TERMINADO] Purgando telemetría transitoria del mapa...");
             clearInterval(intervalo);
             
             for (const unidad of unidadesSimuladas) {
                 try {
-                    await deleteDoc(doc(db, "viajes", unidad.id));
-                    console.log(`🗑️ Removida de Firestore: ${unidad.id}`);
-                } catch (err) {
-                    console.error(`No se pudo remover ${unidad.id}:`, err.message);
-                }
+                    await deleteDoc(doc(db, "conductores_activos", unidad.id));
+                } catch (e) { /* Omisión silenciosa en purga */ }
             }
-            console.log("✅ Servidor táctico limpio. Saliendo.");
+            console.log("✅ Radar despejado. Fin del test.");
             process.exit(0);
         }
 
-        console.log(`\n📡 [RÁFAGA GPS #${paso + 1}] Transmitiendo coordenadas...`);
+        console.log(`📡 [PULSO GPS #${paso + 1}] Georreferenciando unidades en La Jagua...`);
 
-        const promesasDeActualizacion = unidadesSimuladas.map(async (unidad) => {
-            const posicionActual = unidad.coordenadas[paso];
-            const viajeRef = doc(db, "viajes", unidad.id);
+        const promesas = unidadesSimuladas.map(async (u) => {
+            const pos = u.coordenadas[paso];
+            // Escribimos en el canal que escucha el mapa del pasajero
+            const ref = doc(db, "conductores_activos", u.id);
 
-            const payloadGPS = {
-                conductor: unidad.conductor,
-                status: unidad.status,
-                tarifa: unidad.tarifa,
-                latitud: posicionActual.lat,
-                longitud: posicionActual.lng,
-                timestamp: new Date().toISOString()
+            const payload = {
+                uid: u.id,
+                nombre: u.conductor,
+                placa: u.placa,
+                numeroInterno: u.numeroInterno,
+                role: u.role,
+                ubicacion: {
+                    lat: pos.lat,
+                    lng: pos.lng
+                },
+                updatedAt: new Date().toISOString()
             };
 
             try {
-                await setDoc(viajeRef, payloadGPS, { merge: true });
-                console.log(`  🏍️  [${unidad.id}] -> Lat: ${posicionActual.lat}, Lng: ${posicionActual.lng} | OK`);
-            } catch (error) {
-                console.error(`  🚨 [ERROR EN ${unidad.id}]:`, error.message);
+                await setDoc(ref, payload, { merge: true });
+                console.log(`  🛺 [${u.placa} - ${u.conductor}] -> Lat: ${pos.lat} | OK`);
+            } catch (err) {
+                console.error(`  🚨 Fallo en ${u.conductor}:`, err.message);
             }
         });
 
-        await Promise.all(promesasDeActualizacion);
+        await Promise.all(promesas);
         paso++;
-    }, 3000); // Ráfaga cada 3 segundos para observar el movimiento fluido
+    }, 3000); 
 }
 
 iniciarSimulacion();

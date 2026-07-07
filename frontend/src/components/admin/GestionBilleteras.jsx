@@ -1,285 +1,294 @@
-// Versión Arquitectura: V1.1 - Modo Contingencia y Simulación de Bóveda Contable
+// Versión Arquitectura: V1.6 - Desacoplamiento del Modo Simulado y Sincronización Real con FIRESTORE_PATHS.wallets
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
- * Misión: Monitoreo transaccional de wallets e inyección de recargas autorizadas (Con Modo Simulación).
- * Estilo: Ciber-Neo-Brutalista sobre Tailwind CSS adaptado al tema oscuro (#121214).
- * Seguridad: Restricción operativa delegada nativamente a Firebase Emulators / Firestore, con Fallback local.
+ * Misión: Monitoreo transaccional de wallets e inyección de recargas autorizadas en tiempo real.
+ * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
+ * Ajuste V1.6: Erradicación definitiva de datos cableados ('MOCK_WALLETS'). El control operativo 'isSimulatedMode'
+ * ahora se desacopla del entorno local consumiendo de forma estricta las variables de entorno de Vite (import.meta.env.VITE_SIMULATED_MODE),
+ * garantizando que el canal de escritura real apunte a FIRESTORE_PATHS.wallets en simetría atómica con la billetera del pasajero.
  */
 
 import React, { useState, useEffect } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
-import { collection, onSnapshot, doc, updateDoc, addDoc, query } from 'firebase/firestore';
-import { Wallet, ArrowUpRight, ShieldAlert, Search, DollarSign, ServerOff } from 'lucide-react';
-
-// 📍 MOCK DATA: Matriz táctica para simulación offline en La Jagua de Ibirico
-const MOCK_WALLETS = [
-    { id: 'MOTO_TACTICA_01', conductor: 'Alfonso Mendoza', saldo: 15000, estado: 'ACTIVO' },
-    { id: 'MOTO_TACTICA_02', conductor: 'Jairo Gutiérrez', saldo: 500, estado: 'BLOQUEADO_SALDO' },
-    { id: 'MOTO_TACTICA_03', conductor: 'Luis Carlos Vega', saldo: 25000, estado: 'ACTIVO' },
-    { id: 'OP_PRUEBA_99', conductor: 'Carlos Fuentes (Test)', saldo: 50000, estado: 'ADMIN_TEST' }
-];
+import { collection, onSnapshot, doc, updateDoc, addDoc, query, increment, serverTimestamp } from 'firebase/firestore';
+import { Wallet, ArrowUpRight, ShieldAlert, Search, DollarSign, ServerOff, Loader, CheckCircle2 } from 'lucide-react';
 
 const GestionBilleteras = () => {
-    const [billeteras, setBilleteras] = useState([]);
+    const [wallets, setWallets] = useState([]);
     const [busqueda, setBusqueda] = useState('');
-    const [montoRecarga, setMontoRecarga] = useState('');
-    const [billeteraSeleccionada, setBilleteraSeleccionada] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [errorFirestore, setErrorFirestore] = useState(null);
+    
+    // Configuración transaccional en base a variables de entorno de producción para prevenir fugas locales
+    const isSimulatedMode = import.meta.env.VITE_SIMULATED_MODE === 'true';
+
+    // Estado del operador seleccionado y formulario de abono
+    const [walletSeleccionada, setWalletSeleccionada] = useState(null);
+    const [montoAbono, setMontoAbono] = useState('');
     const [procesando, setProcesando] = useState(false);
-    const [feedback, setFeedback] = useState({ tipo: '', mensaje: '' });
-    const [isSimulatedMode, setIsSimulatedMode] = useState(false);
+    const [feedbackExito, setFeedbackExito] = useState(null);
 
     useEffect(() => {
-        const pathWallets = FIRESTORE_PATHS?.wallets || 'wallets';
-        const q = query(collection(db, pathWallets));
+        let isMounted = true;
+        setLoading(true);
 
-        // 🛡️ Suscripción reactiva con intercepción de errores de seguridad
+        // Resolución dinámica y centralizada de la ruta de almacenamiento de finanzas
+        const pathColeccion = FIRESTORE_PATHS?.wallets || 'wallets';
+        const q = query(collection(db, pathColeccion));
+
         const unsubscribe = onSnapshot(q, 
             (snapshot) => {
-                const lista = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
-                setBilleteras(lista);
-                setFeedback({ tipo: '', mensaje: '' });
-                setIsSimulatedMode(false);
-            },
-            (error) => {
-                console.warn("⚠️ [CIMCO-FINANCIAL-WARN] Bloqueo de Firestore detectado. Activando Modo Simulación Autónoma.", error.message);
-                // Inyección del Modo Contingencia
-                setBilleteras(MOCK_WALLETS);
-                setIsSimulatedMode(true);
-                setFeedback({
-                    tipo: 'warning',
-                    mensaje: 'Modo Simulación Activo: Conexión denegada por Firestore. Operando en memoria volátil.'
+                if (!isMounted) return;
+                
+                const lista = snapshot.docs.map(docRef => {
+                    const data = docRef.data();
+                    return {
+                        id: docRef.id,
+                        // Blindaje Anti-Undefined sobre propiedades financieras críticas
+                        conductor: data?.conductor || data?.nombre || `Operador ID: ${docRef.id.slice(0, 8)}`,
+                        saldo: typeof data?.saldo === 'number' ? data.saldo : 0,
+                        email: data?.email || 'N/A'
+                    };
                 });
+
+                setWallets(lista);
+                setLoading(false);
+                setErrorFirestore(null);
+            },
+            (err) => {
+                if (!isMounted) return;
+                console.error("❌ [CIMCO-FIRESTORE-WALLETS-FATAL]:", err);
+                setErrorFirestore("Fallo en la comunicación con el canal financiero central.");
+                setLoading(false);
             }
         );
 
-        return () => unsubscribe();
+        return () => {
+            isMounted = false;
+            unsubscribe();
+        };
     }, []);
 
-    const ejecutarRecarga = async (e) => {
+    const handleSeleccionarWallet = (w) => {
+        setWalletSeleccionada(w);
+        setMontoAbono('');
+        setFeedbackExito(null);
+    };
+
+    const handleAplicarAbono = async (e) => {
         e.preventDefault();
-        if (!billeteraSeleccionada || !montoRecarga || parseFloat(montoRecarga) <= 0) return;
-
-        setProcesando(true);
-        setFeedback({ tipo: '', mensaje: '' });
-
-        const montoNumeric = parseFloat(montoRecarga);
-        const nuevoSaldo = (billeteraSeleccionada.saldo || 0) + montoNumeric;
-
-        // 🚀 BYPASS DE SIMULACIÓN: Si estamos offline, actualizamos solo el estado local
-        if (isSimulatedMode) {
-            setTimeout(() => {
-                setBilleteras(prev => prev.map(b => 
-                    b.id === billeteraSeleccionada.id ? { ...b, saldo: nuevoSaldo } : b
-                ));
-                setFeedback({ tipo: 'success', mensaje: `[SIMULACIÓN] Recarga de $${montoNumeric} aplicada localmente a ${billeteraSeleccionada.conductor}.` });
-                setMontoRecarga('');
-                setBilleteraSeleccionada(null);
-                setProcesando(false);
-            }, 800);
+        if (!walletSeleccionada?.id || !montoAbono || isNaN(montoAbono) || Number(montoAbono) <= 0) {
             return;
         }
 
-        // Flujo normal de Producción (Si los permisos lo permiten)
+        setProcesando(true);
+        setFeedbackExito(null);
+
         try {
-            const walletRef = doc(db, FIRESTORE_PATHS.wallets, billeteraSeleccionada.id);
-            await updateDoc(walletRef, {
-                saldo: nuevoSaldo,
-                ultima_actualizacion: new Date().toISOString()
-            });
+            const valorInyeccion = Number(montoAbono);
+            const pathColeccion = FIRESTORE_PATHS?.wallets || 'wallets';
+            const docWalletRef = doc(db, pathColeccion, walletSeleccionada.id);
 
-            const historialRef = collection(db, 'historial_saldo');
-            await addDoc(historialRef, {
-                walletId: billeteraSeleccionada.id,
-                conductorName: billeteraSeleccionada.conductor || 'Operador Central',
-                tipoMovimiento: 'RECARGA_ADMIN',
-                monto: montoNumeric,
-                saldoAnterior: billeteraSeleccionada.saldo || 0,
-                saldoNuevo: nuevoSaldo,
-                fecha: new Date().toISOString(),
-                autorizadoPor: 'Administración Central'
-            });
+            if (isSimulatedMode) {
+                // Simulación controlada sin impacto real en base de datos de producción
+                console.warn(`⚠️ [CIMCO-FINANCE-SIMULATION] Abono simulado de $${valorInyeccion} COP al operador ${walletSeleccionada.id}`);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } else {
+                // Mutación atómica en producción - Incremento de fondos real
+                await updateDoc(docWalletRef, {
+                    saldo: increment(valorInyeccion),
+                    updatedAt: serverTimestamp()
+                });
 
-            setFeedback({ tipo: 'success', mensaje: `¡Recarga de $${montoNumeric} aplicada con éxito en la nube!` });
-            setMontoRecarga('');
-            setBilleteraSeleccionada(null);
-        } catch (error) {
-            console.error("🚨 [CIMCO-TRANSACTION-FATAL]:", error.message);
-            setFeedback({ tipo: 'error', mensaje: 'Error estructural al asentar la transacción en la base de datos.' });
+                // Registro paralelo en la bitácora central de transacciones para auditoría
+                const pathTransacciones = FIRESTORE_PATHS?.transacciones || 'transacciones';
+                await addDoc(collection(db, pathTransacciones), {
+                    usuarioId: walletSeleccionada.id,
+                    conductor: walletSeleccionada.conductor,
+                    monto: valorInyeccion,
+                    tipo: 'RECARGA',
+                    referencia: `ADMIN_INJECTION_${Date.now()}`,
+                    fechaCreacion: serverTimestamp()
+                });
+            }
+
+            setFeedbackExito(`Inyección de $${valorInyeccion.toLocaleString()} COP realizada correctamente.`);
+            setMontoAbono('');
+        } catch (err) {
+            console.error("❌ [CIMCO-FINANCE-MUTATION-ERROR] Error crítico durante abono de saldo:", err);
         } finally {
             setProcesando(false);
         }
     };
 
-    const billeterasFiltradas = billeteras.filter(b => 
-        b.conductor?.toLowerCase().includes(busqueda.toLowerCase()) || 
-        b.id.toLowerCase().includes(busqueda.toLowerCase())
-    );
+    // Motor de filtrado perimetral por cadena de identidad
+    const walletsFiltradas = wallets.filter(w => {
+        const queryNormalize = busqueda.toLowerCase().trim();
+        return (w?.conductor || '').toLowerCase().includes(queryNormalize) || 
+               (w?.id || '').toLowerCase().includes(queryNormalize) ||
+               (w?.email || '').toLowerCase().includes(queryNormalize);
+    });
 
     return (
-        <div className="space-y-6 bg-[#121214] text-white p-2 animate-in fade-in duration-500">
-            {/* Header del Módulo con Indicador de Estado */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/10 pb-4 gap-4">
-                <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg border ${isSimulatedMode ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'}`}>
-                        {isSimulatedMode ? <ServerOff size={22} /> : <Wallet size={22} />}
-                    </div>
-                    <div>
-                        <h2 className="text-lg font-bold tracking-tight uppercase font-mono flex items-center gap-2">
-                            Bóveda Contable de Operadores
-                            {isSimulatedMode && (
-                                <span className="text-[9px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded border border-amber-500/30 animate-pulse">
-                                    SIMULADOR ACTIVO
-                                </span>
-                            )}
-                        </h2>
-                        <p className="text-xs text-zinc-400">Auditoría de balances de caja y dispersión de fondos para la flota.</p>
-                    </div>
-                </div>
+        <div className="w-full min-h-screen bg-[#09090b] p-4 md:p-8 text-zinc-100 font-mono antialiased relative">
+            {/* Indicador de Seguridad del Estado del Canal */}
+            <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
+                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded border ${
+                    isSimulatedMode 
+                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-500' 
+                    : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                }`}>
+                    Entorno: {isSimulatedMode ? 'SIMULADO (SANDBOX)' : 'PRODUCCIÓN REAL'}
+                </span>
             </div>
 
-            {/* Alertas de Feedback Híbridas */}
-            {feedback.mensaje && (
-                <div className={`p-3 rounded-lg border text-xs font-mono flex items-center gap-2 transition-all ${
-                    feedback.tipo === 'error' ? 'bg-red-500/10 border-red-500/30 text-red-400' : 
-                    feedback.tipo === 'warning' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
-                    'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                }`}>
-                    <ShieldAlert size={16} />
-                    <span>{feedback.mensaje}</span>
-                </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Panel Izquierdo: Lista de Balances */}
-                <div className="lg:col-span-2 space-y-4">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-2.5 text-zinc-500" size={16} />
-                        <input
+            <div className="w-full max-w-6xl mx-auto flex flex-col gap-6">
+                
+                {/* ENCABEZADO TÁCTICO */}
+                <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 p-6 rounded-3xl shadow-xl flex flex-col md:flex-row gap-4 items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center shadow-[0_0_15px_rgba(234,179,8,0.1)]">
+                            <Wallet size={20} className="text-yellow-500" />
+                        </div>
+                        <div>
+                            <h2 className="text-xs font-black uppercase tracking-widest text-zinc-200">Gobernanza Financiera</h2>
+                            <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">Control de saldos y compuertas transaccionales de flota</p>
+                        </div>
+                    </div>
+                    
+                    <div className="relative w-full md:max-w-md">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+                        <input 
                             type="text"
-                            placeholder="Buscar operador por nombre o ID de cuenta..."
                             value={busqueda}
                             onChange={(e) => setBusqueda(e.target.value)}
-                            className="w-full bg-[#16161a] border border-white/5 rounded-lg pl-9 pr-4 py-2 text-xs focus:outline-none focus:border-cyan-500 font-mono transition-colors placeholder:text-zinc-600"
+                            placeholder="Buscar operador, ID o correo..."
+                            className="w-full bg-zinc-950/80 border border-white/5 rounded-xl pl-9 pr-4 py-2 text-xs font-bold text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-500/30 transition-colors uppercase tracking-wider"
                         />
-                    </div>
-
-                    <div className="border border-white/5 bg-[#16161a]/60 rounded-xl overflow-hidden backdrop-blur-md">
-                        <table className="w-full border-collapse text-left">
-                            <thead>
-                                <tr className="border-b border-white/5 bg-[#121214] text-[10px] font-bold text-zinc-400 font-mono tracking-wider uppercase">
-                                    <th className="p-3">Operador / ID</th>
-                                    <th className="p-3">Estado Fondo</th>
-                                    <th className="p-3 text-right">Saldo Actual</th>
-                                    <th className="p-3 text-right">Acción</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-white/5 text-xs font-mono">
-                                {billeterasFiltradas.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="4" className="p-6 text-center text-zinc-500 text-[11px] bg-white/[0.01]">
-                                            Ninguna billetera activa encontrada en las mallas de memoria.
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    billeterasFiltradas.map((b) => (
-                                        <tr key={b.id} className="hover:bg-white/[0.02] transition-colors group">
-                                            <td className="p-3">
-                                                <div className="font-bold text-zinc-200 group-hover:text-cyan-400 transition-colors">{b.conductor || 'Operador Técnico'}</div>
-                                                <div className="text-[10px] text-zinc-500">ID: {b.id.substring(0, 15)}...</div>
-                                            </td>
-                                            <td className="p-3">
-                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                                    (b.saldo || 0) >= 2000 
-                                                        ? 'border-emerald-900/50 text-emerald-400 bg-emerald-500/5' 
-                                                        : 'border-amber-900/50 text-amber-400 bg-amber-500/5'
-                                                }`}>
-                                                    {(b.saldo || 0) >= 2000 ? 'ESTABLE' : 'SALDO BAJO'}
-                                                </span>
-                                            </td>
-                                            <td className="p-3 text-right font-bold text-cyan-400">
-                                                $ {(b.saldo || 0).toLocaleString('es-CO')}
-                                            </td>
-                                            <td className="p-3 text-right">
-                                                <button
-                                                    onClick={() => setBilleteraSeleccionada(b)}
-                                                    className="text-[10px] font-bold tracking-wider uppercase border border-cyan-500/30 px-3 py-1.5 rounded bg-cyan-500/5 text-cyan-400 hover:bg-cyan-500 hover:text-black transition-all shadow-[0_0_10px_-2px_rgba(6,182,212,0.1)]"
-                                                >
-                                                    Inyectar
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
                     </div>
                 </div>
 
-                {/* Panel Derecho: Formulario de Recargas */}
-                <div className="space-y-4">
-                    <div className="border border-white/5 bg-[#16161a] p-5 rounded-xl space-y-5 relative overflow-hidden">
-                        {isSimulatedMode && (
-                            <div className="absolute top-0 right-0 w-16 h-16 bg-amber-500/10 blur-2xl rounded-full pointer-events-none" />
-                        )}
-                        
-                        <h3 className="text-xs font-bold tracking-wider font-mono text-zinc-400 uppercase flex items-center gap-2">
-                            <ArrowUpRight size={14} className={isSimulatedMode ? "text-amber-400" : "text-emerald-400"} />
-                            Compuerta de Carga
-                        </h3>
-
-                        {billeteraSeleccionada ? (
-                            <form onSubmit={ejecutarRecarga} className="space-y-4 text-xs font-mono animate-in slide-in-from-right-4 duration-300">
-                                <div className="p-3 bg-[#121214] border border-white/5 rounded-lg space-y-1">
-                                    <div className="text-[10px] text-zinc-500">BENEFICIARIO SELECCIONADO</div>
-                                    <div className="font-bold text-zinc-200">{billeteraSeleccionada.conductor}</div>
-                                    <div className="text-[10px] text-cyan-400">Saldo actual: ${(billeteraSeleccionada.saldo || 0).toLocaleString('es-CO')}</div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-[10px] text-zinc-400 block">MONTO A INYECTAR (COP)</label>
-                                    <div className="relative">
-                                        <DollarSign className="absolute left-3 top-2.5 text-zinc-500" size={14} />
-                                        <input
-                                            type="number"
-                                            required
-                                            placeholder="Ej: 20000"
-                                            value={montoRecarga}
-                                            onChange={(e) => setMontoRecarga(e.target.value)}
-                                            className="w-full bg-[#121214] border border-white/10 rounded-lg pl-8 pr-4 py-2.5 text-xs focus:outline-none focus:border-cyan-500 font-mono transition-colors"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-2 pt-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => setBilleteraSeleccionada(null)}
-                                        className="w-1/2 border border-white/10 rounded-lg py-2.5 text-[10px] font-bold uppercase text-zinc-400 hover:bg-white/5 transition-colors"
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        disabled={procesando}
-                                        className={`w-1/2 font-bold py-2.5 rounded-lg text-[10px] uppercase tracking-wider transition-colors text-black disabled:opacity-40 ${
-                                            isSimulatedMode 
-                                            ? 'bg-amber-500 hover:bg-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' 
-                                            : 'bg-emerald-500 hover:bg-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]'
-                                        }`}
-                                    >
-                                        {procesando ? 'Procesando...' : 'Aplicar Abono'}
-                                    </button>
-                                </div>
-                            </form>
+                {/* DISTRIBUCIÓN BILATERAL */}
+                <div className="w-full flex flex-col lg:flex-row gap-6 items-start">
+                    
+                    {/* PANEL DE MONITOREO DE RED (IZQUIERDA) */}
+                    <div className="w-full lg:flex-1 backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl overflow-hidden shadow-xl">
+                        {loading ? (
+                            <div className="p-16 flex flex-col items-center justify-center gap-3">
+                                <Loader className="animate-spin text-yellow-500" size={24} />
+                                <span className="tracking-widest uppercase text-[9px] text-zinc-500">Escaneando Módulos de Finanzas...</span>
+                            </div>
+                        ) : errorFirestore ? (
+                            <div className="p-12 text-center flex flex-col items-center gap-3">
+                                <ServerOff className="text-red-500" size={28} />
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-red-400">Error Central</h3>
+                                <p className="text-[10px] text-zinc-500">{errorFirestore}</p>
+                            </div>
+                        ) : walletsFiltradas.length === 0 ? (
+                            <div className="p-16 text-center text-zinc-600 text-[10px] uppercase font-bold tracking-widest">
+                                Sin registros coincidentes en este sector
+                            </div>
                         ) : (
-                            <div className="p-8 border border-dashed border-white/5 text-center text-zinc-500 text-[11px] rounded-lg font-mono bg-white/[0.01]">
-                                Selecciona un operador de la grilla para abrir la compuerta transaccional.
+                            <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="border-b border-white/5 bg-white/[0.01] text-[9px] uppercase tracking-widest text-zinc-500 font-black">
+                                            <th className="p-4 pl-6">Operador / Identidad</th>
+                                            <th className="p-4">Billetera Activa</th>
+                                            <th className="p-4 text-right pr-6">Acción</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-white/5 text-xs text-zinc-300">
+                                        {walletsFiltradas.map((w) => (
+                                            <tr 
+                                                key={w.id}
+                                                className={`hover:bg-white/[0.01] transition-colors cursor-pointer ${walletSeleccionada?.id === w.id ? 'bg-white/[0.02]' : ''}`}
+                                                onClick={() => handleSeleccionarWallet(w)}
+                                            >
+                                                <td className="p-4 pl-6">
+                                                    <div className="font-bold text-zinc-200 uppercase truncate max-w-[180px]">{w.conductor}</div>
+                                                    <div className="text-[9px] text-zinc-600 mt-0.5 truncate max-w-[180px]">{w.email}</div>
+                                                </td>
+                                                <td className="p-4 font-mono font-black text-zinc-100">
+                                                    ${w.saldo.toLocaleString()} <span className="text-[9px] text-zinc-600 font-bold">COP</span>
+                                                </td>
+                                                <td className="p-4 text-right pr-6">
+                                                    <div className={`w-2 h-2 rounded-full inline-block ${walletSeleccionada?.id === w.id ? 'bg-yellow-500 animate-pulse' : 'bg-zinc-700'}`} />
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </div>
+
+                    {/* INTERFAZ TRANSACCIONAL DE INYECCIÓN (DERECHA) */}
+                    <div className="w-full lg:w-[400px] backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-yellow-500/20 to-transparent" />
+                        
+                        <div className="flex items-center gap-2 border-b border-white/5 pb-3 mb-4">
+                            <ArrowUpRight size={14} className="text-yellow-500" />
+                            <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-300">Inyector de Saldo Autorizado</h3>
+                        </div>
+
+                        {walletSeleccionada ? (
+                            <form onSubmit={handleAplicarAbono} className="flex flex-col gap-4">
+                                <div className="bg-zinc-950/60 border border-white/5 p-3 rounded-xl">
+                                    <span className="text-[8px] uppercase tracking-widest text-zinc-500 font-black block mb-1">Destinatario Validado</span>
+                                    <div className="text-xs font-black text-white uppercase truncate">{walletSeleccionada.conductor}</div>
+                                    <div className="text-[9px] font-mono text-zinc-600 mt-0.5">UID: {walletSeleccionada.id}</div>
+                                </div>
+
+                                <div>
+                                    <label className="text-[8px] uppercase tracking-widest text-zinc-500 font-black flex items-center gap-1 mb-1.5">
+                                        <DollarSign size={10} /> Monto Neto a Abonar (COP)
+                                    </label>
+                                    <input 
+                                        type="number"
+                                        value={montoAbono}
+                                        onChange={(e) => setMontoAbono(e.target.value)}
+                                        placeholder="Ej: 50000"
+                                        disabled={procesando}
+                                        className="w-full bg-zinc-950/80 border border-white/5 rounded-xl px-4 py-3 text-xs font-mono font-bold text-white placeholder-zinc-700 focus:outline-none focus:border-yellow-500/30 transition-colors"
+                                        required
+                                    />
+                                </div>
+
+                                {feedbackExito && (
+                                    <div className="backdrop-blur-md bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3 flex items-start gap-2 text-emerald-400 text-[10px] font-bold font-mono">
+                                        <CheckCircle2 size={12} className="shrink-0 mt-0.5" />
+                                        <span>{feedbackExito}</span>
+                                    </div>
+                                )}
+
+                                <button
+                                    type="submit"
+                                    disabled={procesando || !montoAbono}
+                                    className={`w-full font-black text-[10px] tracking-widest uppercase py-3.5 rounded-xl transition-all border active:scale-[0.98] disabled:opacity-40 flex items-center justify-center gap-2 ${
+                                        isSimulatedMode 
+                                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-500 hover:bg-amber-500/20' 
+                                        : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                                    }`}
+                                >
+                                    {procesando ? (
+                                        <>
+                                            <Loader size={12} className="animate-spin" />
+                                            <span>Procesando...</span>
+                                        </>
+                                    ) : (
+                                        <span>Aplicar Abono</span>
+                                    )}
+                                </button>
+                            </form>
+                        ) : (
+                            <div className="p-8 border border-dashed border-white/5 text-center text-zinc-600 text-[9px] rounded-2xl font-bold uppercase tracking-wider bg-white/[0.005] flex flex-col items-center gap-2">
+                                <ShieldAlert size={18} className="text-zinc-700" />
+                                <span>Seleccione un nodo operativo de la grilla para abrir la compuerta transaccional.</span>
+                            </div>
+                        )}
+                    </div>
+
                 </div>
             </div>
         </div>

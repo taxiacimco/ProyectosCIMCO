@@ -1,111 +1,124 @@
-// Versión Arquitectura: V12.0 - PROD READY: Normalización Divisa (COP Neto) y Consulta Inyectada
+// Versión Arquitectura: V13.2 - Refactorización de Parámetros de Consulta para Reutilización Corporativa
 /**
- * Ubicación: @/components/wallet/TransactionHistory.jsx
- * Misión: Auditar y renderizar la trazabilidad financiera del usuario. 
- * Ajuste: Eliminación de parseo de céntimos para sincronizar con la Inyección Atómica del AdminPanel.
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\wallet\TransactionHistory.jsx
+ * Misión: Auditar y renderizar la trazabilidad financiera del usuario mitigando nulos por desincronización.
+ * Ajuste V13.2: Firma polimórfica que acepta targetUid opcional con fallback reactivo a contexto local.
  */
-
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
-import { Clock, ArrowUpRight, ArrowDownLeft, Loader2 } from 'lucide-react';
+import { Clock, ArrowUpRight, ArrowDownLeft, Loader2, ServerOff } from 'lucide-react';
+import { formatFechaColombia } from '@/utils/dateFormatter';
 
-const TransactionHistory = () => {
-    const { user, loading: authLoading } = useAuth();
+const TransactionHistory = ({ targetUid = null }) => {
+    const { user } = useAuth();
     const [transactions, setTransactions] = useState([]);
     const [loadingTx, setLoadingTx] = useState(true);
+    const [errorFirebase, setErrorFirebase] = useState(null);
 
     useEffect(() => {
-        // 🛡️ Guarda Anti-Undefined
-        if (!user?.uid) {
+        // 🛡️ Guardas de Seguridad Avanzadas (Anti-Undefined): Selección del UID operativo
+        const uidOperativo = targetUid || user?.uid;
+        
+        if (!uidOperativo) {
             setLoadingTx(false);
             return;
         }
 
-        // 🚀 Consulta optimizada a la ruta limpia inyectada
+        setErrorFirebase(null);
         const pathColeccion = FIRESTORE_PATHS.transacciones || 'transacciones';
-        const q = query(
-            collection(db, pathColeccion),
-            where("targetUid", "==", user.uid),
-            orderBy("createdAt", "desc")
-        );
+        
+        try {
+            const q = query(
+                collection(db, pathColeccion),
+                where("targetUid", "==", uidOperativo),
+                orderBy("createdAt", "desc")
+            );
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const docs = snapshot.docs.map(doc => {
-                const data = doc.data();
-                return {
-                    id: doc.id,
-                    type: data.type || "DESCONOCIDO",
-                    amount: data.amount || 0,
-                    createdAt: data.createdAt || null
-                };
-            });
-            setTransactions(docs);
+            const unsubscribe = onSnapshot(q, 
+                (snapshot) => {
+                    const txList = snapshot.docs.map(doc => {
+                        const data = doc.data();
+                        return {
+                            id: doc.id,
+                            ...data,
+                            fechaSanitizada: data.createdAt ? (typeof data.createdAt.toDate === 'function' ? data.createdAt.toDate() : new Date(data.createdAt)) : new Date()
+                        };
+                    });
+                    setTransactions(txList);
+                    setLoadingTx(false);
+                },
+                (error) => {
+                    console.error("❌ [CIMCO-WALLET-CORE] Error en streaming de transacciones:", error);
+                    setErrorFirebase(error.message);
+                    setLoadingTx(false);
+                }
+            );
+
+            return () => unsubscribe();
+        } catch (err) {
+            console.error("❌ [CIMCO-WALLET-CORE] Fallo crítico al instanciar consulta NoSQL:", err);
+            setErrorFirebase(err.message);
             setLoadingTx(false);
-        }, (error) => {
-            console.error("❌ [History] Error crítico de lectura en snapshot:", error);
-            setLoadingTx(false);
-        });
+        }
+    }, [user?.uid, targetUid]);
 
-        return () => unsubscribe();
-    }, [user]);
-
-    if (authLoading || loadingTx) {
+    if (loadingTx) {
         return (
-            <div className="flex flex-col items-center justify-center py-12 space-y-4 bg-[#121214]/60 backdrop-blur-md rounded-2xl border border-white/5">
-                <Loader2 className="animate-spin text-emerald-500" size={32} />
-                <p className="text-xs font-mono text-zinc-400 uppercase tracking-widest">Auditoria en curso...</p>
+            <div className="flex items-center justify-center py-8 gap-2 text-zinc-500 font-mono text-[10px]">
+                <Loader2 className="animate-spin text-yellow-500" size={14} />
+                <span>SINCRONIZANDO TRANZABILIDAD...</span>
+            </div>
+        );
+    }
+
+    if (errorFirebase) {
+        return (
+            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-red-400 font-mono text-[10px] uppercase tracking-wider">
+                <ServerOff size={14} className="shrink-0" />
+                <span>Error de comunicación perimetral con base de datos.</span>
             </div>
         );
     }
 
     return (
-        <div className="space-y-4">
-            <div className="flex items-center justify-between px-2">
-                <h3 className="text-xs font-bold text-white uppercase tracking-widest">Libro Mayor</h3>
-                <span className="text-[9px] text-zinc-500 font-mono bg-white/5 px-2 py-1 rounded-md">{transactions.length} Mvts</span>
-            </div>
-
+        <div className="w-full">
             {transactions.length === 0 ? (
-                <div className="text-center py-12 bg-[#121214]/40 backdrop-blur-md border border-white/5 rounded-2xl">
-                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">
-                        Libro contable en cero.
-                    </p>
-                </div>
+                <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest text-center py-6 border border-dashed border-white/5 rounded-xl bg-white/[0.01]">
+                    Sin movimientos financieros registrados en la bitácora.
+                </p>
             ) : (
                 <div className="space-y-2.5">
                     {transactions.map((tx) => {
-                        // Clasificación de la naturaleza del movimiento
-                        const isRecarga = tx.type === 'RECARGA' || tx.type === 'DEPOSITO';
+                        const tipoTx = (tx.type || tx.tipo || 'Transacción').toUpperCase();
+                        const isRecarga = tipoTx === 'RECARGA' || tipoTx === 'CREDIT' || tipoTx === 'ABONO';
                         
                         return (
-                            <div 
-                                key={tx.id} 
-                                className="bg-[#121214]/60 backdrop-blur-md border border-white/5 p-4 rounded-xl flex items-center justify-between hover:border-white/10 hover:bg-[#121214]/80 transition-all duration-300 group"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className={`p-2 rounded-xl border transition-all ${
+                            <div key={tx.id} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-all">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
                                         isRecarga 
-                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 group-hover:bg-emerald-500/20' 
-                                            : 'bg-rose-500/10 text-rose-400 border-rose-500/20 group-hover:bg-rose-500/20'
+                                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                                        : 'bg-zinc-500/10 border-white/5 text-zinc-400'
                                     }`}>
-                                        {isRecarga ? <ArrowDownLeft size={16} /> : <ArrowUpRight size={16} />}
+                                        {isRecarga ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
                                     </div>
-                                    <div>
-                                        <p className="text-[10px] font-black text-zinc-200 uppercase tracking-widest">{tx.type}</p>
-                                        <p className="text-[9px] text-zinc-500 font-mono">Ref: {tx.id.substring(0, 8)}</p>
+                                    <div className="min-w-0">
+                                        <p className="text-[10px] font-black text-zinc-200 uppercase tracking-widest truncate">{tipoTx}</p>
+                                        <p className="text-[9px] text-zinc-500 font-mono truncate">
+                                            Ref: {tx.id ? tx.id.substring(0, 8).toUpperCase() : 'S/R'}
+                                        </p>
                                     </div>
                                 </div>
                                 
-                                <div className="text-right">
-                                    {/* 🛡️ Normalización COP: Se elimina la división por 100 */}
-                                    <p className={`text-sm font-bold font-mono ${isRecarga ? 'text-emerald-400' : 'text-zinc-300'}`}>
-                                        {isRecarga ? '+' : '-'}${ parseFloat(tx.amount || 0).toLocaleString('es-CO') }
+                                <div className="text-right shrink-0 pl-2">
+                                    <p className={`text-xs font-bold font-mono ${isRecarga ? 'text-emerald-400' : 'text-zinc-300'}`}>
+                                        {isRecarga ? '+' : '-'}${parseFloat(tx.amount || tx.monto || 0).toLocaleString('es-CO')}
                                     </p>
                                     <p className="text-[8px] text-zinc-500 font-bold uppercase flex items-center gap-1 justify-end mt-0.5 tracking-wider">
-                                        <Clock className="opacity-60" size={10} /> 
-                                        {tx.createdAt ? new Date(tx.createdAt.toDate()).toLocaleString('es-CO', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Reciente'}
+                                        <Clock className="opacity-60" size={9} /> 
+                                        {formatFechaColombia(tx.createdAt)}
                                     </p>
                                 </div>
                             </div>

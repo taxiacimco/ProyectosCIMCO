@@ -1,0 +1,14 @@
+{
+  "name": "taxia-cimco-root",
+  "version": "15.2.1",
+  "description": "Orquestador de entornos de desarrollo y emuladores para TAXIA CIMCO",
+  "architecture_version": "V15.2.1 - Automatización de Entornos Híbridos y Scripts de Limpieza Contable",
+  "main": "index.js",
+  "scripts": {
+    "emulator:dev": "firebase emulators:start --config firebase.dev.json --import=./database --export-on-exit=./database",
+    "clean:logs": "rm -f *-debug.log"
+  },
+  "keywords": [],
+  "author": "TAXIA CIMCO TEAM",
+  "license": "ISC"
+}

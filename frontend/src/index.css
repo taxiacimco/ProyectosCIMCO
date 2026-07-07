@@ -1,8 +1,7 @@
-/* Versión Arquitectura: V10.3 - Alineación Estricta de Glassmorphism a la Regla border-white/5 */
+/* Versión Arquitectura: V11.0 - PROD READY: Centralización de Abstracciones Glassmorphism V9.3 y Saneamiento de Scrollbars */
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\index.css
- * Misión: Configuración centralizada de diseño, utilidades de Glassmorphism puro y compatibilidad con Leaflet sin capas intermedias.
- * Ajuste: Se ajusta el border de glass-panel a 0.05 para cumplir la regla estética "border-white/5".
+ * Misión: Configuración del sistema de diseño core, utilidades atómicas de Glassmorphism puro y compatibilidad Leaflet.
  */
 
 @import "tailwindcss";
@@ -12,7 +11,7 @@
   --color-cimco-bg: #121214;
   --color-cimco-glass: rgba(18, 18, 20, 0.8);
   
-  /* Manteniendo compatibilidad de paleta con los estilos previos */
+  /* Manteniendo compatibilidad de paleta con los estilos de la flota */
   --color-zinc-100: #f4f4f5;
   --color-zinc-900: #09090b;
 }
@@ -27,6 +26,7 @@
     padding: 0;
     min-width: 320px;
     min-height: 100vh;
+    overflow-x: hidden;
   }
   
   #root {
@@ -34,10 +34,36 @@
     height: 100vh;
   }
 
-  /* Selección de texto adaptada a la identidad visual de la app */
+  /* Selección de texto adaptada a la identidad visual táctica (Amarillo CIMCO) */
   ::selection {
-    background-color: rgba(234, 179, 8, 0.3);
+    background-color: rgba(234, 179, 8, 0.25);
     color: #fef08a;
+  }
+}
+
+@layer utilities {
+  /* 💎 Inyección Atómica de la Regla Estética CIMCO-UI V9.3 Pure Dark Glassmorphism */
+  .glass-panel-premium {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    background-color: rgba(18, 18, 20, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  /* 🔄 Custom Scrollbar Invisible/Cyberpunk para mitigar desbordamientos en terminales de conductores */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: #121214;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(34, 211, 238, 0.4); /* Brillo cian reactivo */
   }
 }
 
@@ -48,27 +74,18 @@
   background: var(--color-zinc-900) !important;
 }
 
-/* Estética CIMCO-UI Glassmorphism para los Popups del Radar */
+/* Estética CIMCO-UI Glassmorphism para los Popups del Radar Geográfico */
 .leaflet-popup-content-wrapper {
   background: rgba(18, 18, 20, 0.95) !important;
   color: var(--color-zinc-100) !important;
   border: 1px solid rgba(255, 255, 255, 0.05) !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
-  border-radius: 12px !important;
+  backdrop-filter: blur(8px);
+  border-radius: 16px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
 }
 
 .leaflet-popup-tip {
   background: rgba(18, 18, 20, 0.95) !important;
-}
-
-/* ✨ UTILIDADES GLOBALES E INQUEBRANTABLES DE GLASSMORPHISM CIMCO-UI V9.3 */
-@utility glass-panel {
-  background-color: var(--color-cimco-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  /* 🛡️ Regla Estricta: border-white/5 */
-  border: 1px solid rgba(255, 255, 255, 0.05); 
-  border-radius: 1rem;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  border-left: 1px solid rgba(255, 255, 255, 0.05) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
 }

@@ -1,53 +1,53 @@
-// Versión Arquitectura: V9.6.0 - Blindaje HMR Polling, Alias Absoluto y Estabilización Tailwind v4
+// Versión Arquitectura: V9.8.6 - Optimización de WebSocket HMR y Enrutamiento de Proxy Unificado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\vite.config.js
- * Misión: Integrar el compilador nativo de Tailwind CSS v4, preservar proxies y estabilizar el sistema de archivos (HMR) en Windows mediante usePolling y Alias absolutos.
+ * Misión: Configuración maestra del servidor de Vite con soporte multi-entorno (Local, IP, Ngrok).
  */
 
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import path from 'path'; // 🚀 Fusión Atómica: Inyección de módulo de rutas para Alias
+import path from 'path';
 
 export default defineConfig({
   plugins: [
     react(),
-    tailwindcss(), // 🚀 Fusión Atómica: Plugin nativo oficial de Tailwind v4 para Vite
+    tailwindcss(),
   ],
   resolve: {
     alias: {
-      // 🛡️ Blindaje de Enrutamiento: Sella la ruta base eliminando las dependencias relativas frágiles (../../) y evita recargos por salidas del File System (/@fs/)
       '@': path.resolve(__dirname, './src'),
     },
   },
   server: {
-    port: 5173, // Puerto nativo del ecosistema frontend verificado
-    host: '0.0.0.0', // Escucha en todas las interfaces para acceso móvil y red local
-    historyApiFallback: true, // Evita el error 404 al recargar páginas como /login o /admin/dashboard
+    port: 5173,
+    host: '0.0.0.0', // Permite la escucha simultánea en Localhost y red externa
+    historyApiFallback: true,
     allowedHosts: [
       '192.168.100.34',
+      'localhost',
+      '127.0.0.1',
       'globosely-appreciative-zander.ngrok-free.app',
       'globosely-appreciative-zander.ngrok-free.dev',
       '.ngrok-free.app',
       '.ngrok-free.dev'
     ],
-    // 🛡️ Blindaje HMR: Fuerza a Vite a escanear archivos constantemente en Windows (PowerShell/WSL)
+    // 🛡️ TUNELIZACIÓN INTEGRADA: Enruta /api al backend Express local (Puerto 3000)
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false,
+        ws: true, // 👈 CRÍTICO: Permite que los WebSockets de Socket.io también pasen por el proxy si es necesario
+      },
+    },
     watch: {
       usePolling: true,
     },
+    // 🔥 OPTIMIZACIÓN HMR: Al remover 'host: localhost', Vite detecta dinámicamente 
+    // si estás navegando desde Ngrok, IP local o localhost y adapta el WebSocket automáticamente.
     hmr: {
-      overlay: true,
+      protocol: 'ws'
     }
-  },
-  preview: {
-    port: 5173,
-    host: '0.0.0.0',
-    allowedHosts: [
-      '192.168.100.34',
-      'globosely-appreciative-zander.ngrok-free.app',
-      'globosely-appreciative-zander.ngrok-free.dev',
-      '.ngrok-free.app',
-      '.ngrok-free.dev'
-    ]
   }
 });

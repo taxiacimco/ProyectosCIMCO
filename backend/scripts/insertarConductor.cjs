@@ -1,56 +1,86 @@
-// Versión Arquitectura: V1.3 - Inyección de Contingencia con URI Expandida Absoluta
+// Versión Arquitectura: V1.5 - Corrección de Case-Sensitivity y Normalización de Base de Datos
 /**
- * Ubicación: backend/src/insertarConductor.cjs
- * Misión: Forzar el registro usando el string de conexión directo de Atlas libre de errores de parseo.
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarConductor.cjs
+ * Misión: Sembrar el perfil del conductor demo en MongoDB Atlas apuntando al namespace exacto en minúsculas.
  */
 
 const { MongoClient } = require('mongodb');
+const path = require('path');
 
-// Usamos la cadena de conexión explícita apuntando directamente a los nodos de datos de tu log
-const URI_DIRECTA = "mongodb://ac-r1pjv3q-shard-00-00.veevs7s.mongodb.net,ac-r1pjv3q-shard-00-01.veevs7s.mongodb.net/TAXIA-CIMCO?ssl=true&replicaSet=atlas-13gbyk-shard-0&authSource=admin&retryWrites=true&w=majority";
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+
+const URI_ATLAS = process.env.MONGODB_URI || process.env.MONGO_URI || "mongodb://ac-r1pjv3q-shard-00-00.veevs7s.mongodb.net,ac-r1pjv3q-shard-00-01.veevs7s.mongodb.net/taxia-cimco?ssl=true&replicaSet=atlas-13gbyk-shard-0&authSource=admin&retryWrites=true&w=majority";
 
 async function sembrarConductorAbsoluto() {
-    // Configuramos opciones de tolerancia para entornos Windows de desarrollo local
-    const client = new MongoClient(URI_DIRECTA, {
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
+    const client = new MongoClient(URI_ATLAS, {
         connectTimeoutMS: 10000
     });
 
     try {
-        console.log('📡 [CIMCO-FINAL] Conectando por bypass directo al bus de datos de Atlas...');
+        console.log('📡 [CIMCO-FINAL] Conectando de forma segura al bus de datos de Atlas...');
         await client.connect();
         
-        const db = client.db('TAXIA-CIMCO');
+        // CORRECCIÓN DE CAJA: Forzar uso del namespace real en minúsculas
+        const db = client.db('taxia-cimco');
         const coleccion = db.collection('conductores');
 
-        console.log('🔍 [CIMCO-FINAL] Verificando existencia de mototaxi@cimco...');
-        const existe = await coleccion.findOne({ email: 'mototaxi@cimco' });
+        const emailObjetivo = "mototaxi@test.com";
+        const uidObjetivo = "6a29c73cc8d7b14cd8f85876"; 
+
+        console.log(`🔍 [CIMCO-FINAL] Verificando preexistencia del nodo: ${emailObjetivo}...`);
+        const existe = await coleccion.findOne({ 
+            $or: [
+                { email: emailObjetivo },
+                { uid: uidObjetivo }
+            ]
+        });
 
         if (existe) {
-            console.log('⚠️ [CIMCO-FINAL] El registro ya se encuentra en el nodo central.');
+            console.log('⚠️ [CIMCO-FINAL] El registro del conductor ya existe. Actualizando credenciales operativas...');
+            await coleccion.updateOne(
+                { email: emailObjetivo },
+                { 
+                    $set: { 
+                        uid: uidObjetivo,
+                        nombre: "Pantera rosa",
+                        placa: "MOT123",
+                        numeroInterno: "#057",
+                        rol: "conductor",
+                        role: "conductor",
+                        estado: "activo",
+                        updatedAt: new Date()
+                    } 
+                }
+            );
+            console.log('🔄 [CIMCO-FINAL] Identidad del conductor re-sincronizada exitosamente con Firebase Auth.');
             return;
         }
 
         console.log('📦 [CIMCO-FINAL] Empaquetando payload del Conductor Demo...');
         const nuevoConductor = {
-            nombre: "Carlos Fuentes (Conductor Demo)",
-            email: "mototaxi@cimco",
+            uid: uidObjetivo, 
+            nombre: "Pantera rosa",
+            email: emailObjetivo,
             rol: "conductor",
-            telefono: "+573001234567",
+            role: "conductor",
+            telefono: "3102223344",
+            clave: "123456",
+            placa: "MOT123",
+            numeroInterno: "#057",
             estado: "activo",
-            saldoWallet: 0,
+            saldo: 20000, 
+            saldoWallet: 20000,
             fechaCreacion: new Date()
         };
 
         await coleccion.insertOne(nuevoConductor);
-        console.log('🚀 ¡SÚPER ÉXITO! CONDUCTOR INYECTADO CORRECTAMENTE EN EL NODO CENTRAL.');
+        console.log('🚀 [SÚPER ÉXITO] Conductor inyectado y alineado al nodo central.');
 
     } catch (error) {
-        console.error('❌ Error crítico en la inyección de datos:', error.message);
+        console.error('❌ [ERROR CRÍTICO] Fallo en la inyección de datos del conductor:', error.message);
     } finally {
         await client.close();
-        console.log('🔌 [CIMCO-FINAL] Canal cerrado con éxito.');
+        console.log('🔌 [CIMCO-FINAL] Canal transaccional cerrado con éxito.');
         process.exit(0);
     }
 }

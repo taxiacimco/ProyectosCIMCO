@@ -1,4 +1,5 @@
 // Versión Arquitectura: V11.2 - Patrón Unificado: FIRESTORE_PATHS.rides y Saneamiento Monetario
+// Refactorización Estética: Cyber-Neo-Brutalismo Industrial (Alta Visibilidad y Estructura Rígida)
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
@@ -24,7 +25,7 @@ const HistorialMotocarga = () => {
                 return;
             }
             try {
-                // Uso de FIRESTORE_PATHS para evitar Hardcoding de colecciones
+                // Uso de FIRESTORE_PATHS adaptado al flujo de servicios completados por la unidad de carga
                 const q = query(
                     collection(db, FIRESTORE_PATHS.rides || 'rides'),
                     where('conductorId', '==', user.uid),
@@ -34,7 +35,7 @@ const HistorialMotocarga = () => {
                 const snapshot = await getDocs(q);
                 setHistorial(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
             } catch (error) {
-                console.error("❌ [CIMCO-LOG-ERROR] Fallo en la sincronización de historial:", error);
+                console.error("❌ [CIMCO-LOG-ERROR] Fallo en la sincronización de historial Carga:", error);
             } finally {
                 setLoading(false);
             }
@@ -44,47 +45,76 @@ const HistorialMotocarga = () => {
     }, [user]);
 
     return (
-        <div className="min-h-screen bg-[#09090b] font-mono text-zinc-100 p-6 flex flex-col gap-6">
-            <header className="flex items-center gap-3 border-b border-white/5 pb-4">
-                <Package className="text-amber-500" size={26} />
+        <div className="min-h-screen bg-[#0e0e11] font-mono text-zinc-100 p-6 flex flex-col gap-6 selection:bg-amber-400 selection:text-black">
+            
+            {/* 🔝 ENCABEZADO: Bloque Masivo Cyber-Brutalist */}
+            <header className="flex items-center gap-4 bg-zinc-900 border-4 border-black p-4 shadow-[4px_4px_0px_0px_#000] rounded-none">
+                <div className="p-2.5 bg-amber-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_#000] shrink-0">
+                    <Package size={24} strokeWidth={2.5} />
+                </div>
                 <div>
-                    <h1 className="text-xl font-black uppercase tracking-widest text-white font-mono">Registro Fletes</h1>
-                    <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Historial de logística pesada y distribución urbana</p>
+                    <h1 className="text-xl font-black uppercase tracking-widest text-white leading-none">Registro Fletes</h1>
+                    <p className="text-[10px] text-amber-400 uppercase tracking-wider font-bold mt-1">Historial de logística pesada y distribución urbana</p>
                 </div>
             </header>
 
-            <div className="space-y-4">
+            {/* 📊 CONTENEDOR DE REGISTROS CRÍTICOS */}
+            <div className="space-y-6">
                 {loading ? (
-                    <div className="flex items-center gap-2 text-zinc-500 text-xs uppercase animate-pulse">
-                        <Loader size={14} className="animate-spin text-amber-500" /> Sincronizando registros fletes...
+                    <div className="flex items-center justify-center gap-3 bg-zinc-900 border-4 border-black p-6 font-black text-xs uppercase tracking-widest text-zinc-400 shadow-[4px_4px_0px_0px_#000]">
+                        <Loader size={16} className="animate-spin text-amber-400" /> Sincronizando registros fletes...
                     </div>
                 ) : historial.length === 0 ? (
-                    <div className="backdrop-blur-md bg-[#121214]/80 p-8 rounded-3xl border border-white/5 text-center shadow-xl">
-                        <p className="text-zinc-500 uppercase text-xs tracking-widest">Sin registros operativos recientes.</p>
+                    <div className="bg-zinc-900 p-8 border-4 border-black text-center shadow-[4px_4px_0px_0px_#000] rounded-none">
+                        <p className="text-zinc-500 uppercase text-xs tracking-widest font-black">Sin registros operativos recientes.</p>
                     </div>
                 ) : (
                     historial.map(flete => {
                         const tarifaFinal = flete.tarifa || flete.pago?.tarifaOfertada || flete.oferta || 0;
                         return (
-                            <div key={flete.id} className="backdrop-blur-md bg-[#121214]/80 p-5 rounded-2xl border border-white/5 flex flex-col gap-3 hover:border-white/10 transition-all shadow-lg">
-                                <div className="flex justify-between items-center border-b border-white/5 pb-3">
+                            <div 
+                                key={flete.id} 
+                                className="bg-zinc-900 p-5 border-4 border-black flex flex-col gap-4 shadow-[4px_4px_0px_0px_#000] rounded-none hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#000] transition-all duration-150"
+                            >
+                                {/* Bloque superior financiero del flete */}
+                                <div className="flex justify-between items-center border-b-4 border-black pb-4">
                                     <div>
-                                        <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold">Flete Neto</p>
-                                        <p className="text-amber-500 font-black text-md">${(parseFloat(tarifaFinal)).toLocaleString()} COP</p>
+                                        <p className="text-[10px] text-zinc-400 uppercase tracking-widest font-black">Flete Neto Recaudado</p>
+                                        <p className="text-lg font-black text-amber-400 tracking-tight">
+                                            ${(parseFloat(tarifaFinal)).toLocaleString()} COP
+                                        </p>
                                     </div>
-                                    <div className="text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 rounded-lg flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest">
-                                        <CheckCircle size={12} /> Completado
+                                    <div className="flex items-center gap-1.5 text-black bg-emerald-400 border-2 border-black px-3 py-1 font-black uppercase tracking-wider text-[10px] shadow-[2px_2px_0px_0px_#000] select-none">
+                                        <CheckCircle size={12} strokeWidth={3} />
+                                        <span>Completado</span>
                                     </div>
                                 </div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 text-xs text-zinc-300">
-                                        <MapPin size={12} className="text-zinc-500 shrink-0" />
-                                        <span className="truncate text-[11px]"><strong className="text-zinc-600 uppercase text-[9px] mr-1">Recogida:</strong> {formatDireccion(flete.origen || flete.ubicacionRecogida)}</span>
+                                
+                                {/* Panel Georreferenciado Rígido */}
+                                <div className="space-y-3 bg-black/40 p-3 border-2 border-black">
+                                    <div className="flex items-start gap-2.5 text-xs text-zinc-200">
+                                        <MapPin size={14} className="text-zinc-500 shrink-0 mt-0.5" strokeWidth={2.5} />
+                                        <span className="text-[11px] leading-tight">
+                                            <strong className="text-zinc-500 uppercase text-[9px] block font-black tracking-wider mb-0.5">Punto de Carga / Origen:</strong> 
+                                            {formatDireccion(flete.origen || flete.ubicacionRecogida)}
+                                        </span>
                                     </div>
-                                    <div className="flex items-center gap-2 text-xs text-zinc-300">
-                                        <MapPin size={12} className="text-amber-500 shrink-0" />
-                                        <span className="truncate text-[11px]"><strong className="text-zinc-600 uppercase text-[9px] mr-1">Destino:</strong> {formatDireccion(flete.destino || flete.ubicacionEntrega)}</span>
+                                    <div className="border-t border-dashed border-zinc-800 my-1"></div>
+                                    <div className="flex items-start gap-2.5 text-xs text-zinc-200">
+                                        <MapPin size={14} className="text-amber-400 shrink-0 mt-0.5" strokeWidth={2.5} />
+                                        <span className="text-[11px] leading-tight">
+                                            <strong className="text-amber-400 uppercase text-[9px] block font-black tracking-wider mb-0.5">Punto de Descarga / Destino:</strong> 
+                                            {formatDireccion(flete.destino || flete.ubicacionEntrega)}
+                                        </span>
                                     </div>
+                                </div>
+                                
+                                {/* Metadata Estructural del Documento */}
+                                <div className="flex justify-between items-center text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-1">
+                                    <span>ID: CARGA-...{String(flete.id).slice(-6).toUpperCase()}</span>
+                                    {flete.fechaCreacion && (
+                                        <span>REG: {new Date(flete.fechaCreacion.seconds * 1000).toLocaleDateString()}</span>
+                                    )}
                                 </div>
                             </div>
                         );

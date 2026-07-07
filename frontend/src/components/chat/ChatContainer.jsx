@@ -1,12 +1,49 @@
-// Versión Arquitectura: V11.0 - PROD READY: Rutas Limpias Inyectadas y Canal de Mensajería de Alta Velocidad
+// Versión Arquitectura: V12.0 - PROD READY: Corrección de Regla de Hooks, Latencia Estimada y Control Anti-Spam
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; // 🚀 Fusión Atómica: Paths Inyectados
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
-import { Send } from 'lucide-react';
+import { Send, Loader2 } from 'lucide-react';
 
 const ChatContainer = ({ tripId }) => {
-  // 🛡️ Guarda de Seguridad Anti-Undefined
+  const { user } = useAuth();
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [isSending, setIsSending] = useState(false); // 🛡️ Control de Concurrencia Móvil
+  const scrollRef = useRef();
+
+  // 🚀 Sincronización del Canal de Mensajería con Compensación de Latencia
+  useEffect(() => {
+    if (!user?.uid || !tripId) return;
+    
+    const q = query(
+      collection(db, `${FIRESTORE_PATHS.chats}/${tripId}/messages`),
+      orderBy("createdAt", "asc")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      // ⚡ Inyección de 'estimate' para mitigar el nulo transitorio del serverTimestamp local
+      const mensajesProcesados = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data({ serverTimestamps: 'estimate' }) 
+      }));
+      
+      setMessages(mensajesProcesados);
+    }, (error) => {
+      console.error("❌ [ChatContainer] Error en canal de mensajería:", error);
+    });
+
+    return () => unsubscribe();
+  }, [tripId, user?.uid]);
+
+  // 📜 Gestión del scroll adaptativo al recibir flujos de datos
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages]);
+
+  // 🛡️ Guarda de Seguridad Táctica (Reubicada post-Hooks para respetar las Reglas de React)
   if (!tripId) {
     console.error("❌ [ChatContainer] Error Crítico: 'tripId' no está definido.");
     return (
@@ -16,43 +53,24 @@ const ChatContainer = ({ tripId }) => {
     );
   }
 
-  const { user } = useAuth();
-  const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState("");
-  const scrollRef = useRef();
-
-  useEffect(() => {
-    if (!user?.uid) return;
-    
-    // 🚀 Ruta Limpia de Producción: chats/{tripId}/messages
-    const q = query(
-      collection(db, `${FIRESTORE_PATHS.chats}/${tripId}/messages`),
-      orderBy("createdAt", "asc")
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, (error) => {
-      console.error("❌ [ChatContainer] Error en canal de mensajería:", error);
-    });
-
-    return () => unsubscribe();
-  }, [tripId, user?.uid]);
-
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !user?.uid) return;
+    if (!newMessage.trim() || !user?.uid || isSending) return;
+
     try {
-      // 🚀 Ruta Limpia de Producción al enviar
+      setIsSending(true); // Bloqueo preventivo en redes de baja cobertura
+      
       await addDoc(collection(db, `${FIRESTORE_PATHS.chats}/${tripId}/messages`), {
         text: newMessage.trim(),
         senderId: user.uid,
         createdAt: serverTimestamp()
       });
+      
       setNewMessage("");
     } catch (error) {
       console.error("❌ [ChatContainer] Error al enviar mensaje:", error);
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -76,7 +94,7 @@ const ChatContainer = ({ tripId }) => {
                 <p className="leading-relaxed break-words">{msg.text}</p>
                 {msg.createdAt && (
                   <span className="block text-[8px] text-right mt-1 opacity-40 font-mono">
-                    {new Date(msg.createdAt.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                    {msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 )}
               </div>
@@ -91,14 +109,16 @@ const ChatContainer = ({ tripId }) => {
           type="text" 
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
-          placeholder="Escribe un mensaje..."
-          className="flex-grow bg-[#121214]/60 border border-white/10 rounded-xl px-3 py-2 text-white text-xs outline-none focus:border-amber-500/50 focus:bg-[#121214]/90 transition-all placeholder:text-zinc-500"
+          placeholder={isSending ? "Enviando..." : "Escribe un mensaje..."}
+          disabled={isSending}
+          className="flex-grow bg-[#121214]/60 border border-white/10 rounded-xl px-3 py-2 text-white text-xs outline-none focus:border-amber-500/50 focus:bg-[#121214]/90 transition-all placeholder:text-zinc-500 disabled:opacity-50"
         />
         <button 
           type="submit" 
-          className="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 p-2 rounded-xl transition-all flex items-center justify-center cursor-pointer"
+          disabled={isSending || !newMessage.trim()}
+          className="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 p-2 rounded-xl transition-all flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <Send size={14} />
+          {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
         </button>
       </form>
     </div>

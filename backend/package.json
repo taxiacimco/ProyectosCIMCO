@@ -1,9 +1,18 @@
 {
+  "//": "Versión Arquitectura: V2.1 - Estabilización de Subpath Imports Nativos (#) para Mitigar Fractura ESM",
   "name": "taxia-cimco-backend",
+  "architecture_version": "V2.1 - Corrección Nativa de Subpath Imports ESM (#)",
   "version": "1.0.1",
   "description": "Servidor Central Local - TAXIA CIMCO",
   "main": "src/server.js",
   "type": "module",
+  "imports": {
+    "#models/*": "./src/models/*",
+    "#modules/*": "./src/modules/*",
+    "#config/*": "./src/config/*",
+    "#middleware/*": "./src/middleware/*",
+    "#*": "./src/*"
+  },
   "scripts": {
     "dev": "nodemon src/server.js"
   },
@@ -16,7 +25,8 @@
     "firebase-admin": "^13.10.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.24.0",
-    "multer": "^2.1.1"
+    "multer": "^2.1.1",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

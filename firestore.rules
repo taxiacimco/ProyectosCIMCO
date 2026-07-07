@@ -1,11 +1,3 @@
-// Versión Arquitectura: V15.1 - Habilitación de Entorno de Desarrollo Híbrido y Preservación de Malla Core
-/**
- * Archivo: C:\Users\Carlos Fuentes\ProyectosCIMCO\firestore.rules
- * Misión: Asegurar el ecosistema TAXIA CIMCO permitiendo pruebas dinámicas en emuladores locales.
- * Ajuste: Apertura temporal con guardas laxas (if true) para 'users', 'wallets' e 'historial_saldo' en desarrollo.
- * ⚠️ ADVERTENCIA: No desplegar esta versión a la nube pública de producción.
- */
-
 rules_version = '2';
 
 service cloud.firestore {
@@ -19,12 +11,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Identifica si el cliente entró usando el canal de respaldo anónimo (Pasajeros rápidos/Telemetría)
     function esUsuarioAnonimo() {
       return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous';
     }
 
-    // Verifica si el usuario autenticado tiene el rol administrativo o nivel maestro
     function esAdmin() {
       return usuarioAutenticado() && (
         request.auth.token.admin == true ||
@@ -39,89 +29,55 @@ service cloud.firestore {
       );
     }
 
-    // Identifica si el usuario es un despachador o personal de control
-    function esDespachador() {
-      return usuarioAutenticado() && (
-        request.auth.token.role == 'despachador' ||
-        request.auth.token.rol == 'despachador' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'despachador' ||
-           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rol == 'despachador'))
-      );
-    }
-
     // ==========================================
     // 🚀 REGLAS DE ACCESO PARA COLECCIONES CORE
     // ==========================================
 
-    // 👥 REGLA 1: GENERAL DE USUARIOS (Malla Operativa Abierta para Emulador Local)
+    // 👥 COLECCIÓN DE USUARIOS / OPERADORES
     match /users/{userId} {
-      allow read, write: if true; // 🔓 Desbloqueo local para ListaOperadores y handshake anónimo
-      
-      match /{document=**} {
-        allow read, write: if true;
-      }
+      allow read, write: if true;
+      match /{document=**} { allow read, write: if true; }
     }
 
-    // Retrocompatibilidad Nodo Hispano
     match /usuarios/{userId} {
       allow read, write: if true;
-      
-      match /{document=**} {
-        allow read, write: if true;
-      }
+      match /{document=**} { allow read, write: if true; }
     }
 
-    // 🚗 REGLA 2: VIAJES Y MONITOR DE TELEMETRÍA (Canal ágil de tiempo real)
-    match /rides/{document=**} {
-      allow read, write: if usuarioAutenticado() || true;
-    }
-    match /viajes/{document=**} {
-      allow read, write: if usuarioAutenticado() || true;
-    }
-
-    // 🛵 REGLA 3: RADAR DE CONDUCTORES
-    match /conductores/{document=**} {
-      allow read: if true; // Permitir que la app dibuje las motos libres en el mapa de pasajeros sin barreras
-      allow write: if usuarioAutenticado() || true;
-    }
-
-    // 💰 REGLA 4: BILLETERAS Y FINANZAS (Estructura Estándar y Rutas de Producción)
-    match /wallets/{walletId} {
-      allow read, write: if true; // 🔓 Permite la auditoría sin errores de permisos en GestionBilleteras
-    }
-    
-    match /historial_saldo/{id} {
-      allow read, write: if true; // 🔓 Asentamiento transaccional local libre
-    }
-
-    // 💰 REGLA 4.1: COMPATIBILIDAD CON RUTA ABSOLUTA DE PRODUCCIÓN (Sacred Route)
-    match /artifacts/taxiacimco-app/public/data/wallets/{userId} {
-      allow read, write: if true;
-    }
-    
-    match /artifacts/taxiacimco-app/public/data/historial_saldo/{docId} {
-      allow read, write: if true;
-    }
-
-    // 🚗 REGLA 4.2: VIAJES ARTIFACTS (Estructuras de Persistencia Alternas)
-    match /artifacts/taxiacimco-app/public/data/viajes/{viajeId} {
-      allow read, write: if true;
-    }
-
-    // ⭐ REGLA 5: REPUTACIÓN Y CALIFICACIONES
-    match /calificaciones/{docId} {
-      allow read, write: if true;
-    }
-
-    // ⚙️ REGLA 6: CONFIGURACIÓN GENERAL OPERATIVA
+    // 🛵 NODO DE CONFIGURACIÓN Y VIAJES DE ARTIFACTS
     match /artifacts/taxiacimco-app/public/data/{collection}/{document=**} {
       allow read, write: if true;
     }
 
-    // 📡 REGLA 7: COMPODÍN RAÍZ HÍBRIDO (Facilita consumo local)
+    // 💰 BILLETERAS Y FINANZAS
+    match /wallets/{walletId} { allow read, write: if true; }
+    match /historial_saldo/{id} { allow read, write: if true; }
+
+    // ==========================================================
+    // 🔥 ENTORNO DE SIMULACIÓN Y TELEMETRÍA (ABIERTO PARA EMULADOR LOCAL)
+    // ==========================================================
+    
+    // El simulador escribe de forma directa en el nodo raíz de viajes
+    match /viajes/{viajeId} {
+      allow read, write: if true;
+    }
+
+    match /viajes/{document=**} {
+      allow read, write: if true;
+    }
+
+    // Compatibilidad secundaria para el radar dinámico de conductores activos
+    match /conductores_activos/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /conductores/{document=**} {
+      allow read, write: if true;
+    }
+
+    // COMODÍN DE EMERGENCIA GLOBAL (Garantiza desacoplamiento completo en ambiente de desarrollo)
     match /{document=**} {
-      allow read, write: if request.auth != null || true;
+      allow read, write: if true;
     }
   }
 }

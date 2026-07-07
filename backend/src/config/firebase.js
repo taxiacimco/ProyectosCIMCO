@@ -1,5 +1,9 @@
-// Versión Arquitectura: V4.2 - Consolidación de Gobernanza de Rutas y Sincronización Estricta
-// Ubicación: backend/src/config/firebase.js
+// Versión Arquitectura: V4.5 - Sincronización Estricta de Puertos e Inyección de Guardas del Emulador 8085
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\config\firebase.js
+ * Misión: Configuración y acoplamiento táctico del Firebase Admin SDK con soporte para emuladores locales.
+ */
+
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { readFileSync } from 'fs';
@@ -22,31 +26,37 @@ export const FIRESTORE_PATHS = {
 
 let app;
 
-// 🛡️ DETECCIÓN FORZADA: Inicialización en modo Emulador Local
-if (process.env.FIRESTORE_EMULATOR_HOST || true) { 
-    process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
+// 🛡️ CONTROLADORES DE ENTORNO (ANTI-UNDEFINED)
+const esEntornoDesarrollo = process.env.NODE_ENV === 'development' || process.env.FIRESTORE_EMULATOR_HOST;
+
+if (esEntornoDesarrollo) {
+    // 🚀 Alineación de variables en memoria para interceptar llamadas salientes de Firebase Admin SDK
+    process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8085";
     process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:9099";
-    
+
     app = initializeApp({
-        projectId: "pelagic-chalice-467818-e1"
+        projectId: process.env.CIMCO_PROJECT_ID || "pelagic-chalice-467818-e1"
     });
-    
-    console.log("🔥 [CIMCO-CONFIG] Firebase Admin SDK inicializado exitosamente en MODO EMULADOR LOCAL.");
+
+    console.log("🔥 [CIMCO-CONFIG] Firebase Admin SDK conectado al Emulador Local en Puerto 8085.");
 } else {
-    // Código de Producción real
+    // 🔒 PRODUCCIÓN REAL: Consumo de credenciales criptográficas del Service Account
     const serviceAccountPath = join(__dirname, '..', '..', 'serviceAccountKey.json');
     const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
+
     app = initializeApp({
         credential: cert(serviceAccount)
     });
 }
 
-// 🛡️ ALIAS DE COMPATIBILIDAD ARQUITECTÓNICA
+// 📡 Instanciación e Inyección de la base de datos
 export const db = getFirestore(app);
 export const dbFirestore = db;
 
-// Configuración de puertos para el emulador
-db.settings({
-    host: "127.0.0.1:8080",
-    ssl: false
-});
+// ⚡ Configuración de red del cliente Firestore local para anular SSL hacia el emulador
+if (esEntornoDesarrollo) {
+    db.settings({
+        host: "127.0.0.1:8085",
+        ssl: false
+    });
+}

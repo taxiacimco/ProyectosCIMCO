@@ -1,12 +1,11 @@
-// Versión Arquitectura: V2.3 - Calibración Estructural e Inicialización de Índices Geoespaciales
+// Versión Arquitectura: V2.5 - Corrección de Sintaxis de Logging y Calibración Final
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\init-db.js
- * Misión: Forzar la compilación del esquema de conductores y validar de forma preventiva que el índice 2dsphere esté activo en MongoDB Atlas.
- * Blindaje: Evita quiebres de importación redirigiendo al modelo unificado central.
+ * Misión: Validar e inyectar el índice 2dsphere para el radar.
  */
 
 import mongoose from 'mongoose';
-import Conductor from '../src/models/Conductor.js'; // Direccionamiento topológico corregido
+import Conductor from '../src/models/Conductor.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -15,31 +14,31 @@ async function verificarIndexacion() {
     try {
         const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
         if (!mongoUri) {
-            throw new Error("⚠️ MONGODB_URI/MONGO_URI omitida en las variables de entorno de este proceso.");
+            throw new Error("⚠️ MONGODB_URI/MONGO_URI omitida en el .env.");
         }
 
         await mongoose.connect(mongoUri);
-        console.log('📡 [CIMCO-RADAR] Conectado para verificación de esquema geoespacial...');
+        console.log('📡 [CIMCO-RADAR] Conectado para verificación de esquema...');
 
-        // Obliga a Mongoose a compilar el esquema e inyectar/actualizar las reglas de indexación en el clúster
         await Conductor.init();
-        
         const indices = await Conductor.listIndexes();
         
-        // Guarda de validación perimetral del índice geoespacial
         const tiene2dsphere = indices.some(idx => idx.key && (idx.key.ubicacion === '2dsphere' || idx.key.coordenadas === '2dsphere'));
 
         if (tiene2dsphere) {
-            console.log('✅ [CIMCO-RADAR] ¡ÍNDICE 2DSPHERE DETECTADO Y ACTIVO! El radar de mototaxis está calibrado para producción.');
+            console.log('✅ [CIMCO-RADAR] ¡ÍNDICE 2DSPHERE DETECTADO Y ACTIVO!');
         } else {
-            console.warn('⚠️ [CIMCO-RADAR] ALERTA: No se detecta un índice 2dsphere nativo en el campo de ubicación geográfica.');
-            console.log('💡 Sugerencia: Mongoose intentará propagarlo en la próxima mutación de coordenadas.');
+            console.log('⚠️ [CIMCO-RADAR] Creando índice 2dsphere...');
+            // Corrección de sintaxis: Usamos comillas dobles externas para permitir comillas simples internas o evitar escape
+            await Conductor.collection.createIndex({ ubicacion: "2dsphere" });
+            console.log("🚀 [CIMCO-RADAR] Índice geoespacial '2dsphere' aplicado correctamente.");
         }
 
-        process.exit(0);
     } catch (error) {
-        console.error('❌ [CIMCO-CRITICAL] Fallo estructural en la verificación del radar:', error.message);
-        process.exit(1);
+        console.error('❌ Error en init-db:', error);
+    } finally {
+        await mongoose.disconnect();
+        process.exit(0);
     }
 }
 

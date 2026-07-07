@@ -3,13 +3,15 @@ node_modules/
 .wrangler/
 dist/
 
-# Seguridad y Llaves (Crítico)
+# Seguridad y Llaves (Configuración de Entornos CIMCO)
 *.json
 !package.json
 !package-lock.json
+!firebase.json
+!firebase.dev.json
 !wrangler.toml
 .env
 .env.local
 
-# Logs
+# Logs de depuración local de Firebase
 *-debug.log

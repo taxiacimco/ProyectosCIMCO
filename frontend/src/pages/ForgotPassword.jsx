@@ -1,226 +1,105 @@
-// Versión Arquitectura: V17.9 - Unificación Estructural y Blindaje Predictivo OTP (CIMCO-UI V9.3)
+// Versión Arquitectura: V20.1 - Recuperación Firebase con Blindaje Anti-Enumeración y Sincronización CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\ForgotPassword.jsx
- * Misión: Asegurar la simetría absoluta de payloads con el controlador central Express y mapeo predictivo de códigos HTTP.
- * Seguridad: Implementación de capas predictivas (404, 400, 429, 503) para evitar bypass de flujos reactivos.
+ * Misión: Nodo seguro para recuperación de credenciales.
+ * Seguridad: Estricta política Anti-Enumeración. El sistema jamás revela si un correo existe o no en la base de datos.
  */
+
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import api from '@/config/api';
-import { ShieldAlert, KeyRound, CheckCircle2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
+import { ShieldAlert, Mail, ArrowLeft, CheckCircle2, Terminal } from 'lucide-react';
 
 const ForgotPassword = () => {
-    const navigate = useNavigate();
-    const [step, setStep] = useState(1);
-    const [inputUser, setInputUser] = useState('');
-    const [codigo, setCodigo] = useState('');
-    const [nuevaPassword, setNuevaPassword] = useState('');
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
+    const { resetPasswordCentral } = useAuth();
+    const [email, setEmail] = useState('');
+    const [isSubmitted, setIsSubmitted] = useState(false);
     const [loading, setLoading] = useState(false);
 
-    const handleRequestOtp = async (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        setError('');
-        setSuccess('');
+        if (!email) return;
+
         setLoading(true);
         try {
-            // 🛡️ GUARDA DE SEGURIDAD: Validación estructural preventiva antes de peticionar
-            if (!inputUser || inputUser.trim() === '') {
-                throw new Error("El identificador de la unidad (teléfono o email) no puede estar vacío.");
-            }
-
-            console.log('📡 [CIMCO-TELEMETRY] Solicitando firma OTP a /api/auth/forgot-password...');
-            
-            // Unificación estructural del payload simétrico para el backend Express
-            const payload = { 
-                inputUser: inputUser.trim() 
-            };
-
-            await api.post('/api/auth/forgot-password', payload);
-            
-            setSuccess('Código OTP generado con éxito. Revisa la consola de tu servidor Express para obtener el token.');
-            setStep(2);
-        } catch (err) {
-            console.error("❌ [CIMCO-AUTH] Falla al solicitar OTP:", err);
-            
-            const status = err.response?.status;
-            const mensajeBackend = err.response?.data?.message;
-
-            // LÓGICA INTELIGENTE 🧠: Mapeo de errores por códigos de estado HTTP
-            switch (status) {
-                case 404:
-                    setError("El identificador no se encuentra registrado en el nodo central.");
-                    break;
-                case 400:
-                    setError("Estructura de payload inválida. Verifique los datos de la unidad.");
-                    break;
-                case 429:
-                    setError("Tráfico sospechoso detectado. Solicitudes de OTP bloqueadas temporalmente.");
-                    break;
-                case 503:
-                    setError("El servicio de mensajería/bóveda no está disponible temporalmente.");
-                    break;
-                default:
-                    setError(mensajeBackend || err.message || "Error al conectar con el nodo central de autenticación.");
-            }
+            // 🛡️ Llamada silenciosa al middleware del ecosistema.
+            await resetPasswordCentral(email);
+        } catch (error) {
+            console.error("🚨 [CIMCO-AUTH] Handshake de recuperación interceptado.");
+            // Capturamos el error silenciosamente para no filtrarlo a la UI.
         } finally {
             setLoading(false);
-        }
-    };
-
-    const handleResetPassword = async (e) => {
-        e.preventDefault();
-        if (loading) return;
-        setError('');
-        setSuccess('');
-        setLoading(true);
-        try {
-            // 🛡️ GUARDA DE SEGURIDAD: Verificación de estados de consistencia locales
-            if (!inputUser || inputUser.trim() === '') {
-                throw new Error("Identificador de usuario corrupto o inválido en el estado.");
-            }
-            if (!codigo || codigo.trim() === '') {
-                throw new Error("El código OTP de simulación es requerido para firmar el cambio.");
-            }
-            if (!nuevaPassword || nuevaPassword.length < 6) {
-                throw new Error("La nueva clave perimetral debe contener un mínimo de 6 caracteres.");
-            }
-
-            console.log('📡 [CIMCO-TELEMETRY] Transmitiendo actualización de credencial a /api/auth/reset-password...');
-
-            // Unificación estructural del payload simétrico para el backend Express
-            const payload = {
-                inputUser: inputUser.trim(),
-                codigo: codigo.trim(),
-                nuevaPassword: nuevaPassword
-            };
-
-            await api.post('/api/auth/reset-password', payload);
-
-            setSuccess('🔑 Credencial actualizada con éxito en la base de datos central. Redirigiendo a consola de acceso...');
-            setTimeout(() => {
-                navigate('/login');
-            }, 2000);
-        } catch (err) {
-            console.error("❌ [CIMCO-AUTH] Falla en reseteo de contraseña:", err);
-            
-            const status = err.response?.status;
-            const mensajeBackend = err.response?.data?.message;
-
-            // LÓGICA INTELIGENTE 🧠: Mapeo de errores en segundo paso de restablecimiento
-            switch (status) {
-                case 400:
-                    setError(mensajeBackend || "Código OTP malformado o expirado.");
-                    break;
-                case 401:
-                    setError("Código OTP inválido. Firma de seguridad rechazada.");
-                    break;
-                case 429:
-                    setError("Demasiados intentos fallidos. El token ha sido invalidado por seguridad.");
-                    break;
-                case 503:
-                    setError("Transacción interrumpida. La base de datos central no responde.");
-                    break;
-                default:
-                    setError(mensajeBackend || err.message || "El código ingresado es inválido o ya ha expirado.");
-            }
-        } finally {
-            setLoading(false);
+            // 🛡️ ANTI-ENUMERACIÓN: Siempre mostramos éxito y cortamos el flujo de comprobación.
+            setIsSubmitted(true);
         }
     };
 
     return (
-        <div className="min-h-screen w-full bg-[#09090b] flex items-center justify-center p-4 antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
-            <div className="w-full max-w-md backdrop-blur-xl bg-[#121214]/80 border border-white/5 rounded-2xl p-8 shadow-[0_0_50px_-12px_rgba(6,182,212,0.15)] relative">
+        <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-6 relative overflow-hidden">
+            {/* FONDO ESTÉTICO CIMCO-UI HOMOLOGADO CON LOGIN */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-900/10 via-black to-black z-0" />
+            
+            <div className="w-full max-w-md backdrop-blur-md bg-[#121214]/80 border border-white/5 p-8 rounded-3xl shadow-2xl relative z-10">
                 
+                {/* ENCABEZADO */}
                 <div className="mb-8 text-center">
-                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-cyan-500/[0.06] border border-cyan-500/15 rounded-full mb-3">
-                        <span className={`h-1.5 w-1.5 rounded-full ${loading ? 'bg-amber-400 animate-ping' : 'bg-cyan-400 animate-pulse'}`} />
-                        <span className="text-[10px] font-mono tracking-[0.15em] text-cyan-400 uppercase">Bóveda de Seguridad</span>
-                    </div>
-                    <h2 className="text-white font-black text-2xl tracking-tight bg-clip-text text-transparent bg-gradient-to-b from-white to-zinc-400">RECOVERY NODE</h2>
-                    <p className="text-zinc-500 text-xs font-mono tracking-wide mt-1 uppercase text-[10px]">Restablecimiento de Credenciales</p>
+                    <Terminal className="mx-auto text-yellow-500 mb-4" size={40} />
+                    <h1 className="text-xl font-black text-white uppercase tracking-tighter">Protocolo de Rescate</h1>
+                    <p className="text-[10px] text-zinc-500 font-mono mt-1 tracking-widest uppercase">Restablecer Acceso al Nodo</p>
                 </div>
 
-                {error && (
-                    <div className="mb-6 bg-red-950/30 border border-red-500/20 text-red-400 text-[10px] font-mono p-3.5 rounded-xl uppercase tracking-widest flex items-center gap-2 animate-in fade-in duration-300">
-                        <ShieldAlert size={14} className="text-red-400 flex-shrink-0" />
-                        <span>{error}</span>
-                    </div>
-                )}
-
-                {success && (
-                    <div className="mb-6 bg-cyan-950/30 border border-cyan-500/20 text-cyan-400 text-[10px] font-mono p-3.5 rounded-xl uppercase tracking-widest flex items-center gap-2 animate-in fade-in duration-300">
-                        <CheckCircle2 size={14} className="text-cyan-400 flex-shrink-0" />
-                        <span>{success}</span>
-                    </div>
-                )}
-
-                {step === 1 ? (
-                    <form onSubmit={handleRequestOtp} className="space-y-4">
-                        <div className="space-y-1.5">
-                            <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest pl-1">Identificador de la Unidad</label>
-                            <input 
-                                type="text" 
-                                placeholder="Ej. 3003503249 o Correo" 
-                                className="w-full bg-[#131318]/90 border border-white/[0.06] p-4 rounded-xl text-zinc-100 text-sm focus:border-cyan-500/40 focus:bg-[#16161f] outline-none font-mono transition-all"
-                                value={inputUser}
-                                onChange={(e) => setInputUser(e.target.value)}
-                                required
-                            />
-                        </div>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full mt-6 py-4 text-xs font-mono uppercase tracking-[0.25em] rounded-xl bg-zinc-100 text-black hover:bg-cyan-500 hover:text-white font-bold transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {loading ? "Generando OTP..." : "Solicitar Código OTP"}
-                        </button>
-                    </form>
-                ) : (
-                    <form onSubmit={handleResetPassword} className="space-y-4">
-                        <div className="space-y-1.5">
-                            <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest pl-1">Código OTP de Simulación</label>
-                            <input 
-                                type="text" 
-                                placeholder="Ingresa el código de 6 dígitos" 
-                                className="w-full bg-[#131318]/90 border border-white/[0.06] p-4 rounded-xl text-zinc-100 text-sm focus:border-cyan-500/40 focus:bg-[#16161f] outline-none font-mono text-center tracking-[0.5em] font-bold transition-all"
-                                value={codigo}
-                                onChange={(e) => setCodigo(e.target.value)}
-                                maxLength={6}
-                                required
-                            />
+                {!isSubmitted ? (
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="p-4 bg-yellow-500/5 border border-yellow-500/10 rounded-xl mb-6 flex gap-3 items-start">
+                            <ShieldAlert size={16} className="text-yellow-500 shrink-0 mt-0.5" />
+                            <p className="text-[10px] text-zinc-400 font-mono leading-relaxed uppercase tracking-wider">
+                                Ingresa la terminal de correo asociada a tu cuenta. Transmitiremos un token seguro de recuperación.
+                            </p>
                         </div>
 
-                        <div className="space-y-1.5">
-                            <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest pl-1">Nueva Clave de Seguridad</label>
+                        <div className="space-y-1">
+                            <label className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Terminal de Correo</label>
                             <div className="relative">
+                                <Mail className="absolute left-4 top-4 text-zinc-600" size={16} />
                                 <input 
-                                    type="password" 
-                                    placeholder="Mínimo 6 caracteres" 
-                                    className="w-full bg-[#131318]/90 border border-white/[0.06] p-4 rounded-xl text-zinc-100 text-sm focus:border-cyan-500/40 focus:bg-[#16161f] outline-none font-mono tracking-widest transition-all"
-                                    value={nuevaPassword}
-                                    onChange={(e) => setNuevaPassword(e.target.value)}
+                                    type="email" 
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="w-full bg-black/40 p-4 pl-12 rounded-xl border border-white/5 text-sm text-zinc-100 focus:border-yellow-500/50 outline-none transition-all placeholder:text-zinc-700"
+                                    placeholder="operador@taxiacimco.com"
                                     required
                                 />
-                                <KeyRound size={16} className="absolute right-4 top-4 text-zinc-500" />
                             </div>
                         </div>
 
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="w-full mt-6 py-4 text-xs font-mono uppercase tracking-[0.25em] rounded-xl bg-cyan-500 text-white hover:bg-cyan-400 font-bold transition-all duration-300 shadow-[0_0_20px_rgba(6,182,212,0.3)] disabled:opacity-50"
+                        <button 
+                            type="submit" 
+                            disabled={loading || !email}
+                            className="w-full mt-4 py-4 text-xs font-mono uppercase tracking-[0.25em] rounded-xl bg-yellow-500 text-black hover:bg-yellow-400 font-black transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg flex items-center justify-center gap-2"
                         >
-                            {loading ? "Procesando Cambio..." : "Restablecer Contraseña"}
+                            {loading ? (
+                                <span className="h-4 w-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                                "Transmitir Enlace Seguro"
+                            )}
                         </button>
                     </form>
+                ) : (
+                    <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-6 text-center space-y-4">
+                        <CheckCircle2 size={40} className="text-emerald-500 mx-auto" />
+                        <h3 className="text-emerald-400 font-black tracking-widest uppercase text-xs font-mono">Enlace Transmitido</h3>
+                        <p className="text-zinc-400 text-[11px] leading-relaxed">
+                            Si el correo <strong className="text-zinc-200">{email}</strong> está validado en el ecosistema, recibirás un vector de acceso en breve.
+                        </p>
+                        <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono mt-4">
+                            Verifica la bandeja de SPAM.
+                        </p>
+                    </div>
                 )}
 
-                <div className="mt-8 pt-4 border-t border-white/[0.03] text-center">
-                    <Link to="/login" className="text-zinc-500 hover:text-cyan-400 font-mono text-[10px] uppercase tracking-widest transition-colors">
-                        ← Volver a Consola de Acceso
+                <div className="mt-8 pt-6 border-t border-white/[0.05] text-center">
+                    <Link to="/login" className="inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-white font-mono text-[10px] uppercase tracking-widest transition-colors">
+                        <ArrowLeft size={12} /> Abortar y Volver al Centro
                     </Link>
                 </div>
             </div>

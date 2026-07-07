@@ -1,8 +1,7 @@
-// CIMCO-SECURITY: Script Atómico de Inserción Directa Ligero (CEO)
+// Versión Arquitectura: V1.2 - Corrección de Inyección a Colección Estandarizada 'usuarios'
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 
-// Carga automática del archivo .env de la raíz del backend
 dotenv.config();
 
 const MONGO_URI = process.env.MONGODB_URI;
@@ -17,41 +16,37 @@ async function elevarACeo() {
         await mongoose.connect(MONGO_URI);
         console.log("🟢 ¡Conexión establecida con el clúster de Atlas!");
         
-        const correoAdmin = "admin@test.com";
-        console.log(`🔍 Verificando existencia de la cuenta: ${correoAdmin}...`);
+        // Credencial principal homologada
+        const correoAdmin = "taxiacimco@gmail.com"; 
         
-        // Buscamos si ya existe en la colección 'users'
-        const usuarioExistente = await mongoose.connection.db.collection('users').findOne({ email: correoAdmin });
+        // ⚠️ CORRECCIÓN ARQUITECTÓNICA: Apuntamos a 'usuarios', no a 'users'
+        const coleccion = mongoose.connection.db.collection('usuarios');
+        const usuarioExistente = await coleccion.findOne({ email: correoAdmin });
 
-        // Objeto con la estructura de datos que requiere el Core del CEO
         const datosCeo = {
-            name: "CARLOS MARIO CEO",
+            name: "CARLOS MARIO FUENTES GARCIA",
             email: correoAdmin,
             phone: "3101112233",
-            password: "123456", // Inserción directa de prueba para desarrollo local
+            password: "123456", // Clave temporal para desarrollo. Cambiar en UI posteriormente.
             role: 'ADMIN',
             access_level: 99,
-            numero_interno: '57',
+            numero_interno: '01',
             cooperativa: 'TAXIA CIMCO',
-            status: 'ACTIVE',
-            createdAt: new Date(),
-            updatedAt: new Date()
+            isActive: true
         };
 
         if (usuarioExistente) {
-            console.log("⚡ Cuenta encontrada. Aplicando elevación de privilegios...");
-            await mongoose.connection.db.collection('users').updateOne(
+            console.log(`🔄 Actualizando privilegios de la cuenta existente: ${correoAdmin}...`);
+            await coleccion.updateOne(
                 { email: correoAdmin },
-                { $set: { role: 'ADMIN', access_level: 99, numero_interno: '57', cooperativa: 'TAXIA CIMCO' } }
+                { $set: { role: 'ADMIN', access_level: 99, isActive: true } }
             );
-            imprimirExito(correoAdmin);
         } else {
-            console.log("⚠️ La cuenta no existía en el clúster de Atlas. Iniciando Inserción Directa...");
-            
-            // Insertamos el documento directamente en la colección 'users'
-            await mongoose.connection.db.collection('users').insertOne(datosCeo);
-            imprimirExito(correoAdmin);
+            console.log("⚠️ La cuenta no existía en 'usuarios'. Iniciando Inserción Directa...");
+            await coleccion.insertOne(datosCeo);
         }
+
+        imprimirExito(correoAdmin);
 
     } catch (error) {
         console.error("❌ Error crítico en la pasarela de seguridad:", error.message);
@@ -65,12 +60,11 @@ async function elevarACeo() {
 function imprimirExito(correo) {
     console.log("\n👑 ===============================================");
     console.log("⚡ [CIMCO-ÉXITO] ¡CREDENCIAL SUPREMA DE CEO REGISTRADA!");
-    console.log(`👤 Usuario: CARLOS MARIO CEO (${correo})`);
+    console.log(`👤 Usuario: CARLOS MARIO FUENTES GARCIA (${correo})`);
     console.log("🛡️  Rol de Sistema: ADMIN");
     console.log("📊 Nivel de Acceso Asignado: 99 (Máximo Control)");
-    console.log("🚖 Entidad de Origen: TAXIA CIMCO | Interno: 57");
-    console.log("🔓 Contraseña Maestra de Ensayo Inyectada: 123456");
-    console.log("==================================================\n");
+    console.log("🚖 Entidad de Origen: TAXIA CIMCO");
+    console.log("===============================================\n");
 }
 
 elevarACeo();

@@ -1,10 +1,15 @@
-// Versión Arquitectura: V1.2 - Libro Contable Digital para Auditorías de Recargas Manuales y Descuentos
+// Versión Arquitectura: V2.0 - Trazabilidad Contable y Alineación de Importaciones ESM
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\HistorialSaldo.js
  * Misión: Persistir cada movimiento de dinero ejecutado por el CEO o la Secretaría Auxiliar para evitar fraudes internos.
+ * Ajuste: Importación explícita de esquemas relacionales al estándar subpath (#) para garantizar el mapeo de Mongoose.
  */
 
 import mongoose from 'mongoose';
+
+// 🛡️ Registro explícito de dependencias relacionales en el pool de Mongoose mediante subpaths ESM
+import '#models/Conductor.js';
+import '#models/Viaje.js';
 
 const HistorialSaldoSchema = new mongoose.Schema({
     conductorId: {
@@ -19,7 +24,7 @@ const HistorialSaldoSchema = new mongoose.Schema({
     },
     tipo: {
         type: String,
-        enum: ['descuento_comision', 'recarga', 'recarga_manual'], // 🛡️ Actualizado para incluir recarga_manual
+        enum: ['descuento_comision', 'recarga', 'recarga_manual'], // 🛡️ Soporte para inyecciones atómicas administrativas
         required: true
     },
     monto: {
@@ -54,4 +59,5 @@ HistorialSaldoSchema.pre('save', function(next) {
     next();
 });
 
-export default mongoose.models.HistorialSaldo || mongoose.model('HistorialSaldo', HistorialSaldoSchema);
+// 🛡️ ENLACE BLINDADO: Persistencia estricta en la colección física 'historialsaldos'
+export default mongoose.models.HistorialSaldo || mongoose.model('HistorialSaldo', HistorialSaldoSchema, 'historialsaldos');

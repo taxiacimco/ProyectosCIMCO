@@ -1,4 +1,5 @@
-// Versión Arquitectura: V11.1 - PROD READY: Integración Financiera y Retrocompatibilidad balance/saldo
+// Versión Arquitectura: V11.2 - PROD READY: Integración Financiera y Retrocompatibilidad balance/saldo
+// Refactorización Estética: Cyber-Neo-Brutalismo Industrial (Alta Visibilidad, Cero Curvas, Hard Shadows)
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
@@ -24,30 +25,56 @@ const WalletMototaxi = () => {
     }, [user]);
 
     return (
-        <div className="min-h-screen bg-[#09090b] font-mono text-zinc-100 p-6 flex flex-col gap-6">
-            <header className="flex items-center gap-3 border-b border-white/5 pb-4">
-                <Wallet className="text-cyan-400" size={26} />
-                <h1 className="text-xl font-black uppercase tracking-widest text-white">Mi Billetera</h1>
+        <div className="min-h-screen bg-[#0e0e11] font-mono text-zinc-100 p-6 flex flex-col gap-6 selection:bg-cyan-400 selection:text-black">
+            
+            {/* 🔝 ENCABEZADO: Módulo de Identidad Financiera */}
+            <header className="flex items-center gap-4 bg-zinc-900 border-4 border-black p-4 shadow-[4px_4px_0px_0px_#000] rounded-none">
+                <div className="p-2.5 bg-cyan-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_#000] shrink-0">
+                    <Wallet size={24} strokeWidth={2.5} />
+                </div>
+                <div>
+                    <h1 className="text-xl font-black uppercase tracking-widest text-white leading-none">Mi Billetera</h1>
+                    <p className="text-[10px] text-cyan-400 uppercase tracking-wider font-bold mt-1">Consola de fondos y conciliación de saldos TAXIA</p>
+                </div>
             </header>
 
-            <div className="backdrop-blur-xl bg-[#121214]/80 border border-cyan-500/20 p-6 rounded-3xl shadow-[0_0_30px_rgba(6,182,212,0.05)] relative overflow-hidden">
-                <div className="absolute -top-10 -right-10 w-32 h-32 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
-                <p className="text-xs text-zinc-400 uppercase tracking-widest mb-2 relative z-10">Saldo Disponible</p>
-                <h2 className="text-4xl font-black text-white mb-6 relative z-10">${balance.toLocaleString()} COP</h2>
-                <div className="flex gap-4 relative z-10">
-                    <BotonRecarga usuarioId={user?.uid} rol={user?.role || user?.rol} />
+            {/* 💳 PANEL DE CONTROL DE SALDO (Bloque Masivo Rígido) */}
+            <div className="bg-zinc-900 border-4 border-black p-6 shadow-[4px_4px_0px_0px_#000] rounded-none flex flex-col relative overflow-hidden">
+                {/* Reemplazo de difuminados por un bloque geométrico sólido de fondo de diseño brutalista */}
+                <div className="absolute top-0 right-0 w-24 h-24 bg-zinc-800 border-b-4 border-l-4 border-black flex items-center justify-center font-black text-zinc-700 text-3xl select-none pointer-events-none">
+                    COP
+                </div>
+
+                <div className="relative z-10">
+                    <p className="text-[10px] text-zinc-400 uppercase tracking-widest font-black mb-1">
+                        Saldo Disponible en Red
+                    </p>
+                    <h2 className="text-3xl font-black text-emerald-400 tracking-tight border-b-4 border-black pb-4 mb-5">
+                        ${balance.toLocaleString()} COP
+                    </h2>
+                    
+                    {/* Botonera Operativa Inyectada */}
+                    <div className="flex gap-4 [&_button]:w-full [&_button]:bg-yellow-400 [&_button]:text-black [&_button]:font-black [&_button]:text-xs [&_button]:uppercase [&_button]:tracking-widest [&_button]:py-3.5 [&_button]:px-4 [&_button]:border-2 [&_button]:border-black [&_button]:rounded-none [&_button]:shadow-[3px_3px_0px_0px_#000] [&_button]:transition-all [&_button]:active:translate-x-[1px] [&_button]:active:translate-y-[1px] [&_button]:active:shadow-[2px_2px_0px_0px_#000]">
+                        <BotonRecarga usuarioId={user?.uid} rol={user?.role || user?.rol} />
+                    </div>
                 </div>
             </div>
 
-            <div className="flex-1 backdrop-blur-md bg-[#121214]/60 rounded-3xl p-6 border border-white/5 shadow-lg flex flex-col gap-4">
-                <div className="flex items-center gap-2 border-b border-white/5 pb-3">
-                    <Activity size={18} className="text-cyan-400" />
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-300">Auditoría Financiera Reciente</h3>
+            {/* 📊 PANEL DE AUDITORÍA TRANSACCIONAL */}
+            <div className="flex-1 bg-zinc-900 border-4 border-black p-6 shadow-[4px_4px_0px_0px_#000] rounded-none flex flex-col gap-4">
+                <div className="flex items-center gap-2.5 border-b-4 border-black pb-3">
+                    <Activity size={16} className="text-cyan-400" strokeWidth={2.5} />
+                    <h3 className="text-xs font-black uppercase tracking-widest text-zinc-200">
+                        Auditoría Financiera Reciente
+                    </h3>
                 </div>
-                <div className="flex-1 overflow-y-auto">
+                
+                {/* Contenedor del Historial con Scrollbar Rígida */}
+                <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-black scrollbar-track-zinc-800">
                     <TransactionHistory usuarioId={user?.uid} />
                 </div>
             </div>
+
         </div>
     );
 };

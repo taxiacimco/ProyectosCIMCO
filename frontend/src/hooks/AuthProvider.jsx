@@ -1,17 +1,16 @@
-// Versión Arquitectura: V20.5 - Resolución de Exportación useAuth para HMR
+// Versión Arquitectura: V21.5 - Sincronización Estricta de Identidad MongoDB-Firebase y Exterminio de Escuchas Zombis
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
  * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO.
- * Ajuste: Inyección del hook useAuth exportado para compatibilidad con AdminDashboard y Vite HMR.
+ * Ajuste V21.5: Sincronización bidireccional absoluta de uid e _id al inicializar, mutar y persistir sesión.
+ * Corrección de Enrutamiento: Eliminación del prefijo duplicado /api en los métodos de pasarela HTTP de Axios.
  */
 
-import React, { createContext, useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '@/config/api';
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-// 🛡️ Importaciones nativas del SDK de Firebase
-import { getAuth, signInAnonymously, signOut } from 'firebase/auth'; 
-
-export const AuthContext = createContext(null);
+import { getAuth, signInAnonymously, signOut, sendPasswordResetEmail } from 'firebase/auth'; 
+import { AuthContext } from '@/hooks/AuthContext';
 
 export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
@@ -29,39 +28,30 @@ export const AuthProvider = ({ children }) => {
                 
                 if (token && token !== 'undefined' && token !== 'null') {
                     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-                    const savedUserRaw = localStorage.getItem('cimco_user');
+                    const savedUser = localStorage.getItem('cimco_user');
                     
-                    if (savedUserRaw && savedUserRaw !== 'undefined' && savedUserRaw !== 'null') {
-                        setUser(JSON.parse(savedUserRaw));
-                    } else {
-                        console.warn("⚠️ [CIMCO-SECURITY] Matriz de usuario ausente o corrupta. Purgando sesión...");
-                        localStorage.removeItem('cimco_token');
-                        delete api.defaults.headers.common['Authorization'];
+                    if (savedUser && savedUser !== 'undefined' && savedUser !== 'null') {
+                        const parsedUser = JSON.parse(savedUser);
+                        
+                        // Guardas de Seguridad (Anti-Undefined): Sincronizar de forma atómica uid con el _id nativo de MongoDB Atlas
+                        if (parsedUser) {
+                            parsedUser.uid = parsedUser.uid || parsedUser._id || parsedUser.id || parsedUser.conductorId;
+                            parsedUser._id = parsedUser._id || parsedUser.uid || parsedUser.id || parsedUser.conductorId;
+                        }
+                        setUser(parsedUser);
                     }
                 } else {
-                    localStorage.removeItem('cimco_token');
-                    localStorage.removeItem('cimco_user');
-                    delete api.defaults.headers.common['Authorization'];
+                    // Si no hay sesión centralizada, se levanta canal anónimo de telemetría por contingencia
+                    const authFirebase = getAuth();
+                    if (!authFirebase.currentUser) {
+                        await signInAnonymously(authFirebase);
+                        console.log("📡 [CIMCO-AUTH] Canal anónimo de telemetría desplegado con éxito.");
+                    }
                 }
-
-                const authFirebase = getAuth();
-                
-                if (!authFirebase.currentUser) {
-                    await signInAnonymously(authFirebase)
-                        .then(() => {
-                            console.log("📡 [CIMCO-AUTH] Handshake anónimo con Firebase completado con éxito.");
-                        })
-                        .catch((firebaseError) => {
-                            console.warn("⚠️ [CIMCO-AUTH-WARN] Firebase Auth Anónimo deshabilitado o rechazado. Modo Contingencia Activo:", firebaseError.message);
-                        });
-                }
-
             } catch (error) {
-                console.error("🚨 [CIMCO-AUTH-CRITIC] Falla atómica al inicializar la sesión global:", error.message);
-                localStorage.removeItem('cimco_user');
+                console.error("❌ [CIMCO-AUTH-FATAL] Fallo en la inicialización del ecosistema de identidad:", error);
                 localStorage.removeItem('cimco_token');
-                delete api.defaults.headers.common['Authorization'];
-                setUser(null);
+                localStorage.removeItem('cimco_user');
             } finally {
                 setLoading(false);
                 setInitialized(true);
@@ -71,46 +61,103 @@ export const AuthProvider = ({ children }) => {
         initializeSession();
     }, []);
 
-    const loginLocal = async (userData, token) => {
-        setLoading(true);
-        try {
-            localStorage.removeItem('token');
-            localStorage.removeItem('taxia_token');
+    // ⚡ Mutador Local Inyectado al árbol de contexto para evitar bucles infinitos en useWallet
+    const actualizarEstadoLocal = (nuevosDatos) => {
+        setUser(prevUser => {
+            if (!prevUser) return null;
+            const usuarioActualizado = { ...prevUser, ...nuevosDatos };
+            
+            // Blindaje de identidad en mutaciones reactivas en caliente
+            usuarioActualizado.uid = usuarioActualizado.uid || usuarioActualizado._id || usuarioActualizado.id || usuarioActualizado.conductorId;
+            usuarioActualizado._id = usuarioActualizado._id || usuarioActualizado.uid || usuarioActualizado.id || usuarioActualizado.conductorId;
+            
+            localStorage.setItem('cimco_user', JSON.stringify(usuarioActualizado));
+            return usuarioActualizado;
+        });
+    };
 
-            if (token && token !== 'undefined' && token !== 'null') {
+    const loginLocal = async (email, password) => {
+        try {
+            setLoading(true);
+            // ✅ AJUSTE: Se limpia la ruta de '/api/auth/login' a '/auth/login' para evitar el error 404 de duplicación
+            const respuesta = await api.post('/auth/login', { email, password });
+            
+            if (respuesta.data && respuesta.data.success) {
+                const { token, user: userData } = respuesta.data;
+                
+                // Guardas de Seguridad (Anti-Undefined): Sincronizar de forma atómica uid con el _id nativo de MongoDB Atlas
+                if (userData) {
+                    userData.uid = userData._id || userData.id || userData.uid || userData.conductorId;
+                    userData._id = userData._id || userData.uid || userData.id || userData.conductorId;
+                    userData.role = userData.role || userData.rol || ROLES.PASAJERO;
+                    userData.rol = userData.rol || userData.role || ROLES.PASAJERO;
+                    userData.access_level = userData.access_level || DEFAULT_ACCESS_LEVELS[userData.role] || 1;
+                }
+
                 localStorage.setItem('cimco_token', token);
+                localStorage.setItem('cimco_user', JSON.stringify(userData));
+                
                 api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+                setUser(userData);
+
+                // Autenticación paralela en Firebase para sincronización táctica de mapa y canales de Firestore
+                try {
+                    const authFirebase = getAuth();
+                    if (!authFirebase.currentUser) {
+                        await signInAnonymously(authFirebase);
+                    }
+                } catch (fbError) {
+                    console.warn("⚠️ [CIMCO-AUTH] Canal satelital Firebase Auth no enlazado, operando en modo degradado:", fbError.message);
+                }
+
+                return { success: true, user: userData };
             }
             
-            const assignedRole = userData?.role || userData?.rol || ROLES.PASAJERO;
-            const assignedAccess = userData?.access_level !== undefined 
-                                   ? userData.access_level 
-                                   : (DEFAULT_ACCESS_LEVELS[assignedRole] || 0);
-    
-            const normalizedUser = { 
-                ...userData, 
-                role: assignedRole,
-                access_level: assignedAccess
-            };
-    
-            localStorage.setItem('cimco_user', JSON.stringify(normalizedUser));
-            setUser(normalizedUser);
-
-            const authFirebase = getAuth();
-            if (!authFirebase.currentUser) {
-                await signInAnonymously(authFirebase).catch(() => {});
-            }
-
-            return { success: true };
+            return { success: false, message: respuesta.data?.message || "Credenciales incorrectas." };
         } catch (error) {
-            console.error("❌ Error en compuerta loginLocal:", error.message);
-            return { success: false, message: "Falla estructural al persistir credenciales locales." };
+            console.error("❌ [CIMCO-AUTH] Error crítico en pasarela loginLocal:", error);
+            return { 
+                success: false, 
+                message: error.response?.data?.message || "Error de comunicación con el nodo central de TAXIA CIMCO." 
+            };
         } finally {
             setLoading(false);
         }
     };
 
+    const registerCentral = async (payload) => {
+        try {
+            setLoading(true);
+            // ✅ AJUSTE: Se limpia la ruta de '/api/auth/register' a '/auth/register' para evitar colisiones
+            const respuesta = await api.post('/auth/register', payload);
+            if (respuesta.data && respuesta.data.success) {
+                return { success: true, data: respuesta.data };
+            }
+            return { success: false, message: respuesta.data?.message || "No se pudo completar el registro central." };
+        } catch (error) {
+            console.error("❌ [CIMCO-AUTH] Falla perimetral en método registerCentral:", error);
+            return { 
+                success: false, 
+                message: error.response?.data?.message || "Error de red al intentar persistir el nodo de identidad." 
+            };
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const resetPasswordCentral = async (email) => {
+        try {
+            const authFirebase = getAuth();
+            await sendPasswordResetEmail(authFirebase, email);
+            return { success: true };
+        } catch (error) {
+            console.error("❌ [CIMCO-AUTH] Quiebre en la pasarela de recuperación de Firebase:", error);
+            return { success: false, message: "No se pudo procesar la solicitud. Verifique el correo o intente más tarde." };
+        }
+    };
+
     const logout = async () => {
+        // Purga atómica de persistencia local y cabeceras de Axios
         localStorage.removeItem('cimco_token');
         localStorage.removeItem('cimco_user');
         localStorage.removeItem('token');
@@ -121,8 +168,12 @@ export const AuthProvider = ({ children }) => {
         
         try {
             const authFirebase = getAuth();
+            
+            // 🧹 Exterminación Definitiva de Conexiones Zombis del Emulador / Firebase SDK
+            // El método signOut fuerza el cierre de flujos reactivos de escucha en Firestore
             if (authFirebase.currentUser) {
                 await signOut(authFirebase);
+                console.log("🧹 [CIMCO-AUTH] Canal satelital Firebase cerrado y purgado de forma segura.");
             }
         } catch (error) {
             console.error("Error al cerrar sesión en Firebase:", error);
@@ -130,17 +181,18 @@ export const AuthProvider = ({ children }) => {
     };
 
     return (
-        <AuthContext.Provider value={{ user, setUser, loading, initialized, loginLocal, logout }}>
+        <AuthContext.Provider value={{ 
+            user, 
+            setUser, 
+            actualizarEstadoLocal, // ⚡ Inyectado al árbol de contexto global
+            loading, 
+            initialized, 
+            loginLocal, 
+            logout, 
+            registerCentral, 
+            resetPasswordCentral 
+        }}>
             {!loading && children}
         </AuthContext.Provider>
     );
-};
-
-// 🛡️ EXPORTACIÓN NOMBRADA DEL HOOK DE AUTENTICACIÓN
-export const useAuth = () => {
-    const context = useContext(AuthContext);
-    if (!context) {
-        throw new Error("🚨 [CIMCO-UI-ERR] useAuth debe ser consumido estrictamente dentro de un AuthProvider.");
-    }
-    return context;
 };
