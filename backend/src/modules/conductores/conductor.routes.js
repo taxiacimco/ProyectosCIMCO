@@ -1,8 +1,9 @@
-// Versión Arquitectura: V11.9 - Fusión de Sanitización Avanzada y Endpoints de Estrés de Depuración
+// Versión Arquitectura: V11.10 - Blindaje Perimetral Interceptor de Stress-Testing en Producción
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
  * Misión: Asegurar el correcto mapeo de endpoints para el ciclo de vida del conductor, telemetría y contabilidad interna.
- * Ajuste V11.9: Fusión atómica de la sanitización perimetral avanzada radial, protección de recargas manuales por admin y preservación del bypass de saldo para stress-testing.
+ * Ajuste V11.10: Inyección de la guarda defensiva `verificarBypassDesarrollo` dentro del endpoint `/bypass-stress-saldo` para blindar el canal de estrés en producción.
+ * Corrección Técnica: Remoción de la doble importación errónea de 'express' para instanciar mongoose.
  */
 
 import express from 'express';
@@ -15,7 +16,8 @@ import {
     obtenerConductoresCercanos, 
     recargarBilleteraPorAdmin,
     actualizarUbicacionGPS,
-    actualizarEstadoConductor 
+    actualizarEstadoConductor,
+    verificarBypassDesarrollo
 } from './conductor.controller.js';
 import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
 
@@ -62,7 +64,7 @@ router.get('/', obtenerConductores);
 router.get('/disponibles', obtenerConductoresDisponibles);
 
 /**
- * 📍 RADAR GEOESPACIAL 
+ * 📍 RADAR GEOESPACIAL
  * @route   GET /api/conductores/radar/cercanos
  * @desc    Obtener unidades activas en un rango radial específico filtrando por rol y saldo.
  */
@@ -98,7 +100,7 @@ router.post('/saldos/admin/recargar', verificarToken, esAdmin, recargarBilletera
 // ==================================================================
 // 🛠️ RUTA EXCLUSIVA DE DEPURACIÓN PARA ENTORNOS DE DESARROLLO / STRESS TEST
 // ==================================================================
-router.put('/bypass-stress-saldo', async (req, res) => {
+router.put('/bypass-stress-saldo', verificarBypassDesarrollo, async (req, res) => {
     try {
         if (!req || !req.body) {
             return res.status(400).json({ success: false, message: "⚠️ Payload de bypass corrupto o ausente." });
@@ -110,7 +112,7 @@ router.put('/bypass-stress-saldo', async (req, res) => {
             return res.status(400).json({ success: false, message: "ID de conductor requerido." });
         }
 
-        const Conductor = mongoose.model('Conductor'); 
+        const Conductor = mongoose.model('Conductor');
         
         const actualizado = await Conductor.findByIdAndUpdate(
             conductorId, 

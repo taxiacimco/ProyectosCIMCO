@@ -1,15 +1,39 @@
-// Versión Arquitectura: V20.1 - Hub Central Sincronizado CIMCO-UI V9.3
+// Versión Arquitectura: V21.0 - Auto-Enrutamiento Reactivo por Parámetro de Captación QR
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Register.jsx
- * Misión: Enrutador maestro de roles operativos. Rediseño Glassmorphism para transición transparente desde Login.
+ * Misión: Enrutador maestro de roles con interceptor automático para códigos QR institucionales.
+ * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Híbrida).
  */
 
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { User, Bike, Bus, Terminal, Shield, ArrowLeft } from 'lucide-react';
 
 const Register = () => {
-    // 🗂️ Mapeo de Roles y Rutas
+    const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
+    
+    // Guardas de Seguridad para mitigar desbordamientos por tipos inválidos
+    const targetRole = searchParams ? searchParams.get('role') : null;
+
+    // 🛡️ INTERCEPTOR RECOLECTOR DE CÓDIGO QR EN TIEMPO DE MONTAJE (BLINDAJE ANTI-UNDEFINED)
+    useEffect(() => {
+        if (targetRole) {
+            const normalizedRole = String(targetRole).toLowerCase().trim();
+            
+            if (normalizedRole === 'pasajero') {
+                navigate('/register-pasajero', { replace: true });
+            } else if (['mototaxi', 'motoparrillero', 'motocarga', 'moto'].includes(normalizedRole)) {
+                navigate(`/register-moto?role=${normalizedRole}`, { replace: true });
+            } else if (normalizedRole === 'intermunicipal') {
+                navigate('/register-intermunicipal', { replace: true });
+            } else if (normalizedRole === 'despachador') {
+                navigate('/register-despachador', { replace: true });
+            }
+        }
+    }, [targetRole, navigate]);
+
+    // 🗂️ Mapeo de Roles y Rutas Homologados CIMCO-UI V9.3
     const roles = [
         {
             id: 'pasajero',
@@ -32,7 +56,7 @@ const Register = () => {
         {
             id: 'intermunicipal',
             title: 'Intermunicipal',
-            desc: 'Operadores de mediana y larga distancia.',
+            desc: 'Operadores de Cooperativas y Rutas Medianas.',
             path: '/register-intermunicipal',
             icon: <Bus size={24} className="text-indigo-500" />,
             borderColor: 'hover:border-indigo-500/50',
@@ -40,8 +64,8 @@ const Register = () => {
         },
         {
             id: 'despachador',
-            title: 'Despachador',
-            desc: 'Gestión y asignación de unidades.',
+            title: 'Despachador de Nodo',
+            desc: 'Gestión y control de despachos en terminales.',
             path: '/register-despachador',
             icon: <Terminal size={24} className="text-amber-500" />,
             borderColor: 'hover:border-amber-500/50',
@@ -50,32 +74,33 @@ const Register = () => {
     ];
 
     return (
-        <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-6 relative overflow-hidden">
+        <div className="min-h-screen bg-[#08080a] flex items-center justify-center p-4 selection:bg-cyan-500/30 relative overflow-hidden">
             {/* FONDO ESTÉTICO CIMCO-UI HOMOLOGADO */}
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-zinc-900/20 via-black to-black z-0" />
-
-            <div className="w-full max-w-2xl backdrop-blur-md bg-[#121214]/80 border border-white/5 p-8 rounded-3xl shadow-2xl relative z-10">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(6,182,212,0.03)_0%,transparent_70%)] pointer-events-none" />
+            
+            <div className="w-full max-w-4xl backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-8 shadow-[0_0_50px_rgba(0,0,0,0.5)] relative z-10">
                 <div className="text-center mb-8">
-                    <h1 className="text-2xl font-black text-white uppercase tracking-tighter">Selección de Nodo</h1>
-                    <p className="text-[10px] text-zinc-500 font-mono mt-1 tracking-widest uppercase">
-                        Elige tu rol dentro del ecosistema híbrido
-                    </p>
+                    <div className="inline-flex items-center justify-center bg-zinc-900 px-4 py-1.5 rounded-full border border-white/5 text-[10px] text-zinc-400 font-mono tracking-widest uppercase mb-3">
+                        Núcleo Central CIMCO
+                    </div>
+                    <h2 className="text-xl font-black text-white uppercase tracking-wider">Crear Cuenta Corporativa</h2>
+                    <p className="text-xs text-zinc-500 uppercase font-mono tracking-wider mt-1">Selecciona tu perfil de operaciones satelitales</p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {roles.map((rol) => (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {roles && roles.map((rol) => (
                         <Link 
-                            key={rol.id} 
-                            to={rol.path}
-                            className={`flex items-start gap-4 p-5 rounded-2xl border border-white/5 bg-black/40 transition-all duration-300 group ${rol.borderColor} ${rol.bgColor}`}
+                            key={rol?.id || Math.random()}
+                            to={rol?.path || '/register'}
+                            className={`flex items-start gap-4 p-5 rounded-2xl bg-black/40 border border-white/5 transition-all duration-300 text-decoration-none group ${rol?.borderColor || ''} ${rol?.bgColor || ''}`}
                         >
-                            <div className="p-3 bg-white/5 rounded-xl group-hover:scale-110 transition-transform">
-                                {rol.icon}
+                            <div className="p-3 bg-zinc-900 rounded-xl border border-white/[0.03] group-hover:scale-105 transition-transform shrink-0">
+                                {rol?.icon}
                             </div>
-                            <div>
-                                <h3 className="text-white font-bold tracking-wide mb-1 uppercase text-sm">{rol.title}</h3>
+                            <div className="min-w-0">
+                                <h3 className="text-white font-bold tracking-wide mb-1 uppercase text-sm">{rol?.title || 'Indefinido'}</h3>
                                 <p className="text-zinc-500 text-[9px] uppercase font-mono tracking-wider leading-relaxed">
-                                    {rol.desc}
+                                    {rol?.desc || ''}
                                 </p>
                             </div>
                         </Link>

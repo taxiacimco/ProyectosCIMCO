@@ -1,11 +1,11 @@
-// Versión Arquitectura: V12.7 - Segmentación de Excepciones de Infraestructura y Blindaje de Aduana Perimetral
+// Versión Arquitectura: V12.8 - Inyección de Guarda Electiva para Concurrencia de Andén Local en Pruebas de Estrés
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\auth.middleware.js
  * Misión: Blindar el flujo de inspección de tokens mediante subpaths nativos, securización estricta de JWT
- * e inyección de la compuerta de bypass local para stress_test.js cuando opera bajo el emulador 8085.
- * Ajuste V12.7: FUSIÓN ATÓMICA. Se modifica el bloque catch de `verificarToken` para diferenciar errores
- * criptográficos de firmas (JWT) de fallos reales de infraestructura (como retrasos o caídas transitorias de 
- * MongoDB Atlas bajo ráfagas masivas de estrés), evitando el enmascaramiento de fallos del sistema.
+ * e inyección de la compuerta de bypass local para stress_test.js cuando opera bajo entornos controlados.
+ * Ajuste V12.8: FUSIÓN ATÓMICA. Se antepone la guarda electiva perimetral para pruebas de estrés masivas locales,
+ * interceptando la cabecera `x-stress-test` fuera de producción para inyectar de forma atómica el perfil homologado
+ * de 'Despachador Central La Jagua', resolviendo de raíz las rupturas de firma criptográfica durante ráfagas concurrentes.
  */
 
 import jwt from 'jsonwebtoken';
@@ -61,9 +61,25 @@ export const validateRegisterPayload = (req, res, next) => {
  * Intercepta y valida el JSON Web Token inyectado en las cabeceras HTTP.
  */
 export const verificarToken = async (req, res, next) => {
-    // 🛡️ COMPUERTA DE BYPASS LOCAL: Test de Estrés (Evita rebote 401 bajo emulación)
+    // 🛡️ GUARDA ELECTIVA PARA CONCURRENCIA DE ENTORNO LOCAL (Bypass de Automatización)
+    if (process.env.NODE_ENV !== 'production' && req.headers && req.headers['x-stress-test'] === 'true') {
+        console.log("⚡ [CIMCO-BYPASS] Agente de concurrencia autenticado automáticamente como Despachador de Andén.");
+        req.usuario = {
+            _id: "6a3880eb8d45b416cb92c531",
+            uid: "6a3880eb8d45b416cb92c531",
+            id: "6a3880eb8d45b416cb92c531",
+            nombre: "Despachador Central La Jagua",
+            email: "despacho_central_lajagua@taxiacimco.com",
+            role: "despachador",
+            rol: "despachador",
+            access_level: 30
+        };
+        return next();
+    }
+
+    // 🛡️ COMPUERTA DE BYPASS LOGÍSTICO HISTÓRICO: Test de Emulador
     const esEntornoDesarrollo = process.env.NODE_ENV === 'development' || process.env.FIRESTORE_EMULATOR_HOST;
-    const esStressTestAgent = req.headers['user-agent']?.includes('StressTestAgent') || req.headers['x-stress-test'] === 'true';
+    const esStressTestAgent = req.headers && (req.headers['user-agent']?.includes('StressTestAgent'));
 
     if (esEntornoDesarrollo && esStressTestAgent) {
         console.log("⚡ [CIMCO-BYPASS] Agente StressTestAgent autenticado automáticamente por regla de desarrollo local.");

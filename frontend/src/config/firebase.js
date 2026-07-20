@@ -1,7 +1,9 @@
-// Versión Arquitectura: V14.5 - Enrutamiento Perimetral con Parametrización Dinámica Anti-Undefined
+// Versión Arquitectura: V14.8 - Blindaje Estricto Anti-Producción para Emuladores de Firebase
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\firebase.js
  * Misión: Orquestador central de Firebase con captura dinámica de IP de red para emuladores y resolución limpia de rutas.
+ * Ajuste V14.8: Validación estricta del entorno mediante la adición de la guarda (!import.meta.env.PROD) para evitar 
+ * el levantamiento accidental de emuladores locales en compilaciones distribuidas de producción.
  */
 
 import { initializeApp } from "firebase/app";
@@ -35,18 +37,22 @@ export const FIRESTORE_PATHS = {
   historial_saldo: 'historial_saldo'
 };
 
-// 🛡️ DETECTOR DE RED PERIMETRAL
+// 🛡️ DETECTOR DE RED PERIMETRAL SEGURO PARA DESPLIEGUE (Mejorado para soporte ngrok en pruebas)
 const hostname = window.location.hostname;
-const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname.includes("192.168.");
+const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname.includes("192.168.") || hostname.includes("ngrok-free.dev");
+const usarEmulador = import.meta.env.VITE_FIREBASE_EMULATOR === 'true';
 
-if (isLocal || import.meta.env.DEV) {
+// Solo levanta emuladores si estamos en desarrollo local, explícitamente se solicita y NO es producción
+if (import.meta.env.DEV && isLocal && usarEmulador && !import.meta.env.PROD) {
   // Hereda la IP unificada declarada en .env.development o usa la IP fija de desarrollo
   const LOCAL_HOST_IP = import.meta.env.VITE_HOST_IP || '192.168.100.34';
   
   console.warn(`⚠️ [CIMCO-ARCHITECTURE] Emuladores enlazados a la IP de red: http://${LOCAL_HOST_IP}`);
   
   connectAuthEmulator(auth, `http://${LOCAL_HOST_IP}:9099`, { disableWarnings: true });
-  connectFirestoreEmulator(db, LOCAL_HOST_IP, 8080);
+  connectFirestoreEmulator(db, LOCAL_HOST_IP, 8085);
+} else {
+  console.log("🚀 [CIMCO-ARCHITECTURE] Conectado exitosamente al nodo central de Firebase en la Nube.");
 }
 
 export { app, auth, db };

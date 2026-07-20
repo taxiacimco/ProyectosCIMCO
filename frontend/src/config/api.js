@@ -1,38 +1,34 @@
-// Versión Arquitectura: V11.9.2 - Resolución Estricta con Soporte de Retrocompatibilidad de Rutas
+// Versión Arquitectura: V15.6 - Resolución Dinámica Estricta de Axios Anti-Localhost y Blindaje JWT
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
- * Misión: Centralización de Axios e inyección de puente de compatibilidad API_CORE_URL para componentes hijos.
+ * Misión: Centralización de Axios e inyección inteligente de endpoints sin dependencias huérfanas.
+ * Ajuste V15.6: Homologación estricta de rutas de producción y consistencia de sufijos de API.
  */
 
 import axios from 'axios';
 
-// 🔌 CONFIGURACIÓN ESTRICTA DEL NODO CENTRAL (Apunta directamente al puerto 3000)
+// 🔌 RESOLUCIÓN ESTRICTA DE LA URL BASE BASADA EN ENTORNO V15.6
 export const HOST_IP = import.meta.env.VITE_HOST_IP || '192.168.100.34';
-export const API_CORE_LOCAL = `http://${HOST_IP}:3000/api`;
 
-// 🚀 PUENTE DE RETROCOMPATIBILIDAD EXTERNA (Requerido por PerfilPasajero.jsx y otros componentes)
-// Retorna la URL base dinámica resuelta para que los componentes que usen fetch no queden en el aire.
-export const API_CORE_URL = import.meta.env.VITE_API_BASE_URL || API_CORE_LOCAL;
-
-// 🔍 RESOLUCIÓN DINÁMICA DEL ID DE PROYECTO (Cloud Functions)
-const PROJ_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'pelagic-chalice-467818-e1';
-export const API_FUNCTIONS_URL = `http://${HOST_IP}:5001/${PROJ_ID}/us-central1`;
-
-// 🔍 RESOLUCIÓN DINÁMICA DE LA URL BASE DE LA API PARA AXIOS
 const DETERMINAR_URL_BASE = () => {
-    try {
-        if (import.meta.env.VITE_API_BASE_URL) {
-            return import.meta.env.VITE_API_BASE_URL;
-        }
-        return API_CORE_LOCAL;
-    } catch (e) {
-        console.error('🚨 [CIMCO-NEXUS-RESOLUTION] Fallo en análisis perimetral de red:', e);
-        return API_CORE_LOCAL;
+    // 1. Prioridad Absoluta: La variable unificada nueva del build (Evita IPs quemadas en producción)
+    if (import.meta.env.VITE_API_URL) {
+        return import.meta.env.VITE_API_URL;
     }
+    // 2. Fallback Seguro para Desarrollo Local
+    return `http://${HOST_IP}:3000/api`;
 };
 
+export const API_CORE_URL = DETERMINAR_URL_BASE();
+
+// 🔍 RESOLUCIÓN DE CLOUD FUNCTIONS COMPATIBLE CON PRODUCCIÓN TLS
+const PROJ_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'pelagic-chalice-467818-e1';
+export const API_FUNCTIONS_URL = import.meta.env.PROD 
+    ? import.meta.env.VITE_API_FUNCTIONS_URL || `https://api-tx.taxiacimco.com/api/v1` // ✅ Sufijo de API unificado para producción
+    : `http://${HOST_IP}:5001/${PROJ_ID}/us-central1`;
+
 export const api = axios.create({
-    baseURL: DETERMINAR_URL_BASE(),
+    baseURL: API_CORE_URL,
     timeout: 15000,
     headers: {
         'Content-Type': 'application/json'
@@ -40,12 +36,12 @@ export const api = axios.create({
     withCredentials: true
 });
 
-// 🛡️ INTERCEPTOR DE PETICIONES: INYECCIÓN DE FIRMA JWT
+// 🛡️ INTERCEPTOR DE PETICIONES: INYECCIÓN DE FIRMA JWT (CIMCO-GUARD)
 api.interceptors.request.use(
     (config) => {
         try {
             if (typeof window !== 'undefined' && window.localStorage) {
-                const token = localStorage.getItem('token') || localStorage.getItem('cimco_token');
+                const token = localStorage.getItem('cimco_token') || localStorage.getItem('token');
                 if (token) {
                     config.headers.Authorization = `Bearer ${token}`;
                 }
@@ -59,7 +55,7 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA AUTOMÁTICA
+// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA
 api.interceptors.response.use(
     (response) => {
         try {
@@ -70,9 +66,9 @@ api.interceptors.response.use(
                     localStorage.setItem('cimco_token', payload.token);
                 }
                 if (payload.usuario) {
-                    localStorage.setItem('user', JSON.stringify(payload.usuario));
+                    localStorage.setItem('cimco_user', JSON.stringify(payload.usuario));
                 } else if (payload.user) {
-                    localStorage.setItem('user', JSON.stringify(payload.user));
+                    localStorage.setItem('cimco_user', JSON.stringify(payload.user));
                 }
             }
         } catch (storageError) {
@@ -87,10 +83,10 @@ api.interceptors.response.use(
             if (error.response.status === 401 || error.response.status === 403) {
                 localStorage.removeItem('token');
                 localStorage.removeItem('cimco_token');
-                localStorage.removeItem('user');
+                localStorage.removeItem('cimco_user');
             }
         } else if (error && error.request) {
-            console.error('🚨 [CIMCO-NEXUS-NETWORK] Sin respuesta del nodo central. Verifique que el Backend (Puerto 3000) esté encendido.');
+            console.error('🚨 [CIMCO-NEXUS-NETWORK] Sin respuesta del nodo central. Verifique conectividad o estado del Backend.');
         } else {
             console.error('🚨 [CIMCO-NEXUS-FATAL] Quiebre estructural en la transmisión HTTP.');
         }
@@ -98,7 +94,7 @@ api.interceptors.response.use(
     }
 );
 
-// 📡 GOBERNANZA DE ENDPOINTS
+// 📡 GOBERNANZA DE ENDPOINTS CENTRALIZADOS
 export const AUTH_ENDPOINTS = {
     login: '/auth/login',
     register: '/auth/register',

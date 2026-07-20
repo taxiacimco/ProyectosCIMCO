@@ -1,12 +1,12 @@
-// Versión Arquitectura: V6.2 - Transición GeoJSON Nativa y Coexistencia de Billetera Homóloga
+// Versión Arquitectura: V6.3 - Integración Quirúrgica de Atributo de Autenticación isActive
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios en MongoDB Atlas con GeoJSON Point oficial.
  * Integridad: Fusión Atómica. Pone fin a la dualidad nominal forzando a Mongoose a persistir
  * estrictamente en la colección física 'usuarios' (tercer parámetro de exportación). Preserva las
  * guardas pre-save de sincronización bidireccional homóloga (rol ↔ role y saldo ↔ balance).
- * Ajuste V6.2: Mutación definitiva de la propiedad `coordenadas` a un formato compatible GeoJSON Point oficial
- * para consultas indexadas $near instantáneas, preservando la compatibilidad retroactiva a nivel de hooks pre-save.
+ * Ajuste V6.3: Inyección perimetral de la propiedad `isActive` para homologación con flujo de validación 
+ * en pasarela de autenticación polimórfica, evitando rechazos indeterminados en login.
  */
 
 import mongoose from 'mongoose';
@@ -83,6 +83,22 @@ const usuarioSchema = new mongoose.Schema({
         type: String,
         enum: ['active', 'inactive', 'suspended', 'offline', 'online', 'activo'],
         default: 'offline'
+    },
+    // 🛡️ CAMPO AGREGADO PARA LOGROS DE AUTENTICACIÓN:
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    // 🚀 AGREGADO: Atributos de pertenencia operativa homologados para evitar descalce en updateProfile
+    cooperativa: {
+        type: String,
+        trim: true,
+        default: 'Particular'
+    },
+    empresa: {
+        type: String,
+        trim: true,
+        default: 'Particular'
     },
     // 🧭 AJUSTE GEOMÉTRICO OFICIAL: Formato GeoJSON Point nativo para consultas indexadas $near instantáneas
     coordenadas: {

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V1.2 - Solución a Restricción de Inicialización de ID Manual en Esquemas Mongoose
+// Versión Arquitectura: V1.3 - Corrección de Case-Sensitivity mediante Expresión Regular y Unificación de Telemetría
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarPasajero.cjs
  * Misión: Sanitizar y sembrar el dataset de pasajeros en MongoDB Atlas utilizando casillas nativas y Types.ObjectId.
@@ -63,8 +63,8 @@ const pasajerosDePrueba = [
 const ejecutarSeeder = async () => {
     try {
         console.log("📡 Conectando con el Clúster de MongoDB Atlas...");
-        // Aseguramos conexión explícita al namespace en minúsculas
-        await mongoose.connect(mongoURI.replace('TAXIA-CIMCO', 'taxia-cimco'));
+        // CORRECCIÓN REACTIVA: Expresión regular robusta para insensibilidad a caja
+        await mongoose.connect(mongoURI.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco'));
         console.log("✅ Conexión perimetral establecida.");
 
         console.log("⚡ Iniciando inyección atómica de pasajeros...");
@@ -72,6 +72,12 @@ const ejecutarSeeder = async () => {
         let omitidos = 0;
 
         for (const passengerData of pasajerosDePrueba) {
+            // Guardas de Seguridad anti-undefined para el payload
+            if (!passengerData || !passengerData.email || !passengerData.uid) {
+                console.log("⚠️ [CIMCO-VALIDACIÓN] Payload de pasajero malformado u omitido.");
+                continue;
+            }
+
             const pasajeroExistente = await Pasajero.findOne({
                 $or: [
                     { email: passengerData.email },
@@ -97,7 +103,8 @@ const ejecutarSeeder = async () => {
         console.log("----------------------------------------\n");
 
     } catch (error) {
-        console.error("❌ Error crítico durante la ejecución del despachador:", error);
+        // CORRECCIÓN DE DEUDA TÉCNICA: Log corregido para pasajeros
+        console.error("❌ Error crítico durante la ejecución del seeder de pasajeros:", error);
     } finally {
         await mongoose.connection.close();
         console.log("🛑 Proceso de sembrado finalizado de forma segura.");

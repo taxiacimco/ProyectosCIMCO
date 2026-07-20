@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.2 - Sincronización Avanzada de Telemetría GPS con Compuerta de Reloj Anti-Lock y Encadenamiento Seguro
+// Versión Arquitectura: V12.4 - Integración Quirúrgica de Eventos de Radar GPS e Interfaz de Mutación de Perfil/Vehículo Flota
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -8,7 +8,7 @@ import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import { io } from 'socket.io-client'; 
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Bus, MapPin, Clock, CheckCircle, AlertTriangle, XCircle, Bell } from 'lucide-react';
+import { Bus, MapPin, Clock, CheckCircle, AlertTriangle, XCircle, Bell, User, Phone, FileText } from 'lucide-react';
 
 // Corrección de Iconos Leaflet para despliegue intermunicipal
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -28,6 +28,18 @@ const HomeIntermunicipal = () => {
     const [viajesAsignados, setViajesAsignados] = useState([]);
     const [loading, setLoading] = useState(true);
     
+    // 👤 ESTADOS DE IDENTIDAD Y MUTACIÓN DE PERFIL
+    const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "OPERADOR FLOTA";
+    const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback);
+    const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
+    const [guardandoPerfil, setGuardandoPerfil] = useState(false);
+    const [datosPerfil, setDatosPerfil] = useState({
+        nombre: '',
+        telefono: '',
+        placaVehiculo: '',
+        numeroInterno: ''
+    });
+
     // 📡 ESTADOS DE TELEMETRÍA (Alineado con el nodo operativo de la Terminal de La Jagua)
     const [posicionActual, setPosicionActual] = useState([9.3244, -73.3321]);
     const [gpsActivo, setGpsActivo] = useState(false);
@@ -35,8 +47,10 @@ const HomeIntermunicipal = () => {
     // 🔔 ESTADO PARA NOTIFICACIONES FLUIDAS (No Bloqueantes)
     const [notificacionUI, setNotificacionUI] = useState(null);
 
-    // 🛡️ REFERENCIA MUTABLE: Rompe el bucle infinito de reinicios del GPS
+    // 🛡️ REFERENCIAS MUTABLES: Rompen el bucle infinito de reinicios del GPS y guardan canales activos
     const viajesAsignadosRef = useRef(viajesAsignados);
+    const socketRef = useRef(null);
+
     useEffect(() => {
         viajesAsignadosRef.current = viajesAsignados;
     }, [viajesAsignados]);
@@ -45,17 +59,81 @@ const HomeIntermunicipal = () => {
     const ultimaActualizacionGpsRef = useRef(0);
     const ENFRIAMIENTO_GPS_MS = 10000; // 10 segundos mínimos entre escrituras a Firestore
 
+    // ==================================================================
+    // 1. ESCUCHA REACTIVA DE IDENTIDAD DEL CONDUCTOR EN FIRESTORE
+    // ==================================================================
+    useEffect(() => {
+        if (!user?.uid) return;
+
+        const pathUsuarios = FIRESTORE_PATHS.usuarios || 'usuarios';
+        const conductorRef = doc(db, pathUsuarios, user.uid);
+
+        const unsubscribe = onSnapshot(conductorRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                const nombreCompleto = data?.nombre || data?.displayName || data?.nombreCompleto;
+                if (nombreCompleto) {
+                    setNombreConductor(nombreCompleto.toUpperCase());
+                }
+
+                // Sincronizar datos locales de conductor y su vehículo asignado
+                setDatosPerfil({
+                    nombre: nombreCompleto || '',
+                    telefono: data?.telefono || '',
+                    placaVehiculo: data?.placaVehiculo || data?.vehiculo?.placa || '',
+                    numeroInterno: data?.numeroInterno || data?.vehiculo?.interno || ''
+                });
+            }
+        }, (error) => {
+            console.error("🚨 [CIMCO-INTERMUNICIPAL-IDENTITY-ERROR] Fallo en lectura de perfil:", error);
+        });
+
+        return () => unsubscribe();
+    }, [user?.uid]);
+
+    // ==================================================================
+    // 2. ACTUALIZACIÓN MUTABLE DE DATOS EN CALIENTE (FIRESTORE)
+    // ==================================================================
+    const handleGuardarPerfil = async (e) => {
+        e.preventDefault();
+        if (!user?.uid) return;
+        setGuardandoPerfil(true);
+
+        try {
+            const pathUsuarios = FIRESTORE_PATHS.usuarios || 'usuarios';
+            const conductorRef = doc(db, pathUsuarios, user.uid);
+
+            await updateDoc(conductorRef, {
+                nombre: datosPerfil.nombre,
+                nombreCompleto: datosPerfil.nombre,
+                telefono: datosPerfil.telefono,
+                placaVehiculo: datosPerfil.placaVehiculo.toUpperCase(),
+                numeroInterno: datosPerfil.numeroInterno,
+                fechaActualizacionPerfil: serverTimestamp()
+            });
+
+            setMostrarModalPerfil(false);
+            alert("✅ DATOS DE OPERADOR Y VEHÍCULO INTERMUNICIPAL SINCRONIZADOS");
+        } catch (error) {
+            console.error("🚨 [CIMCO-INTER-PROFILE-ERR] Error al actualizar datos:", error);
+            alert("Error al salvar las modificaciones en el servidor central.");
+        } finally {
+            setGuardandoPerfil(false);
+        }
+    };
+
     // ⚡ CANAL DE EVENTOS DE SOCKETS (Sincronización fluida con el Despachador)
     useEffect(() => {
         if (!user?.uid) return;
 
-        const socket = io(API_FUNCTIONS_URL, {
+        // Guardar en la referencia mutable para acceso global en el componente sin provocar re-renders
+        socketRef.current = io(API_FUNCTIONS_URL, {
             transports: ['websocket'],
             upgrade: false
         });
 
-        // Escuchador táctico alineado con las ráfagas emitidas por el despachador
-        socket.on('servidor:nueva_solicitud', (data) => {
+        // Escuchador táctico alineador con las ráfagas emitidas por el despachador
+        socketRef.current.on('servidor:nueva_solicitud', (data) => {
             console.log("🔔 Despacho capturado en segmento Cooperativa:", data);
 
             // Filtrar inteligentemente si la solicitud va dirigida específicamente a este conductor
@@ -79,7 +157,9 @@ const HomeIntermunicipal = () => {
         });
 
         return () => {
-            socket.disconnect();
+            if (socketRef.current) {
+                socketRef.current.disconnect();
+            }
         };
     }, [user]);
 
@@ -114,6 +194,16 @@ const HomeIntermunicipal = () => {
                         estadoRadar: 'INTERMUNICIPAL_ACTIVE'
                     });
     
+                    // 📡 MIGRACIÓN UNIFICADA: Espejo de transmisión en tiempo real vía WebSockets hacia el despachador
+                    if (socketRef.current && socketRef.current.connected) {
+                        socketRef.current.emit('actualizar_radar_gps', {
+                            conductorId: user.uid,
+                            latitude: lat,
+                            longitude: lng,
+                            estadoRadar: 'INTERMUNICIPAL_ACTIVE'
+                        });
+                    }
+
                     // 2. Sincronización segura del tramo del viaje usando la referencia mutable (.current)
                     const viajeActivo = viajesAsignadosRef.current?.[0];
                     
@@ -175,9 +265,32 @@ const HomeIntermunicipal = () => {
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 font-mono antialiased relative selection:bg-yellow-500/20 selection:text-yellow-400">
             
+            {/* 🔝 ENCABEZADO SUPERIOR DE CONTROL DE IDENTIDAD */}
+            <div className="w-full bg-[#121214]/90 border-b border-white/5 sticky top-0 z-[50] backdrop-blur-md px-6 py-3 flex justify-between items-center">
+                <div 
+                    onClick={() => setMostrarModalPerfil(true)}
+                    className="flex items-center gap-3 cursor-pointer group"
+                >
+                    <div className="w-8 h-8 rounded-xl bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 group-hover:bg-yellow-500/20 transition-all">
+                        <User size={15} />
+                    </div>
+                    <div>
+                        <h2 className="text-xs font-black text-white tracking-wider uppercase flex items-center gap-1.5">
+                            {nombreConductor}
+                            <span className="text-[10px] text-yellow-500/70 font-normal underline lowercase group-hover:text-yellow-400">(editar)</span>
+                        </h2>
+                        <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-0.5">Control de Conductor y Vehículo</p>
+                    </div>
+                </div>
+
+                <div className="text-[9px] uppercase tracking-wider bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400 font-bold">
+                    Interno: {datosPerfil.numeroInterno || 'N/A'}
+                </div>
+            </div>
+
             {/* 🚨 TOAST NOTIFICACIÓN NO BLOQUEANTE (REEMPLAZO DE ALERT) */}
             {notificacionUI && (
-                <div className="fixed top-20 left-4 right-4 md:left-auto md:right-6 md:w-[420px] backdrop-blur-xl bg-[#121214]/95 border-2 border-yellow-500/30 rounded-2xl p-5 shadow-[0_10px_40px_rgba(234,179,8,0.15)] z-[9999] animate-in slide-in-from-top-4 duration-300">
+                <div className="fixed top-24 left-4 right-4 md:left-auto md:right-6 md:w-[420px] backdrop-blur-xl bg-[#121214]/95 border-2 border-yellow-500/30 rounded-2xl p-5 shadow-[0_10px_40px_rgba(234,179,8,0.15)] z-[9999] animate-in slide-in-from-top-4 duration-300">
                     <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-3">
                         <div className="flex items-center gap-2 text-yellow-400 font-black text-xs uppercase tracking-widest">
                             <Bell size={14} className="animate-bounce" />
@@ -259,6 +372,87 @@ const HomeIntermunicipal = () => {
                     )}
                 </div>
             </div>
+
+            {/* 🛠️ MODAL DE EDICIÓN FLUIDO - DATOS COMPAÑÍA Y VEHÍCULO */}
+            {mostrarModalPerfil && (
+                <div className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="w-full max-w-md bg-[#121214] border border-white/10 rounded-2xl p-6 shadow-2xl space-y-5">
+                        <div className="flex justify-between items-center border-b border-white/5 pb-3">
+                            <div className="flex items-center gap-2 text-xs font-black text-yellow-400 uppercase tracking-widest">
+                                <Bus size={16} />
+                                <span>Ajustar Datos de Ruta</span>
+                            </div>
+                            <button 
+                                onClick={() => setMostrarModalPerfil(false)}
+                                className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2.5 py-1 rounded-md uppercase transition-colors"
+                            >
+                                Cerrar
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleGuardarPerfil} className="space-y-4 text-xs uppercase">
+                            <div className="space-y-1">
+                                <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><User size={11} /> Nombre del Conductor</label>
+                                <input 
+                                    type="text" 
+                                    required
+                                    value={datosPerfil.nombre}
+                                    onChange={(e) => setDatosPerfil({...datosPerfil, nombre: e.target.value})}
+                                    className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors uppercase"
+                                    placeholder="Nombre completo"
+                                />
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><Phone size={11} /> Teléfono Móvil</label>
+                                <input 
+                                    type="tel" 
+                                    required
+                                    value={datosPerfil.telefono}
+                                    onChange={(e) => setDatosPerfil({...datosPerfil, telefono: e.target.value})}
+                                    className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors"
+                                    placeholder="Número de celular"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><FileText size={11} /> Placa de Vehículo</label>
+                                    <input 
+                                        type="text" 
+                                        required
+                                        value={datosPerfil.placaVehiculo}
+                                        onChange={(e) => setDatosPerfil({...datosPerfil, placaVehiculo: e.target.value})}
+                                        className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors uppercase"
+                                        placeholder="Ej: STR543"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><Bus size={11} /> Número Interno</label>
+                                    <input 
+                                        type="text" 
+                                        required
+                                        value={datosPerfil.numeroInterno}
+                                        onChange={(e) => setDatosPerfil({...datosPerfil, numeroInterno: e.target.value})}
+                                        className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors"
+                                        placeholder="Ej: 045"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="pt-2">
+                                <button
+                                    type="submit"
+                                    disabled={guardandoPerfil}
+                                    className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase text-[11px] tracking-widest py-3.5 rounded-xl transition-all shadow-[0_4px_12px_rgba(234,179,8,0.2)] disabled:opacity-50"
+                                >
+                                    {guardandoPerfil ? 'Sincronizando...' : 'Actualizar Datos de Flota'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

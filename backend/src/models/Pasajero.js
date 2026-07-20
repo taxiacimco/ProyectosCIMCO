@@ -1,13 +1,29 @@
-// Versión Arquitectura: V16.1 - Normalización y Aislamiento Perimetral
+// Versión Arquitectura: V16.2 - Integración de Atributo de Autenticación isActive, Geolocalización y Control de Saldos en Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
  * Integridad: Rompe la dependencia legacy con Usuario.js y establece un esquema blindado propio.
- * Ajuste V16.1: Estabilizar y alinear sus propiedades nominales con la persistencia aislada de la colección física de pasajeros.
+ * Ajuste V16.2: Inclusión de los campos `isActive`, `saldo`, `access_level` y sub-esquema de `coordenadas` 
+ * para garantizar la compatibilidad de inicio de sesión de pasajeros, previniendo errores 403 por asimetría de propiedades.
  */
 
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+
+const coordenadasSchema = new mongoose.Schema({
+    latitud: {
+        type: Number,
+        default: 9.5623
+    },
+    longitud: {
+        type: Number,
+        default: -73.3325
+    },
+    ultimaActualizacion: {
+        type: Date,
+        default: Date.now
+    }
+}, { _id: false });
 
 const pasajeroSchema = new mongoose.Schema({
     nombre: {
@@ -38,7 +54,7 @@ const pasajeroSchema = new mongoose.Schema({
     },
     password: {
         type: String,
-        required: true
+        required: false // Se establece en false para soportar usuarios de Firebase sin contraseña local inicial
     },
     role: {
         type: String,
@@ -52,8 +68,40 @@ const pasajeroSchema = new mongoose.Schema({
         type: String,
         default: 'offline'
     },
+    isActive: {
+        type: Boolean,
+        default: true
+    },
+    saldo: {
+        type: Number,
+        default: 0,
+        min: [0, '⚠️ ALERTA DE NEGOCIO: El saldo de la billetera del pasajero no puede ser negativo.']
+    },
+    access_level: {
+        type: Number,
+        default: 1
+    },
+    // 🚀 AGREGADO: Atributos de pertenencia operativa homologados para evitar descalce en updateProfile
+    cooperativa: {
+        type: String,
+        trim: true,
+        default: 'Particular'
+    },
+    empresa: {
+        type: String,
+        trim: true,
+        default: 'Particular'
+    },
     uid: {
         type: String
+    },
+    coordenadas: {
+        type: coordenadasSchema,
+        default: () => ({})
+    },
+    fechaRegistro: {
+        type: Date,
+        default: Date.now
     }
 }, {
     timestamps: true
@@ -76,7 +124,7 @@ pasajeroSchema.pre('save', async function (next) {
             this.telefono = this.telefonoMovil;
         }
 
-        if (!this.isModified('password')) {
+        if (!this.isModified('password') || !this.password) {
             return next();
         }
 

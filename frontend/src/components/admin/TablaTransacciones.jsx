@@ -1,16 +1,14 @@
-// Versión Arquitectura: V1.2 - Inyección Local de Formateador Monetario e Integridad Transaccional
+// Versión Arquitectura: V1.4 - Extracción Segura de Timestamps y Blindaje Antifrase
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\TablaTransacciones.jsx
- * Misión: Renderizar el historial reactivo de auditoría financiera con diseño Glassmorphism (CIMCO-UI V9.3).
- * Seguridad: Protección total Anti-Undefined mediante operadores de encadenamiento opcional y fallbacks de respaldo.
- * Ajuste V1.2: Inyección local e implementación del formateador monetario 'formatearMoneda' localizado (es-CO) para mitigar el ReferenceError fatal en producción.
+ * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism.
+ * Saneamiento V1.4: Adaptación inteligente del objeto Timestamp de Firestore antes del parseo de fecha local.
  */
 
 import React from 'react';
 import { ArrowUpRight, ArrowDownLeft, Clock, CircleDollarSign, Database } from 'lucide-react';
-import { formatFechaColombia } from '@/utils/dateFormatter'; // Utilidad homologada del ecosistema interno
+import { formatFechaColombia } from '@/utils/dateFormatter'; 
 
-// 🪙 Formateador Monetario Localizado (Pesos Colombianos) para mitigar ReferenceError en Runtime
 const formatearMoneda = (valor) => {
     return new Intl.NumberFormat('es-CO', {
         style: 'currency',
@@ -21,7 +19,6 @@ const formatearMoneda = (valor) => {
 
 const TablaTransacciones = ({ transacciones = [] }) => {
     
-    // Función auxiliar para renderizar insignias de tipo con el estándar estético CIMCO-UI
     const renderBadgeTipo = (tipo = '') => {
         const t = tipo.toUpperCase();
         if (t === 'RECARGA' || t === 'CREDIT') {
@@ -40,9 +37,21 @@ const TablaTransacciones = ({ transacciones = [] }) => {
         );
     };
 
+    // Helper interno para desempaquetar de forma segura cualquier tipo de fecha proveniente de Firestore
+    const resolverFechaSegura = (campoFecha) => {
+        if (!campoFecha) return null;
+        // Si es un Timestamp de Firestore, ejecutamos toDate() de forma segura
+        if (typeof campoFecha === 'object' && campoFecha.toDate && typeof campoFecha.toDate === 'function') {
+            return campoFecha.toDate();
+        }
+        if (campoFecha?.seconds) {
+            return new Date(campoFecha.seconds * 1000);
+        }
+        return campoFecha;
+    };
+
     return (
         <div className="w-full backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl overflow-hidden shadow-xl">
-            {/* Header de la Tabla */}
             <div className="p-4 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <CircleDollarSign className="text-yellow-500" size={18} />
@@ -55,7 +64,6 @@ const TablaTransacciones = ({ transacciones = [] }) => {
                 </div>
             </div>
 
-            {/* Contenedor Responsivo / Tabla */}
             <div className="overflow-x-auto w-full">
                 {!transacciones || transacciones.length === 0 ? (
                     <div className="p-8 flex flex-col items-center justify-center text-center gap-2">
@@ -75,50 +83,48 @@ const TablaTransacciones = ({ transacciones = [] }) => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5 text-xs text-zinc-300">
-                            {transacciones.map((tx, index) => (
-                                <tr 
-                                    key={tx?.id || tx?._id || index} 
-                                    className="hover:bg-white/[0.02] transition-colors duration-150 group"
-                                >
-                                    {/* Celda: Fecha */}
-                                    <td className="p-4 pl-6">
-                                        <div className="flex items-center gap-2 text-zinc-400 font-medium">
-                                            <Clock size={12} className="text-zinc-500" />
-                                            {tx?.fecha || tx?.createdAt || tx?.timestamp ? (
-                                                formatFechaColombia(tx?.fecha || tx?.createdAt || tx?.timestamp)
-                                            ) : (
-                                                <span className="text-zinc-600 italic">Fecha Incierta</span>
-                                            )}
-                                        </div>
-                                    </td>
+                            {transacciones.map((tx, index) => {
+                                const keyTransaccion = tx?.id || tx?._id || tx?.referencia || `tx-fallback-${index}`;
+                                const fechaObjetivo = resolverFechaSegura(tx?.fecha || tx?.createdAt || tx?.timestamp);
 
-                                    {/* Celda: Identificador Operativo */}
-                                    <td className="p-4">
-                                        <div className="text-zinc-200 font-semibold truncate max-w-[180px]">
-                                            {tx?.usuarioId || tx?.userId || tx?.driverId || 'SISTEMA_CORE'}
-                                        </div>
-                                        <div className="text-[9px] text-zinc-500 font-mono uppercase tracking-wide">
-                                            Ref: {tx?.referencia || tx?.id || 'Transacción Directa'}
-                                        </div>
-                                    </td>
+                                return (
+                                    <tr key={keyTransaccion} className="hover:bg-white/[0.02] transition-colors duration-150 group">
+                                        <td className="p-4 pl-6">
+                                            <div className="flex items-center gap-2 text-zinc-400 font-medium">
+                                                <Clock size={12} className="text-zinc-500" />
+                                                {fechaObjetivo ? (
+                                                    formatFechaColombia(fechaObjetivo)
+                                                ) : (
+                                                    <span className="text-zinc-600 italic">Fecha Incierta</span>
+                                                )}
+                                            </div>
+                                        </td>
 
-                                    {/* Celda: Badge de Tipo */}
-                                    <td className="p-4">
-                                        {renderBadgeTipo(tx?.tipo || tx?.type || '')}
-                                    </td>
+                                        <td className="p-4">
+                                            <div className="text-zinc-200 font-semibold truncate max-w-[180px]">
+                                                {tx?.usuarioId || tx?.userId || tx?.driverId || 'SISTEMA_CORE'}
+                                            </div>
+                                            <div className="text-[9px] text-zinc-500 font-mono uppercase tracking-wide">
+                                                Ref: {tx?.referencia || tx?.id || 'Transacción Directa'}
+                                            </div>
+                                        </td>
 
-                                    {/* Celda: Valor */}
-                                    <td className="p-4 text-right pr-6">
-                                        <span className={`text-sm font-mono font-black ${
-                                            tx?.tipo?.toUpperCase() === 'RECARGA' || tx?.tipo?.toUpperCase() === 'CREDIT' || tx?.type?.toUpperCase() === 'RECARGA'
-                                            ? 'text-emerald-400' 
-                                            : 'text-cyan-400'
-                                        }`}>
-                                            {formatearMoneda(tx?.monto || tx?.amount || 0)}
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))}
+                                        <td className="p-4">
+                                            {renderBadgeTipo(tx?.tipo || tx?.type || '')}
+                                        </td>
+
+                                        <td className="p-4 text-right pr-6">
+                                            <span className={`text-sm font-mono font-black ${
+                                                tx?.tipo?.toUpperCase() === 'RECARGA' || tx?.tipo?.toUpperCase() === 'CREDIT' || tx?.type?.toUpperCase() === 'RECARGA'
+                                                ? 'text-emerald-400' 
+                                                : 'text-cyan-400'
+                                            }`}>
+                                                {formatearMoneda(tx?.monto || tx?.amount || 0)}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 )}

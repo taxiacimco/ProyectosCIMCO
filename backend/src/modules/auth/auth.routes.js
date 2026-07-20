@@ -1,9 +1,7 @@
-// Versión Arquitectura: V15.6 - Conservación Absoluta de Endpoints de Autenticación
+// Versión Arquitectura: V15.8 - Sincronización de Endpoints con Controlador Polimórfico V21.15
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
- * Misión: Enrutador perimetral de autenticación alineado al 100% con las exportaciones del controlador V20.8.
- * Nota: No requiere modificaciones estructurales internas dado que la firma de sus métodos expuestos permanece inmutable,
- * preservando el pipeline middleware, control de carga híbrida multer y validaciones previas de producción.
+ * Misión: Enrutador perimetral de autenticación alineado al 100% con las exportaciones del controlador V21.15.
  */
 
 import express from 'express'; 
@@ -11,9 +9,10 @@ import multer from 'multer';
 import { 
     login, 
     register, 
-    solicitarRecuperacion, 
-    restablecerPassword, 
-    verificarTelefono 
+    solicitarOTP, 
+    verificarOTPyRestablecer, 
+    verificarTelefono,
+    updateProfile
 } from './auth.controller.js';
 import { validateRegisterPayload, verificarToken, esDespachador } from '../../middleware/auth.middleware.js';
 
@@ -55,12 +54,25 @@ const interceptorCargaHibrida = (req, res, next) => {
 };
 
 /**
- * 🚀 ENDPOINTS DE ACCESO Y REGISTRO (Mapeo Simétrico V20.8)
+ * 🚀 ENDPOINTS DE ACCESO Y REGISTRO
  */
 router.post('/login', verificarPayloadLogin, login);
-router.post('/register', verificarPayloadLogin, interceptorCargaHibrida, validateRegisterPayload, register);
-router.post('/check-phone', verificarPayloadLogin, verificarTelefono);
-router.post('/forgot-password', verificarPayloadLogin, solicitarRecuperacion);
-router.post('/reset-password', verificarPayloadLogin, restablecerPassword);
+router.post('/register', interceptorCargaHibrida, validateRegisterPayload, register);
+
+/**
+ * 🔑 PASARELA DE RECUPERACIÓN DE CREDENCIALES (OTP)
+ */
+router.post('/solicitar-otp', solicitarOTP);
+router.post('/restablecer', verificarOTPyRestablecer);
+
+/**
+ * 📡 VALIDACIONES EN CALIENTE (REGISTRO DINÁMICO)
+ */
+router.post('/verificar-telefono', verificarTelefono);
+
+/**
+ * 🔄 GESTIÓN DE PERFIL DE USUARIO (Ruta Protegida)
+ */
+router.put('/update-profile', verificarToken, updateProfile);
 
 export default router;

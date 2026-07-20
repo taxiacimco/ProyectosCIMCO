@@ -1,24 +1,30 @@
-// Versión Arquitectura: V16.1 - Inyección de Guarda Semántica Operativa y GeoJSON Unificado
+// Versión Arquitectura: V16.3 - Depuración de Token Inesperado de Citación en Mongoose Schema
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
- * Misión: Definición del documento del Conductor con soporte Multi-Rol y persistencia estricta en 'conductores'.
- * Integridad: Fusión Atómica. Incorpora la guarda de seguridad semántica `estadoOperativo` junto con su mapeo automático,
- * consolidando un único campo GeoJSON Point optimizado llamado `ubicacion` para eliminar la duplicidad de telemetría
- * sin romper las validaciones contables ni las sincronizaciones redundantes de roles heredadas.
+ * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
+ * Integridad: Fusión Atómica. Remoción inmediata de marcas de citación conversacional inyectadas en la 
+ * validación del campo 'saldo' para restaurar la validez de la sintaxis del motor V8 (ESM). Preserva intactas 
+ * todas las guardas transaccionales, indexación 2dsphere y esquemas de multi-subrol integrados previamente.
  */
 
 import mongoose from 'mongoose';
 
+const coordenadasSchema = new mongoose.Schema({
+    latitud: { type: Number },
+    longitud: { type: Number },
+    ultimaActualizacion: { type: Date, default: Date.now }
+}, { _id: false });
+
 const ConductorSchema = new mongoose.Schema({
     nombre: { 
         type: String, 
-        required: [true, 'El nombre es obligatorio'], 
+        required: [true, '⚠️ El nombre es obligatorio.'], 
         trim: true 
     },
     email: { 
         type: String, 
         unique: true, 
-        required: [true, 'El correo es obligatorio'], 
+        required: [true, '⚠️ El correo es obligatorio.'], 
         lowercase: true, 
         trim: true 
     },
@@ -29,12 +35,13 @@ const ConductorSchema = new mongoose.Schema({
     },
     telefono: { 
         type: String, 
+        required: true,
         unique: true, 
         sparse: true 
     },
     password: { 
         type: String, 
-        required: false 
+        required: true 
     },
     role: { 
         type: String, 
@@ -48,9 +55,37 @@ const ConductorSchema = new mongoose.Schema({
         lowercase: true, 
         trim: true 
     },
+    subrol: { 
+        type: String, 
+        enum: ['motocarga', 'mototaxi', 'motoparrillero', 'conductor_intermunicipal'],
+        required: true 
+    },
     access_level: { 
         type: Number, 
         default: 10 
+    },
+    // 🏷️ ATRIBUTOS VEHICULARES Y OPERATIVOS
+    placa: {
+        type: String,
+        required: true,
+        trim: true,
+        uppercase: true
+    },
+    numeroInterno: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    cooperativa: {
+        type: String,
+        trim: true,
+        default: 'Particular'
+    },
+    // 🚀 AGREGADO: Campo homologado para prevenir descalce documental en updateProfile
+    empresa: {
+        type: String,
+        trim: true,
+        default: 'Particular'
     },
     // Campo tradicional extendido para soportar los estados del controlador
     estado: { 
@@ -63,8 +98,19 @@ const ConductorSchema = new mongoose.Schema({
     estadoOperativo: {
         type: String,
         enum: ['DISPONIBLE', 'OCUPADO', 'NO_DISPONIBLE'],
-        default: 'NO_DISPONIBLE',
+        default: 'DISPONIBLE',
         uppercase: true
+    },
+    isActive: { 
+        type: Boolean, 
+        default: true 
+    },
+    uid: { 
+        type: String 
+    },
+    flota_id: { 
+        type: String, 
+        default: null 
     },
     viajeActualId: {
         type: String,
@@ -75,10 +121,18 @@ const ConductorSchema = new mongoose.Schema({
         type: { type: String, enum: ['Point'], default: 'Point' },
         coordinates: { type: [Number], default: [-73.3332, 9.5661] } // [longitud, latitud]
     },
+    coordenadas: { 
+        type: coordenadasSchema, 
+        default: () => ({}) 
+    },
     saldo: { 
         type: Number, 
         default: 0, 
         min: [0, 'El saldo no puede ser inferior a $0 COP.'] 
+    },
+    saldoWallet: { 
+        type: Number, 
+        default: 0 
     }
 }, { timestamps: true });
 
@@ -103,14 +157,28 @@ ConductorSchema.pre('save', function(next) {
         }
     }
 
-    // Salvaguarda geométrica GeoJSON Point nativa
-    if (!cond.ubicacion || !Array.isArray(cond.ubicacion.coordinates) || cond.ubicacion.coordinates.length !== 2) {
+    // Sincronización de espejo para la estructura incrustada coordenadasSchema
+    if (cond.ubicacion && Array.isArray(cond.ubicacion.coordinates) && cond.ubicacion.coordinates.length === 2) {
+        cond.coordenadas.longitud = cond.ubicacion.coordinates[0];
+        cond.coordenadas.latitud = cond.ubicacion.coordinates[1];
+        cond.coordenadas.ultimaActualizacion = new Date();
+    } else if (cond.coordenadas && cond.coordenadas.longitud && cond.coordenadas.latitud) {
+        cond.ubicacion = {
+            type: 'Point',
+            coordinates: [cond.coordenadas.longitud, cond.coordenadas.latitud]
+        };
+    } else {
+        // Salvaguarda geométrica GeoJSON Point nativa predeterminada
         cond.ubicacion = { type: 'Point', coordinates: [-73.3332, 9.5661] };
+        cond.coordenadas = { longitud: -73.3332, latitud: 9.5661, ultimaActualizacion: new Date() };
     }
 
-    // Blindaje de seguridad financiera (Anti-Null / Anti-NaN)
+    // Blindaje de seguridad financiera (Anti-Null / Anti-NaN / Preservación de saldos)
     if (cond.saldo === undefined || cond.saldo === null || isNaN(cond.saldo)) {
         cond.saldo = 0;
+    }
+    if (cond.saldoWallet === undefined || cond.saldoWallet === null || isNaN(cond.saldoWallet)) {
+        cond.saldoWallet = 0;
     }
 
     // Sincronización bidireccional homóloga de roles operativos

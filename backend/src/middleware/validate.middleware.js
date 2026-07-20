@@ -1,29 +1,126 @@
-// Versión Arquitectura: V19.1 - Aduana Perimetral Nativa y Fusión Atómica de Despacho Híbrido Urbano e Intermunicipal
+// Versión Arquitectura: V19.5 - Normalización Blindada Multi-Formato y Puentes de Retrocompatibilidad Síncrona
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\validate.middleware.js
- * Misión: Validar y sanitizar los payloads de despacho perimetral (Urbano e Intermunicipal) antes de impactar el bus síncrono.
- * Ajuste V19.1: Fusión atómica del middleware histórico 'validarDespacho' conservando las validaciones urbanas,
- * junto con la asimilación quirúrgica de las llaves intermunicipales (pasajeroNombre, destinoNombre, fleetId) 
- * y puente de retrocompatibilidad determinista para evitar regresiones operativas en viaje.controller.js.
+ * Misión: Validar y sanitizar los payloads de despacho perimetral (Urbano, Intermunicipal e Inmediato) antes de impactar el bus de datos central.
+ * Ajuste V19.5: FUSIÓN ATÓMICA. Integración quirúrgica de extracción polimórfica de coordenadas híbridas (planas y anidadas).
+ *               Soporta de forma adaptativa y transparente la omisión de 'viajeId' en '/despachar-inmediato',
+ *               hidratando con éxito los objetos geométricos para el controlador ACID sin generar regresiones de producción.
  */
 
+const logLocal = (msg) => {
+    console.log(`[${new Date().toLocaleString('es-CO')}] 📡 [CIMCO-VALIDACION] ${msg}`);
+};
+
 /**
- * @param {Object} req - Petición entrante desde el bus de pasajeros urbanos e intermunicipales
- * @param {Object} res - Objeto de respuesta HTTP central
- * @param {Function} next - Hilo de ejecución hacia el controlador transaccional
+ * Middleware Maestro de Validación Perimetral para Despachos
+ * @param {Object} req - Petición Express entrante
+ * @param {Object} res - Objeto de respuesta HTTP
+ * @param {Function} next - Siguiente middleware en la cadena de Express
  */
 export const validarDespacho = (req, res, next) => {
-    // 🛡️ Guarda Anti-Undefined: Verificar que exista el cuerpo del mensaje de forma perimetral
+    // 🛡️ GUARDA DE SEGURIDAD ABSOLUTA: Verificar existencia del cuerpo del mensaje
     if (!req || !req.body || Object.keys(req.body).length === 0) {
+        logLocal("🚨 Bloqueado: Payload vacío o corrupto.");
         return res.status(400).json({ 
             success: false, 
             error: "⚠️ ALERTA DE ARQUITECTURA: Cuerpo de la petición (req.body) ausente o corrupto en el bus." 
         });
     }
 
-    const { viajeId, conductorId, tarifa, metodoPago, pasajeroNombre, destinoNombre, fleetId } = req.body;
+    const { body, originalUrl } = req;
+    const { 
+        viajeId, 
+        conductorId, 
+        tarifa, 
+        metodoPago, 
+        pasajeroNombre, 
+        destinoNombre, 
+        fleetId, 
+        pasajeroId,
+        origenLat,
+        origenLng,
+        destinoLat,
+        destinoLng,
+        origen,
+        destino
+    } = body;
 
-    // 🕵️ DETECCIÓN OPERATIVA: Identificar si el payload corresponde al ecosistema Intermunicipal Novedoso
+    // Detectar ruta actual para activar la guarda electiva de taquilla / andén
+    const esDespachoInmediato = originalUrl && originalUrl.includes('/despachar-inmediato');
+
+    if (esDespachoInmediato) {
+        // 📦 1. Validar parámetros obligatorios de andén inmediatos (Sin viajeId)
+        if (!conductorId || typeof conductorId !== 'string' || conductorId.trim() === '') {
+            return res.status(400).json({ success: false, error: "El campo 'conductorId' es requerido para despacho inmediato." });
+        }
+        if (!pasajeroId && (!pasajeroNombre || typeof pasajeroNombre !== 'string' || pasajeroNombre.trim().length < 3)) {
+            return res.status(400).json({ success: false, error: "El campo 'pasajeroId' o un 'pasajeroNombre' válido es requerido para despacho inmediato." });
+        }
+        if (tarifa === undefined || tarifa === null) {
+            return res.status(400).json({ success: false, error: "El campo 'tarifa' es requerido para despacho inmediato." });
+        }
+        
+        const tarifaNum = Number(tarifa);
+        if (isNaN(tarifaNum) || tarifaNum <= 0) {
+            return res.status(400).json({ success: false, error: "La 'tarifa' de despacho inmediato debe ser un número real positivo mayor a cero." });
+        }
+
+        // Extraer coordenadas polimórficamente (Soporta formato plano origenLat y formato estructurado origen.lat)
+        const latO = origen?.lat !== undefined ? origen.lat : origenLat;
+        const lngO = origen?.lng !== undefined ? origen.lng : origenLng;
+        const latD = destino?.lat !== undefined ? destino.lat : destinoLat;
+        const lngD = destino?.lng !== undefined ? destino.lng : destinoLng;
+
+        if (latO === undefined || lngO === undefined) {
+            return res.status(400).json({ success: false, error: "El punto de 'origen' (lat/lng) es obligatorio para el despacho logístico." });
+        }
+        if (latD === undefined || lngD === undefined) {
+            return res.status(400).json({ success: false, error: "El punto de 'destino' (lat/lng) es obligatorio para el cálculo de ruta." });
+        }
+
+        const parsedOrigenLat = parseFloat(latO);
+        const parsedOrigenLng = parseFloat(lngO);
+        const parsedDestinoLat = parseFloat(latD);
+        const parsedDestinoLng = parseFloat(lngD);
+
+        if (isNaN(parsedOrigenLat) || isNaN(parsedOrigenLng) || isNaN(parsedDestinoLat) || isNaN(parsedDestinoLng)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: "⚠️ ALERTA DE VALIDACIÓN: Una o más coordenadas geográficas no contienen un formato decimal válido." 
+            });
+        }
+
+        // Sanitizar y mutar tipos nativos para este flujo controlado antes de procesar el canal financiero
+        req.body.tarifa = tarifaNum;
+        req.body.conductorId = String(conductorId).trim();
+        if (pasajeroId) req.body.pasajeroId = String(pasajeroId).trim();
+
+        // Inyección quirúrgica del payload de coordenadas unificadas para el controlador transaccional
+        req.body.origen = { lat: parsedOrigenLat, lng: parsedOrigenLng };
+        req.body.destino = { lat: parsedDestinoLat, lng: parsedDestinoLng };
+
+        // Procesamiento del canal financiero unificado
+        if (metodoPago !== undefined && metodoPago !== null) {
+            if (typeof metodoPago !== 'string') {
+                return res.status(400).json({ success: false, error: "El campo 'metodoPago' debe ser una cadena de texto." });
+            }
+            const metodoFormateado = metodoPago.toUpperCase().trim();
+            const metodosValidos = ['WALLET', 'EFECTIVO', 'QR'];
+            if (!metodosValidos.includes(metodoFormateado)) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: `El método de pago '${metodoPago}' no es válido para el ecosistema CIMCO. Use: WALLET, EFECTIVO o QR.` 
+                });
+            }
+            req.body.metodoPago = metodoFormateado;
+        } else {
+            req.body.metodoPago = 'EFECTIVO';
+        }
+
+        return next();
+    }
+
+    // 🕵️ DETECCIÓN OPERATIVA: Identificar si el payload corresponde al ecosistema Intermunicipal Novedoso estándar
     const esIntermunicipal = (pasajeroNombre !== undefined || destinoNombre !== undefined || fleetId !== undefined);
 
     if (esIntermunicipal) {

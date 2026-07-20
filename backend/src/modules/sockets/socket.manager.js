@@ -1,8 +1,9 @@
-// Versión Arquitectura: V5.2.0 - Sincronización Radial Unificada con Difusión a Sala de Control
+// Versión Arquitectura: V16.1.0 - Sincronización Radial Unificada con Difusión a Sala de Control
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\sockets\socket.manager.js
  * Misión: Administrar el ciclo de vida de las conexiones, salas automáticas y despacho en tiempo real.
- * Ajuste V5.2.0: Expansión del bloque 2B para emitir ráfagas de telemetría a despachadores y administradores en tiempo real.
+ * Ajuste V16.1.0: Depreciación y remoción del evento redundante `actualizar_ubicacion_conductor`.
+ * Se unifica el flujo en el estándar universal `actualizar_radar_gps` para liberar ciclos de CPU en el servidor.
  */
 import { socketAuthMiddleware } from '#middleware/socketAuth.middleware.js';
 import { actualizarRadarUbicacion } from '#modules/conductores/conductor.controller.js';
@@ -26,31 +27,7 @@ export const inicializarSockets = (io) => {
         logSocket(`Asignación automatizada a salas completada para el usuario: ${usuarioId}`);
 
         // ==================================================
-        // 2. RADAR GEOSPATIAL (Ubicación en Tiempo Real - Legado Conductor)
-        // ==================================================
-        socket.on('actualizar_ubicacion_conductor', async (datos) => {
-            if (!datos) return; // Guarda de seguridad anti-crash
-            
-            const { lat, lng, subrol } = datos;
-            
-            const payloadRadar = {
-                lat,
-                lng,
-                subrol,
-                conductorId: usuarioId 
-            };
-
-            // 📡 Retransmisión instantánea en memoria (baja latencia para el mapa del Pasajero)
-            socket.to('sala_pasajeros').emit('conductor_movido', payloadRadar);
-
-            // 🗄️ Persistencia en segundo plano en MongoDB con índice 2dsphere
-            if (lat && lng) {
-                await actualizarRadarUbicacion(usuarioId, lat, lng);
-            }
-        });
-
-        // ==================================================
-        // 2B. RADAR TELEMETRÍA REACTIVA (Universal GPS Guard v16.1)
+        // 2. RADAR TELEMETRÍA REACTIVA (Universal GPS Guard v16.1)
         // ==================================================
         socket.on('actualizar_radar_gps', async (datos) => {
             // 🛡️ BLINDAJE DE VARIABLES (ANTI-UNDEFINED)

@@ -1,13 +1,13 @@
-// Versión Arquitectura: V7.3 - Gobernanza Contable Definitiva con Mutaciones Atómicas Anti-Condición de Carrera
+// Versión Arquitectura: V7.4 - Gobernanza Contable Definitiva (Escritura Transaccional Blindada)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
  * Misión: Forzar la sincronización exacta con Firestore y proveer mutaciones atómicas seguras para liquidaciones.
- * Ajuste V7.3: Inyección de runTransaction para soportar pruebas de estrés concurrentes sin descalces financieros.
+ * Ajuste V7.4: Mitigación de condiciones de carrera mediante uso estricto de transacciones aisladas en Firestore.
  */
 
 import { useState, useEffect } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
-import { doc, onSnapshot, runTransaction, collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, onSnapshot, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 
 export const useWallet = () => {
@@ -87,7 +87,10 @@ export const useWallet = () => {
 
         setIsMutating(true);
         const referenciaBilletera = doc(db, coleccionDestino, idDocumentoUnificado);
-        const referenciaHistorial = collection(db, 'historial_saldos');
+        
+        // 🛡️ Obtener referencia de colección para pre-generar la ruta de destino de forma síncrona
+        const coleccionHistorial = collection(db, 'historial_saldos');
+        const nuevoDocHistorialRef = doc(coleccionHistorial);
 
         try {
             await runTransaction(db, async (transaction) => {
@@ -105,15 +108,15 @@ export const useWallet = () => {
 
                 const nuevoSaldoCalculado = saldoActual - montoDebito;
 
-                // 🗄️ Escritura atómica garantizada
+                // 🗄️ Escritura atómica 1: Actualización del saldo financiero
                 transaction.update(referenciaBilletera, {
                     saldo: nuevoSaldoCalculado,
                     balance: nuevoSaldoCalculado,
                     ultimaActualizacion: serverTimestamp()
                 });
 
-                // Registrar auditoría inmediatamente en la misma transacción en segundo plano
-                await addDoc(referenciaHistorial, {
+                // 🗄️ Escritura atómica 2: Auditoría del historial (¡Aislada de forma segura en la transacción!)
+                transaction.set(nuevoDocHistorialRef, {
                     usuarioId: idDocumentoUnificado,
                     tipo: 'DEBITO',
                     monto: montoDebito,
@@ -127,7 +130,7 @@ export const useWallet = () => {
             setIsMutating(false);
             return true;
         } catch (err) {
-            console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Transacción revertida:", err.message);
+            console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Transacción revertida de forma segura:", err.message);
             setIsMutating(false);
             throw err;
         }

@@ -1,7 +1,7 @@
 {
-  "//": "Versión Arquitectura: V2.1 - Estabilización de Subpath Imports Nativos (#) para Mitigar Fractura ESM",
+  "//": "Versión Arquitectura: V2.2 - Integración del Script de Arranque Estándar para Despliegue en Railway",
   "name": "taxia-cimco-backend",
-  "architecture_version": "V2.1 - Corrección Nativa de Subpath Imports ESM (#)",
+  "architecture_version": "V2.2 - Integración del Script de Arranque Estándar para Despliegue en Railway",
   "version": "1.0.1",
   "description": "Servidor Central Local - TAXIA CIMCO",
   "main": "src/server.js",
@@ -14,9 +14,11 @@
     "#*": "./src/*"
   },
   "scripts": {
+    "start": "node src/server.js",
     "dev": "nodemon src/server.js"
   },
   "dependencies": {
+    "axios": "^1.18.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
@@ -29,6 +31,7 @@
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
+    "autocannon": "^8.0.0",
     "nodemon": "^3.1.14"
   }
 }

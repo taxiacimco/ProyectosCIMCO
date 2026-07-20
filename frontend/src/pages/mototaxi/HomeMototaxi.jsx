@@ -1,9 +1,9 @@
-// Versión Arquitectura: V12.13 - Fusión Atómica de Canales Reactivos (Socket.io + Firestore) y Telemetría Geoespacial
+// Versión Arquitectura: V12.19 - Sincronización Unificada de Radar GPS y Autogestión de Perfil Operativo de Flota
 // Refactorización Estética: Cyber-Neo-Brutalismo Industrial Puro (Bordes Macizos, Hard Shadows y Cero Curvas)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Panel interactivo en tiempo real para el rol 'conductor' de Mototaxi con soporte multi-red, control transaccional e inyección de telemetría geoespacial.
- * Ajuste V12.13: Transición radical del ecosistema visual de Glassmorphism a Cyber-Neo-Brutalismo de alta visibilidad para pantallas bajo luz directa del sol.
+ * Ajuste V12.19: Adición del módulo de edición de perfil táctico para cambio de datos y actualización dinámica de vehículos en malla radar.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -16,7 +16,7 @@ import api from '@/config/api';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
-  MessageSquare, Send, XCircle, CheckCircle, CircleDollarSign, Signal, LogOut, Loader
+  MessageSquare, Send, XCircle, CheckCircle, CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X, Bike
 } from 'lucide-react';
 
 const BACKEND_URL = "https://globosely-appreciative-zander.ngrok-free.dev";
@@ -39,6 +39,14 @@ export default function HomeMototaxi() {
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [datosParaCalificar, setDatosParaCalificar] = useState(null);
 
+  // 📝 Estados para la Modal del Perfil Brutalista
+  const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
+  const [inputNombre, setInputNombre] = useState('');
+  const [inputTelefono, setInputTelefono] = useState('');
+  const [inputPlaca, setInputPlaca] = useState('');
+  const [inputTipoServicio, setInputTipoServicio] = useState('mototaxi');
+  const [errorPerfil, setErrorPerfil] = useState('');
+
   // Referencias para control perimetral de Sockets y Telemetría
   const socketRef = useRef(null);
   const geoWatchRef = useRef(null);
@@ -60,10 +68,13 @@ export default function HomeMototaxi() {
     const unsubscribe = onSnapshot(conductorRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const nombreCompleto = data?.nombre || data?.displayName || data?.nombreCompleto;
-        if (nombreCompleto) {
-          setNombreConductor(nombreCompleto.toUpperCase());
-        }
+        const nombreCompleto = data?.nombre || data?.displayName || data?.nombreCompleto || nombreInicialFallback;
+        
+        setNombreConductor(nombreCompleto.toUpperCase());
+        setInputNombre(nombreCompleto);
+        setInputTelefono(data?.telefono || '');
+        setInputPlaca(data?.placa || '');
+        setInputTipoServicio(data?.tipoServicio || 'mototaxi');
       }
     }, (error) => {
       console.error("🚨 [CIMCO-IDENTITY-ERROR] Fallo en lectura de perfil:", error);
@@ -94,7 +105,7 @@ export default function HomeMototaxi() {
         console.log(`✅ [CIMCO-SOCKET] Conectado exitosamente con ID: ${socketRef.current.id}`);
         socketRef.current.emit('registrar_conductor', { 
           conductorId, 
-          tipoServicio: 'mototaxi',
+          tipoServicio: inputTipoServicio,
           email: user?.email || localStorage.getItem('conductorEmail') || ''
         });
       });
@@ -120,10 +131,10 @@ export default function HomeMototaxi() {
     return () => {
       desconectarEcosistema();
     };
-  }, [isOnline, conductorId, token, saldoVivo]);
+  }, [isOnline, conductorId, token, saldoVivo, inputTipoServicio]);
 
   // ==================================================================
-  // 3. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
+  // 3. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE UNIFICADO)
   // ==================================================================
   const iniciarTrackingGPS = () => {
     if (!navigator.geolocation) {
@@ -131,7 +142,7 @@ export default function HomeMototaxi() {
       return;
     }
 
-    console.log("🛰️ [CIMCO-TELEMETRIA] Encendiendo receptor de satélites GPS...");
+    console.log("🛰️ [CIMCO-TELEMETRIA] Encending receptor de satélites GPS...");
     geoWatchRef.current = navigator.geolocation.watchPosition(
       (position) => {
         if (!position || !position.coords) return;
@@ -139,13 +150,12 @@ export default function HomeMototaxi() {
         setCoordenadas({ lat: latitude, lng: longitude });
 
         if (socketRef.current && socketRef.current.connected) {
-          // Formato de backend compatible [longitud, latitud]
-          socketRef.current.emit('actualizar_ubicacion_radar', {
+          socketRef.current.emit('actualizar_radar_gps', {
             conductorId,
             lat: latitude,
             lng: longitude
           });
-          console.log(`🎯 [RADAR-BURST] Coordenadas emitidas: [${longitude}, ${latitude}]`);
+          console.log(`🎯 [RADAR-BURST] Coordenadas emitidas al ecosistema unificado: [${longitude}, ${latitude}]`);
         }
       },
       (error) => {
@@ -235,8 +245,46 @@ export default function HomeMototaxi() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 6. ACCIONES DE GESTIÓN DE DESPACHOS CONTABLES ACID
+  // 6. ACCIONES DE GESTIÓN DE DESPACHOS Y AJUSTES DE PERFIL
   // ==================================================================
+  const handleActualizarPerfil = async (e) => {
+    e.preventDefault();
+    setErrorPerfil('');
+
+    if (!inputNombre.trim() || !inputPlaca.trim()) {
+      setErrorPerfil("⚠️ Nombre y Placa son obligatorios.");
+      return;
+    }
+
+    try {
+      const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+      const conductorRef = doc(db, pathConductores, user.uid);
+
+      await updateDoc(conductorRef, {
+        nombre: inputNombre.trim(),
+        telefono: inputTelefono.trim(),
+        placa: inputPlaca.trim().toUpperCase(),
+        tipoServicio: inputTipoServicio,
+        fechaActualizacion: serverTimestamp()
+      });
+
+      // Si está en línea, reenviamos la actualización al gateway de Sockets
+      if (socketRef.current && socketRef.current.connected) {
+        socketRef.current.emit('registrar_conductor', { 
+          conductorId, 
+          tipoServicio: inputTipoServicio,
+          email: user?.email || ''
+        });
+      }
+
+      setMostrarModalPerfil(false);
+      console.log("🔒 [PERFIL-CIMCO] Parámetros de la unidad modificados con éxito.");
+    } catch (err) {
+      console.error("🚨 [PERFIL-FAIL] Error al escribir en nodo atómico:", err);
+      setErrorPerfil("Error interno al sincronizar el perfil.");
+    }
+  };
+
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
     if (Number(saldoVivo) < 2000) {
@@ -291,6 +339,8 @@ export default function HomeMototaxi() {
           estado: 'ACEPTADO',
           conductorId: user?.uid,
           conductorNombre: nombreConductor,
+          conductorPlaca: inputPlaca,
+          conductorTipoServicio: inputTipoServicio,
           fechaAceptado: serverTimestamp()
         });
       });
@@ -337,19 +387,28 @@ export default function HomeMototaxi() {
   return (
     <div className="min-h-screen bg-[#0e0e11] text-zinc-100 font-mono antialiased pb-28 relative selection:bg-cyan-400 selection:text-black">
       
-      {/* 🔝 ENCABEZADO DE CONTROL MAESTRO (CIMCO-UI V12.13 NEO-BRUTALIST) */}
+      {/* 🔝 ENCABEZADO DE CONTROL MAESTRO (CIMCO-UI V12.18 NEO-BRUTALIST) */}
       <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="p-2 bg-yellow-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] select-none shrink-0 rounded-none">
+          <button 
+            onClick={() => setMostrarModalPerfil(true)}
+            className="p-2 bg-yellow-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all shrink-0 rounded-none hover:bg-yellow-300"
+          >
             🛺
-          </div>
+          </button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xs font-black tracking-widest text-white uppercase truncate" title={nombreConductor}>
-              {nombreConductor}
-            </h1>
+            <button 
+              onClick={() => setMostrarModalPerfil(true)}
+              className="text-xs font-black tracking-widest text-white uppercase truncate flex items-center gap-1.5 hover:text-cyan-400 text-left w-full focus:outline-none"
+              title="Click para editar parámetros de unidad"
+            >
+              {nombreConductor} <Edit3 size={11} className="text-zinc-500 shrink-0" />
+            </button>
             <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
               <Signal size={10} className={isOnline ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
-              {isOnline ? 'CONECTADO A RED' : 'NODO DESCONECTADO'}
+              {isOnline ? 'CONECTADO' : 'OFFLINE'} 
+              <span className="text-zinc-700">|</span> 
+              <span className="text-zinc-400 text-[8px] bg-black px-1 border border-zinc-800">{inputPlaca || 'SIN PLACA'}</span>
             </p>
           </div>
         </div>
@@ -606,7 +665,88 @@ export default function HomeMototaxi() {
         )}
       </main>
 
-      {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR (CIMCO-UI V12.13 NEO-BRUTALIST RIGID) */}
+      {/* MODAL NEO-BRUTALISTA DE AJUSTES DE CUENTA / VEHÍCULO */}
+      {mostrarModalPerfil && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[5000] p-4">
+          <div className="w-full max-w-sm bg-zinc-900 border-4 border-black rounded-none p-5 shadow-[6px_6px_0px_0px_#000] relative font-mono animate-scaleUp text-zinc-100">
+            <button 
+              onClick={() => setMostrarModalPerfil(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white border-2 border-black p-1 bg-black shadow-[1px_1px_0px_0px_#000]"
+            >
+              <X size={14} />
+            </button>
+            <h3 className="text-xs font-black uppercase tracking-widest text-yellow-400 mb-4 flex items-center gap-2">
+              <User size={14} /> Ajustes de Unidad
+            </h3>
+
+            {errorPerfil && (
+              <p className="p-2 mb-3 bg-red-500 text-black text-[10px] font-black uppercase tracking-wider border-2 border-black">
+                {errorPerfil}
+              </p>
+            )}
+
+            <form onSubmit={handleActualizarPerfil} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[9px] uppercase tracking-widest text-zinc-400 font-black">Nombre del Conductor</label>
+                <input 
+                  type="text"
+                  value={inputNombre}
+                  onChange={(e) => setInputNombre(e.target.value)}
+                  placeholder="Ej: CARLOS FUENTES"
+                  className="w-full bg-black border-2 border-black rounded-none p-2.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400 font-mono"
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[9px] uppercase tracking-widest text-zinc-400 font-black">Línea de Contacto</label>
+                <input 
+                  type="tel"
+                  value={inputTelefono}
+                  onChange={(e) => setInputTelefono(e.target.value)}
+                  placeholder="Ej: 3001234567"
+                  className="w-full bg-black border-2 border-black rounded-none p-2.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[9px] uppercase tracking-widest text-zinc-400 font-black">Placa Vehículo</label>
+                  <input 
+                    type="text"
+                    value={inputPlaca}
+                    onChange={(e) => setInputPlaca(e.target.value)}
+                    placeholder="Ej: ABC12D"
+                    className="w-full bg-black border-2 border-black rounded-none p-2.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400 font-mono uppercase"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[9px] uppercase tracking-widest text-zinc-400 font-black">Modalidad Flota</label>
+                  <select 
+                    value={inputTipoServicio}
+                    onChange={(e) => setInputTipoServicio(e.target.value)}
+                    className="w-full bg-black border-2 border-black rounded-none p-2.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400 font-mono cursor-pointer"
+                  >
+                    <option value="mototaxi">🛺 Mototaxi</option>
+                    <option value="motoparrillero">🛵 Motoparrillero</option>
+                    <option value="motocarga">🚛 Motocarga</option>
+                    <option value="intermunicipal">🛣️ Intermunicipal</option>
+                  </select>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full mt-2 bg-cyan-400 hover:bg-cyan-500 text-black text-xs font-black uppercase tracking-widest py-3 border-2 border-black rounded-none shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+              >
+                Sincronizar Unidad
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR (CIMCO-UI V12.18 NEO-BRUTALIST RIGID) */}
       <footer className="fixed bottom-0 left-0 w-full bg-zinc-900 border-t-4 border-black p-3 flex justify-around items-center z-50 shadow-[0_-4px_0px_0px_#000]">
         <button className="text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95">
           <Navigation size={18} strokeWidth={2.5} />

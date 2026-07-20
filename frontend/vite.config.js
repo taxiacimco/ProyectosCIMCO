@@ -1,7 +1,8 @@
-// Versión Arquitectura: V9.8.6 - Optimización de WebSocket HMR y Enrutamiento de Proxy Unificado
+// Versión Arquitectura: V9.9.5 - Corrección de Dependencias Circulares y Optimización de Chunks Limpios
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\vite.config.js
- * Misión: Configuración maestra del servidor de Vite con soporte multi-entorno (Local, IP, Ngrok).
+ * Misión: Eliminar la advertencia 'Circular chunk' reestructurando el empaquetado manual.
+ * Previene que las dependencias implícitas de node_modules se mezclen de forma cíclica con el núcleo.
  */
 
 import { defineConfig } from 'vite';
@@ -21,7 +22,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    host: '0.0.0.0', // Permite la escucha simultánea en Localhost y red externa
+    host: '0.0.0.0', // Escucha activa para permitir conexiones desde el teléfono por IP
     historyApiFallback: true,
     allowedHosts: [
       '192.168.100.34',
@@ -32,22 +33,45 @@ export default defineConfig({
       '.ngrok-free.app',
       '.ngrok-free.dev'
     ],
-    // 🛡️ TUNELIZACIÓN INTEGRADA: Enruta /api al backend Express local (Puerto 3000)
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
         secure: false,
-        ws: true, // 👈 CRÍTICO: Permite que los WebSockets de Socket.io también pasen por el proxy si es necesario
+        ws: true,
       },
     },
     watch: {
       usePolling: true,
     },
-    // 🔥 OPTIMIZACIÓN HMR: Al remover 'host: localhost', Vite detecta dinámicamente 
-    // si estás navegando desde Ngrok, IP local o localhost y adapta el WebSocket automáticamente.
     hmr: {
       protocol: 'ws'
     }
-  }
+  },
+  build: {
+    chunkSizeWarningLimit: 1000, // Ajuste del umbral operacional para producción
+    rollupOptions: {
+      output: {
+        // Corrección definitiva del ciclo: Evitamos clasificar arbitrariamente todo el node_modules
+        manualChunks(id) {
+          // Bloque exclusivo para el núcleo de la aplicación reactiva
+          if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-router-dom/')) {
+            return 'vendor-core';
+          }
+          // Bloque aislado para la suite gráfica de iconos
+          if (id.includes('node_modules/lucide-react')) {
+            return 'vendor-ui-icons';
+          }
+          // Bloque para peticiones y transporte de red
+          if (id.includes('node_modules/axios')) {
+            return 'vendor-network';
+          }
+          // Infraestructura de datos
+          if (id.includes('node_modules/firebase')) {
+            return 'vendor-firebase';
+          }
+        },
+      },
+    },
+  },
 });

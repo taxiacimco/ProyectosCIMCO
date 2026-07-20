@@ -22,9 +22,13 @@ const secondaryApp = initializeApp(firebaseConfig, "SecondaryAuthApp");
 export const secondaryAuth = getAuth(secondaryApp);
 
 // 🛡️ ENLACE PERIMETRAL AL EMULADOR DE AUTH SECUNDARIO
-if (import.meta.env.DEV) {
+const hostname = window.location.hostname;
+const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname.includes("192.168.") || hostname.includes("ngrok-free.dev");
+
+if (import.meta.env.DEV && isLocal && import.meta.env.VITE_FIREBASE_EMULATOR === 'true') {
   const LOCAL_HOST_IP = import.meta.env.VITE_HOST_IP || '192.168.100.34';
   connectAuthEmulator(secondaryAuth, `http://${LOCAL_HOST_IP}:9099`, { disableWarnings: true });
+  console.log("🤖 Emulador de Autenticación Secundaria Vinculado con Éxito.");
 }
 
 export default secondaryAuth;

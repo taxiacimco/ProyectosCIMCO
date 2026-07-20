@@ -1,10 +1,8 @@
-// Versión Arquitectura: V6.9 - Implementación de Manejador de Errores Global de Infraestructura y Resiliencia en Test de Estrés
+// Versión Arquitectura: V6.13 - Adaptación para Despliegue en Railway e Inyección CORS Cloudflare
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS dinámico para Proxies y orquestación de sockets modularizados.
- * Ajuste V6.9: FUSIÓN ATÓMICA. Se inyecta un middleware de control de errores global de cuatro parámetros antes del controlador 
- * de caída perimetral para capturar y neutralizar de manera limpia excepciones de persistencia (índices, WriteConflict, caídas transitorias de Atlas),
- * previniendo el colapso abrupto (crash) del proceso de Node durante ráfagas masivas.
+ * Ajuste V6.13: Vinculación a interfaz 0.0.0.0 para Railway e inyección del dominio oficial de producción en CORS.
  */
 
 import 'dotenv/config';
@@ -28,17 +26,23 @@ const logLocal = (msg) => {
     console.log(`[${new Date().toLocaleString('es-CO')}] ${msg}`);
 };
 
-// 📡 CONFIGURACIÓN MAESTRA DE CORS (Mapeo simétrico con variables de entorno e inyección estricta del túnel activo)
+// 📡 CONFIGURACIÓN MAESTRA DE CORS (Mapeo simétrico con variables de entorno e inyección del dominio oficial)
 const origenesPermitidos = [
-    process.env.CLIENT_ORIGIN_LOCAL,   // http://localhost:5173
-    process.env.CLIENT_ORIGIN_IP,      // http://192.168.100.34:5173
-    process.env.CLIENT_ORIGIN_TUNNEL,  // Respeta la variable del entorno previo
-    'https://globosely-appreciative-zander.ngrok-free.dev' // 🔗 Inyección quirúrgica del dominio seguro activo para mitigar el error ERR_NGROK_3200
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:4173',  
+    'http://127.0.0.1:4173',  
+    process.env.CLIENT_ORIGIN_LOCAL,   
+    process.env.CLIENT_ORIGIN_IP,      
+    'http://192.168.100.34:5173',     
+    'http://192.168.100.34:4173',     
+    process.env.CLIENT_ORIGIN_TUNNEL,  
+    'https://globosely-appreciative-zander.ngrok-free.dev',
+    'https://app.taxiacimco.com' // 🌐 ¡DOMINIO OFICIAL DE PRODUCCIÓN INYECTADO!
 ];
 
 const corsOptions = {
     origin: function (origin, callback) {
-        // Permitir peticiones sin origen (como apps móviles nativas, Postman o tareas internas)
         if (!origin) return callback(null, true);
         
         if (origenesPermitidos.indexOf(origin) !== -1) {
@@ -52,17 +56,19 @@ const corsOptions = {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 };
 
+// ==================================================================\\
+// ⚡ MIDDLEWARES PERIMETRALES Y CAPAS DE CONFIGURACIÓN
+// ==================================================================\\
 app.use(cors(corsOptions));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// 🎛️ CAPA MIDDLEWARE: MONITOREO DE TRÁFICO CENTRALIZADO
 app.use((req, res, next) => {
     const originHeader = req.headers.origin || req.headers.referer || 'Proxy Local / Red Directa';
     logLocal(`📡 [CIMCO-NUCLEO] ${req.method} desde ${originHeader} -> ${req.originalUrl}`);
     next();
 });
 
-// 🛠️ REMEDIACIÓN ROUTE-MISS: Endpoint estratégico para la verificación de salud e integridad del Nodo Central
 app.get('/health', (req, res) => {
     res.status(200).json({
         success: true,
@@ -73,27 +79,25 @@ app.get('/health', (req, res) => {
     });
 });
 
-// 🛣️ DECLARACIÓN DE INFRAESTRUCTURA DE ENRUTAMIENTO ATÓMICO
+// ==================================================================\\
+// 🚀 ENRUTADORES GENERALES DEL SISTEMA
+// ==================================================================\\
 app.use('/api/auth', authRoutes);
 app.use('/api/conductores', conductorRoutes);
 app.use('/api/viajes', viajeRoutes);
 
-// 🔌 ORQUESTACIÓN MAESTRA DE WEBSOCKETS (Sincronización en Tiempo Real de Flotas)
 const io = new Server(httpServer, {
     cors: corsOptions
 });
 
-// 🔥 Invocación modularizada con blindaje JWT y control de salas dinámicas
 inicializarSockets(io);
 
-// 🛡️ MIDDLEWARE GLOBAL DE ERRORES DE CUATRO PARÁMETROS (PREVENCION ANTI-CRASH BAJO ESTRÉS)
 app.use((err, req, res, next) => {
-    // Captura fallos de concurrencia y bloqueos transitorios en MongoDB Atlas (ej. WriteConflict)
     if (err.name === 'MongoServerError' || err.code === 112 || err.message.includes('WriteConflict')) {
         logLocal(`💥 [CIMCO-CONCURRENCIA] Conflicto de escritura detectado bajo ráfaga masiva: ${err.message}`);
         return res.status(503).json({
             success: false,
-            error: "Conflicto transitorio de transacciones concurrentes en el clúster. Reintentando operación.",
+            error: "Conflicto transitorio de transacciones concurrentes en el clúster. Reintentando operation.",
             retryAfterMS: 200
         });
     }
@@ -105,7 +109,6 @@ app.use((err, req, res, next) => {
     });
 });
 
-// 🛡️ CONTROLADOR DE CAÍDA PERIMETRAL (Captura regresiones de rutas inexistentes)
 app.use((req, res) => {
     logLocal(`⚠️ [CIMCO-ROUTE-MISS] Solicitud no interceptada por enrutadores en: ${req.originalUrl}`);
     res.status(404).json({
@@ -116,12 +119,12 @@ app.use((req, res) => {
 
 const URI = process.env.MONGODB_URI;
 const opcionesConexion = {
-    serverSelectionTimeoutMS: 10000, 
+    serverSelectionTimeoutMS: 10000,
     socketTimeoutMS: 45000,
-    family: 4, 
+    family: 4,
     directConnection: false,
-    retryWrites: true, 
-    w: 'majority'      
+    retryWrites: true,
+    w: 'majority'     
 };
 
 async function conectar() {
@@ -135,8 +138,9 @@ async function conectar() {
         logLocal('✅ [CIMCO-DATABASE] ¡CONEXIÓN ESTABLECIDA EXITOSAMENTE con MongoDB Atlas!');
         
         const PORT = process.env.PORT || 3000;
-        httpServer.listen(PORT, () => {
-            logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo en puerto: ${PORT}`);
+        // 🔄 AJUSTE DE ENRUTAMIENTO PERIMETRAL: Forzar escucha en la interfaz pública '0.0.0.0' para Railway
+        httpServer.listen(PORT, '0.0.0.0', () => {
+            logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo exitosamente en el puerto dinámico: ${PORT}`);
         });
     } catch (error) {
         logLocal(`🚨 [CIMCO-DATABASE-FATAL] Error crítico de enlace en la capa persistente: ${error.message}`);

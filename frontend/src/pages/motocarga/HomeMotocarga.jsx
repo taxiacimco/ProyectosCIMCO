@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.16 - Cierre de Componente y Sincronización Estructural de Carga Pesada
+// Versión Arquitectura: V12.18 - Sincronización Unificada de Radar GPS e Integración de Mutación de Perfil/Vehículo
 // Refactorización Estética: Cyber-Neo-Brutalismo Industrial Puro (Bordes Macizos, Hard Shadows y Cero Curvas)
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
@@ -10,7 +10,7 @@ import api from '@/config/api';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
-  CircleDollarSign, Signal, LogOut, Package, Truck, Loader
+  CircleDollarSign, Signal, LogOut, Package, Truck, Loader, UserSquare2
 } from 'lucide-react';
 
 const BACKEND_URL = "https://globosely-appreciative-zander.ngrok-free.dev";
@@ -23,8 +23,18 @@ export default function HomeMotocarga() {
   const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "CIMCO CARGA";
   const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback); 
 
+  // 📝 ESTADOS COMPLEMENTARIOS DE VEHÍCULO / PERFIL
+  const [datosPerfil, setDatosPerfil] = useState({
+    nombre: '',
+    telefono: '',
+    placa: '',
+    motoModelo: ''
+  });
+
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
+  const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
   const [solicitudViaje, setSolicitudViaje] = useState(null); 
   const [servicioActivo, setServicioActivo] = useState(null); 
   const [ofertasDisponibles, setOfertasDisponibles] = useState([]);
@@ -56,6 +66,14 @@ export default function HomeMotocarga() {
         if (nombreCompleto) {
           setNombreConductor(nombreCompleto.toUpperCase());
         }
+
+        // Sincronizar datos locales para el formulario de edición
+        setDatosPerfil({
+          nombre: nombreCompleto || '',
+          telefono: data?.telefono || '',
+          placa: data?.placa || data?.vehiculo?.placa || '',
+          motoModelo: data?.motoModelo || data?.vehiculo?.modelo || ''
+        });
       }
     }, (error) => {
       console.error("🚨 [CIMCO-CARGA-IDENTITY-ERROR] Fallo en lectura de perfil:", error);
@@ -65,7 +83,38 @@ export default function HomeMotocarga() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 2. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA (MOTOCARGA)
+  // 2. ACTUALIZACIÓN MUTABLE DE DATOS (FIRESTORE)
+  // ==================================================================
+  const handleGuardarPerfil = async (e) => {
+    e.preventDefault();
+    if (!user?.uid) return;
+    setGuardandoPerfil(true);
+    
+    try {
+      const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+      const conductorRef = doc(db, pathConductores, user.uid);
+      
+      await updateDoc(conductorRef, {
+        nombre: datosPerfil.nombre,
+        nombreCompleto: datosPerfil.nombre,
+        telefono: datosPerfil.telefono,
+        placa: datosPerfil.placa.toUpperCase(),
+        motoModelo: datosPerfil.motoModelo,
+        fechaActualizacion: serverTimestamp()
+      });
+      
+      setMostrarModalPerfil(false);
+      alert("✅ PERFIL Y VEHÍCULO DE CARGA ACTUALIZADOS EN RED");
+    } catch (error) {
+      console.error("🚨 [CIMCO-CARGA-PROFILE-UPDATE-ERR] No se pudieron salvar los datos:", error);
+      alert("Error al actualizar los datos en el servidor de carga.");
+    } finally {
+      setGuardandoPerfil(false);
+    }
+  };
+
+  // ==================================================================
+  // 3. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA (MOTOCARGA)
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
@@ -114,7 +163,7 @@ export default function HomeMotocarga() {
   }, [isOnline, conductorId, token, saldoVivo]);
 
   // ==================================================================
-  // 3. TRANSMISIÓN DE TELEMETRÍA GEOESPACIAL (COMPATIBLE 2DSPHERE [LNG, LAT])
+  // 4. TRANSMISIÓN DE TELEMETRÍA GEOESPACIAL (COMPATIBLE 2DSPHERE [LNG, LAT])
   // ==================================================================
   const iniciarTrackingGPS = () => {
     if (!navigator.geolocation) {
@@ -130,7 +179,7 @@ export default function HomeMotocarga() {
         setCoordenadas({ lat: latitude, lng: longitude });
 
         if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('actualizar_ubicacion_radar', {
+          socketRef.current.emit('actualizar_radar_gps', {
             conductorId,
             lat: latitude,
             lng: longitude
@@ -160,7 +209,7 @@ export default function HomeMotocarga() {
   };
 
   // ==================================================================
-  // 4. ESCUCHA ATÓMICA DE FLETES EN RADAR FIRESTORE
+  // 5. ESCUCHA ATÓMICA DE FLETES EN RADAR FIRESTORE
   // ==================================================================
   useEffect(() => {
     if (!user?.uid || !isOnline) {
@@ -193,7 +242,7 @@ export default function HomeMotocarga() {
   }, [user?.uid, isOnline]);
 
   // ==================================================================
-  // 5. MONITOR DE FLETE ACTIVO ASIGNADO A ESTA UNIDAD
+  // 6. MONITOR DE FLETE ACTIVO ASIGNADO A ESTA UNIDAD
   // ==================================================================
   useEffect(() => {
     if (!user?.uid) return;
@@ -226,7 +275,7 @@ export default function HomeMotocarga() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 6. ACCIONES DE GESTIÓN LOGÍSTICA CON DEPURACIÓN CONTABLE
+  // 7. ACCIONES DE GESTIÓN LOGÍSTICA CON DEPURACIÓN CONTABLE
   // ==================================================================
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
@@ -325,12 +374,17 @@ export default function HomeMotocarga() {
       {/* 🔝 ENCABEZADO DE CONTROL MAESTRO */}
       <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="p-2 bg-amber-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] select-none shrink-0 rounded-none">
+          {/* BOTÓN OPERATIVO PARA ABRIR MODAL DESDE EL ICONO */}
+          <button 
+            onClick={() => setMostrarModalPerfil(true)}
+            title="Editar Perfil y Vehículo"
+            className="p-2 bg-amber-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] select-none shrink-0 rounded-none hover:bg-amber-300 transition-colors active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+          >
             🚚
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xs font-black tracking-widest text-white uppercase truncate" title={nombreConductor}>
-              {nombreConductor}
+          </button>
+          <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setMostrarModalPerfil(true)}>
+            <h1 className="text-xs font-black tracking-widest text-white uppercase truncate flex items-center gap-1.5" title={nombreConductor}>
+              {nombreConductor} <span className="text-[9px] text-amber-400 underline lowercase font-normal">(editar)</span>
             </h1>
             <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
               <Signal size={10} className={isOnline ? "text-amber-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
@@ -578,15 +632,100 @@ export default function HomeMotocarga() {
         )}
       </main>
 
+      {/* 🛠️ MODAL NEO-BRUTALISTA DE AJUSTE DE DATOS PERSONALES / VEHÍCULO */}
+      {mostrarModalPerfil && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-zinc-900 border-4 border-black shadow-[8px_8px_0px_0px_#000] p-5 space-y-4 font-mono">
+            <div className="flex justify-between items-center border-b-4 border-black pb-2">
+              <div className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-widest">
+                <UserSquare2 size={16} className="text-amber-400" />
+                <span>Perfil Operador</span>
+              </div>
+              <button 
+                onClick={() => setMostrarModalPerfil(false)}
+                className="text-[10px] font-black bg-zinc-800 border-2 border-black text-zinc-400 px-2 py-0.5 uppercase hover:bg-zinc-700 active:translate-x-[1px]"
+              >
+                Cerrar [X]
+              </button>
+            </div>
+
+            <form onSubmit={handleGuardarPerfil} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Nombre Completo</label>
+                <input 
+                  type="text" 
+                  required
+                  value={datosPerfil.nombre}
+                  onChange={(e) => setDatosPerfil({...datosPerfil, nombre: e.target.value})}
+                  className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-amber-400 rounded-none placeholder-zinc-700 uppercase"
+                  placeholder="Ej: MARCOS DIAZ"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Celular / Contacto</label>
+                <input 
+                  type="tel" 
+                  required
+                  value={datosPerfil.telefono}
+                  onChange={(e) => setDatosPerfil({...datosPerfil, telefono: e.target.value})}
+                  className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-amber-400 rounded-none placeholder-zinc-700"
+                  placeholder="Ej: 3157654321"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Placa Motocarga</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={datosPerfil.placa}
+                    onChange={(e) => setDatosPerfil({...datosPerfil, placa: e.target.value})}
+                    className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-amber-400 rounded-none placeholder-zinc-700 uppercase"
+                    placeholder="Ej: ABC45F"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Cilindraje / Modelo</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={datosPerfil.motoModelo}
+                    onChange={(e) => setDatosPerfil({...datosPerfil, motoModelo: e.target.value})}
+                    className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-amber-400 rounded-none placeholder-zinc-700"
+                    placeholder="Ej: Torito RE 205"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={guardandoPerfil}
+                  className="w-full bg-amber-400 hover:bg-amber-500 text-black font-black uppercase py-3 border-2 border-black tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                >
+                  {guardandoPerfil ? 'GUARDANDO CAMBIOS...' : 'ACTUALIZAR DATOS'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR */}
       <footer className="fixed bottom-0 left-0 w-full bg-zinc-900 border-t-4 border-black p-3 flex justify-around items-center z-50 shadow-[0_-4px_0px_0px_#000]">
         <button className="text-amber-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95">
           <Truck size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Radar Fletes</span>
         </button>
-        <button className="text-zinc-600 flex flex-col items-center gap-0.5 cursor-not-allowed opacity-50">
-          <Clock size={18} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-wider">Historial</span>
+        {/* ENLACE DE ACCESO AL MODAL DE PERFIL */}
+        <button 
+          onClick={() => setMostrarModalPerfil(true)}
+          className="text-zinc-400 hover:text-amber-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95"
+        >
+          <UserSquare2 size={18} strokeWidth={2.5} />
+          <span className="text-[9px] font-black uppercase tracking-wider">Perfil</span>
         </button>
         <button className="text-zinc-600 flex flex-col items-center gap-0.5 cursor-not-allowed opacity-50">
           <Wallet size={18} strokeWidth={2.5} />

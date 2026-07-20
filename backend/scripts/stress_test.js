@@ -1,8 +1,26 @@
+// Versión Arquitectura: V22.1 - Bloqueo de Perímetro de Producción y Carga Dinámica de Puertos
 // Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\stress_test.js
-// Versión: V22.0 - Sincronización Total vía Endpoint Dedicado de Pruebas
 
-const BASE_URL_VIAJES = "http://localhost:3000/api/viajes";
-const BASE_URL_CONDUCTORES = "http://localhost:3000/api/conductores"; 
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Resolución y carga del entorno local para evaluar el NODE_ENV antes de cualquier disparo HTTP
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+const ENTORNO_ACTUAL = process.env.NODE_ENV || 'development';
+const PORT = process.env.PORT || 3000;
+
+// 🛡️ COMPUERTA PERIMETRAL: Detener el script si se intenta correr apuntando a producción
+if (ENTORNO_ACTUAL === 'production') {
+    console.error("\n🚨 [CIMCO-ANTIFRAUDE] Abortando stress_test.js: Prohibido lanzar pruebas de carga en producción.");
+    console.error("🔒 Los endpoints de bypass y los tokens mock están deshabilitados globalmente.\n");
+    process.exit(1);
+}
+
+const BASE_URL_VIAJES = `http://localhost:${PORT}/api/viajes`;
+const BASE_URL_CONDUCTORES = `http://localhost:${PORT}/api/conductores`; 
 const TOTAL_CONCURRENTE = 10; 
 
 let ID_CONDUCTOR_REAL = "6a29c73cc8d7b14cd8f85876"; 

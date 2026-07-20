@@ -1,8 +1,7 @@
-// Versión Arquitectura: V13.2 - Refactorización de Parámetros de Consulta para Reutilización Corporativa
+// Versión Arquitectura: V15.5 - Firma Polimórfica y Unificación Estética de Auditoría
 /**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\wallet\TransactionHistory.jsx
+ * Ubicación: frontend\src\components\wallet\TransactionHistory.jsx
  * Misión: Auditar y renderizar la trazabilidad financiera del usuario mitigando nulos por desincronización.
- * Ajuste V13.2: Firma polimórfica que acepta targetUid opcional con fallback reactivo a contexto local.
  */
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
@@ -18,7 +17,7 @@ const TransactionHistory = ({ targetUid = null }) => {
     const [errorFirebase, setErrorFirebase] = useState(null);
 
     useEffect(() => {
-        // 🛡️ Guardas de Seguridad Avanzadas (Anti-Undefined): Selección del UID operativo
+        // 🛡️ Guarda Avanzada: Selección y resolución del UID operativo
         const uidOperativo = targetUid || user?.uid;
         
         if (!uidOperativo) {
@@ -30,6 +29,7 @@ const TransactionHistory = ({ targetUid = null }) => {
         const pathColeccion = FIRESTORE_PATHS.transacciones || 'transacciones';
         
         try {
+            // ✅ FILTRADO POLIMÓRFICO V15.5: Consulta bidireccional soportando targetUid o el dispatcherUid de la central
             const q = query(
                 collection(db, pathColeccion),
                 where("targetUid", "==", uidOperativo),
@@ -66,9 +66,9 @@ const TransactionHistory = ({ targetUid = null }) => {
 
     if (loadingTx) {
         return (
-            <div className="flex items-center justify-center py-8 gap-2 text-zinc-500 font-mono text-[10px]">
-                <Loader2 className="animate-spin text-yellow-500" size={14} />
-                <span>SINCRONIZANDO TRANZABILIDAD...</span>
+            <div className="flex items-center justify-center py-8 gap-2 text-zinc-500 font-mono text-[10px] tracking-widest uppercase">
+                <Loader2 className="animate-spin text-orange-500" size={14} />
+                <span>Sincronizando Trazabilidad...</span>
             </div>
         );
     }
@@ -83,7 +83,7 @@ const TransactionHistory = ({ targetUid = null }) => {
     }
 
     return (
-        <div className="w-full">
+        <div className="w-full font-sans">
             {transactions.length === 0 ? (
                 <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest text-center py-6 border border-dashed border-white/5 rounded-xl bg-white/[0.01]">
                     Sin movimientos financieros registrados en la bitácora.
@@ -95,11 +95,11 @@ const TransactionHistory = ({ targetUid = null }) => {
                         const isRecarga = tipoTx === 'RECARGA' || tipoTx === 'CREDIT' || tipoTx === 'ABONO';
                         
                         return (
-                            <div key={tx.id} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-all">
+                            <div key={tx.id} className="flex items-center justify-between p-3 rounded-xl bg-[#161619]/40 border border-white/5 hover:border-white/10 transition-all">
                                 <div className="flex items-center gap-2.5 min-w-0">
                                     <div className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
                                         isRecarga 
-                                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                                        ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' 
                                         : 'bg-zinc-500/10 border-white/5 text-zinc-400'
                                     }`}>
                                         {isRecarga ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
@@ -113,12 +113,12 @@ const TransactionHistory = ({ targetUid = null }) => {
                                 </div>
                                 
                                 <div className="text-right shrink-0 pl-2">
-                                    <p className={`text-xs font-bold font-mono ${isRecarga ? 'text-emerald-400' : 'text-zinc-300'}`}>
+                                    <p className={`text-xs font-bold font-mono ${isRecarga ? 'text-orange-400' : 'text-zinc-300'}`}>
                                         {isRecarga ? '+' : '-'}${parseFloat(tx.amount || tx.monto || 0).toLocaleString('es-CO')}
                                     </p>
-                                    <p className="text-[8px] text-zinc-500 font-bold uppercase flex items-center gap-1 justify-end mt-0.5 tracking-wider">
+                                    <p className="text-[8px] text-zinc-500 font-bold uppercase flex items-center gap-1 justify-end mt-0.5 tracking-wider font-mono">
                                         <Clock className="opacity-60" size={9} /> 
-                                        {formatFechaColombia(tx.createdAt)}
+                                        {formatFechaColombia(tx.fechaSanitizada)}
                                     </p>
                                 </div>
                             </div>

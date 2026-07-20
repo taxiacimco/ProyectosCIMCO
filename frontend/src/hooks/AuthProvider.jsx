@@ -1,9 +1,7 @@
-// Versión Arquitectura: V21.5 - Sincronización Estricta de Identidad MongoDB-Firebase y Exterminio de Escuchas Zombis
+// Versión Arquitectura: V21.8 - Tolerancia a Fallos Satelitales Firebase y Sincronización Estricta MongoDB-Firebase
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
  * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO.
- * Ajuste V21.5: Sincronización bidireccional absoluta de uid e _id al inicializar, mutar y persistir sesión.
- * Corrección de Enrutamiento: Eliminación del prefijo duplicado /api en los métodos de pasarela HTTP de Axios.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -21,6 +19,7 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         const initializeSession = async () => {
             try {
+                // Purgamos posibles tokens residuales antiguos para evitar interferencias
                 localStorage.removeItem('token');
                 localStorage.removeItem('taxia_token');
 
@@ -41,11 +40,15 @@ export const AuthProvider = ({ children }) => {
                         setUser(parsedUser);
                     }
                 } else {
-                    // Si no hay sesión centralizada, se levanta canal anónimo de telemetría por contingencia
-                    const authFirebase = getAuth();
-                    if (!authFirebase.currentUser) {
-                        await signInAnonymously(authFirebase);
-                        console.log("📡 [CIMCO-AUTH] Canal anónimo de telemetría desplegado con éxito.");
+                    // 🛡️ PROTECCIÓN ANTI-FALLO FATAL: Canal anónimo envuelto para tolerancia a fallos
+                    try {
+                        const authFirebase = getAuth();
+                        if (!authFirebase.currentUser) {
+                            await signInAnonymously(authFirebase);
+                            console.log("📡 [CIMCO-AUTH] Canal anónimo de telemetría desplegado con éxito.");
+                        }
+                    } catch (fbError) {
+                        console.warn("⚠️ [CIMCO-AUTH-FALLBACK] No se pudo levantar el canal anónimo de Firebase de inmediato. Operando en modo local desconectado:", fbError.message);
                     }
                 }
             } catch (error) {
@@ -79,8 +82,12 @@ export const AuthProvider = ({ children }) => {
     const loginLocal = async (email, password) => {
         try {
             setLoading(true);
-            // ✅ AJUSTE: Se limpia la ruta de '/api/auth/login' a '/auth/login' para evitar el error 404 de duplicación
-            const respuesta = await api.post('/auth/login', { email, password });
+            
+            // ⚡ CORE FIX: Cambiamos 'email' por 'identifier' para cumplir con los requerimientos estrictos del validador de backend
+            const respuesta = await api.post('/auth/login', { 
+                identifier: email, 
+                password: password 
+            });
             
             if (respuesta.data && respuesta.data.success) {
                 const { token, user: userData } = respuesta.data;
@@ -100,14 +107,15 @@ export const AuthProvider = ({ children }) => {
                 api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
                 setUser(userData);
 
-                // Autenticación paralela en Firebase para sincronización táctica de mapa y canales de Firestore
+                // 🛡️ Autenticación paralela en Firebase protegida contra fallos (Tolerancia del Ecosistema)
                 try {
                     const authFirebase = getAuth();
                     if (!authFirebase.currentUser) {
                         await signInAnonymously(authFirebase);
+                        console.log("📡 [CIMCO-AUTH-FIREBASE] Enlace satelital anónimo acoplado con éxito.");
                     }
                 } catch (fbError) {
-                    console.warn("⚠️ [CIMCO-AUTH] Canal satelital Firebase Auth no enlazado, operando en modo degradado:", fbError.message);
+                    console.warn("⚠️ [CIMCO-AUTH-WARNING] El puente satelital Firebase falló de forma no fatal. Operando en modo degradado local:", fbError.message);
                 }
 
                 return { success: true, user: userData };
@@ -128,7 +136,6 @@ export const AuthProvider = ({ children }) => {
     const registerCentral = async (payload) => {
         try {
             setLoading(true);
-            // ✅ AJUSTE: Se limpia la ruta de '/api/auth/register' a '/auth/register' para evitar colisiones
             const respuesta = await api.post('/auth/register', payload);
             if (respuesta.data && respuesta.data.success) {
                 return { success: true, data: respuesta.data };
@@ -157,7 +164,6 @@ export const AuthProvider = ({ children }) => {
     };
 
     const logout = async () => {
-        // Purga atómica de persistencia local y cabeceras de Axios
         localStorage.removeItem('cimco_token');
         localStorage.removeItem('cimco_user');
         localStorage.removeItem('token');
@@ -168,9 +174,6 @@ export const AuthProvider = ({ children }) => {
         
         try {
             const authFirebase = getAuth();
-            
-            // 🧹 Exterminación Definitiva de Conexiones Zombis del Emulador / Firebase SDK
-            // El método signOut fuerza el cierre de flujos reactivos de escucha en Firestore
             if (authFirebase.currentUser) {
                 await signOut(authFirebase);
                 console.log("🧹 [CIMCO-AUTH] Canal satelital Firebase cerrado y purgado de forma segura.");
@@ -184,7 +187,7 @@ export const AuthProvider = ({ children }) => {
         <AuthContext.Provider value={{ 
             user, 
             setUser, 
-            actualizarEstadoLocal, // ⚡ Inyectado al árbol de contexto global
+            actualizarEstadoLocal, 
             loading, 
             initialized, 
             loginLocal, 

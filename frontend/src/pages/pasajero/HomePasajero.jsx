@@ -1,18 +1,18 @@
-// Versión Arquitectura: V14.1 - Blindaje de Telemetría Red y Coexistencia de Canales Híbridos
+// Versión Arquitectura: V14.5 - Blindaje de Telemetría Red y Coexistencia de Canales Híbridos con Módulo de Billetera y Perfil Avanzado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
- * Misión: Emisión activa de telemetría y solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS) y visualización de perfil.
- * Ajuste V14.1: Integración quirúrgica de sockets a través de API_CORE_URL, blindaje anti-undefined en coordenadas e inyección CIMCO-UI V9.3.
+ * Misión: Emisión activa de telemetría, solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS), edición de perfil y pasarela de billetera.
+ * Ajuste V14.5: Integración de actualización de datos de perfil, mapeo exacto de íconos de flota solicitados y pasarela para recargas simuladas de Admin/CEO.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, auth as firebaseAuth, FIRESTORE_PATHS } from '@/config/firebase'; 
-import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, updateDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { useAuth } from '@/hooks/useAuth';
 import { useGpsGuard } from '@/hooks/useGpsGuard';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, DollarSign, Send, MessageSquare, Activity, Wallet, QrCode, Banknote, ShieldAlert } from 'lucide-react';
+import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, DollarSign, Send, MessageSquare, Activity, Wallet, QrCode, Banknote, ShieldAlert, User, Edit3, X, CreditCard } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import GpsRequiredModal from '@/components/shared/GpsRequiredModal';
@@ -25,7 +25,7 @@ import { io } from 'socket.io-client';
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
@@ -68,10 +68,6 @@ const HomePasajero = () => {
     
     // 🛡️ Integración Hook Perimetral de Monitoreo GPS y Guardas Anti-Undefined
     const { isGpsValid, showGpsModal, checkGpsStatus, coordenadasPasajero, reintentarGps } = useGpsGuard();
-    
-    // Extracción Saneada de Metadatos de Identidad de Usuario
-    const nombrePasajero = user?.nombre || user?.name || user?.displayName || 'Pasajero Operativo';
-    const idPasajero = String(user?.id || user?._id || user?.uid || 'ANÓNIMO').slice(0, 8);
 
     // Matrices de Estado Reactivo
     const [coordenadas, setCoordenadas] = useState([9.718, -73.351]); // La Jagua de Ibirico Fallback
@@ -85,8 +81,27 @@ const HomePasajero = () => {
     const [procesandoPeticion, setProcesandoPeticion] = useState(false);
     const [errorInterno, setErrorInterno] = useState('');
     const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
+    
+    // 🗲 Estados de la UI / Secciones dinámicas inferiores
+    const [seccionActiva, setSeccionActiva] = useState('radar'); // 'radar' | 'billetera'
+    const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
+    
+    // 🔄 Sincronización dinámica de perfil extendido desde Firestore
+    const [perfilFirestore, setPerfilFirestore] = useState({
+        nombre: 'Cargando...',
+        telefono: '',
+        saldoBilletera: 0
+    });
+
+    // Inputs editables del perfil
+    const [inputNombre, setInputNombre] = useState('');
+    const [inputTelefono, setInputTelefono] = useState('');
+    const [montoRecargaSimulada, setMontoRecargaSimulada] = useState('20000');
 
     const socketRef = useRef(null);
+    
+    const uidUsuario = user?.uid || user?.id || user?._id || 'ANÓNIMO';
+    const idPasajeroCorto = String(uidUsuario).slice(0, 8);
 
     // Conexión Dinámica de Sockets mapeada al Gateway del Core API
     useEffect(() => {
@@ -106,6 +121,37 @@ const HomePasajero = () => {
         };
     }, []);
 
+    // 🔄 Streaming reactivo de datos de perfil y billetera del Pasajero en Firestore
+    useEffect(() => {
+        if (!uidUsuario || uidUsuario === 'ANÓNIMO') return;
+        
+        const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
+        const docRef = doc(db, pathUsuarios, uidUsuario);
+        
+        const unsubscribe = onSnapshot(docRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
+                const perfilActualizado = {
+                    nombre: data.nombre || user?.nombre || user?.displayName || 'Pasajero Operativo',
+                    telefono: data.telefono || '',
+                    saldoBilletera: typeof data.saldoBilletera === 'number' ? data.saldoBilletera : 0
+                };
+                setPerfilFirestore(perfilActualizado);
+                setInputNombre(perfilActualizado.nombre);
+                setInputTelefono(perfilActualizado.telefono);
+            } else {
+                // Fallback por si el documento aún no existe en colecciones unificadas
+                setPerfilFirestore({
+                    nombre: user?.nombre || user?.displayName || 'Pasajero Operativo',
+                    telefono: '',
+                    saldoBilletera: 0
+                });
+            }
+        });
+
+        return () => unsubscribe();
+    }, [uidUsuario, user]);
+
     // Sincronización Automática con el Hook de Permisos de Ubicación Hardware
     useEffect(() => {
         if (coordenadasPasajero && coordenadasPasajero.lat && coordenadasPasajero.lng) {
@@ -122,7 +168,6 @@ const HomePasajero = () => {
             const unidades = [];
             snapshot.forEach((doc) => {
                 const data = doc.data();
-                // Blindaje anti-undefined estructural en lectura geoespacial
                 if (data && data.coordenadas && typeof data.coordenadas.lat === 'number' && typeof data.coordenadas.lng === 'number') {
                     unidades.push({ id: doc.id, ...data });
                 }
@@ -191,6 +236,55 @@ const HomePasajero = () => {
         });
     };
 
+    // Actualización de Datos Personales del Pasajero
+    const handleActualizarPerfil = async (e) => {
+        e.preventDefault();
+        if (!inputNombre.trim()) {
+            setErrorInterno("⚠️ El nombre de perfil no puede quedar vacío.");
+            return;
+        }
+
+        try {
+            const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
+            const docRef = doc(db, pathUsuarios, uidUsuario);
+            
+            await updateDoc(docRef, {
+                nombre: inputNombre.trim(),
+                telefono: inputTelefono.trim(),
+                fechaActualizacion: serverTimestamp()
+            });
+
+            setMostrarModalPerfil(false);
+            console.log("🔒 [PERFIL-CIMCO] Datos de usuario guardados en nodo atómico.");
+        } catch (err) {
+            console.error("❌ [PERFIL-ERROR] Fallo al actualizar base distribuidora:", err);
+            setErrorInterno("No se pudieron actualizar tus datos personales.");
+        }
+    };
+
+    // 💰 Inyección de saldo simulando consola de administración CEO/Admin
+    const handleRecargaAdministrativaCEO = async (e) => {
+        e.preventDefault();
+        const montoNum = parseFloat(montoRecargaSimulada);
+        if (isNaN(montoNum) || montoNum <= 0) return;
+
+        try {
+            const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
+            const docRef = doc(db, pathUsuarios, uidUsuario);
+            const nuevoSaldo = perfilFirestore.saldoBilletera + montoNum;
+
+            await updateDoc(docRef, {
+                saldoBilletera: nuevoSaldo,
+                ultimaRecargaCEO: serverTimestamp()
+            });
+
+            console.log(`🏦 [CEO-WALLET-INJECTION] Recarga forzada exitosa. Nuevo saldo: $${nuevoSaldo}`);
+        } catch (err) {
+            console.error("❌ [WALLET-ERROR] Falla crítica en pasarela de simulación:", err);
+            setErrorInterno("Error de red en el procesador de transacciones.");
+        }
+    };
+
     const handleSolicitarServicio = async (e) => {
         if (e) e.preventDefault();
         if (procesandoPeticion) return;
@@ -203,7 +297,6 @@ const HomePasajero = () => {
         setErrorInterno('');
 
         try {
-            // Asegurar lectura de coordenadas en tiempo de ejecución
             let coordsActuales = coordenadas;
             try {
                 coordsActuales = await obtenerUbicacionHardware();
@@ -214,8 +307,8 @@ const HomePasajero = () => {
 
             const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
             const payload = {
-                pasajeroId: user?.uid || 'ANÓNIMO',
-                nombrePasajero,
+                pasajeroId: uidUsuario,
+                nombrePasajero: perfilFirestore.nombre,
                 tipoServicio,
                 metodoPago,
                 destino: destinoText.trim(),
@@ -285,12 +378,19 @@ const HomePasajero = () => {
                     </div>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.1</span>
+                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.5</span>
                         </h1>
-                        <p className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest flex items-center gap-1">
+                        <div className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
-                            ID: <span className="text-zinc-200">{idPasajero}</span> | {nombrePasajero}
-                        </p>
+                            <span>ID: {idPasajeroCorto}</span>
+                            <span className="text-zinc-600">|</span>
+                            <button 
+                                onClick={() => setMostrarModalPerfil(true)} 
+                                className="text-cyan-400 font-bold hover:underline flex items-center gap-1 bg-cyan-500/5 px-1.5 py-0.5 rounded border border-cyan-500/10 transition-all"
+                            >
+                                <User size={10} /> {perfilFirestore.nombre} <Edit3 size={8} />
+                            </button>
+                        </div>
                     </div>
                 </div>
                 <button 
@@ -304,6 +404,7 @@ const HomePasajero = () => {
 
             {/* CONTENEDOR TÁCTICO CENTRAL */}
             <main className="pt-[78px] pb-[80px] min-h-screen w-full flex flex-col md:flex-row relative z-10">
+                
                 {/* PANEL DE CONTROL IZQUIERDO */}
                 <section className="w-full md:w-[420px] p-4 md:p-6 flex flex-col gap-4 border-b md:border-b-0 md:border-r border-white/5 bg-[#121214]/40 backdrop-blur-md">
                     {/* MONITOR DE ESTADO Y ERRORES */}
@@ -314,151 +415,205 @@ const HomePasajero = () => {
                         </div>
                     )}
 
-                    {estadoViaje === 'IDLE' && (
-                        <div className="p-5 rounded-2xl border border-white/5 bg-[#121214]/60 relative overflow-hidden group transition-all duration-300 hover:border-white/10">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl pointer-events-none" />
-                            <h2 className="text-xs font-black uppercase tracking-widest text-cyan-400 mb-4 flex items-center gap-2">
-                                <Compass size={14} className="animate-spin-slow" /> Configurar Nueva Orden
-                            </h2>
-                            <form onSubmit={handleSolicitarServicio} className="flex flex-col gap-4">
-                                <div className="flex flex-col gap-1.5">
-                                    <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Destino de Arribo</label>
-                                    <div className="relative">
-                                        <MapPin size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-                                        <input 
-                                            type="text"
-                                            value={destinoText}
-                                            onChange={(e) => setDestinoText(e.target.value)}
-                                            placeholder="¿A dónde nos dirigimos hoy?"
-                                            className="w-full bg-[#161619] border border-white/5 rounded-xl py-3 pl-10 pr-4 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/40 focus:ring-1 focus:ring-cyan-500/40 transition-all"
-                                        />
-                                    </div>
-                                </div>
+                    {/* INTERFAZ DINÁMICA: RADAR DE SERVICIOS */}
+                    {seccionActiva === 'radar' && (
+                        <>
+                            {estadoViaje === 'IDLE' && (
+                                <div className="p-5 rounded-2xl border border-white/5 bg-[#121214]/60 relative overflow-hidden group transition-all duration-300 hover:border-white/10">
+                                    <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl pointer-events-none" />
+                                    <h2 className="text-xs font-black uppercase tracking-widest text-cyan-400 mb-4 flex items-center gap-2">
+                                        <Compass size={14} className="animate-spin-slow" /> Configurar Nueva Orden
+                                    </h2>
+                                    <form onSubmit={handleSolicitarServicio} className="flex flex-col gap-4">
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Destino de Arribo</label>
+                                            <div className="relative">
+                                                <MapPin size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                                                <input 
+                                                    type="text"
+                                                    value={destinoText}
+                                                    onChange={(e) => setDestinoText(e.target.value)}
+                                                    placeholder="¿A dónde nos dirigimos hoy?"
+                                                    className="w-full bg-[#161619] border border-white/5 rounded-xl py-3 pl-10 pr-4 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/40 focus:ring-1 focus:ring-cyan-500/40 transition-all"
+                                                />
+                                            </div>
+                                        </div>
 
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="flex flex-col gap-1.5">
-                                        <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Modalidad Flota</label>
-                                        <select 
-                                            value={tipoServicio}
-                                            onChange={(e) => setTipoServicio(e.target.value)}
-                                            className="w-full bg-[#161619] border border-white/5 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/40 transition-all appearance-none cursor-pointer"
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="flex flex-col gap-1.5">
+                                                <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Modalidad Flota</label>
+                                                <select 
+                                                    value={tipoServicio}
+                                                    onChange={(e) => setTipoServicio(e.target.value)}
+                                                    className="w-full bg-[#161619] border border-white/5 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/40 transition-all appearance-none cursor-pointer text-left"
+                                                >
+                                                    <option value="mototaxi">🛺 Mototaxi</option>
+                                                    <option value="motoparrillero">🛵 Motoparrillero</option>
+                                                    <option value="motocarga">🚛 Motocarga</option>
+                                                    <option value="intermunicipal">0🛣️ Intermunicipal</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="flex flex-col gap-1.5">
+                                                <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Pasarela Pago</label>
+                                                <select 
+                                                    value={metodoPago}
+                                                    onChange={(e) => setMetodoPago(e.target.value)}
+                                                    className="w-full bg-[#161619] border border-white/5 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/40 transition-all appearance-none cursor-pointer"
+                                                >
+                                                    <option value="EFECTIVO">💵 EFECTIVO</option>
+                                                    <option value="BILLETERA">📱 BILLETERA (${perfilFirestore.saldoBilletera.toLocaleString()})</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            type="submit"
+                                            disabled={procesandoPeticion}
+                                            className="w-full mt-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black text-xs font-black uppercase tracking-widest py-3.5 rounded-xl transition-all duration-300 shadow-[0_4px_20px_rgba(6,182,212,0.25)] hover:shadow-[0_4px_25px_rgba(6,182,212,0.4)] active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2"
                                         >
-                                            <option value="mototaxi">🏍️ MOTOTAXI</option>
-                                            <option value="motocarga">🛺 MOTOCARGA</option>
-                                            <option value="motoparrillero">👥 PARRILLERO</option>
-                                            <option value="intermunicipal">🚌 INTERMUNICIPAL</option>
-                                        </select>
-                                    </div>
-
-                                    <div className="flex flex-col gap-1.5">
-                                        <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Pasarela Pago</label>
-                                        <select 
-                                            value={metodoPago}
-                                            onChange={(e) => setMetodoPago(e.target.value)}
-                                            className="w-full bg-[#161619] border border-white/5 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/40 transition-all appearance-none cursor-pointer"
-                                        >
-                                            <option value="EFECTIVO">💵 EFECTIVO</option>
-                                            <option value="BILLETERA">📱 BILLETERA</option>
-                                        </select>
-                                    </div>
+                                            {procesandoPeticion ? (
+                                                <>
+                                                    <Activity className="animate-spin text-black" size={16} />
+                                                    Procesando Vector...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Send size={14} />
+                                                    Lanzar Solicitud
+                                                </>
+                                            )}
+                                        </button>
+                                    </form>
                                 </div>
-
-                                <button
-                                    type="submit"
-                                    disabled={procesandoPeticion}
-                                    className="w-full mt-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black text-xs font-black uppercase tracking-widest py-3.5 rounded-xl transition-all duration-300 shadow-[0_4px_20px_rgba(6,182,212,0.25)] hover:shadow-[0_4px_25px_rgba(6,182,212,0.4)] active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none flex items-center justify-center gap-2"
-                                >
-                                    {procesandoPeticion ? (
-                                        <>
-                                            <Activity className="animate-spin text-black" size={16} />
-                                            Procesando Vector...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Send size={14} />
-                                            Lanzar Solicitud
-                                        </>
-                                    )}
-                                </button>
-                            </form>
-                        </div>
-                    )}
-
-                    {estadoViaje === 'BUSCANDO' && (
-                        <div className="p-6 rounded-2xl border border-cyan-500/20 bg-[#121214]/80 backdrop-blur-md relative overflow-hidden shadow-2xl flex flex-col items-center justify-center text-center py-10 animate-pulse">
-                            <div className="w-16 h-16 rounded-full bg-cyan-500/10 flex items-center justify-center border border-cyan-500/30 mb-4 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
-                                <Activity className="text-cyan-400 animate-spin" size={26} />
-                            </div>
-                            <h3 className="text-sm font-black uppercase tracking-widest text-cyan-400 mb-1">Buscando Operador</h3>
-                            <p className="text-[10px] text-zinc-400 uppercase tracking-wider font-mono max-w-[240px] leading-relaxed mb-6">
-                                Tu orden ha sido inyectada en el radar radial. Esperando confirmación de unidad solvente.
-                            </p>
-                            <button
-                                onClick={handleCancelarViaje}
-                                className="px-5 py-2.5 rounded-xl border border-red-500/30 bg-red-500/5 hover:bg-red-500/10 text-red-400 text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95"
-                            >
-                                Abortar Petición
-                            </button>
-                        </div>
-                    )}
-
-                    {(estadoViaje === 'ACEPTADO' || estadoViaje === 'EN_CAMINO' || estadoViaje === 'EN_VIAJE') && datosConductor && (
-                        <div className="p-5 rounded-2xl border border-emerald-500/20 bg-[#121214]/90 backdrop-blur-md relative overflow-hidden shadow-2xl flex flex-col gap-4">
-                            <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                                <div>
-                                    <span className="text-[9px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded">
-                                        {estadoViaje === 'EN_VIAJE' ? 'Tránsito Activo' : 'Unidad Asignada'}
-                                    </span>
-                                    <h4 className="text-xs font-black uppercase tracking-wider text-white mt-1.5">{datosConductor.nombre || 'Conductor Asignado'}</h4>
-                                </div>
-                                <div className="w-10 h-10 rounded-xl bg-zinc-800 border border-white/5 flex items-center justify-center">
-                                    <Bike className="text-emerald-400" size={20} />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3 bg-[#161619]/60 p-3 rounded-xl border border-white/5">
-                                <div>
-                                    <p className="text-[8px] uppercase tracking-widest text-zinc-500 font-bold">Identificador Placa</p>
-                                    <p className="text-xs font-black text-cyan-400 font-mono tracking-wider uppercase mt-0.5">{datosConductor.placa || 'N/A'}</p>
-                                </div>
-                                <div>
-                                    <p className="text-[8px] uppercase tracking-widest text-zinc-500 font-bold">Contacto Celular</p>
-                                    <p className="text-xs font-bold text-zinc-200 font-mono mt-0.5">{datosConductor.telefono || 'N/A'}</p>
-                                </div>
-                            </div>
-
-                            {estadoViaje !== 'EN_VIAJE' && (
-                                <button
-                                    onClick={handleCancelarViaje}
-                                    className="w-full py-3 rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-400 text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95 mt-1"
-                                >
-                                    Cancelar Servicio
-                                </button>
                             )}
-                        </div>
-                    )}
 
-                    {/* VISTA RÁPIDA DE DISPONIBILIDAD FLOTA */}
-                    <div className="p-4 rounded-xl border border-white/5 bg-[#121214]/20 mt-auto">
-                        <h4 className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-2.5 flex items-center gap-1.5">
-                            <Users size={10} /> Consola de Flota Activa
-                        </h4>
-                        <div className="flex flex-col gap-1.5 max-h-[140px] overflow-y-auto pr-1">
-                            {conductoresActivos.length === 0 ? (
-                                <p className="text-[10px] text-zinc-600 italic font-mono">Buscando transmisiones en la zona...</p>
-                            ) : (
-                                conductoresActivos.map((cond) => (
-                                    <div key={cond.id} className="flex items-center justify-between text-[10px] bg-[#161619]/40 p-2 rounded-lg border border-white/5 font-mono">
-                                        <span className="text-zinc-300 font-medium truncate max-w-[120px]">{cond.nombre || 'Operador'}</span>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">{cond.tipoServicio || 'moto'}</span>
-                                            <span className="text-cyan-400 bg-cyan-500/5 px-1.5 py-0.5 rounded border border-cyan-500/10 text-[9px] font-bold uppercase tracking-wider">{cond.placa || 'N/A'}</span>
+                            {estadoViaje === 'BUSCANDO' && (
+                                <div className="p-6 rounded-2xl border border-cyan-500/20 bg-[#121214]/80 backdrop-blur-md relative overflow-hidden shadow-2xl flex flex-col items-center justify-center text-center py-10 animate-pulse">
+                                    <div className="w-16 h-16 rounded-full bg-cyan-500/10 flex items-center justify-center border border-cyan-500/30 mb-4 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
+                                        <Activity className="text-cyan-400 animate-spin" size={26} />
+                                    </div>
+                                    <h3 className="text-sm font-black uppercase tracking-widest text-cyan-400 mb-1">Buscando Operador</h3>
+                                    <p className="text-[10px] text-zinc-400 uppercase tracking-wider font-mono max-w-[240px] leading-relaxed mb-6">
+                                        Tu orden ha sido inyectada en el radar radial. Esperando confirmación de unidad solvente.
+                                    </p>
+                                    <button
+                                        onClick={handleCancelarViaje}
+                                        className="px-5 py-2.5 rounded-xl border border-red-500/30 bg-red-500/5 hover:bg-red-500/10 text-red-400 text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95"
+                                    >
+                                        Abortar Petición
+                                    </button>
+                                </div>
+                            )}
+
+                            {(estadoViaje === 'ACEPTADO' || estadoViaje === 'EN_CAMINO' || estadoViaje === 'EN_VIAJE') && datosConductor && (
+                                <div className="p-5 rounded-2xl border border-emerald-500/20 bg-[#121214]/90 backdrop-blur-md relative overflow-hidden shadow-2xl flex flex-col gap-4">
+                                    <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                                        <div>
+                                            <span className="text-[9px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded">
+                                                {estadoViaje === 'EN_VIAJE' ? 'Tránsito Activo' : 'Unidad Asignada'}
+                                            </span>
+                                            <h4 className="text-xs font-black uppercase tracking-wider text-white mt-1.5">{datosConductor.nombre || 'Conductor Asignado'}</h4>
+                                        </div>
+                                        <div className="w-10 h-10 rounded-xl bg-zinc-800 border border-white/5 flex items-center justify-center">
+                                            <Bike className="text-emerald-400" size={20} />
                                         </div>
                                     </div>
-                                ))
+
+                                    <div className="grid grid-cols-2 gap-3 bg-[#161619]/60 p-3 rounded-xl border border-white/5">
+                                        <div>
+                                            <p className="text-[8px] uppercase tracking-widest text-zinc-500 font-bold">Identificador Placa</p>
+                                            <p className="text-xs font-black text-cyan-400 font-mono tracking-wider uppercase mt-0.5">{datosConductor.placa || 'N/A'}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-[8px] uppercase tracking-widest text-zinc-500 font-bold">Contacto Celular</p>
+                                            <p className="text-xs font-bold text-zinc-200 font-mono mt-0.5">{datosConductor.telefono || 'N/A'}</p>
+                                        </div>
+                                    </div>
+
+                                    {estadoViaje !== 'EN_VIAJE' && (
+                                        <button
+                                            onClick={handleCancelarViaje}
+                                            className="w-full py-3 rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-400 text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95 mt-1"
+                                        >
+                                            Cancelar Servicio
+                                        </button>
+                                    )}
+                                </div>
                             )}
+
+                            {/* VISTA RÁPIDA DE DISPONIBILIDAD FLOTA */}
+                            <div className="p-4 rounded-xl border border-white/5 bg-[#121214]/20 mt-auto">
+                                <h4 className="text-[9px] font-black uppercase tracking-widest text-zinc-500 mb-2.5 flex items-center gap-1.5">
+                                    <Users size={10} /> Consola de Flota Activa
+                                </h4>
+                                <div className="flex flex-col gap-1.5 max-h-[140px] overflow-y-auto pr-1">
+                                    {conductoresActivos.length === 0 ? (
+                                        <p className="text-[10px] text-zinc-600 italic font-mono">Buscando transmisiones en la zona...</p>
+                                    ) : (
+                                        conductoresActivos.map((cond) => (
+                                            <div key={cond.id} className="flex items-center justify-between text-[10px] bg-[#161619]/40 p-2 rounded-lg border border-white/5 font-mono">
+                                                <span className="text-zinc-300 font-medium truncate max-w-[120px]">{cond.nombre || 'Operador'}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">
+                                                        {cond.tipoServicio === 'motocarga' ? '🛺 Carga' : cond.tipoServicio === 'motoparrillero' ? '🛵 Parrillero' : cond.tipoServicio === 'intermunicipal' ? '🛣️ Inter' : '🛺 Moto'}
+                                                    </span>
+                                                    <span className="text-cyan-400 bg-cyan-500/5 px-1.5 py-0.5 rounded border border-cyan-500/10 text-[9px] font-bold uppercase tracking-wider">{cond.placa || 'N/A'}</span>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        </>
+                    )}
+
+                    {/* INTERFAZ DINÁMICA: PANEL CORE DE BILLETERA VIRTUAL */}
+                    {seccionActiva === 'billetera' && (
+                        <div className="flex flex-col gap-4 h-full animate-fadeIn">
+                            <div className="p-5 rounded-2xl bg-gradient-to-br from-[#161619] to-[#121214] border border-white/10 shadow-xl relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <p className="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Saldo Disponible</p>
+                                        <h3 className="text-2xl font-black text-emerald-400 mt-1 font-mono">${perfilFirestore.saldoBilletera.toLocaleString()} COP</h3>
+                                    </div>
+                                    <Wallet className="text-zinc-500" size={24} />
+                                </div>
+                                <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                                    <span>ID CUENTA SMART</span>
+                                    <span className="text-zinc-300 font-bold">CIMCO-{idPasajeroCorto.toUpperCase()}</span>
+                                </div>
+                            </div>
+
+                            {/* SIMULADOR DE CONSOLA CEO/ADMINISTRATIVO PARA RECARGAR PASAJERO */}
+                            <div className="p-4 rounded-xl border border-yellow-500/20 bg-yellow-500/5">
+                                <div className="flex items-center gap-2 text-yellow-500 text-xs font-bold uppercase tracking-wider mb-3">
+                                    <Banknote size={14} /> Consola Admin/CEO (Simulador)
+                                </div>
+                                <p className="text-[10px] text-zinc-400 leading-normal mb-3">
+                                    Inyecta saldo simulando la pasarela de control administrativo central para habilitar el pago por billetera.
+                                </p>
+                                <form onSubmit={handleRecargaAdministrativaCEO} className="flex gap-2">
+                                    <select 
+                                        value={montoRecargaSimulada}
+                                        onChange={(e) => setMontoRecargaSimulada(e.target.value)}
+                                        className="bg-[#161619] border border-white/10 rounded-lg p-2 text-xs font-mono text-zinc-200 focus:outline-none"
+                                    >
+                                        <option value="10000">$10,000</option>
+                                        <option value="20000">$20,000</option>
+                                        <option value="50000">$50,000</option>
+                                    </select>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase tracking-widest text-[10px] rounded-lg transition-all active:scale-95 flex items-center justify-center gap-1"
+                                    >
+                                        Recargar Pasajero
+                                    </button>
+                                </form>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </section>
 
                 {/* VISUALIZADOR GEOESPACIAL DERECHO */}
@@ -474,19 +629,17 @@ const HomePasajero = () => {
                             attribution='&copy; <a href="https://carto.com/">CARTO</a>'
                         />
                         
-                        {/* Marcador Omnipresente de Identidad de Pasajero */}
                         {coordenadas && (
                             <Marker position={coordenadas} icon={IconoPasajero}>
                                 <Popup className="custom-popup">
                                     <div className="bg-[#121214] border border-white/10 p-2.5 rounded-xl shadow-2xl font-mono text-[10px]">
-                                        <p className="text-emerald-400 font-bold uppercase tracking-wider">Tu Posición</p>
+                                        <p className="text-emerald-400 font-bold uppercase tracking-wider">{perfilFirestore.nombre}</p>
                                         <p className="text-zinc-400 mt-0.5">Sincronizado vía Satélite</p>
                                     </div>
                                 </Popup>
                             </Marker>
                         )}
 
-                        {/* Despliegue de Unidades Activas mapeadas por Radar */}
                         {conductoresActivos.map((cond) => (
                             <Marker 
                                 key={cond.id} 
@@ -511,21 +664,72 @@ const HomePasajero = () => {
                 </section>
             </main>
 
-            {/* BARRA DE NAVEGACIÓN INFERIOR */}
+            {/* BARRA DE NAVEGACIÓN INFERIOR COEXISTENTE */}
             <footer className="fixed bottom-0 left-0 w-full backdrop-blur-md bg-[#121214]/80 border-t border-white/5 p-3 flex justify-around items-center z-[1000]">
-                <button className="text-cyan-500 flex flex-col items-center gap-0.5 transition-transform active:scale-90">
+                <button 
+                    onClick={() => setSeccionActiva('radar')}
+                    className={`flex flex-col items-center gap-0.5 transition-all ${seccionActiva === 'radar' ? 'text-cyan-500 scale-105 font-bold' : 'text-zinc-500'}`}
+                >
                     <Navigation size={20} />
-                    <span className="text-[9px] font-bold uppercase tracking-wider font-mono">Radar</span>
+                    <span className="text-[9px] uppercase tracking-wider font-mono">Radar</span>
                 </button>
-                <button className="text-zinc-600 flex flex-col items-center gap-0.5 opacity-40 cursor-not-allowed">
+                <button className="text-zinc-600 flex flex-col items-center gap-0.5 opacity-30 cursor-not-allowed">
                     <Clock size={20} />
-                    <span className="text-[9px] font-bold uppercase tracking-wider font-mono">Historial</span>
+                    <span className="text-[9px] uppercase tracking-wider font-mono">Historial</span>
                 </button>
-                <button className="text-zinc-600 flex flex-col items-center gap-0.5 opacity-40 cursor-not-allowed">
+                <button 
+                    onClick={() => setSeccionActiva('billetera')}
+                    className={`flex flex-col items-center gap-0.5 transition-all ${seccionActiva === 'billetera' ? 'text-emerald-500 scale-105 font-bold' : 'text-zinc-500'}`}
+                >
                     <Wallet size={20} />
-                    <span className="text-[9px] font-bold uppercase tracking-wider font-mono">Billetera</span>
+                    <span className="text-[9px] uppercase tracking-wider font-mono">Billetera</span>
                 </button>
             </footer>
+
+            {/* MODAL DE EDICIÓN DE PERFIL/DATOS PERSONALES */}
+            {mostrarModalPerfil && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[5000] p-4">
+                    <div className="w-full max-w-sm bg-[#121214] border border-white/10 rounded-2xl p-5 shadow-2xl relative font-mono animate-scaleUp">
+                        <button 
+                            onClick={() => setMostrarModalPerfil(false)}
+                            className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors"
+                        >
+                            <X size={16} />
+                        </button>
+                        <h3 className="text-xs font-black uppercase tracking-widest text-cyan-400 mb-4 flex items-center gap-2">
+                            <User size={14} /> Ajustes de Cuenta
+                        </h3>
+                        <form onSubmit={handleActualizarPerfil} className="flex flex-col gap-4">
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Nombre Completo</label>
+                                <input 
+                                    type="text"
+                                    value={inputNombre}
+                                    onChange={(e) => setInputNombre(e.target.value)}
+                                    placeholder="Tu nombre completo"
+                                    className="w-full bg-[#161619] border border-white/5 rounded-xl p-3 text-xs text-zinc-100 focus:outline-none focus:border-cyan-500/40"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1.5">
+                                <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Línea Telefónica</label>
+                                <input 
+                                    type="tel"
+                                    value={inputTelefono}
+                                    onChange={(e) => setInputTelefono(e.target.value)}
+                                    placeholder="Número de celular"
+                                    className="w-full bg-[#161619] border border-white/5 rounded-xl p-3 text-xs text-zinc-100 focus:outline-none focus:border-cyan-500/40"
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                className="w-full mt-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all duration-300"
+                            >
+                                Sincronizar Cambios
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* MODAL DE CALIFICACIÓN TRANSACCIONAL SANEADO */}
             {mostrarModalCalificacion && (
@@ -547,6 +751,10 @@ const HomePasajero = () => {
                 .custom-popup .leaflet-popup-content-wrapper { background: transparent; box-shadow: none; padding: 0; }
                 .custom-popup .leaflet-popup-tip-container { display: none; }
                 .custom-popup .leaflet-popup-content { margin: 0; width: auto !important; }
+                @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+                @keyframes scaleUp { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+                .animate-fadeIn { animation: fadeIn 0.2s ease-out forwards; }
+                .animate-scaleUp { animation: scaleUp 0.15s ease-out forwards; }
             `}</style>
         </div>
     );

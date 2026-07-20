@@ -1,15 +1,19 @@
-// Versión Arquitectura: V21.1 - Homologación de Importación de Módulo Mototaxi y Saneamiento de Dependencias Estáticas
+// Versión Arquitectura: V21.4 - Saneamiento Quirúrgico de Props y Blindaje de Enrutamiento Seguro
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
  * Misión: Orquestar el direccionamiento centralizado, inyectar puentes QR y blindar con autenticación basada en roles todas las vistas operativas.
+ * Ajuste V21.4: Extracción y consumo explícito de la prop 'allowedRoles' dentro del Guard perimetral 'ProtectedRoute' para 
+ * evitar que se propague hacia elementos nativos del árbol DOM, erradicando por completo el Warning de consola.
  * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
-// 🛡️ Importaciones centralizadas con Alias Absolutos
+// 🛡️ Importaciones de Contexto y Hooks
 import { useAuth } from '@/hooks/useAuth';
+
+// 📄 Componentes de Vista de Autenticación y Registro
 import Login from '@/pages/Login';
 import ForgotPassword from '@/pages/ForgotPassword';
 import Register from '@/pages/Register';
@@ -19,36 +23,36 @@ import RegisterMoto from '@/pages/RegisterMoto';
 import RegisterDespachador from '@/pages/RegisterDespachador';
 import RegisterIntermunicipal from '@/pages/RegisterIntermunicipal';
 
-// Módulo Administrativo
+// 📊 Módulo Administrativo y de Control
 import AdminDashboard from '@/pages/admin/AdminDashboard';
 import AdminPanel from '@/pages/admin/AdminPanel';
 import QrGenerator from '@/pages/admin/QrGenerator';
 
-// Módulo Pasajero
+// 👤 Módulo de Pasajeros
 import HomePasajero from '@/pages/pasajero/HomePasajero';
 import PerfilPasajero from '@/pages/pasajero/PerfilPasajero';
 import HistorialViajes from '@/pages/pasajero/HistorialViajes';
 
-// Módulos Logísticos y Flota
+// 🚚 Módulos de Operación Logística, Despacho y Flota
 import HomeDespachador from '@/pages/despachador/HomeDespachador';
 import HomeIntermunicipal from '@/pages/intermunicipal/HomeIntermunicipal';
 import HomeMotocarga from '@/pages/motocarga/HomeMotocarga';
 import HistorialMotocarga from '@/pages/motocarga/HistorialMotocarga';
 import HomeMotoparrillero from '@/pages/motoparrillero/HomeMotoparrillero';
-
-// 🔄 AJUSTE TÉCNICO COMPARTIDO: Homologación de exportación por defecto de HomeMototaxi
 import HomeMototaxi from '@/pages/mototaxi/HomeMototaxi';
 
-// 🔄 Componente de Carga Unificado para Optimización DRY (Don't Repeat Yourself)
+// 🔄 Componente de Carga Unificado de Pantalla de Transición (CIMCO-UI Standard)
 const RouterLoadingScreen = ({ mensaje }) => (
     <div className="fixed inset-0 flex flex-col items-center justify-center bg-[#121214]/90 backdrop-blur-md text-white border border-white/5 z-50">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-400 mb-3 shadow-[0_0_15px_rgba(34,211,238,0.5)]"></div>
-        <p className="text-[10px] uppercase tracking-widest text-cyan-400/80 font-mono animate-pulse">{mensaje}</p>
+        <p className="text-[10px] uppercase tracking-widest text-cyan-400/80 font-mono animate-pulse">
+            {mensaje || 'SINCRO_NODO...'}
+        </p>
     </div>
 );
 
-// 🛡️ ADUANA UNIFICADA: Guard Perimetral con Matriz de Roles Integrada
-const ProtectedRoute = ({ children, allowedRoles = [] }) => {
+// 🛡️ ADUANA UNIFICADA: Componente Guard de Rutas Protegidas sin fugas de Props al DOM
+export const ProtectedRoute = ({ children, allowedRoles = [] }) => {
     const { user, loading } = useAuth();
     
     if (loading) {
@@ -59,21 +63,30 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
         return <Navigate to="/login" replace />;
     }
 
+    // 🛡️ Saneamiento preventivo de roles para evitar desbordamiento por nulidad o tipo de variable
     const userRole = (user?.rol || user?.role || '').toLowerCase().trim();
     
-    // ⚡ Evaluación de privilegios administrativos de superusuario
+    // ⚡ Evaluación y bypass para privilegios administrativos (Superusuario / CEO)
     const isAdmin = userRole === 'admin' || user?.access_level === 99 || user?.level === 10 || userRole === 'gerente';
-    if (isAdmin) return children;
+    if (isAdmin) {
+        return children;
+    }
 
-    // Normalización de roles equivalentes de conductores de mototaxi
+    // Normalización interna de roles equivalentes de conductores de mototaxi
     const normalizedRole = (userRole === 'conductor' || userRole === 'moto') ? 'mototaxi' : userRole;
 
-    if (allowedRoles.length > 0 && !allowedRoles.includes(normalizedRole)) {
-        console.warn(`⚠️ [CIMCO-SECURITY] Acceso denegado. UID: ${user?.uid} | Rol Real: ${userRole} | Requerido: ${allowedRoles}`);
+    // Normalización de la matriz de roles permitidos
+    const safeAllowedRoles = Array.isArray(allowedRoles)
+        ? allowedRoles.map(role => role?.trim()?.toLowerCase())
+        : [];
+
+    if (safeAllowedRoles.length > 0 && !safeAllowedRoles.includes(normalizedRole)) {
+        console.warn(`⚠️ [CIMCO-SECURITY] Acceso denegado. UID: ${user?.uid || 'DESCONOCIDO'} | Rol Real: ${userRole} | Requerido: ${allowedRoles}`);
         return <Navigate to="/" replace />;
     }
     
-    return children;
+    // Retorno limpio y explícito de fragmentos de React para evitar herencia o polución de props en el DOM
+    return children ? <>{children}</> : null;
 };
 
 const AppRouter = () => {
@@ -106,17 +119,17 @@ const AppRouter = () => {
                 <Route path="/despachador/home" element={<ProtectedRoute allowedRoles={['despachador']}><HomeDespachador /></ProtectedRoute>} />
                 <Route path="/intermunicipal/home" element={<ProtectedRoute allowedRoles={['intermunicipal']}><HomeIntermunicipal /></ProtectedRoute>} />
                 <Route path="/motocarga/home" element={<ProtectedRoute allowedRoles={['motocarga']}><HomeMotocarga /></ProtectedRoute>} />
-                <Route path="/motocarga/historial" element={<ProtectedRoute allowedRoles={['motocarga']}><HistorialViajes /></ProtectedRoute>} />
+                <Route path="/motocarga/historial" element={<ProtectedRoute allowedRoles={['motocarga']}><HistorialMotocarga /></ProtectedRoute>} />
                 <Route path="/mototaxi/home" element={<ProtectedRoute allowedRoles={['mototaxi']}><HomeMototaxi /></ProtectedRoute>} />
                 <Route path="/motoparrillero/home" element={<ProtectedRoute allowedRoles={['motoparrillero']}><HomeMotoparrillero /></ProtectedRoute>} />
                 
-                {/* 🚀 PUENTES DE ENTRADA DIRECTA PARA CÓDIGOS QR (Redirecciones Dinámicas Privadas) */}
-                <Route path="/mototaxi" element={<ProtectedRoute allowedRoles={['mototaxi']}><Navigate to="/mototaxi/home" replace /></ProtectedRoute>} />
-                <Route path="/moto-parrillero" element={<ProtectedRoute allowedRoles={['motoparrillero']}><Navigate to="/motoparrillero/home" replace /></ProtectedRoute>} />
-                <Route path="/motocarga" element={<ProtectedRoute allowedRoles={['motocarga']}><Navigate to="/motocarga/home" replace /></ProtectedRoute>} />
-                <Route path="/pasajero" element={<ProtectedRoute allowedRoles={['pasajero']}><Navigate to="/pasajero/home" replace /></ProtectedRoute>} />
-                <Route path="/despachador" element={<ProtectedRoute allowedRoles={['despachador']}><Navigate to="/despachador/home" replace /></ProtectedRoute>} />
-                <Route path="/intermunicipal" element={<ProtectedRoute allowedRoles={['intermunicipal']}><Navigate to="/intermunicipal/home" replace /></ProtectedRoute>} />
+                {/* 🚀 PUENTES DE ENTRADA DIRECTA PARA CÓDIGOS QR OMNICANAL (Flujo Invertido Público Dinámico) */}
+                <Route path="/mototaxi" element={<Navigate to="/login?role=moto" replace />} />
+                <Route path="/moto-parrillero" element={<Navigate to="/login?role=moto" replace />} />
+                <Route path="/motocarga" element={<Navigate to="/login?role=motocarga" replace />} />
+                <Route path="/intermunicipal" element={<Navigate to="/login?role=intermunicipal" replace />} />
+                <Route path="/pasajero" element={<Navigate to="/login?role=pasajero" replace />} />
+                <Route path="/despachador" element={<Navigate to="/login?role=despachador" replace />} />
 
                 {/* Home Central y Catch-all */}
                 <Route path="/" element={<RoleBasedRedirect />} />

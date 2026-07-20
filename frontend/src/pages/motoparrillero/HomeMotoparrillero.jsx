@@ -1,5 +1,4 @@
-// Versión Arquitectura: V12.13 - Fusión Atómica de Canales Reactivos (Socket.io + Firestore) y Telemetría Geoespacial
-// Refactorización Estética: Cyber-Neo-Brutalismo Industrial Puro (Bordes Macizos, Hard Shadows y Cero Curvas)
+// Versión Arquitectura: V12.15 - Integración de Gestión de Perfil y Vehículo Removible / Mutación Dinámica
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
@@ -10,7 +9,7 @@ import api from '@/config/api';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
-  XCircle, CheckCircle, CircleDollarSign, Signal, LogOut, Loader
+  XCircle, CheckCircle, CircleDollarSign, Signal, LogOut, Loader, UserSquare2
 } from 'lucide-react';
 
 const BACKEND_URL = "https://globosely-appreciative-zander.ngrok-free.dev";
@@ -22,9 +21,19 @@ export default function HomeMotoparrillero() {
 
   const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "CIMCO PARRILLERO";
   const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback); 
+  
+  // 📝 ESTADOS COMPLEMENTARIOS DE VEHÍCULO / PERFIL
+  const [datosPerfil, setDatosPerfil] = useState({
+    nombre: '',
+    telefono: '',
+    placa: '',
+    motoModelo: ''
+  });
 
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
+  const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
   const [solicitudViaje, setSolicitudViaje] = useState(null); 
   const [servicioActivo, setServicioActivo] = useState(null); 
   const [ofertasDisponibles, setOfertasDisponibles] = useState([]);
@@ -52,10 +61,19 @@ export default function HomeMotoparrillero() {
     const unsubscribe = onSnapshot(conductorRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const nombreCompleto = data?.nombre || data?.displayName || data?.nombreCompleto;
+        const nombreCompleto = data?.nombre || data?.displayName || data?.nombreCompleto || '';
+        
         if (nombreCompleto) {
           setNombreConductor(nombreCompleto.toUpperCase());
         }
+        
+        // Sincronizar datos locales para el formulario de edición
+        setDatosPerfil({
+          nombre: nombreCompleto,
+          telefono: data?.telefono || '',
+          placa: data?.placa || data?.vehiculo?.placa || '',
+          motoModelo: data?.motoModelo || data?.vehiculo?.modelo || ''
+        });
       }
     }, (error) => {
       console.error("🚨 [CIMCO-IDENTITY-ERROR] Fallo en lectura de perfil Parrillero:", error);
@@ -65,7 +83,38 @@ export default function HomeMotoparrillero() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 2. GOBERNANZA DEL CANAL WEBSOCKET E INYECCIÓN 'motoparrillero'
+  // 2. ACTUALIZACIÓN MUTABLE DE DATOS (FIRESTORE)
+  // ==================================================================
+  const handleGuardarPerfil = async (e) => {
+    e.preventDefault();
+    if (!user?.uid) return;
+    setGuardandoPerfil(true);
+    
+    try {
+      const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+      const conductorRef = doc(db, pathConductores, user.uid);
+      
+      await updateDoc(conductorRef, {
+        nombre: datosPerfil.nombre,
+        nombreCompleto: datosPerfil.nombre,
+        telefono: datosPerfil.telefono,
+        placa: datosPerfil.placa.toUpperCase(),
+        motoModelo: datosPerfil.motoModelo,
+        fechaActualizacion: serverTimestamp()
+      });
+      
+      setMostrarModalPerfil(false);
+      alert("✅ PERFIL Y VEHÍCULO ACTUALIZADOS EN RED");
+    } catch (error) {
+      console.error("🚨 [CIMCO-PROFILE-UPDATE-ERR] No se pudieron salvar los datos:", error);
+      alert("Error al actualizar los datos en el servidor.");
+    } finally {
+      setGuardandoPerfil(false);
+    }
+  };
+
+  // ==================================================================
+  // 3. GOBERNANZA DEL CANAL WEBSOCKET E INYECCIÓN 'motoparrillero'
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
@@ -84,7 +133,6 @@ export default function HomeMotoparrillero() {
 
       socketRef.current.on('connect', () => {
         console.log(`✅ [CIMCO-SOCKET] Conectado exitosamente con ID: ${socketRef.current.id}`);
-        // 🎯 Inyección de tipoServicio explícito para segmentación en backend
         socketRef.current.emit('registrar_conductor', { 
           conductorId, 
           tipoServicio: 'motoparrillero',
@@ -115,7 +163,7 @@ export default function HomeMotoparrillero() {
   }, [isOnline, conductorId, token, saldoVivo]);
 
   // ==================================================================
-  // 3. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
+  // 4. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
   // ==================================================================
   const iniciarTrackingGPS = () => {
     if (!navigator.geolocation) {
@@ -131,7 +179,7 @@ export default function HomeMotoparrillero() {
         setCoordenadas({ lat: latitude, lng: longitude });
 
         if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('actualizar_ubicacion_radar', {
+          socketRef.current.emit('actualizar_radar_gps', {
             conductorId,
             lat: latitude,
             lng: longitude
@@ -161,7 +209,7 @@ export default function HomeMotoparrillero() {
   };
 
   // ==================================================================
-  // 4. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
+  // 5. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
   // ==================================================================
   useEffect(() => {
     if (!user?.uid || !isOnline) {
@@ -171,7 +219,6 @@ export default function HomeMotoparrillero() {
 
     setCargandoOfertas(true);
     const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
-    // Opcional: Si los viajes se filtran por subtipo de red en Firestore, agregar where('tipoServicio', '==', 'motoparrillero')
     const q = query(
       collection(db, pathViajes),
       where('estado', '==', 'SOLICITADO'),
@@ -194,7 +241,7 @@ export default function HomeMotoparrillero() {
   }, [user?.uid, isOnline]);
 
   // ==================================================================
-  // 5. MONITOR DE VIAJE ACTIVO EN HILO DEL CONDUCTOR
+  // 6. MONITOR DE VIAJE ACTIVO EN HILO DEL CONDUCTOR
   // ==================================================================
   useEffect(() => {
     if (!user?.uid) return;
@@ -227,7 +274,7 @@ export default function HomeMotoparrillero() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 6. ACCIONES DE GESTIÓN DE DESPACHOS CONTABLES ACID
+  // 7. ACCIONES DE GESTIÓN DE DESPACHOS CONTABLES ACID
   // ==================================================================
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
@@ -329,12 +376,17 @@ export default function HomeMotoparrillero() {
       {/* 🔝 ENCABEZADO DE CONTROL MAESTRO */}
       <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="p-2 bg-cyan-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] select-none shrink-0 rounded-none">
-            🏍️
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xs font-black tracking-widest text-white uppercase truncate" title={nombreConductor}>
-              {nombreConductor}
+          {/* BOTÓN DE ACCESO AL PERFIL EN EL ICONO DE MOTO */}
+          <button 
+            onClick={() => setMostrarModalPerfil(true)}
+            title="Editar Datos de Perfil / Vehículo"
+            className="p-2 bg-cyan-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] select-none shrink-0 rounded-none hover:bg-cyan-300 transition-colors active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+          >
+            🛵
+          </button>
+          <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setMostrarModalPerfil(true)}>
+            <h1 className="text-xs font-black tracking-widest text-white uppercase truncate flex items-center gap-1.5" title={nombreConductor}>
+              {nombreConductor} <span className="text-[9px] text-cyan-400 underline lowercase font-normal">(editar)</span>
             </h1>
             <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
               <Signal size={10} className={isOnline ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
@@ -576,15 +628,100 @@ export default function HomeMotoparrillero() {
         )}
       </main>
 
+      {/* 🛠️ MODAL BRUTALISTA DE AJUSTE DE DATOS PERSONALES / VEHÍCULO */}
+      {mostrarModalPerfil && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-zinc-900 border-4 border-black shadow-[8px_8px_0px_0px_#000] p-5 space-y-4 font-mono animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex justify-between items-center border-b-4 border-black pb-2">
+              <div className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-widest">
+                <UserSquare2 size={16} className="text-cyan-400" />
+                <span>Perfil Operador</span>
+              </div>
+              <button 
+                onClick={() => setMostrarModalPerfil(false)}
+                className="text-[10px] font-black bg-zinc-800 border-2 border-black text-zinc-400 px-2 py-0.5 uppercase hover:bg-zinc-700 active:translate-x-[1px]"
+              >
+                Cerrar [X]
+              </button>
+            </div>
+
+            <form onSubmit={handleGuardarPerfil} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Nombre Completo</label>
+                <input 
+                  type="text" 
+                  required
+                  value={datosPerfil.nombre}
+                  onChange={(e) => setDatosPerfil({...datosPerfil, nombre: e.target.value})}
+                  className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-cyan-400 rounded-none placeholder-zinc-700 uppercase"
+                  placeholder="Ej: JUAN PÉREZ"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Celular / Contacto</label>
+                <input 
+                  type="tel" 
+                  required
+                  value={datosPerfil.telefono}
+                  onChange={(e) => setDatosPerfil({...datosPerfil, telefono: e.target.value})}
+                  className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-cyan-400 rounded-none placeholder-zinc-700"
+                  placeholder="Ej: 3001234567"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Placa Vehículo</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={datosPerfil.placa}
+                    onChange={(e) => setDatosPerfil({...datosPerfil, placa: e.target.value})}
+                    className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-cyan-400 rounded-none placeholder-zinc-700 uppercase"
+                    placeholder="Ej: XYZ123"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Cilindraje / Modelo</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={datosPerfil.motoModelo}
+                    onChange={(e) => setDatosPerfil({...datosPerfil, motoModelo: e.target.value})}
+                    className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-cyan-400 rounded-none placeholder-zinc-700"
+                    placeholder="Ej: Pulsar NS 200"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={guardandoPerfil}
+                  className="w-full bg-cyan-400 hover:bg-cyan-500 text-black font-black uppercase py-3 border-2 border-black tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                >
+                  {guardandoPerfil ? 'GUARDANDO NODO...' : 'ACTUALIZAR DATOS'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR */}
       <footer className="fixed bottom-0 left-0 w-full bg-zinc-900 border-t-4 border-black p-3 flex justify-around items-center z-50 shadow-[0_-4px_0px_0px_#000]">
         <button className="text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95">
           <Navigation size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Radar</span>
         </button>
-        <button className="text-zinc-600 flex flex-col items-center gap-0.5 cursor-not-allowed opacity-50">
-          <Clock size={18} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-wider">Historial</span>
+        {/* Habilitamos el perfil en el menú también para redundancia y usabilidad */}
+        <button 
+          onClick={() => setMostrarModalPerfil(true)} 
+          className="text-zinc-400 hover:text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95"
+        >
+          <UserSquare2 size={18} strokeWidth={2.5} />
+          <span className="text-[9px] font-black uppercase tracking-wider">Perfil</span>
         </button>
         <button className="text-zinc-600 flex flex-col items-center gap-0.5 cursor-not-allowed opacity-50">
           <CircleDollarSign size={18} strokeWidth={2.5} />

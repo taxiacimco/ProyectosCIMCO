@@ -1,10 +1,9 @@
-// Versión Arquitectura: V12.6 - Inyección Transaccional Concurrente en Descuento de Comisión
+// Versión Arquitectura: V12.7 - Blindaje de Seguridad Perimetral Anti-Inyección de Saldos Falsos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
  * Misión: Gestión unificada de operarios, telemetría GPS reactiva, inyección contable y motor de radar radial.
- * Ajuste V12.6: Erradicación del anti-patrón de lectura en memoria en `descontarComisionViaje`.
- * Se delega la validación y la matemática concurrente directamente a MongoDB Atlas mediante `findOneAndUpdate` 
- * con protección de balance e inyección atómica en una única operación transaccional ACID.
+ * Ajuste V12.7: Inclusión de la guarda restrictiva atómica `verificarBypassDesarrollo` para bloquear recargas ilegítimas en producción.
+ * Se preserva intacta la integración transaccional ACID mediante findOneAndUpdate y el manejo controlado de errores WiredTiger.
  */
 
 import mongoose from 'mongoose';
@@ -12,6 +11,26 @@ import Conductor from '../../models/Conductor.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
 import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js'; 
 import { FieldValue } from 'firebase-admin/firestore'; 
+
+// ==================================================================
+// 🛡️ GUARDAS DE ARQUITECTURA AVANZADAS (ANTI-FRAUDE)
+// ==================================================================
+
+/**
+ * Detiene inmediatamente la ejecución si se intenta procesar una recarga artificial 
+ * a través de endpoints de depuración dentro de un entorno de producción real.
+ */
+export const verificarBypassDesarrollo = (req, res, next) => {
+    const ENTORNO_ACTUAL = process.env.NODE_ENV || 'development';
+    if (ENTORNO_ACTUAL === 'production') {
+        console.error("⚠️ [ALERTA DE ARQUITECTURA] Intento de evasión de saldos detectado y neutralizado en producción.");
+        return res.status(403).json({
+            success: false,
+            message: "⚠️ ALERTA DE ARQUITECTURA: Las recargas de stress-test están ESTRICTAMENTE PROHIBIDAS en el clúster de producción."
+        });
+    }
+    next();
+};
 
 // ==================================================================
 // 1. CONSULTAS LOGÍSTICAS BÁSICAS Y COMPATIBILIDAD DE ENRUTAMIENTO
