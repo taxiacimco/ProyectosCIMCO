@@ -1,8 +1,7 @@
-// Versión Arquitectura: V6.13 - Adaptación para Despliegue en Railway e Inyección CORS Cloudflare
+// Versión Arquitectura: V6.14 - Flexibilización de CORS Perimetral para Railway y Frontend Local
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
- * Misión: Integración de red centralizada, habilitación de CORS dinámico para Proxies y orquestación de sockets modularizados.
- * Ajuste V6.13: Vinculación a interfaz 0.0.0.0 para Railway e inyección del dominio oficial de producción en CORS.
+ * Misión: Integración de red centralizada, habilitación de CORS flexible y orquestación de sockets modularizados.
  */
 
 import 'dotenv/config';
@@ -16,7 +15,6 @@ import { Server } from 'socket.io';
 import authRoutes from '#modules/auth/auth.routes.js';
 import conductorRoutes from '#modules/conductores/conductor.routes.js';
 import viajeRoutes from '#modules/viajes/viaje.routes.js';
-// ⚡ NUEVA IMPORTACIÓN MODULAR CON GOBERNANZA JWT
 import { inicializarSockets } from '#modules/sockets/socket.manager.js';
 
 const app = express();
@@ -26,34 +24,12 @@ const logLocal = (msg) => {
     console.log(`[${new Date().toLocaleString('es-CO')}] ${msg}`);
 };
 
-// 📡 CONFIGURACIÓN MAESTRA DE CORS (Mapeo simétrico con variables de entorno e inyección del dominio oficial)
-const origenesPermitidos = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:4173',  
-    'http://127.0.0.1:4173',  
-    process.env.CLIENT_ORIGIN_LOCAL,   
-    process.env.CLIENT_ORIGIN_IP,      
-    'http://192.168.100.34:5173',     
-    'http://192.168.100.34:4173',     
-    process.env.CLIENT_ORIGIN_TUNNEL,  
-    'https://globosely-appreciative-zander.ngrok-free.dev',
-    'https://app.taxiacimco.com' // 🌐 ¡DOMINIO OFICIAL DE PRODUCCIÓN INYECTADO!
-];
-
+// 📡 CONFIGURACIÓN MAESTRA DE CORS (Apertura perimetral para pruebas)
 const corsOptions = {
-    origin: function (origin, callback) {
-        if (!origin) return callback(null, true);
-        
-        if (origenesPermitidos.indexOf(origin) !== -1) {
-            callback(null, true);
-        } else {
-            logLocal(`🚨 [CIMCO-CORS-VIOLATION] Intrusión bloqueada desde origen no autorizado: ${origin}`);
-            callback(new Error('No permitido por políticas de seguridad CORS TAXIA CIMCO'));
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+    origin: '*', // Permite solicitudes desde localhost, tuneles ngrok y dominio final
+    credentials: false, // Cuando origin es '*', credentials debe establecerse en false según especificación W3C
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 };
 
 // ==================================================================\\
@@ -97,7 +73,7 @@ app.use((err, req, res, next) => {
         logLocal(`💥 [CIMCO-CONCURRENCIA] Conflicto de escritura detectado bajo ráfaga masiva: ${err.message}`);
         return res.status(503).json({
             success: false,
-            error: "Conflicto transitorio de transacciones concurrentes en el clúster. Reintentando operation.",
+            error: "Conflicto transitorio de transacciones concurrentes en el clúster. Reintentando operación.",
             retryAfterMS: 200
         });
     }
@@ -138,7 +114,6 @@ async function conectar() {
         logLocal('✅ [CIMCO-DATABASE] ¡CONEXIÓN ESTABLECIDA EXITOSAMENTE con MongoDB Atlas!');
         
         const PORT = process.env.PORT || 3000;
-        // 🔄 AJUSTE DE ENRUTAMIENTO PERIMETRAL: Forzar escucha en la interfaz pública '0.0.0.0' para Railway
         httpServer.listen(PORT, '0.0.0.0', () => {
             logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo exitosamente en el puerto dinámico: ${PORT}`);
         });
