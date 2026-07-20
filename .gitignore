@@ -32,4 +32,6 @@ backend/serviceAccountKey.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.DS_Store
+.DS_Storenode_modules/
+backend/node_modules/
+backend/serviceAccountKey.json
