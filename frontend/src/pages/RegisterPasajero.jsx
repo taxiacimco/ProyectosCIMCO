@@ -1,11 +1,10 @@
-// Versión Arquitectura: V12.2 - Blindaje de FormData (Multipart) y Homologación de Payload (rol/role)
+// Versión Arquitectura: V12.3 - Control de Peticiones y Contrato Unificado de Rol Pasajero
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
- * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Yellow).
- * Misión: Capturar identidad exclusivamente para PASAJEROS y enviar el payload con access_level: 0.
- * Ajuste: Protección Anti-Undefined en inyecciones de FormData y estandarización de variables de rol.
+ * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Yellow Accent).
+ * Misión: Capturar identidad exclusivamente para PASAJEROS con control de peticiones en Step 1 y payload limpio.
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth'; 
 import api from '@/config/api'; 
@@ -28,20 +27,44 @@ const RegisterPasajero = () => {
     const [clave, setClave] = useState('');
     const [fotoPerfilFile, setFotoPerfilFile] = useState(null);
 
+    // Ref para abortar peticiones pendientes en Step 1 si el usuario reintenta o desmonta
+    const checkPhoneControllerRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            if (checkPhoneControllerRef.current) {
+                checkPhoneControllerRef.current.abort();
+            }
+        };
+    }, []);
+
     const handleCheckPhone = async (e) => {
         e.preventDefault();
         
-        // 🛡️ GUARDA DE SEGURIDAD PREVENTIVA
-        if (!telefono || !telefono?.trim() || telefono.length < 7) {
+        // 🛡️ GUARDAS DE SEGURIDAD PREVENTIVAS (Bloqueo si está cargando o datos inválidos)
+        if (loading) return;
+
+        if (!telefono || !telefono?.trim() || telefono.trim().length < 7) {
             setError('El número de teléfono (mínimo 7 dígitos) es obligatorio.');
             return;
         }
-        
+
+        // Abortar cualquier petición en vuelo anterior
+        if (checkPhoneControllerRef.current) {
+            checkPhoneControllerRef.current.abort();
+        }
+
+        checkPhoneControllerRef.current = new AbortController();
+
         setLoading(true);
         setError('');
         
         try {
-            const res = await api.post(`/api/auth/check-phone`, { telefono: telefono.trim() });
+            const res = await api.post(
+                `/api/auth/check-phone`, 
+                { telefono: telefono.trim() },
+                { signal: checkPhoneControllerRef.current.signal }
+            );
             
             if (res?.data?.success && res?.data?.existe) {
                 setError('Este terminal ya posee una identidad indexada. Redirigiendo...');
@@ -50,15 +73,20 @@ const RegisterPasajero = () => {
                 setStep(2);
             }
         } catch (err) {
-            setError('Error de enlace en el gateway. Verifique el nodo central.');
+            if (err.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED') {
+                setError('Error de enlace en el gateway. Verifique el nodo central.');
+            }
         } finally {
             setLoading(false);
+            checkPhoneControllerRef.current = null;
         }
     };
 
     const handleRegister = async (e) => {
         e.preventDefault();
         setError('');
+
+        if (loading) return;
 
         // 🛡️ GUARDA DE SEGURIDAD: Validación estructural local
         if (!nombre?.trim() || !correo?.trim() || !clave?.trim()) {
@@ -71,18 +99,16 @@ const RegisterPasajero = () => {
             const targetRole = ROLES?.PASAJERO || 'pasajero';
             const accessLevel = DEFAULT_ACCESS_LEVELS?.[targetRole] ?? 0;
 
-            // ⚠️ ALERTA DE ARQUITECTURA: Uso de FormData requiere blindaje Anti-Undefined
-            // para evitar que valores nulos se serialicen como strings "undefined".
+            // Fusión Atómica: Payload unificado y limpio hacia el Backend
             const formData = new FormData();
             formData.append('nombre', nombre.trim());
             formData.append('email', correo.toLowerCase().trim());
             formData.append('telefono', telefono.trim());
             formData.append('password', clave);
             
-            // 🚀 Inyección Atómica de Gobernanza (Homologada con Moto/Intermunicipal)
-            formData.append('role', targetRole); // Para la validación de Middleware
-            formData.append('rol', targetRole);  // Para el mapeo en el Controlador
-            formData.append('access_level', accessLevel);
+            // 🚀 Inyección Atómica de Gobernanza (Se descontinúa la duplicidad "rol")
+            formData.append('role', targetRole);
+            formData.append('access_level', String(accessLevel));
 
             // Verificación binaria segura
             if (fotoPerfilFile instanceof File) {
@@ -121,7 +147,7 @@ const RegisterPasajero = () => {
                 </div>
 
                 {error && (
-                    <div className="mb-4 p-3 bg-red-950/40 border border-red-500/20 text-red-400 text-xs font-mono rounded-lg backdrop-blur-sm flex items-center gap-2">
+                    <div className="mb-4 p-3 bg-red-950/40 border border-red-500/20 text-red-400 text-xs font-mono rounded-lg backdrop-blur-sm flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
                         <span className="font-bold flex-shrink-0 text-red-500">⚠️ SYSTEM_FAULT:</span> 
                         <span className="leading-tight">{error}</span>
                     </div>
@@ -139,7 +165,7 @@ const RegisterPasajero = () => {
                                 placeholder="INGRESAR NÚMERO CELULAR" 
                                 value={telefono} 
                                 onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))} 
-                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs font-mono uppercase tracking-wide text-zinc-200 focus:outline-none focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] transition-all placeholder:text-zinc-600" 
+                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs font-mono uppercase tracking-wide text-zinc-200 focus:outline-none focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] transition-all placeholder:text-zinc-600 disabled:opacity-50" 
                                 disabled={loading} 
                                 maxLength={10} 
                                 required 
@@ -148,9 +174,9 @@ const RegisterPasajero = () => {
                         <button 
                             type="submit" 
                             disabled={loading} 
-                            className="w-full bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-black text-xs font-mono font-black uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_25px_rgba(234,179,8,0.4)]"
+                            className="w-full bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed text-black text-xs font-mono font-black uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_25px_rgba(234,179,8,0.4)]"
                         >
-                            {loading ? 'CONECTANDO CENTRAL...' : 'VERIFICAR DISPONIBILIDAD'}
+                            {loading ? 'VERIFICANDO DISPONIBILIDAD...' : 'VERIFICAR DISPONIBILIDAD'}
                         </button>
                     </form>
                 ) : (
@@ -195,7 +221,7 @@ const RegisterPasajero = () => {
                                 placeholder="NOMBRE COMPLETO" 
                                 value={nombre} 
                                 onChange={(e) => setNombre(e.target.value)} 
-                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600" 
+                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
                                 disabled={loading} 
                                 required 
                             />
@@ -207,7 +233,7 @@ const RegisterPasajero = () => {
                                 placeholder="CORREO ELECTRÓNICO" 
                                 value={correo} 
                                 onChange={(e) => setCorreo(e.target.value)} 
-                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600" 
+                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
                                 disabled={loading} 
                                 required 
                             />
@@ -219,7 +245,7 @@ const RegisterPasajero = () => {
                                 placeholder="CONTRASEÑA SEGURA (Mín. 6)" 
                                 value={clave} 
                                 onChange={(e) => setClave(e.target.value)} 
-                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all tracking-widest placeholder:text-zinc-600 placeholder:tracking-normal" 
+                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all tracking-widest placeholder:text-zinc-600 placeholder:tracking-normal disabled:opacity-50" 
                                 disabled={loading} 
                                 required 
                             />
@@ -228,7 +254,7 @@ const RegisterPasajero = () => {
                         <button 
                             type="submit" 
                             disabled={loading} 
-                            className="w-full bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-black text-xs font-mono font-black uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_25px_rgba(234,179,8,0.4)] mt-2"
+                            className="w-full bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed text-black text-xs font-mono font-black uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_25px_rgba(234,179,8,0.4)] mt-2"
                         >
                             {loading ? 'ALMACENANDO EN CENTRAL...' : 'FINALIZAR INSCRIPCIÓN'}
                         </button>
@@ -236,7 +262,8 @@ const RegisterPasajero = () => {
                         <button 
                             type="button" 
                             onClick={() => setStep(1)} 
-                            className="w-full text-center text-zinc-500 hover:text-zinc-300 text-[9px] uppercase tracking-widest pt-2 transition-colors font-mono font-bold"
+                            disabled={loading}
+                            className="w-full text-center text-zinc-500 hover:text-zinc-300 text-[9px] uppercase tracking-widest pt-2 transition-colors font-mono font-bold disabled:opacity-50"
                         >
                             ← MODIFICAR TERMINAL TELEFÓNICO
                         </button>

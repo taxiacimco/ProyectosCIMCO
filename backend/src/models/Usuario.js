@@ -1,12 +1,9 @@
-// Versión Arquitectura: V6.3 - Integración Quirúrgica de Atributo de Autenticación isActive
+// Versión Arquitectura: V16.5 - Modelo Usuario con Extensión Despachador Terminal y Billetera Unificada
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
- * Misión: Definir la estructura unificada para la entidad de Usuarios en MongoDB Atlas con GeoJSON Point oficial.
- * Integridad: Fusión Atómica. Pone fin a la dualidad nominal forzando a Mongoose a persistir
- * estrictamente en la colección física 'usuarios' (tercer parámetro de exportación). Preserva las
- * guardas pre-save de sincronización bidireccional homóloga (rol ↔ role y saldo ↔ balance).
- * Ajuste V6.3: Inyección perimetral de la propiedad `isActive` para homologación con flujo de validación 
- * en pasarela de autenticación polimórfica, evitando rechazos indeterminados en login.
+ * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
+ * Integridad: Fusión Atómica. Preserva sincronización bidireccional (rol ↔ role, saldo ↔ balance), hashing bcrypt,
+ * campos de geolocalización GeoJSON y agrega atributos dedicados para la gestión de despachadores de terminales (terminal_id, codigoDespachador).
  */
 
 import mongoose from 'mongoose';
@@ -84,12 +81,12 @@ const usuarioSchema = new mongoose.Schema({
         enum: ['active', 'inactive', 'suspended', 'offline', 'online', 'activo'],
         default: 'offline'
     },
-    // 🛡️ CAMPO AGREGADO PARA LOGROS DE AUTENTICACIÓN:
+    // 🛡️ CAMPO PARA LOGROS DE AUTENTICACIÓN
     isActive: {
         type: Boolean,
         default: true
     },
-    // 🚀 AGREGADO: Atributos de pertenencia operativa homologados para evitar descalce en updateProfile
+    // 🚀 ATRIBUTOS DE PERTENENCIA OPERATIVA HOMOLOGADOS
     cooperativa: {
         type: String,
         trim: true,
@@ -100,12 +97,23 @@ const usuarioSchema = new mongoose.Schema({
         trim: true,
         default: 'Particular'
     },
-    // 🧭 AJUSTE GEOMÉTRICO OFICIAL: Formato GeoJSON Point nativo para consultas indexadas $near instantáneas
+    // 🏢 ATRIBUTOS ESPECÍFICOS DE DESPACHADOR DE TERMINAL
+    terminal_id: {
+        type: String,
+        trim: true,
+        default: null
+    },
+    codigoDespachador: {
+        type: String,
+        trim: true,
+        sparse: true
+    },
+    // 🧭 FORMATO GEOJSON POINT NATIVO
     coordenadas: {
         type: { type: String, enum: ['Point'], default: 'Point' },
         coordinates: { type: [Number], default: [-73.3332, 9.5661] } // [longitud, latitud]
     },
-    // Campos específicos de conductores y despachadores simulados
+    // Campos específicos para compatibilidad polimórfica
     cooperativa_nombre: String,
     flota_id: String,
     placa: String,
@@ -115,16 +123,14 @@ const usuarioSchema = new mongoose.Schema({
     versionKey: false
 });
 
-// Mantener índice sparse estrictamente necesario para integraciones con Firebase UID
+// Índices optimizados
 usuarioSchema.index({ uid: 1 }, { sparse: true });
-
-// 🛠️ INYECCIÓN DE SEGURIDAD V6.2: Índice geoespacial compuesto actualizado para soportar la ruta exacta de la propiedad GeoJSON .coordinates
 usuarioSchema.index({ estado: 1, rol: 1, "coordenadas.coordinates": "2dsphere" }, { 
   name: "idx_usuarios_telemetria_geojson", 
   background: true 
 });
 
-// 🛡️ HOOK PRE-SAVE: Sincronización Bidireccional Homóloga y Cifrado
+// 🛠️ HOOK PRE-SAVE: Sincronización Bidireccional Homóloga y Cifrado
 usuarioSchema.pre('save', async function (next) {
     const usuario = this;
 
@@ -150,7 +156,13 @@ usuarioSchema.pre('save', async function (next) {
             usuario.saldo = usuario.balance;
         }
 
-        // Validación preventiva de la estructura del arreglo GeoJSON y resguardo geométrico
+        // Sanitización financiera anti-undefined o nulos
+        if (isNaN(usuario.saldo) || usuario.saldo < 0) {
+            usuario.saldo = 0;
+            usuario.balance = 0;
+        }
+
+        // Validación preventiva de la estructura del arreglo GeoJSON
         if (!usuario.coordenadas || !Array.isArray(usuario.coordenadas.coordinates) || usuario.coordenadas.coordinates.length !== 2) {
             usuario.coordenadas = { type: 'Point', coordinates: [-73.3332, 9.5661] };
         }
@@ -167,7 +179,7 @@ usuarioSchema.pre('save', async function (next) {
     }
 });
 
-// 🛡️ MÉTODO COMPLEMENTARIO: Verificación de firmas criptográficas bajo bcrypt
+// 🛡️ MÉTODO COMPLEMENTARIO: Verificación de firmas criptográficas
 usuarioSchema.methods.compararPassword = async function (passwordCandidato) {
     if (!passwordCandidato || !this.password) {
         return false;
@@ -180,7 +192,6 @@ usuarioSchema.methods.compararPassword = async function (passwordCandidato) {
     }
 };
 
-// 🔥 TRUCO MAESTRO: El tercer parámetro 'usuarios' blinda el ORM contra pluralizaciones en inglés (users)
 const Usuario = mongoose.models.Usuario || mongoose.model('Usuario', usuarioSchema, 'usuarios');
 
 export default Usuario;

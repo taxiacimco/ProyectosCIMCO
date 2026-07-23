@@ -1,10 +1,10 @@
-// Versión Arquitectura: V16.3 - Depuración de Token Inesperado de Citación en Mongoose Schema
+// Versión Arquitectura: V16.4 - Depuración Definitiva de saldoWallet e Integración de Guardas Billetera
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
- * Integridad: Fusión Atómica. Remoción inmediata de marcas de citación conversacional inyectadas en la 
- * validación del campo 'saldo' para restaurar la validez de la sintaxis del motor V8 (ESM). Preserva intactas 
- * todas las guardas transaccionales, indexación 2dsphere y esquemas de multi-subrol integrados previamente.
+ * Integridad: Fusión Atómica. Eliminación estricta de la clave obsoleta 'saldoWallet', consolidación
+ * en el estándar único 'saldo' y adición de hooks pre-save/pre-update para sanitización transaccional
+ * y prevención de reinyección de campos duplicados.
  */
 
 import mongoose from 'mongoose';
@@ -125,22 +125,22 @@ const ConductorSchema = new mongoose.Schema({
         type: coordenadasSchema, 
         default: () => ({}) 
     },
+    // 🛡️ ESTÁNDAR ÚNICO DE BILLETERA
     saldo: { 
         type: Number, 
         default: 0, 
         min: [0, 'El saldo no puede ser inferior a $0 COP.'] 
-    },
-    saldoWallet: { 
-        type: Number, 
-        default: 0 
     }
-}, { timestamps: true });
+}, { 
+    timestamps: true,
+    strict: true // 🚀 Bloquea la persistencia de campos no definidos en el esquema (como saldoWallet)
+});
 
 // Índices optimizados para el motor de geolocalización y bloqueos transaccionales
 ConductorSchema.index({ ubicacion: "2dsphere" });
 ConductorSchema.index({ estadoOperativo: 1 });
 
-// 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados y Geometría Anti-Undefined
+// 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados, Geometría y Sanitización Financiera Anti-Undefined
 ConductorSchema.pre('save', function(next) {
     const cond = this;
 
@@ -173,13 +173,21 @@ ConductorSchema.pre('save', function(next) {
         cond.coordenadas = { longitud: -73.3332, latitud: 9.5661, ultimaActualizacion: new Date() };
     }
 
-    // Blindaje de seguridad financiera (Anti-Null / Anti-NaN / Preservación de saldos)
-    if (cond.saldo === undefined || cond.saldo === null || isNaN(cond.saldo)) {
-        cond.saldo = 0;
+    // 🛡️ UNIFICACIÓN Y SANITIZACIÓN FINANCIERA ATÓMICA
+    let saldoConsolidado = cond.saldo;
+    
+    // Si detectamos un valor residual en saldoWallet, migramos su valor a saldo si saldo estaba en 0
+    if (cond._doc.saldoWallet !== undefined && cond._doc.saldoWallet !== null) {
+        const valorWallet = Number(cond._doc.saldoWallet);
+        if (!isNaN(valorWallet) && (saldoConsolidado === undefined || saldoConsolidado === 0)) {
+            saldoConsolidado = valorWallet;
+        }
+        delete cond._doc.saldoWallet; // Remoción inmediata del buffer Mongoose
     }
-    if (cond.saldoWallet === undefined || cond.saldoWallet === null || isNaN(cond.saldoWallet)) {
-        cond.saldoWallet = 0;
-    }
+
+    // Guardas de seguridad contra valores nulos o corruptos
+    saldoConsolidado = Number(saldoConsolidado);
+    cond.saldo = isNaN(saldoConsolidado) || saldoConsolidado < 0 ? 0 : saldoConsolidado;
 
     // Sincronización bidireccional homóloga de roles operativos
     if (cond.isModified('rol') && cond.rol) {
@@ -187,6 +195,31 @@ ConductorSchema.pre('save', function(next) {
     } else if (cond.isModified('role') && cond.role) {
         cond.rol = cond.role;
     }
+
+    next();
+});
+
+// 🛠️ HOOK PRE-UPDATE: Sanitización en operaciones de actualización directa (findOneAndUpdate, updateOne, etc.)
+ConductorSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function(next) {
+    const update = this.getUpdate();
+    if (!update) return next();
+
+    // Eliminar saldoWallet de $set para impedir inyecciones accidentales en updates
+    if (update.$set && update.$set.saldoWallet !== undefined) {
+        if (update.$set.saldo === undefined && update.$set.saldoWallet !== null) {
+            const valorWallet = Number(update.$set.saldoWallet);
+            if (!isNaN(valorWallet)) {
+                update.$set.saldo = valorWallet;
+            }
+        }
+        delete update.$set.saldoWallet;
+    }
+
+    // Forzar $unset de saldoWallet para limpiar el documento en la base de datos durante cualquier mutación
+    if (!update.$unset) {
+        update.$unset = {};
+    }
+    update.$unset.saldoWallet = "";
 
     next();
 });

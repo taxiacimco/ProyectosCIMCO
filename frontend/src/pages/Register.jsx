@@ -1,37 +1,60 @@
-// Versión Arquitectura: V21.0 - Auto-Enrutamiento Reactivo por Parámetro de Captación QR
+// Versión Arquitectura: V23.3 - Interceptor de QR con Fallback por Defecto y Saneamiento de Roles
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Register.jsx
- * Misión: Enrutador maestro de roles con interceptor automático para códigos QR institucionales.
+ * Misión: Enrutador maestro de roles con interceptor para QR institucionales, verificación de estado de sesión
+ *         y fallback preventivo ante parámetros ?role= inválidos.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Híbrida).
  */
 
 import React, { useEffect } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { User, Bike, Bus, Terminal, Shield, ArrowLeft } from 'lucide-react';
+import { User, Bike, Bus, Terminal, Shield, ArrowLeft, Loader } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth'; // 🔐 Contexto global de autenticación
 
 const Register = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const { user, loading } = useAuth(); // 🛡️ Evaluación del estado de sesión activo
     
     // Guardas de Seguridad para mitigar desbordamientos por tipos inválidos
     const targetRole = searchParams ? searchParams.get('role') : null;
 
-    // 🛡️ INTERCEPTOR RECOLECTOR DE CÓDIGO QR EN TIEMPO DE MONTAJE (BLINDAJE ANTI-UNDEFINED)
+    // 🛡️ INTERCEPTOR DOBLE: VERIFICA SESIÓN Y REDIRIGE SEGÚN CÓDIGO QR O ROL (CON FALLBACK)
     useEffect(() => {
+        if (loading) return; // Esperar a que la autenticación de Firebase resuelva el estado
+
+        // 1️⃣ CASO A: EL USUARIO YA TIENE SESIÓN ABIERTA
+        if (user) {
+            navigate('/login', { replace: true });
+            return;
+        }
+
+        // 2️⃣ CASO B: EL USUARIO NO TIENE SESIÓN Y ESCANEÓ UN QR (Redirección por Rol con Fallback)
         if (targetRole) {
             const normalizedRole = String(targetRole).toLowerCase().trim();
             
-            if (normalizedRole === 'pasajero') {
+            // Matriz de roles homologados
+            const isPasajero = normalizedRole === 'pasajero';
+            const isMoto = ['mototaxi', 'motoparrillero', 'motocarga', 'moto'].includes(normalizedRole);
+            const isIntermunicipal = normalizedRole === 'intermunicipal';
+            const isDespachador = normalizedRole === 'despachador';
+
+            if (isPasajero) {
                 navigate('/register-pasajero', { replace: true });
-            } else if (['mototaxi', 'motoparrillero', 'motocarga', 'moto'].includes(normalizedRole)) {
+            } else if (isMoto) {
                 navigate(`/register-moto?role=${normalizedRole}`, { replace: true });
-            } else if (normalizedRole === 'intermunicipal') {
+            } else if (isIntermunicipal) {
                 navigate('/register-intermunicipal', { replace: true });
-            } else if (normalizedRole === 'despachador') {
+            } else if (isDespachador) {
                 navigate('/register-despachador', { replace: true });
+            } else {
+                // ⚠️ CASO BORDE / FALLBACK DE SEGURIDAD:
+                // Si el parámetro ?role= no coincide con ningún rol reconocido, se redirige por defecto a pasajero.
+                console.warn(`⚠️ [CIMCO-QR] Parámetro ?role="${targetRole}" no válido. Aplicando fallback a registro de pasajero.`);
+                navigate('/register-pasajero', { replace: true });
             }
         }
-    }, [targetRole, navigate]);
+    }, [user, loading, targetRole, navigate]);
 
     // 🗂️ Mapeo de Roles y Rutas Homologados CIMCO-UI V9.3
     const roles = [
@@ -72,6 +95,16 @@ const Register = () => {
             bgColor: 'hover:bg-amber-500/10'
         }
     ];
+
+    // Pantalla de carga mientras useAuth() valida las credenciales
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-[#08080a] flex flex-col items-center justify-center p-4">
+                <Loader size={32} className="animate-spin text-yellow-500 mb-3" />
+                <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest">Validando credenciales en la red CIMCO...</p>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-[#08080a] flex items-center justify-center p-4 selection:bg-cyan-500/30 relative overflow-hidden">

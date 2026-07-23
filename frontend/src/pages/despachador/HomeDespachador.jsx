@@ -1,31 +1,32 @@
-// Versión Arquitectura: V15.9 - Integración Quirúrgica del Módulo de Edición de Perfil de Central
+// Versión Arquitectura: V16.0 - Ajuste Quirúrgico de Registro Intermunicipal y Sincronización Socket
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones, calcomanía QR de autogestión
  * y despliegue del radar satelital en tiempo real para las unidades de la cooperativa autorizada.
- * Ajuste V15.9: Integración del subcomponente 'ModalEditarPerfil' y mapeo del disparador de configuración en la cabecera táctica.
- * Preservación estricta de la lógica de sockets unificados, filtros de telemetría y reglas estéticas CIMCO-UI V9.3.
+ * Ajuste V16.0: Normalización del payload para backend Node.js (tipoViaje: 'intermunicipal'), 
+ * soporte de token Bearer/JWT, emisión del evento 'nuevo_viaje' vía WebSockets y preservación de CIMCO-UI V9.3.
  */
 
 import React, { useEffect, useState } from "react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db, FIRESTORE_PATHS } from "@/config/firebase"; 
 import { useAuth } from "@/hooks/useAuth";
-import { useSocket } from "@/hooks/SocketContext"; // ✅ Consumo del canal unificado blindado
+import { useSocket } from "@/hooks/SocketContext"; 
 import api, { VIAJES_ENDPOINTS } from "@/config/api"; 
-import { Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Hash, Tag, QrCode, Download, Map, Settings } from "lucide-react";
+import { Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, QrCode, Download, Map, Settings } from "lucide-react";
 import { formatHoraColombia } from '@/utils/dateFormatter';
-import { QRCodeSVG } from "qrcode.react"; // ✅ Importación de componente vectorial para calcomanías seguras
+import { QRCodeSVG } from "qrcode.react"; 
 
 // 🗺️ IMPORTACIÓN DEL RADAR GPS OPERATIVO DE CONFLICTOS DE RENDIMIENTO
 import MapaOperativo from "@/components/admin/MapaOperativo";
-import ModalEditarPerfil from "@/components/shared/ModalEditarPerfil"; // ✅ Inyección de subcomponente solicitado
+import ModalEditarPerfil from "@/components/shared/ModalEditarPerfil";
 
 const HomeDespachador = () => {
   // 🛡️ Guardas de Seguridad y Consumo del Contexto Centralizado
   const authContext = useAuth();
   const user = authContext?.user || null;
   const setUser = authContext?.setUser || null;
+  const token = authContext?.token || localStorage.getItem("token") || user?.token || "";
   
   const { socket, isConnected } = useSocket();
 
@@ -33,7 +34,7 @@ const HomeDespachador = () => {
   const [conductores, setConductores] = useState([]);
   const [loadingConductores, setLoadingConductores] = useState(true);
   const [errorConductores, setErrorConductores] = useState(null);
-  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false); // ✅ Control de visibilidad del modal
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   // 🎫 ESTADOS DE FORMULARIO DE RUTA (INYECCIÓN DE VIAJES MANUALES)
   const [origen, setOrigen] = useState("");
@@ -107,21 +108,44 @@ const HomeDespachador = () => {
     setMensajeExito("");
     setMensajeError("");
 
+    // 🛡️ Payload estandardizado para sincronización fluida con viajeController.js
     const payloadInyeccion = {
-      conductorId: conductorSeleccionado.id,
+      conductorId: conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "",
+      conductor: conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "",
+      despachadorId: idOperadorLogistico,
+      despachador: idOperadorLogistico,
       origen: origen.trim().toUpperCase(),
       destino: destino.trim().toUpperCase(),
       valorPasaje: Number(valorPasaje),
+      tarifa: Number(valorPasaje),
+      tipoViaje: "intermunicipal",
       cooperativa: cooperativaDespachador,
-      despachadorId: idOperadorLogistico,
-      creadoManualmente: true
+      creadoManualmente: true,
+      estado: "asignado"
     };
+
+    // Configuración con Guardas de Seguridad para envío del Bearer Token si la ruta lo requiere
+    const axiosConfig = token ? {
+      headers: { Authorization: `Bearer ${token}` }
+    } : {};
 
     try {
       const endpoint = VIAJES_ENDPOINTS?.crear || "/api/viajes/crear";
-      const response = await api.post(endpoint, payloadInyeccion);
+      const response = await api.post(endpoint, payloadInyeccion, axiosConfig);
 
-      if (response?.data?.success) {
+      if (response?.data?.success || response?.data?.viaje || response?.status === 200 || response?.status === 201) {
+        const viajeCreado = response?.data?.viaje || response?.data?.data || response?.data;
+
+        // 📡 Emisión WebSocket para sincronización en caliente del radar operativo
+        if (socket && isConnected) {
+          socket.emit("nuevo_viaje", {
+            viaje: viajeCreado,
+            payload: payloadInyeccion,
+            cooperativa: cooperativaDespachador,
+            timestamp: new Date().toISOString()
+          });
+        }
+
         setMensajeExito(`¡Ruta asignada con éxito al conductor ${conductorSeleccionado.fullName}!`);
         // Limpiar el formulario para evitar duplicados accidentales
         setOrigen("");
@@ -399,7 +423,7 @@ const HomeDespachador = () => {
                           <p className="text-[11px] text-zinc-300 font-black uppercase tracking-wide">
                             CONDUCTOR: <span className="text-white">{conductor.fullName || conductor.nombre || 'Desconocido'}</span>
                           </p>
-                          <p className="text-[9px] text-zinc-500 font-mono mt-0.5 truncate max-w-[280px]\">
+                          <p className="text-[9px] text-zinc-500 font-mono mt-0.5 truncate max-w-[280px]">
                             ID Satelital: {conductor.id}
                           </p>
                         </div>
@@ -435,7 +459,6 @@ const HomeDespachador = () => {
             setUser(prev => ({
               ...prev,
               ...updatedUser,
-              // Mantener compatibilidad si se normalizan propiedades de la sesión corporativa
               rol: updatedUser?.rol || prev?.rol,
               cooperativa: updatedUser?.cooperativa || prev?.cooperativa
             }));

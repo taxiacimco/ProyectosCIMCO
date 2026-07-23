@@ -1,8 +1,8 @@
-// Versión Arquitectura: V12.2 - Aislamiento de Entorno de Desarrollo y Supresión de Credenciales Quemadas
+// Versión Arquitectura: V12.3 - Code Splitting con Lazy Loading y Supresión de Credenciales
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterAdmin.jsx
  * Misión: Sembrar los perfiles de Alta Gerencia y Operaciones en entorno local de forma segura.
- * Seguridad: Bloqueo estricto fuera del entorno de 'development' y remoción de credenciales hardcodeadas.
+ * Seguridad: Bloqueo estricto fuera de 'development' y preparado para Lazy Loading.
  */
 
 import React, { useState } from 'react';
@@ -15,7 +15,7 @@ const RegisterAdmin = () => {
   const [log, setLog] = useState('');
   const [loading, setLoading] = useState(false);
   
-  // Estados para inyección dinámica (remoción de credenciales quemadas)
+  // Estados para inyección dinámica (sin credenciales hardcodeadas)
   const [correoInyeccion, setCorreoInyeccion] = useState('');
   const [claveInyeccion, setClaveInyeccion] = useState('');
 
@@ -26,7 +26,6 @@ const RegisterAdmin = () => {
     setLoading(true);
     setLog('');
 
-    // 🛡️ Blindaje de variables Anti-Undefined
     if (!correoInyeccion?.trim() || !claveInyeccion?.trim()) {
       setLog("❌ Error de Validación: Debe especificar un correo y clave operativa para la inyección.");
       setLoading(false);
@@ -56,12 +55,9 @@ const RegisterAdmin = () => {
         };
       }
 
-      // Enviar comando directo al endpoint de registro
       await api.post('/api/auth/register', payload);
       
-      setLog(`✅ Perfil [${perfil}] indexado con éxito en el clúster local con el usuario: ${correoInyeccion}`);
-      
-      // Limpiar campos por seguridad tras la inyección exitosa
+      setLog(`✅ Perfil [${perfil}] indexado con éxito en el clúster local: ${correoInyeccion}`);
       setCorreoInyeccion('');
       setClaveInyeccion('');
       
@@ -72,7 +68,7 @@ const RegisterAdmin = () => {
     }
   };
 
-  // 🛡️ RENDERIZADO DE BLOQUEO (Si se filtra a Producción)
+  // 🛡️ RENDERIZADO DE BLOQUEO EN CASO DE ACCESO NO DESEADO EN PRODUCCIÓN
   if (!isDevelopment) {
     return (
       <div className="min-h-screen bg-[#050507] flex items-center justify-center p-4 font-sans relative overflow-hidden">
@@ -83,7 +79,7 @@ const RegisterAdmin = () => {
           </div>
           <h1 className="text-red-500 font-black text-2xl tracking-widest uppercase mb-2">Acceso Restringido</h1>
           <p className="text-zinc-400 font-mono text-xs tracking-wider mb-8 leading-relaxed">
-            El entorno de inyección de cuentas está estrictamente deshabilitado en el clúster de producción.<br/>Violación de políticas de seguridad evadida.
+            El entorno de inyección de cuentas está estrictamente deshabilitado en producción.
           </p>
           <Link to="/login" className="inline-block px-8 py-3 bg-red-950/40 text-red-400 border border-red-500/20 hover:bg-red-900/50 hover:text-red-300 font-mono text-[10px] uppercase tracking-[0.2em] rounded-xl transition-all">
             Retornar a Zona Segura
@@ -93,15 +89,11 @@ const RegisterAdmin = () => {
     );
   }
 
-  // RENDERIZADO DE DESARROLLO (Modo Seguro Activo)
   return (
     <div className="min-h-screen bg-[#050507] flex items-center justify-center p-4 font-sans relative overflow-hidden selection:bg-red-500/30">
-      {/* Resplandor Rojo de advertencia de infraestructura */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-red-600/[0.04] rounded-full blur-[120px] pointer-events-none" />
 
       <div className="w-full max-w-md backdrop-blur-xl bg-[#0b0b0f]/95 border border-red-500/10 rounded-2xl p-8 shadow-2xl shadow-black relative z-10">
-        
-        {/* Encabezado Restringido */}
         <div className="mb-6 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-500/[0.08] border border-red-500/30 rounded-full mb-3">
             <span className="h-2 w-2 rounded-full bg-red-500 animate-ping" />
@@ -111,7 +103,6 @@ const RegisterAdmin = () => {
           <p className="text-zinc-500 font-mono text-[9px] tracking-widest mt-1 uppercase">Entorno Local de Pruebas CIMCO</p>
         </div>
 
-        {/* Consola de Logs */}
         {log && (
           <div className="mb-6 bg-black/50 border border-zinc-800/80 p-3 rounded-xl font-mono text-[11px] text-zinc-300 whitespace-pre-line leading-relaxed border-l-2 border-l-red-500">
             {log}
@@ -123,7 +114,6 @@ const RegisterAdmin = () => {
             Defina credenciales dinámicas para la inyección de roles:
           </p>
 
-          {/* Inputs Dinámicos para Evitar Credenciales Quemadas */}
           <div className="space-y-3 bg-zinc-950/50 p-4 rounded-xl border border-white/5">
             <div className="space-y-1.5">
               <label className="text-zinc-500 font-mono text-[9px] uppercase tracking-[0.2em] font-black pl-1">Correo de Asignación</label>
@@ -147,7 +137,6 @@ const RegisterAdmin = () => {
             </div>
           </div>
 
-          {/* ACCIÓN 1: ADMINISTRADOR MÁXIMO / CEO */}
           <div className="p-4 bg-zinc-900/40 border border-zinc-800/60 rounded-xl space-y-3 transition-colors hover:border-red-500/20">
             <div className="flex justify-between items-center">
               <span className="text-xs font-bold text-white font-mono">⚡ El Administrador Máximo / CEO</span>
@@ -163,7 +152,6 @@ const RegisterAdmin = () => {
             </button>
           </div>
 
-          {/* ACCIÓN 2: SOPORTE Y OPERACIONES / SECRETARIA */}
           <div className="p-4 bg-zinc-900/40 border border-zinc-800/60 rounded-xl space-y-3 transition-colors hover:border-zinc-700">
             <div className="flex justify-between items-center">
               <span className="text-xs font-bold text-white font-mono">🎧 Soporte y Operaciones</span>
@@ -180,13 +168,11 @@ const RegisterAdmin = () => {
           </div>
         </div>
 
-        {/* Retorno seguro */}
         <div className="mt-8 text-center border-t border-zinc-900 pt-4">
           <Link to="/login" className="text-zinc-600 hover:text-red-400 font-mono text-[10px] uppercase tracking-widest transition-colors">
             ← Regresar al Acceso Público
           </Link>
         </div>
-
       </div>
     </div>
   );

@@ -1,8 +1,7 @@
-// Versión Arquitectura: V9.9.5 - Corrección de Dependencias Circulares y Optimización de Chunks Limpios
+// Versión Arquitectura: V9.9.6 - Integración de Plugin Tailwind v4 y Preservación de Reglas Perimetrales de Red
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\vite.config.js
- * Misión: Eliminar la advertencia 'Circular chunk' reestructurando el empaquetado manual.
- * Previene que las dependencias implícitas de node_modules se mezclen de forma cíclica con el núcleo.
+ * Misión: Asegurar el procesamiento de estilos con @tailwindcss/vite manteniendo alias @, proxy hacia backend local y aislamiento anti-ciclos de chunks.
  */
 
 import { defineConfig } from 'vite';

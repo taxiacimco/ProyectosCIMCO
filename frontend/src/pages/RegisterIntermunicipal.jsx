@@ -1,7 +1,7 @@
-// Versión Arquitectura: V1.7 - Carga Documental de Auditoría Obligatoria Intermunicipal
+// Versión Arquitectura: V1.8 - Carga Documental y Contrato Unificado Intermunicipal
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterIntermunicipal.jsx
- * Misión: Captura de operadores de mediana distancia con controles estrictos de documentación vial y normalización de payload.
+ * Misión: Captura de operadores de mediana distancia con validación estricta de archivos y payload estandarizado.
  * Estilo: CIMCO-UI V9.3 Glassmorphism (Indigo Theme).
  */
 
@@ -10,6 +10,11 @@ import { useNavigate, Link } from 'react-router-dom';
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
 import { AlertTriangle, UploadCloud, FileText, CheckCircle2 } from 'lucide-react';
+
+// Constantes de Validación Documental (Máx 5MB)
+const MAX_FILE_SIZE_MB = 5;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 
 const RegisterIntermunicipal = () => {
   const navigate = useNavigate();
@@ -31,9 +36,35 @@ const RegisterIntermunicipal = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleFileChange = (e, setFile) => {
+  // Helper de validación de archivos (Tamaño + Extensión/MIME Type)
+  const validateFile = (file, fileLabel) => {
+    if (!file) return null;
+
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      return `El archivo "${fileLabel}" tiene un formato no permitido. Usa imágenes (.jpg, .png) o PDF.`;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return `El archivo "${fileLabel}" excede el límite máximo permitido de ${MAX_FILE_SIZE_MB}MB.`;
+    }
+
+    return null;
+  };
+
+  const handleFileChange = (e, setFile, label) => {
+    setError('');
     if (e?.target?.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      const validationError = validateFile(selectedFile, label);
+
+      if (validationError) {
+        setError(validationError);
+        e.target.value = ''; // Resetear input
+        setFile(null);
+        return;
+      }
+
+      setFile(selectedFile);
     }
   };
 
@@ -43,8 +74,8 @@ const RegisterIntermunicipal = () => {
 
     // 🛡️ Guardas de seguridad preventivas (Anti-Undefined / Blindaje de Variables)
     if (!nombre?.trim() || !celular?.trim() || !correo?.trim() || !clave?.trim() || !placa?.trim() || !cooperativa?.trim()) {
-        setError("⚠️ Error de Validación: Todos los campos operacionales son obligatorios.");
-        return;
+      setError("⚠️ Error de Validación: Todos los campos operacionales son obligatorios.");
+      return;
     }
 
     if (!cedulaFile || !licenciaFile || !tarjetaFile) {
@@ -52,37 +83,39 @@ const RegisterIntermunicipal = () => {
       return;
     }
 
+    // Re-validación estricta de archivos antes del envío
+    const errCedula = validateFile(cedulaFile, 'Cédula');
+    const errLicencia = validateFile(licenciaFile, 'Licencia');
+    const errTarjeta = validateFile(tarjetaFile, 'Tarjeta de Propiedad');
+
+    if (errCedula || errLicencia || errTarjeta) {
+      setError(errCedula || errLicencia || errTarjeta);
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // Trazabilidad de Roles y Niveles de Acceso con Guardas
+      // Trazabilidad de Roles y Niveles de Acceso
       const targetRole = ROLES?.CONDUCTOR_INTERMUNICIPAL || 'conductor_intermunicipal';
       const accessLevel = DEFAULT_ACCESS_LEVELS?.[targetRole] ?? 20;
 
-      // Fusión Atómica: Compilación de FormData binario para transporte seguro multipart hacia el backend
+      // Fusión Atómica: Payload estandarizado y limpio hacia el Backend (Sin redundancias)
       const dataPayload = new FormData();
       dataPayload.append('nombre', nombre.trim());
-      dataPayload.append('telefono', celular.trim());            // Mapeo unificado a telefono
-      dataPayload.append('celular', celular.trim());             // Retrocompatibilidad preservada
-      dataPayload.append('email', correo.toLowerCase().trim());  // Mapeo unificado a email
-      dataPayload.append('correo', correo.toLowerCase().trim()); // Retrocompatibilidad preservada
+      dataPayload.append('telefono', celular.trim());
+      dataPayload.append('email', correo.toLowerCase().trim());
       dataPayload.append('password', clave);
-      dataPayload.append('clave', clave);                       // Retrocompatibilidad preservada
       dataPayload.append('placa', placa.toUpperCase().trim());
       dataPayload.append('numero_interno', numeroInterno.trim());
-      dataPayload.append('empresa', cooperativa.trim());         // Mapeo unificado a empresa
-      dataPayload.append('cooperativa', cooperativa.trim());     // Retrocompatibilidad preservada
+      dataPayload.append('empresa', cooperativa.trim());
       dataPayload.append('role', targetRole); 
-      dataPayload.append('rol', targetRole);  
       dataPayload.append('access_level', String(accessLevel));
 
-      // Inyección unificada de ficheros para auditoría legal
+      // Inyección unificada de ficheros limpios
       dataPayload.append('doc_cedula', cedulaFile);
-      dataPayload.append('documento_cedula', cedulaFile);
       dataPayload.append('doc_licencia', licenciaFile);
-      dataPayload.append('documento_licencia', licenciaFile);
       dataPayload.append('doc_tarjeta', tarjetaFile);
-      dataPayload.append('documento_tarjeta', tarjetaFile);
 
       const res = await api.post('/api/auth/register', dataPayload, {
         headers: { 'Content-Type': 'multipart/form-data' }
@@ -219,9 +252,12 @@ const RegisterIntermunicipal = () => {
 
           {/* 📂 SECCIÓN DE CARGA DOCUMENTAL GLASSMORPHISM */}
           <div className="border-t border-white/5 pt-5">
-            <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5 mb-3">
+            <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5 mb-1">
               <FileText size={12} className="text-indigo-400" /> Archivos de Verificación Nacional Terrestre (Obligatorios)
             </label>
+            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide mb-3">
+              Formatos admitidos: JPG, PNG, PDF (Máx. 5MB por archivo)
+            </p>
             
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Cédula */}
@@ -230,7 +266,12 @@ const RegisterIntermunicipal = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {cedulaFile ? cedulaFile.name : "Cédula PDF/Img"}
                 </span>
-                <input type="file" accept="image/*,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileChange(e, setCedulaFile)} />
+                <input 
+                  type="file" 
+                  accept="image/jpeg,image/png,image/webp,application/pdf" 
+                  className="absolute inset-0 opacity-0 cursor-pointer" 
+                  onChange={(e) => handleFileChange(e, setCedulaFile, 'Cédula')} 
+                />
               </div>
 
               {/* Licencia */}
@@ -239,7 +280,12 @@ const RegisterIntermunicipal = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {licenciaFile ? licenciaFile.name : "Licencia C2/C3"}
                 </span>
-                <input type="file" accept="image/*,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileChange(e, setLicenciaFile)} />
+                <input 
+                  type="file" 
+                  accept="image/jpeg,image/png,image/webp,application/pdf" 
+                  className="absolute inset-0 opacity-0 cursor-pointer" 
+                  onChange={(e) => handleFileChange(e, setLicenciaFile, 'Licencia')} 
+                />
               </div>
 
               {/* Tarjeta de Propiedad */}
@@ -248,7 +294,12 @@ const RegisterIntermunicipal = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {tarjetaFile ? tarjetaFile.name : "Tarjeta Propiedad"}
                 </span>
-                <input type="file" accept="image/*,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileChange(e, setTarjetaFile)} />
+                <input 
+                  type="file" 
+                  accept="image/jpeg,image/png,image/webp,application/pdf" 
+                  className="absolute inset-0 opacity-0 cursor-pointer" 
+                  onChange={(e) => handleFileChange(e, setTarjetaFile, 'Tarjeta de Propiedad')} 
+                />
               </div>
             </div>
           </div>

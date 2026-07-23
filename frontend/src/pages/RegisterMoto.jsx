@@ -1,9 +1,8 @@
-// Versión Arquitectura: V2.0 - Captura de Documentación de Flota y Enrutamiento de Sub-Roles QR
+// Versión Arquitectura: V2.1 - Captura de Documentación Validada y Enrutamiento QR Robusto
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterMoto.jsx
- * Misión: Registro del Escuadrón Moto con soporte nativo para carga digital de documentos obligatorios.
+ * Misión: Registro del Escuadrón Moto con validación estricta de peso/extensión documental y fallback QR.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Teal Accent).
- * Ajuste V2.0: Sincronización automática de sub-roles vía parámetros de query (?role=) e inyección de payload multipart adaptativo.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -11,6 +10,11 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
 import { ShieldCheck, FileText, Camera, UploadCloud, AlertTriangle } from 'lucide-react';
+
+// 🛡️ CONSTANTES DE VALIDACIÓN DOCUMENTAL (MÁX 5MB)
+const MAX_FILE_SIZE_MB = 5;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 
 const RegisterMoto = () => {
   const navigate = useNavigate();
@@ -34,30 +38,61 @@ const RegisterMoto = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Sincronizar sub-rol si viene inyectado del QR (Blindaje contra variaciones)
+  // 🔄 SINCRONIZACIÓN QR CON FALLBACK ROBUSTO
   useEffect(() => {
+    const defaultRole = ROLES?.MOTOTAXI || 'mototaxi';
+
     if (roleParam) {
       const normalizedRole = String(roleParam).toLowerCase().trim();
-      const validRoles = [
-        String(ROLES?.MOTOTAXI || 'mototaxi').toLowerCase(),
-        String(ROLES?.MOTOPARRILLERO || 'motoparrillero').toLowerCase(),
-        String(ROLES?.MOTOCARGA || 'motocarga').toLowerCase(),
-        'moto'
-      ];
-      
-      if (validRoles.includes(normalizedRole)) {
-        if (normalizedRole === 'moto') {
-          setTipoMoto(ROLES?.MOTOTAXI || 'mototaxi');
-        } else {
-          setTipoMoto(normalizedRole);
-        }
+      const mototaxiRole = String(ROLES?.MOTOTAXI || 'mototaxi').toLowerCase();
+      const parrilleroRole = String(ROLES?.MOTOPARRILLERO || 'motoparrillero').toLowerCase();
+      const cargaRole = String(ROLES?.MOTOCARGA || 'motocarga').toLowerCase();
+
+      // Mapeo seguro con fallback
+      if (normalizedRole === mototaxiRole || normalizedRole === 'moto') {
+        setTipoMoto(ROLES?.MOTOTAXI || 'mototaxi');
+      } else if (normalizedRole === parrilleroRole) {
+        setTipoMoto(ROLES?.MOTOPARRILLERO || 'motoparrillero');
+      } else if (normalizedRole === cargaRole) {
+        setTipoMoto(ROLES?.MOTOCARGA || 'motocarga');
+      } else {
+        // Fallback por defecto si el parámetro no es reconocido
+        setTipoMoto(defaultRole);
       }
+    } else {
+      setTipoMoto(defaultRole);
     }
   }, [roleParam]);
 
-  const handleFileChange = (e, setFile) => {
+  // 🔍 HELPER DE VALIDACIÓN DE ARCHIVOS (Tamaño + Formato MIME)
+  const validateFile = (file, fileLabel) => {
+    if (!file) return null;
+
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      return `El archivo "${fileLabel}" tiene un formato no válido. Se permiten imágenes (.jpg, .png) o PDF.`;
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return `El archivo "${fileLabel}" excede el límite máximo permitido de ${MAX_FILE_SIZE_MB}MB.`;
+    }
+
+    return null;
+  };
+
+  const handleFileChange = (e, setFile, fileLabel) => {
+    setError('');
     if (e?.target?.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      const validationError = validateFile(selectedFile, fileLabel);
+
+      if (validationError) {
+        setError(validationError);
+        e.target.value = ''; // Resetear el input file
+        setFile(null);
+        return;
+      }
+
+      setFile(selectedFile);
     }
   };
 
@@ -65,7 +100,7 @@ const RegisterMoto = () => {
     e.preventDefault();
     setError('');
 
-    // 🛡️ GUARDAS DE SEGURIDAD OPERATIVA (ANTI-UNDEFINED Y REQUISITOS OBLIGATORIOS)
+    // 🛡️ GUARDAS DE SEGURIDAD OPERATIVA
     if (!nombre?.trim() || !celular?.trim() || !correo?.trim() || !clave?.trim() || !placa?.trim()) {
       setError("Faltan variables operacionales críticas.");
       return;
@@ -73,6 +108,16 @@ const RegisterMoto = () => {
 
     if (!docCedula || !docLicencia || !docTarjetaPropiedad) {
       setError("Falta documentación obligatoria: Cédula, Licencia y Tarjeta de Propiedad.");
+      return;
+    }
+
+    // 🔬 RE-VALIDACIÓN PREVENTIVA DE ARCHIVOS
+    const errCedula = validateFile(docCedula, 'Cédula');
+    const errLicencia = validateFile(docLicencia, 'Licencia');
+    const errTarjeta = validateFile(docTarjetaPropiedad, 'Tarjeta de Propiedad');
+
+    if (errCedula || errLicencia || errTarjeta) {
+      setError(errCedula || errLicencia || errTarjeta);
       return;
     }
 
@@ -132,7 +177,7 @@ const RegisterMoto = () => {
         </div>
 
         {error && (
-          <div className="mb-6 bg-red-950/30 border border-red-500/20 rounded-xl p-3.5 flex items-center gap-2 text-red-400 text-[10px] font-mono uppercase tracking-widest font-bold">
+          <div className="mb-6 bg-red-950/30 border border-red-500/20 rounded-xl p-3.5 flex items-center gap-2 text-red-400 text-[10px] font-mono uppercase tracking-widest font-bold animate-in fade-in slide-in-from-top-2">
             <AlertTriangle size={12} />
             <span>{error}</span>
           </div>
@@ -182,9 +227,12 @@ const RegisterMoto = () => {
 
           {/* 📂 SECCIÓN DE CARGA DOCUMENTAL GLASSMORPHISM */}
           <div className="border-t border-white/5 pt-5">
-            <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5 mb-3">
+            <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5 mb-1">
               <FileText size={12} className="text-teal-400" /> Documentación Digital del Conductor (Obligatoria)
             </label>
+            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide mb-3">
+              Formatos admitidos: JPG, PNG, PDF (Máx. 5MB por archivo)
+            </p>
             
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Cédula */}
@@ -193,7 +241,12 @@ const RegisterMoto = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {docCedula ? docCedula.name : "Cédula Ciudadanía"}
                 </span>
-                <input type="file" accept="image/*,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileChange(e, setDocCedula)} />
+                <input 
+                  type="file" 
+                  accept="image/jpeg,image/png,image/webp,application/pdf" 
+                  className="absolute inset-0 opacity-0 cursor-pointer" 
+                  onChange={(e) => handleFileChange(e, setDocCedula, 'Cédula')} 
+                />
               </div>
 
               {/* Licencia */}
@@ -202,7 +255,12 @@ const RegisterMoto = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {docLicencia ? docLicencia.name : "Licencia Conducción"}
                 </span>
-                <input type="file" accept="image/*,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileChange(e, setDocLicencia)} />
+                <input 
+                  type="file" 
+                  accept="image/jpeg,image/png,image/webp,application/pdf" 
+                  className="absolute inset-0 opacity-0 cursor-pointer" 
+                  onChange={(e) => handleFileChange(e, setDocLicencia, 'Licencia')} 
+                />
               </div>
 
               {/* Tarjeta de Propiedad */}
@@ -211,7 +269,12 @@ const RegisterMoto = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {docTarjetaPropiedad ? docTarjetaPropiedad.name : "Tarjeta Propiedad"}
                 </span>
-                <input type="file" accept="image/*,application/pdf" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleFileChange(e, setDocTarjetaPropiedad)} />
+                <input 
+                  type="file" 
+                  accept="image/jpeg,image/png,image/webp,application/pdf" 
+                  className="absolute inset-0 opacity-0 cursor-pointer" 
+                  onChange={(e) => handleFileChange(e, setDocTarjetaPropiedad, 'Tarjeta de Propiedad')} 
+                />
               </div>
             </div>
           </div>

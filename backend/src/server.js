@@ -1,7 +1,8 @@
-// Versión Arquitectura: V6.14 - Flexibilización de CORS Perimetral para Railway y Frontend Local
+// Versión Arquitectura: V16.7 - Registro del Enrutador Perimetral de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
- * Misión: Integración de red centralizada, habilitación de CORS flexible y orquestación de sockets modularizados.
+ * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado, orquestación de sockets
+ * e inyección del enrutador de Pasajeros (/api/pasajeros) junto con Usuarios, Conductores y Viajes.
  */
 
 import 'dotenv/config';
@@ -15,6 +16,8 @@ import { Server } from 'socket.io';
 import authRoutes from '#modules/auth/auth.routes.js';
 import conductorRoutes from '#modules/conductores/conductor.routes.js';
 import viajeRoutes from '#modules/viajes/viaje.routes.js';
+import usuarioRoutes from './modules/usuarios/usuario.routes.js';
+import pasajeroRoutes from './modules/pasajeros/pasajero.routes.js';
 import { inicializarSockets } from '#modules/sockets/socket.manager.js';
 
 const app = express();
@@ -24,10 +27,25 @@ const logLocal = (msg) => {
     console.log(`[${new Date().toLocaleString('es-CO')}] ${msg}`);
 };
 
-// 📡 CONFIGURACIÓN MAESTRA DE CORS (Apertura perimetral para pruebas)
+// 🌐 ORIGENES PERMITIDOS PARA DESARROLLO LOCAL, NGROK Y PRODUCCIÓN
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:5173',
+  'https://globosely-appreciative-zander.ngrok-free.dev',
+  process.env.CLIENT_URL
+].filter(Boolean);
+
+// 📡 CONFIGURACIÓN MAESTRA DE CORS CON VALIDACIÓN DINÁMICA DE ORIGEN Y CREDENCIALES
 const corsOptions = {
-    origin: '*', // Permite solicitudes desde localhost, tuneles ngrok y dominio final
-    credentials: false, // Cuando origin es '*', credentials debe establecerse en false según especificación W3C
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+            callback(null, true);
+        } else {
+            callback(new Error('Bloqueado por política de seguridad CORS CIMCO-Core'));
+        }
+    },
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 };
@@ -40,7 +58,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use((req, res, next) => {
-    const originHeader = req.headers.origin || req.headers.referer || 'Proxy Local / Red Directa';
+    const originHeader = req.headers?.origin || req.headers?.referer || 'Proxy Local / Red Directa';
     logLocal(`📡 [CIMCO-NUCLEO] ${req.method} desde ${originHeader} -> ${req.originalUrl}`);
     next();
 });
@@ -61,7 +79,10 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/conductores', conductorRoutes);
 app.use('/api/viajes', viajeRoutes);
+app.use('/api/usuarios', usuarioRoutes);
+app.use('/api/pasajeros', pasajeroRoutes);
 
+// Sincronización de CORS para WebSockets (Socket.IO)
 const io = new Server(httpServer, {
     cors: corsOptions
 });
@@ -69,7 +90,7 @@ const io = new Server(httpServer, {
 inicializarSockets(io);
 
 app.use((err, req, res, next) => {
-    if (err.name === 'MongoServerError' || err.code === 112 || err.message.includes('WriteConflict')) {
+    if (err && (err.name === 'MongoServerError' || err.code === 112 || (err.message && err.message.includes('WriteConflict')))) {
         logLocal(`💥 [CIMCO-CONCURRENCIA] Conflicto de escritura detectado bajo ráfaga masiva: ${err.message}`);
         return res.status(503).json({
             success: false,
@@ -78,8 +99,9 @@ app.use((err, req, res, next) => {
         });
     }
 
-    logLocal(`🚨 [CIMCO-MANEJADOR-GLOBAL] Error no controlado interceptado: ${err.message}`);
-    res.status(err.status || 500).json({
+    const mensajeError = err?.message || 'Error no especificado';
+    logLocal(`🚨 [CIMCO-MANEJADOR-GLOBAL] Error no controlado interceptado: ${mensajeError}`);
+    res.status(err?.status || 500).json({
         success: false,
         error: "Error interno del servidor central controlado por la directriz de resiliencia CIMCO Core."
     });
@@ -118,7 +140,7 @@ async function conectar() {
             logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo exitosamente en el puerto dinámico: ${PORT}`);
         });
     } catch (error) {
-        logLocal(`🚨 [CIMCO-DATABASE-FATAL] Error crítico de enlace en la capa persistente: ${error.message}`);
+        logLocal(`🚨 [CIMCO-DATABASE-FATAL] Error crítico de enlace en la capa persistente: ${error?.message || error}`);
         process.exit(1);
     }
 }

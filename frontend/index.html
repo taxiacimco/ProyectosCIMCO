@@ -1,3 +1,4 @@
+<!-- Versión Arquitectura: V9.9.7 - Inyección de Hoja de Estilos CSS de Leaflet y Preservación de CDN Wompi -->
 <!DOCTYPE html>
 <html lang="es">
   <head>
@@ -5,6 +6,16 @@
     <link rel="icon" type="image/png" href="/assets/pasajero-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Taxia CIMCO - La Jagua de Ibirico</title>
+
+    <!-- Leaflet CSS (Requerido para la correcta renderización visual de mapas, azulejos y marcadores) -->
+    <link 
+      rel="stylesheet" 
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+
+    <!-- Widget de Pagos Wompi -->
     <script type="text/javascript" src="https://checkout.wompi.co/widget.js"></script>
   </head>
   <body class="bg-[#121214]">

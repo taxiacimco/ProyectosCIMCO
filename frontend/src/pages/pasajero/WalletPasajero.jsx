@@ -1,44 +1,57 @@
-// Versión Arquitectura: V12.1 - Sanitización de Suscripciones Reactivas de Fondos
+// Versión Arquitectura: V12.2 - Blindaje de Suscripciones Reactivas de Billetera y Anti-NaN Output
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\WalletPasajero.jsx
  * Misión: Proveer al pasajero una interfaz para recargar fondos y auditar sus movimientos.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
- * Ajuste V12.1: Optimización del ciclo de vida del Snapshot agregando user?.uid a las dependencias y control de errores reactivo.
+ * Ajuste V12.2: Manejo seguro de FIRESTORE_PATHS, blindaje anti-NaN en renderizado de fondos y manejo de errores de snapshot.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { Wallet, Activity, CreditCard } from 'lucide-react';
+import { Wallet, Activity, CreditCard, AlertCircle } from 'lucide-react';
 import BotonRecarga from '@/components/wallet/BotonRecarga';
 import TransactionHistory from '@/components/wallet/TransactionHistory';
 
 const WalletPasajero = () => {
     const { user } = useAuth();
     const [balance, setBalance] = useState(0);
+    const [errorReactor, setErrorReactor] = useState(null);
 
     useEffect(() => {
-        if (!user?.uid) return;
+        const uid = user?.uid || user?.id;
+        if (!uid) return;
         
-        // Conexión unificada a la colección de finanzas consumiendo FIRESTORE_PATHS global
-        const pathColeccion = FIRESTORE_PATHS.wallets || 'wallets';
-        const unsubscribe = onSnapshot(doc(db, pathColeccion, user.uid), (docRef) => {
+        setErrorReactor(null);
+
+        // Conexión unificada a la colección de finanzas consumiendo FIRESTORE_PATHS global con fallbacks
+        const pathColeccion = FIRESTORE_PATHS?.wallets || FIRESTORE_PATHS?.billeteras || 'wallets';
+        
+        const unsubscribe = onSnapshot(doc(db, pathColeccion, uid), (docRef) => {
             if (docRef.exists()) {
-                // Retrocompatibilidad segura y guardas anti-undefined para leer el estado del fondo
-                const data = docRef.data();
-                setBalance(data?.balance || data?.saldo || 0);
+                const data = docRef.data() || {};
+                // Guardas anti-undefined y casteo numérico seguro
+                const saldoCalculado = Number(data?.balance ?? data?.saldo ?? 0);
+                setBalance(isNaN(saldoCalculado) ? 0 : saldoCalculado);
+            } else {
+                setBalance(0);
             }
+            setErrorReactor(null);
         }, (error) => {
             console.error("❌ [BILLETERA-REACTOR-ERROR] Fallo transaccional de fondo:", error);
+            setErrorReactor("Fallo de comunicación en tiempo real con la bóveda de fondos.");
         });
         
         return () => unsubscribe();
-    }, [user?.uid]); // 🚀 Optimización del ciclo de vida del Snapshot para mitigar fugas de memoria
+    }, [user?.uid, user?.id]);
+
+    const uidUsuario = user?.uid || user?.id;
+    const rolUsuario = user?.role || user?.rol || 'pasajero';
 
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 p-4 md:p-8 font-mono antialiased flex flex-col items-center justify-center relative overflow-hidden">
-            {/* Gradiante ambiental premium */}
+            {/* Gradiente ambiental premium */}
             <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-yellow-500/5 rounded-full blur-[130px] pointer-events-none" />
             
             <div className="w-full max-w-4xl flex flex-col md:flex-row gap-6 relative z-10">
@@ -55,23 +68,32 @@ const WalletPasajero = () => {
                                 </div>
                                 <div>
                                     <h2 className="text-xs font-black uppercase tracking-widest text-zinc-400">Billetera Digital</h2>
-                                    <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5 font-mono">ID Operador: <span className="text-zinc-400">{String(user?.uid || 'ANÓNIMO').slice(0, 8)}</span></p>
+                                    <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5 font-mono">
+                                        ID Operador: <span className="text-zinc-400">{String(uidUsuario || 'ANÓNIMO').slice(0, 8)}</span>
+                                    </p>
                                 </div>
                             </div>
                             <CreditCard size={18} className="text-zinc-600" />
                         </div>
 
+                        {errorReactor && (
+                            <div className="mb-4 bg-red-500/10 border border-red-500/20 rounded-xl p-2.5 flex items-center gap-2 text-red-400 text-[9px] font-bold uppercase tracking-wider">
+                                <AlertCircle size={14} className="shrink-0" />
+                                <span>{errorReactor}</span>
+                            </div>
+                        )}
+
                         <div className="py-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Fondos Disponibles</p>
                             <h2 className="text-4xl md:text-5xl font-black text-white mb-6 tracking-tight mt-1">
-                                ${balance.toLocaleString()} <span className="text-lg text-zinc-500 font-normal">COP</span>
+                                ${Number(balance || 0).toLocaleString()} <span className="text-lg text-zinc-500 font-normal">COP</span>
                             </h2>
                         </div>
                     </div>
 
                     <div className="flex gap-4 relative z-10 mt-2 border-t border-white/5 pt-6">
-                        {/* Se inyecta el componente global de recarga pasando el rol para definir reglas de negocio si es necesario */}
-                        <BotonRecarga usuarioId={user?.uid} rol={user?.role || user?.rol || 'pasajero'} />
+                        {/* Componente global de recarga con fallback seguro de UID */}
+                        <BotonRecarga usuarioId={uidUsuario} rol={rolUsuario} />
                     </div>
                 </div>
 
@@ -83,7 +105,7 @@ const WalletPasajero = () => {
                     </div>
                     
                     <div className="flex-1 overflow-y-auto h-96 pr-2 custom-scrollbar">
-                        <TransactionHistory usuarioId={user?.uid} />
+                        <TransactionHistory usuarioId={uidUsuario} />
                     </div>
                 </div>
 

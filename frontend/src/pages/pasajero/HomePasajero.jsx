@@ -1,13 +1,13 @@
-// Versión Arquitectura: V14.5 - Blindaje de Telemetría Red y Coexistencia de Canales Híbridos con Módulo de Billetera y Perfil Avanzado
+// Versión Arquitectura: V14.6 - Estandarización de Colección de Billetera y Limpieza de Select de Modalidad Flota
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Emisión activa de telemetría, solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS), edición de perfil y pasarela de billetera.
- * Ajuste V14.5: Integración de actualización de datos de perfil, mapeo exacto de íconos de flota solicitados y pasarela para recargas simuladas de Admin/CEO.
+ * Ajuste V14.6: Estandarización de la lectura de la billetera desde FIRESTORE_PATHS.wallets con fallback retrocompatible hacia usuarios y corrección del string de selección intermunicipal.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, auth as firebaseAuth, FIRESTORE_PATHS } from '@/config/firebase'; 
-import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { useAuth } from '@/hooks/useAuth';
 import { useGpsGuard } from '@/hooks/useGpsGuard';
@@ -25,7 +25,7 @@ import { io } from 'socket.io-client';
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-png',
+    iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
@@ -126,30 +126,56 @@ const HomePasajero = () => {
         if (!uidUsuario || uidUsuario === 'ANÓNIMO') return;
         
         const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
-        const docRef = doc(db, pathUsuarios, uidUsuario);
+        const docRefUser = doc(db, pathUsuarios, uidUsuario);
         
-        const unsubscribe = onSnapshot(docRef, (snapshot) => {
-            if (snapshot.exists()) {
-                const data = snapshot.data();
-                const perfilActualizado = {
-                    nombre: data.nombre || user?.nombre || user?.displayName || 'Pasajero Operativo',
-                    telefono: data.telefono || '',
-                    saldoBilletera: typeof data.saldoBilletera === 'number' ? data.saldoBilletera : 0
-                };
-                setPerfilFirestore(perfilActualizado);
-                setInputNombre(perfilActualizado.nombre);
-                setInputTelefono(perfilActualizado.telefono);
-            } else {
-                // Fallback por si el documento aún no existe en colecciones unificadas
-                setPerfilFirestore({
-                    nombre: user?.nombre || user?.displayName || 'Pasajero Operativo',
-                    telefono: '',
-                    saldoBilletera: 0
-                });
+        const unsubscribeUser = onSnapshot(docRefUser, (snapshotUser) => {
+            let nombreBase = user?.nombre || user?.displayName || 'Pasajero Operativo';
+            let telefonoBase = '';
+            let saldoBase = 0;
+
+            if (snapshotUser.exists()) {
+                const dataUser = snapshotUser.data();
+                nombreBase = dataUser.nombre || nombreBase;
+                telefonoBase = dataUser.telefono || '';
+                saldoBase = typeof dataUser.saldoBilletera === 'number' ? dataUser.saldoBilletera : (typeof dataUser.balance === 'number' ? dataUser.balance : 0);
             }
+
+            setPerfilFirestore((prev) => ({
+                ...prev,
+                nombre: nombreBase,
+                telefono: telefonoBase,
+                saldoBilletera: saldoBase
+            }));
+            setInputNombre(nombreBase);
+            setInputTelefono(telefonoBase);
+        }, (error) => {
+            console.error("❌ [PERFIL-FIRESTORE] Error cargando perfil:", error);
         });
 
-        return () => unsubscribe();
+        // 🏦 Subscripción en tiempo real al nodo unificado de Billeteras (FIRESTORE_PATHS.wallets)
+        const pathWallets = FIRESTORE_PATHS?.wallets || 'wallets';
+        const docRefWallet = doc(db, pathWallets, uidUsuario);
+
+        const unsubscribeWallet = onSnapshot(docRefWallet, (snapshotWallet) => {
+            if (snapshotWallet.exists()) {
+                const walletData = snapshotWallet.data();
+                const saldoReal = typeof walletData?.balance === 'number' 
+                    ? walletData.balance 
+                    : (typeof walletData?.saldo === 'number' ? walletData.saldo : 0);
+
+                setPerfilFirestore((prev) => ({
+                    ...prev,
+                    saldoBilletera: saldoReal
+                }));
+            }
+        }, (error) => {
+            console.warn("⚠️ [WALLET-FIRESTORE] Advertencia al suscribir canal de billetera:", error);
+        });
+
+        return () => {
+            unsubscribeUser();
+            unsubscribeWallet();
+        };
     }, [uidUsuario, user]);
 
     // Sincronización Automática con el Hook de Permisos de Ubicación Hardware
@@ -269,14 +295,24 @@ const HomePasajero = () => {
         if (isNaN(montoNum) || montoNum <= 0) return;
 
         try {
-            const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
-            const docRef = doc(db, pathUsuarios, uidUsuario);
+            const pathWallets = FIRESTORE_PATHS?.wallets || 'wallets';
+            const docRefWallet = doc(db, pathWallets, uidUsuario);
             const nuevoSaldo = perfilFirestore.saldoBilletera + montoNum;
 
-            await updateDoc(docRef, {
-                saldoBilletera: nuevoSaldo,
+            await setDoc(docRefWallet, {
+                balance: nuevoSaldo,
+                saldo: nuevoSaldo,
+                usuarioId: uidUsuario,
                 ultimaRecargaCEO: serverTimestamp()
-            });
+            }, { merge: true });
+
+            // Retrocompatibilidad con nodo de usuario
+            const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
+            const docRefUser = doc(db, pathUsuarios, uidUsuario);
+            await setDoc(docRefUser, {
+                saldoBilletera: nuevoSaldo,
+                balance: nuevoSaldo
+            }, { merge: true });
 
             console.log(`🏦 [CEO-WALLET-INJECTION] Recarga forzada exitosa. Nuevo saldo: $${nuevoSaldo}`);
         } catch (err) {
@@ -378,7 +414,7 @@ const HomePasajero = () => {
                     </div>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.5</span>
+                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.6</span>
                         </h1>
                         <div className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
@@ -450,7 +486,7 @@ const HomePasajero = () => {
                                                     <option value="mototaxi">🛺 Mototaxi</option>
                                                     <option value="motoparrillero">🛵 Motoparrillero</option>
                                                     <option value="motocarga">🚛 Motocarga</option>
-                                                    <option value="intermunicipal">0🛣️ Intermunicipal</option>
+                                                    <option value="intermunicipal">🛣️ Intermunicipal</option>
                                                 </select>
                                             </div>
 

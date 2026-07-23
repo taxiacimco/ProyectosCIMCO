@@ -1,9 +1,9 @@
-// Versión Arquitectura: V23.0 - Sistema de Captación Institucional Estático y Registro Automatizado por Roles
+// Versión Arquitectura: V23.1 - Parametrización Dinámica de URL Base para Entornos Híbridos y Producción
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
  * Misión: Generación de códigos QR de reclutamiento institucional que redirigen a las vistas de registro/login parametrizadas por rol.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
- * Ajuste V23.0: Transformación total a matriz estática institucional por perfiles con persistencia blindada y protección anti-undefined.
+ * Ajuste V23.1: Enrutamiento dinámico de PRODUCCION_BASE_URL mediante import.meta.env.VITE_FRONTEND_URL con fallback a window.location.origin.
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -23,8 +23,8 @@ const QrGenerator = () => {
     const [loadingHistorial, setLoadingHistorial] = useState(true);
     const qrRef = useRef(null);
 
-    // 🌐 IP DE PRODUCCIÓN LOCAL (PUERTO 4173 VITE PREVIEW) PARA ESCANEO CON CELULAR REAL
-    const PRODUCCION_BASE_URL = 'http://192.168.100.34:4173';
+    // 🌐 BASE URL DINÁMICA: Toma la variable VITE_FRONTEND_URL del .env o el origen del navegador
+    const PRODUCCION_BASE_URL = (import.meta.env.VITE_FRONTEND_URL || window.location.origin).replace(/\/$/, '');
 
     // Diccionario de Roles del Ecosistema TAXIA CIMCO con sus etiquetas legibles
     const ROLES_CONTEXTO = {

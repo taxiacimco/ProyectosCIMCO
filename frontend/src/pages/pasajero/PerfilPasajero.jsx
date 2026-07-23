@@ -1,48 +1,69 @@
-// Versión Arquitectura: V11.1 - Saneamiento de Dependencias y Resiliencia Limpia de Perfil
+// Versión Arquitectura: V12.2 - Blindaje Transaccional de Perfil y Auditoría de Billetera
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\PerfilPasajero.jsx
  * Misión: Despliegue de expediente de identidad del pasajero bajo la estética premium CIMCO-UI V9.3.
- * Ajuste V11.1: Corrección atómica del array de dependencias en useEffect para mitigar bucles infinitos de renderizado y blindaje de resiliencia local.
+ * Ajuste V12.2: Normalización de esquemas multi-backend, guardas de seguridad anti-undefined e indicador visual de modo resiliencia.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { API_CORE_URL } from '@/config/api'; 
-import { User, Mail, Shield, ShieldCheck, Phone, Award, Loader } from 'lucide-react';
+import { User, Mail, Shield, ShieldCheck, Phone, Award, Loader, AlertCircle } from 'lucide-react';
 
 const PerfilPasajero = () => {
     const { user } = useAuth();
     const [perfil, setPerfil] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [esModoLocal, setEsModoLocal] = useState(false);
 
     useEffect(() => {
-        if (!user?.uid) return;
+        const uid = user?.uid || user?.id;
+        if (!uid) {
+            setLoading(false);
+            return;
+        }
 
         const obtenerDatosPerfil = async () => {
             try {
                 setLoading(true);
+                setEsModoLocal(false);
+
                 // 📡 Consumo unificado mediante API_CORE_URL
-                const respuesta = await fetch(`${API_CORE_URL}/api/usuarios/perfil/${user.uid}`, {
+                const respuesta = await fetch(`${API_CORE_URL}/api/usuarios/perfil/${uid}`, {
                     method: 'GET',
                     headers: { 'Content-Type': 'application/json' }
                 });
 
+                if (!respuesta.ok) {
+                    throw new Error(`HTTP Error Status: ${respuesta.status}`);
+                }
+
                 const data = await respuesta.json();
-                if (data.success) {
-                    setPerfil(data.perfil);
+                if (data?.success && data?.perfil) {
+                    const payload = data.perfil;
+                    // Normalización de esquema de datos (Anti-Undefined)
+                    setPerfil({
+                        nombre: payload?.nombre || payload?.name || payload?.displayName || 'Pasajero CIMCO',
+                        correo: payload?.correo || payload?.email || 'sin-correo@taxiacimco.com',
+                        rol: payload?.rol || payload?.role || 'pasajero',
+                        telefono: payload?.telefono || payload?.phone || 'Sin registrar',
+                        nivelSeguridad: payload?.nivelSeguridad || payload?.securityLevel || 'Verificado Root',
+                        viajesTotales: Number(payload?.viajesTotales || payload?.totalRides || 0)
+                    });
                 } else {
                     throw new Error("Estructura no mapeada por el core.");
                 }
             } catch (err) {
-                console.warn("💡 [CIMCO-RESILIENCIA] Modo local activo para:", user.uid);
-                // 🛡️ Guardas de Seguridad contra desbordamientos de UI (Anti-Undefined)
+                console.warn("💡 [CIMCO-RESILIENCIA] Modo local activo para:", uid, err);
+                setEsModoLocal(true);
+                // 🛡️ Guardas de Seguridad contra desbordamientos de UI (Fallback Resiliente)
                 setPerfil({
                     nombre: user?.nombre || user?.name || user?.displayName || 'Pasajero CIMCO',
                     correo: user?.correo || user?.email || 'sin-correo@taxiacimco.com',
                     rol: user?.rol || user?.role || 'pasajero',
-                    telefono: user?.telefono || 'Sin registrar',
-                    nivelSeguridad: 'Verificado Root',
-                    viajesTotales: 0 // Valor base neutro para no falsear auditoría
+                    telefono: user?.telefono || user?.phone || 'Sin registrar',
+                    nivelSeguridad: 'Verificado Local',
+                    viajesTotales: 0
                 });
             } finally {
                 setLoading(false);
@@ -50,7 +71,7 @@ const PerfilPasajero = () => {
         };
 
         obtenerDatosPerfil();
-    }, [user?.uid]); // 🚀 Corrección de dependencia para mitigar loops de renderizado
+    }, [user?.uid, user?.id]);
 
     if (loading) {
         return (
@@ -65,10 +86,19 @@ const PerfilPasajero = () => {
 
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 p-6 font-mono antialiased flex items-center justify-center relative overflow-hidden">
-            {/* Gradiante ambiental premium */}
+            {/* Gradiente ambiental premium */}
             <div className="absolute top-[-20%] left-[-20%] w-[500px] h-[500px] bg-yellow-500/5 rounded-full blur-[120px] pointer-events-none" />
             
             <div className="w-full max-w-md backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-6 shadow-2xl relative z-10 transition-all duration-300 hover:border-white/10">
+                
+                {/* Banner de Modo Resiliencia si falla el API */}
+                {esModoLocal && (
+                    <div className="mb-4 bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-center gap-2 text-amber-400 text-[9px] font-bold uppercase tracking-wider">
+                        <AlertCircle size={14} className="shrink-0" />
+                        <span>Modo Resiliencia: Visualizando expediente sin sincronización activa</span>
+                    </div>
+                )}
+
                 <div className="flex flex-col items-center text-center border-b border-white/5 pb-6">
                     <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-yellow-500/20 to-orange-500/10 border border-yellow-500/30 flex items-center justify-center shadow-[0_0_20px_rgba(234,179,8,0.15)] relative group">
                         <User size={36} className="text-yellow-500" />
@@ -110,7 +140,7 @@ const PerfilPasajero = () => {
                     <div className="backdrop-blur-md bg-[#121214]/60 border border-white/5 p-4 rounded-2xl shadow-md flex flex-col justify-center items-center">
                         <p className="text-[10px] text-zinc-500 flex items-center justify-center gap-1.5"><Shield size={12}/> Estado Token</p>
                         <div className="mt-2 text-[9px] bg-zinc-950/80 px-2 py-1.5 rounded-lg border border-white/5 text-zinc-400 tracking-wider w-full truncate font-mono">
-                            {perfil?.nivelSeguridad || 'Activo Segure'}
+                            {perfil?.nivelSeguridad || 'Activo Secure'}
                         </div>
                         <p className="text-[8px] text-zinc-500 font-bold mt-1 tracking-wider">Firma Digital</p>
                     </div>

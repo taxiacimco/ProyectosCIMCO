@@ -1,29 +1,23 @@
-// Versión Arquitectura: V16.2 - Integración de Atributo de Autenticación isActive, Geolocalización y Control de Saldos en Pasajeros
+// Versión Arquitectura: V16.8 - Eliminación de Índice Duplicado UID en Modelo Pasajero
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
- * Integridad: Rompe la dependencia legacy con Usuario.js y establece un esquema blindado propio.
- * Ajuste V16.2: Inclusión de los campos `isActive`, `saldo`, `access_level` y sub-esquema de `coordenadas` 
- * para garantizar la compatibilidad de inicio de sesión de pasajeros, previniendo errores 403 por asimetría de propiedades.
+ * Integridad: Depuración de índice explícito en la propiedad `uid` para silenciar la advertencia
+ * de duplicidad en Mongoose, manteniendo la restricción sparse en la definición de campo
+ * e índice GeoJSON 2dsphere activo.
  */
 
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-const coordenadasSchema = new mongoose.Schema({
-    latitud: {
-        type: Number,
-        default: 9.5623
-    },
-    longitud: {
-        type: Number,
-        default: -73.3325
-    },
-    ultimaActualizacion: {
-        type: Date,
-        default: Date.now
+const direccionFavoritaSchema = new mongoose.Schema({
+    alias: { type: String, required: true, trim: true }, // Ej: "Casa", "Trabajo", "Terminal"
+    direccion: { type: String, required: true, trim: true },
+    coordenadas: {
+        latitud: { type: Number, required: true },
+        longitud: { type: Number, required: true }
     }
-}, { _id: false });
+}, { _id: true });
 
 const pasajeroSchema = new mongoose.Schema({
     nombre: {
@@ -48,13 +42,13 @@ const pasajeroSchema = new mongoose.Schema({
         sparse: true
     },
     telefonoMovil: {
-        type: String, // 🛡️ Sincronización directa con tu base de datos Atlas
+        type: String,
         unique: true,
         sparse: true
     },
     password: {
         type: String,
-        required: false // Se establece en false para soportar usuarios de Firebase sin contraseña local inicial
+        required: false
     },
     role: {
         type: String,
@@ -81,7 +75,6 @@ const pasajeroSchema = new mongoose.Schema({
         type: Number,
         default: 1
     },
-    // 🚀 AGREGADO: Atributos de pertenencia operativa homologados para evitar descalce en updateProfile
     cooperativa: {
         type: String,
         trim: true,
@@ -93,35 +86,53 @@ const pasajeroSchema = new mongoose.Schema({
         default: 'Particular'
     },
     uid: {
-        type: String
+        type: String,
+        sparse: true
     },
+    direccionesFavoritas: [direccionFavoritaSchema],
     coordenadas: {
-        type: coordenadasSchema,
-        default: () => ({})
+        type: { type: String, enum: ['Point'], default: 'Point' },
+        coordinates: { type: [Number], default: [-73.3325, 9.5623] } // [longitud, latitud]
     },
     fechaRegistro: {
         type: Date,
         default: Date.now
     }
 }, {
-    timestamps: true
+    timestamps: true,
+    versionKey: false
 });
+
+// Índices optimizados (se remueve declaración duplicada de uid)
+pasajeroSchema.index({ "coordenadas.coordinates": "2dsphere" }, { background: true });
 
 // 🛡️ Sincronización Homóloga de Variables y Cifrado
 pasajeroSchema.pre('save', async function (next) {
     try {
-        // Normalización de roles
+        if (!this.fullName && this.nombre) {
+            this.fullName = this.nombre;
+        } else if (!this.nombre && this.fullName) {
+            this.nombre = this.fullName;
+        }
+
         if (this.isModified('rol') && this.rol) {
             this.role = this.rol;
         } else if (this.isModified('role') && this.role) {
             this.rol = this.role;
         }
 
-        // Normalización de teléfono para Atlas
         if (this.isModified('telefono') && this.telefono) {
             this.telefonoMovil = this.telefono;
         } else if (this.isModified('telefonoMovil') && this.telefonoMovil) {
             this.telefono = this.telefonoMovil;
+        }
+
+        if (isNaN(this.saldo) || this.saldo < 0) {
+            this.saldo = 0;
+        }
+
+        if (!this.coordenadas || !Array.isArray(this.coordenadas.coordinates) || this.coordenadas.coordinates.length !== 2) {
+            this.coordenadas = { type: 'Point', coordinates: [-73.3325, 9.5623] };
         }
 
         if (!this.isModified('password') || !this.password) {
@@ -136,7 +147,6 @@ pasajeroSchema.pre('save', async function (next) {
     }
 });
 
-// 🛡️ ENLACE BLINDADO: Persistencia estricta en la colección física 'pasajeros'
 const Pasajero = mongoose.models.Pasajero || mongoose.model('Pasajero', pasajeroSchema, 'pasajeros');
 
 export default Pasajero;
