@@ -1,15 +1,17 @@
-// Versión Arquitectura: V12.8 - Inyección de Guarda Electiva para Concurrencia de Andén Local en Pruebas de Estrés
+// Versión Arquitectura: V13.0 - Sincronización de Aduana de Autenticación, Puente Anti-Crash y Protección de Rutas de Cooperativas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\auth.middleware.js
- * Misión: Blindar el flujo de inspección de tokens mediante subpaths nativos, securización estricta de JWT
- * e inyección de la compuerta de bypass local para stress_test.js cuando opera bajo entornos controlados.
- * Ajuste V12.8: FUSIÓN ATÓMICA. Se antepone la guarda electiva perimetral para pruebas de estrés masivas locales,
- * interceptando la cabecera `x-stress-test` fuera de producción para inyectar de forma atómica el perfil homologado
- * de 'Despachador Central La Jagua', resolviendo de raíz las rupturas de firma criptográfica durante ráfagas concurrentes.
+ * Misión: Securización estricta de JWT, inspección de tokens, bypass local y puente de retrocompatibilidad.
  */
 
 import jwt from 'jsonwebtoken';
 import Usuario from '#models/Usuario.js';
+
+// 🛡️ Garantizar presencia estricta de la clave secreta
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+    console.error("💥 [CIMCO-FATAL] process.env.JWT_SECRET no está configurada en el entorno.");
+    process.exit(1);
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'Cimco_Master_Key_Secret_Tokens_2026_LaJagua';
 
@@ -23,7 +25,9 @@ const ROLES_PERMITIDOS = [
     'intermunicipal', 
     'pasajero',
     'secretaria',
-    'staff'
+    'staff',
+    'admin',
+    'ceo'
 ];
 
 /**
@@ -124,10 +128,17 @@ export const verificarToken = async (req, res, next) => {
         }
 
         // Inyección unificada del payload del usuario sincronizando propiedades críticas (Anti-Undefined)
-        req.usuario = usuarioEncontrado;
-        req.usuario.uid = usuarioEncontrado.uid || usuarioEncontrado._id.toString();
-        req.usuario._id = usuarioEncontrado._id;
-        req.usuario.access_level = usuarioEncontrado.access_level !== undefined ? usuarioEncontrado.access_level : 1;
+        const rolEfectivo = (usuarioEncontrado.rol || usuarioEncontrado.role || decodificado.rol || decodificado.role || 'pasajero').toLowerCase();
+        
+        req.usuario = {
+            ...usuarioEncontrado.toObject(),
+            _id: usuarioEncontrado._id,
+            id: usuarioEncontrado._id.toString(),
+            uid: usuarioEncontrado.uid || usuarioEncontrado._id.toString(),
+            rol: rolEfectivo,
+            role: rolEfectivo,
+            access_level: usuarioEncontrado.access_level !== undefined ? usuarioEncontrado.access_level : 1
+        };
 
         next();
     } catch (error) {
@@ -158,7 +169,7 @@ export const esAdminCentral = (req, res, next) => {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Contexto de identidad no disponible para el Nodo Root.' });
     }
 
-    if (req.usuario.access_level < 99) {
+    if (req.usuario.access_level < 99 && req.usuario.rol !== 'admin' && req.usuario.rol !== 'ceo') {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Se requieren privilegios del Nodo Root.' });
     }
     next();
@@ -170,10 +181,10 @@ export const esAdminCentral = (req, res, next) => {
 export const esStaffOAdmin = (req, res, next) => {
     // 🛡️ GUARDA DE SEGURIDAD: Previene ruptura por falta de privilegios
     if (!req || !req.usuario || req.usuario.access_level === undefined) {
-        return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Context de identidad no disponible.' });
+        return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Contexto de identidad no disponible.' });
     }
 
-    if (req.usuario.access_level < 50) {
+    if (req.usuario.access_level < 50 && req.usuario.rol !== 'admin' && req.usuario.rol !== 'staff' && req.usuario.rol !== 'ceo') {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Privilegios de Staff insuficientes.' });
     }
     next();
@@ -188,7 +199,7 @@ export const esDespachador = (req, res, next) => {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Contexto de identidad no disponible.' });
     }
 
-    if (req.usuario.access_level < 30) {
+    if (req.usuario.access_level < 30 && req.usuario.rol !== 'despachador' && req.usuario.rol !== 'admin' && req.usuario.rol !== 'ceo') {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Privilegios de Despacho insuficientes.' });
     }
     next();
@@ -197,6 +208,9 @@ export const esDespachador = (req, res, next) => {
 // ==================================================================
 // 📡 PUENTE DE RETROCOMPATIBILIDAD DETERMINISTA (ANTI-CRASH)
 // ==================================================================
-// Vincula la exportación histórica 'esAdmin' con las directrices de 'esAdminCentral' 
-// para subsanar descalces de importación en módulos como conductor.routes.js.
+// Vincula la exportación histórica 'esAdmin' y 'authMiddleware' con las directrices unificadas 
+// para subsanar descalces de importación en el ecosistema.
 export const esAdmin = esAdminCentral;
+export const authMiddleware = verificarToken;
+
+export default verificarToken;

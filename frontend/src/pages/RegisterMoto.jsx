@@ -1,7 +1,7 @@
-// Versión Arquitectura: V2.1 - Captura de Documentación Validada y Enrutamiento QR Robusto
+// Versión Arquitectura: V2.2 - Integración de Badges e Indicadores de Límite Documental en UI Glassmorphism
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterMoto.jsx
- * Misión: Registro del Escuadrón Moto con validación estricta de peso/extensión documental y fallback QR.
+ * Misión: Registro del Escuadrón Moto con indicación visual explícita de límite de tamaño por archivo.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Teal Accent).
  */
 
@@ -227,13 +227,21 @@ const RegisterMoto = () => {
 
           {/* 📂 SECCIÓN DE CARGA DOCUMENTAL GLASSMORPHISM */}
           <div className="border-t border-white/5 pt-5">
-            <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5 mb-1">
-              <FileText size={12} className="text-teal-400" /> Documentación Digital del Conductor (Obligatoria)
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5">
+                <FileText size={12} className="text-teal-400" /> Documentación Digital del Conductor (Obligatoria)
+              </label>
+              
+              {/* 💡 INDICADOR DESTACADO DE LÍMITE DE TAMAÑO */}
+              <span className="text-[9px] font-mono font-bold bg-teal-500/10 border border-teal-500/30 text-teal-300 px-2 py-0.5 rounded-md uppercase">
+                Máx. {MAX_FILE_SIZE_MB} MB por archivo
+              </span>
+            </div>
+
             <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide mb-3">
-              Formatos admitidos: JPG, PNG, PDF (Máx. 5MB por archivo)
+              Formatos admitidos: JPG, PNG, WEBP, PDF • Tamaño máximo permitido: <strong className="text-teal-400">5 MB</strong>
             </p>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Cédula */}
               <div className="bg-black/40 border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative group hover:border-teal-500/20 transition-colors cursor-pointer">
@@ -241,6 +249,7 @@ const RegisterMoto = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {docCedula ? docCedula.name : "Cédula Ciudadanía"}
                 </span>
+                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 
@@ -255,6 +264,7 @@ const RegisterMoto = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {docLicencia ? docLicencia.name : "Licencia Conducción"}
                 </span>
+                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 
@@ -269,6 +279,7 @@ const RegisterMoto = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {docTarjetaPropiedad ? docTarjetaPropiedad.name : "Tarjeta Propiedad"}
                 </span>
+                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 

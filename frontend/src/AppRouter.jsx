@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.5 - Code Splitting con Lazy Loading y Módulos Protegidos CIMCO-UI V9.3
+// Versión Arquitectura: V21.6 - Code Splitting con Lazy Loading y Módulos Protegidos CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
  * Misión: Orquestar el direccionamiento centralizado, inyectar puentes QR, blindar con autenticación basada en roles 
@@ -28,6 +28,7 @@ const RegisterAdmin = lazy(() => import('@/pages/RegisterAdmin'));
 const AdminDashboard = lazy(() => import('@/pages/admin/AdminDashboard'));
 const AdminPanel = lazy(() => import('@/pages/admin/AdminPanel'));
 const QrGenerator = lazy(() => import('@/pages/admin/QrGenerator'));
+const Cooperativas = lazy(() => import('@/pages/admin/Cooperativas')); // 👈 Carga perezosa del Módulo Cooperativas
 
 // 👤 Módulo de Pasajeros (Lazy Loaded)
 const HomePasajero = lazy(() => import('@/pages/pasajero/HomePasajero'));
@@ -119,6 +120,7 @@ const AppRouter = () => {
                     <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><AdminDashboard /></ProtectedRoute>} />
                     <Route path="/admin/panel" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><AdminPanel /></ProtectedRoute>} />
                     <Route path="/admin/qr" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><QrGenerator /></ProtectedRoute>} />
+                    <Route path="/admin/cooperativas" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><Cooperativas /></ProtectedRoute>} /> {/* 👈 Nueva Ruta Registrada */}
                     
                     {/* 🛡️ RUTAS PASAJERO PROTEGIDAS */}
                     <Route path="/pasajero/home" element={<ProtectedRoute allowedRoles={['pasajero']}><HomePasajero /></ProtectedRoute>} />

@@ -1,20 +1,25 @@
-// Versión Arquitectura: V11.10 - Blindaje Perimetral Interceptor de Stress-Testing en Producción
+// Versión Arquitectura: V11.12 - Métrica de Capital Circulante y Protección de Rutas Estáticas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
  * Misión: Asegurar el correcto mapeo de endpoints para el ciclo de vida del conductor, telemetría y contabilidad interna.
- * Ajuste V11.10: Inyección de la guarda defensiva `verificarBypassDesarrollo` dentro del endpoint `/bypass-stress-saldo` para blindar el canal de estrés en producción.
- * Corrección Técnica: Remoción de la doble importación errónea de 'express' para instanciar mongoose.
+ * Ajuste V11.12: Inserción previa de la ruta de agregación métrica /metricas/capital-circulante antes de parámetros numéricos/dinámicos.
  */
 
 import express from 'express';
-import mongoose from 'mongoose';
+import Conductor from '../../models/Conductor.js';
 import { 
     registrarConductor, 
     obtenerConductores, 
+    obtenerConductorPorId,
+    actualizarConductor,
+    eliminarConductor,
     obtenerHistorialConductor, 
     obtenerConductoresDisponibles,
     obtenerConductoresCercanos, 
+    obtenerCapitalCirculante,
     recargarBilleteraPorAdmin,
+    descontarComisionViaje,
+    ajustarSaldo,
     actualizarUbicacionGPS,
     actualizarEstadoConductor,
     verificarBypassDesarrollo
@@ -34,7 +39,7 @@ const validarTelemetriaRadar = (req, res, next) => {
         });
     }
 
-    const { lat, lng, radioMaxKm } = req.query;
+    const { lat, lng } = req.query;
 
     if (!lat || !lng) {
         return res.status(400).json({
@@ -64,36 +69,47 @@ router.get('/', obtenerConductores);
 router.get('/disponibles', obtenerConductoresDisponibles);
 
 /**
+ * 📊 MÉTRICAS ADMINISTRATIVAS Y FINANCIERAS
+ * @route   GET /api/conductores/metricas/capital-circulante
+ * Ubicada antes de /:id para evitar intercepción de la ruta dinámicamente.
+ */
+router.get('/metricas/capital-circulante', verificarToken, esAdmin, obtenerCapitalCirculante);
+
+/**
  * 📍 RADAR GEOESPACIAL
  * @route   GET /api/conductores/radar/cercanos
- * @desc    Obtener unidades activas en un rango radial específico filtrando por rol y saldo.
  */
 router.get('/radar/cercanos', validarTelemetriaRadar, obtenerConductoresCercanos);
 
 /**
  * 📡 TELEMETRÍA EN CALIENTE
  * @route   POST /api/conductores/actualizar-ubicacion
- * @desc    Inyección masiva y veloz de coordenadas GPS en tiempo real para Leaflet.js
  */
 router.post('/actualizar-ubicacion', actualizarUbicacionGPS);
 
 /**
  * 🔄 SINCRONIZADOR HÍBRIDO DE ESTADOS
  * @route   PUT /api/conductores/estado
- * @desc    Actualiza el estado (active/busy/offline) en Mongo y refleja en Firestore
  */
 router.put('/estado', actualizarEstadoConductor);
+
+// ==================================================================
+// 🔍 CONSULTAS Y MODIFICACIONES POR ID (REST STACK)
+// ==================================================================
+router.get('/:id', obtenerConductorPorId);
+router.put('/:id', actualizarConductor);
+router.delete('/:id', eliminarConductor);
 
 // ==================================================================
 // 🛡️ RUTAS BLINDADAS (Requieren Autenticación / Roles)
 // ==================================================================
 router.get('/:conductorId/historial', verificarToken, obtenerHistorialConductor);
+router.post('/descuento-comision', verificarToken, descontarComisionViaje);
+router.put('/ajustar-saldo/:uid', verificarToken, esAdmin, ajustarSaldo);
 
 /**
  * 💰 RUTA CRÍTICA: Recargas Manuales por Administración
  * @route   POST /api/conductores/saldos/admin/recargar
- * @desc    Permite a los administradores inyectar saldo a cuentas mediante ID, ID Operativo o Teléfono.
- * @access  Privado [Admin, Gerente]
  */
 router.post('/saldos/admin/recargar', verificarToken, esAdmin, recargarBilleteraPorAdmin);
 
@@ -112,11 +128,9 @@ router.put('/bypass-stress-saldo', verificarBypassDesarrollo, async (req, res) =
             return res.status(400).json({ success: false, message: "ID de conductor requerido." });
         }
 
-        const Conductor = mongoose.model('Conductor');
-        
         const actualizado = await Conductor.findByIdAndUpdate(
             conductorId, 
-            { $set: { saldo: Number(saldo), balance: Number(saldo) } }, 
+            { $set: { saldo: Number(saldo) }, $unset: { saldoWallet: "" } }, 
             { new: true }
         );
         

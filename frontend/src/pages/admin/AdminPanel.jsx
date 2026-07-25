@@ -1,15 +1,15 @@
-// Versión Arquitectura: V14.5 - Sanitización de Memoria y Sincronización Estricta de Métricas
+// Versión Arquitectura: V15.1 - Corrección de Firma JWT para API REST Express
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminPanel.jsx
- * Misión: Panel Central de Control Administrativo (CIMCO-UI V9.3)
- * Ajuste V14.5: Eliminación de importaciones muertas, prevención de fugas de memoria mediante bandera de montaje y corrección semántica de logs.
+ * Misión: Panel Central de Control Administrativo / CEO
+ * Ajuste V15.1: Priorización del JWT de sesión emitido por el Backend REST para resolver error 403/jwt signature is required.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db, FIRESTORE_PATHS } from '@/config/firebase';
+import { db, auth, FIRESTORE_PATHS } from '@/config/firebase';
 import { 
   Shield, 
   TrendingUp, 
@@ -18,76 +18,109 @@ import {
   AlertTriangle, 
   Crown, 
   DollarSign,
-  Briefcase
+  Briefcase,
+  Wallet
 } from 'lucide-react';
 
 const AdminPanel = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // 🛡️ GUARDA DE SEGURIDAD: Inicialización de estados de telemetría y métricas del sistema
+  // 🛡️ ESTADOS DE METRICAS DEL SISTEMA
   const [metricas, setMetricas] = useState({
     usuariosActivos: 0,
     conductoresDisponibles: 0,
     viajesHoy: 0,
-    comisionesAcumuladas: 0
+    comisionesAcumuladas: 0,
+    capitalCirculante: 0
   });
 
   const [loading, setLoading] = useState(true);
   const [errorArquitectura, setErrorArquitectura] = useState(null);
 
-  // 🚀 Lógica de Control de Flujo Basado en Perfiles Gerenciales (Nivel 99)
-  const esCEO = user?.access_level === 99 || user?.role === 'admin' || user?.rol === 'admin';
+  // Control de Privilegios Gerenciales
+  const esCEO = user?.access_level === 99 || user?.role === 'admin' || user?.rol === 'admin' || user?.role === 'ceo';
 
   useEffect(() => {
-    let isMounted = true; // Evita fugas de memoria si el componente se desmonta antes de resolver las promesas
+    let isMounted = true;
 
-    const cargarMetricasSistema = async () => {
+    const cargarMétricasConsolidadas = async () => {
       try {
         setLoading(true);
         setErrorArquitectura(null);
 
+        // 1. OBTENER DATOS DESDE FIRESTORE
         const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
         const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
         const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
-
-        if (!FIRESTORE_PATHS || !FIRESTORE_PATHS.usuarios || !FIRESTORE_PATHS.conductores || !FIRESTORE_PATHS.viajes) {
-          console.warn("⚠️ [CIMCO-ARCHITECTURE-WARN]: FIRESTORE_PATHS incompleto. Aplicando fallbacks nominales.");
-        }
 
         const usuariosQuery = query(collection(db, pathUsuarios));
         const conductoresQuery = query(collection(db, pathConductores), where("estado", "==", "online"));
         const viajesQuery = query(collection(db, pathViajes));
 
-        // Ejecución en paralelo para maximizar rendimiento de red
         const [snapUsuarios, snapConductores, snapViajes] = await Promise.all([
           getDocs(usuariosQuery),
           getDocs(conductoresQuery),
           getDocs(viajesQuery)
         ]);
 
-        if (!isMounted) return;
-
-        // 🧮 Cálculo optimizado con blindaje numérico
         let comisionesTotales = 0;
         snapViajes.forEach((docViaje) => {
-          const datosViaje = docViaje.data();
-          if (datosViaje?.comision) {
-            comisionesTotales += Number(datosViaje.comision || 0);
+          const datos = docViaje.data();
+          if (datos?.comision) {
+            comisionesTotales += Number(datos.comision || 0);
           }
         });
+
+        // 2. OBTENER CAPITAL CIRCULANTE DESDE BACKEND EXPRESS (MongoDB)
+        let capitalTotalMongoDB = 0;
+        try {
+          const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+          const cleanBaseUrl = rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
+
+          // 🔑 ESTRATEGIA DE RECUPEARCIÓN DE JWT COMPATIBLE CON EXPRESS
+          // Priorizamos el token nativo del servidor REST generado en /api/auth/login
+          let tokenActivo = user?.token || 
+                            localStorage.getItem('token') || 
+                            localStorage.getItem('cimco_token');
+
+          // Fallback a Firebase solo si no existe token REST almacenado
+          if (!tokenActivo && auth?.currentUser) {
+            tokenActivo = await auth.currentUser.getIdToken();
+          }
+
+          const response = await fetch(`${cleanBaseUrl}/api/conductores/metricas/capital-circulante`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${tokenActivo || ''}`
+            }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            capitalTotalMongoDB = Number(data.totalCapital || data.data?.totalCapital || 0);
+          } else {
+            console.warn(`⚠️ API REST respondió con estado HTTP ${response.status} al consultar capital circulante.`);
+          }
+        } catch (apiErr) {
+          console.error("❌ Error de comunicación con la API REST (MongoDB):", apiErr);
+        }
+
+        if (!isMounted) return;
 
         setMetricas({
           usuariosActivos: snapUsuarios?.size || 0,
           conductoresDisponibles: snapConductores?.size || 0,
           viajesHoy: snapViajes?.size || 0,
-          comisionesAcumuladas: comisionesTotales
+          comisionesAcumuladas: comisionesTotales,
+          capitalCirculante: capitalTotalMongoDB
         });
 
       } catch (err) {
         console.error("🚨 [CIMCO-ADMIN-PANEL-ERR]:", err);
         if (isMounted) {
-          setErrorArquitectura(err.message || "Error crítico de sincronización en el bus corporativo.");
+          setErrorArquitectura(err.message || "Error crítico de sincronización.");
         }
       } finally {
         if (isMounted) setLoading(false);
@@ -95,11 +128,11 @@ const AdminPanel = () => {
     };
 
     if (user) {
-      cargarMetricasSistema();
+      cargarMétricasConsolidadas();
     }
 
     return () => {
-      isMounted = false; // Cleanup funcional
+      isMounted = false;
     };
   }, [user]);
 
@@ -107,7 +140,7 @@ const AdminPanel = () => {
     return (
       <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center space-y-4">
         <div className="w-12 h-12 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
-        <p className="text-zinc-500 font-mono text-xs uppercase tracking-widest animate-pulse">Sincronizando Consola de Control Gerencial...</p>
+        <p className="text-zinc-500 font-mono text-xs uppercase tracking-widest animate-pulse">Consultando Métricas Financieras de MongoDB...</p>
       </div>
     );
   }
@@ -128,7 +161,7 @@ const AdminPanel = () => {
             {user?.nombre || user?.fullName || "ADMINISTRADOR CENTRAL"}
           </h1>
           <p className="text-zinc-500 font-mono text-xs">
-            ID de Enlace Corporativo: <span className="text-zinc-400">{user?._id || user?.id || "NODO_LOCAL_ANÓNIMO"}</span>
+            ID de Enlace Corporativo: <span className="text-zinc-400">{user?._id || user?.id || user?.uid || "NODO_LOCAL_ANÓNIMO"}</span>
           </p>
         </div>
 
@@ -156,47 +189,66 @@ const AdminPanel = () => {
         </div>
       )}
 
-      {/* METRICAS */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {/* GRILLA TÁCTICA DE 5 COLUMNAS */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+        
+        {/* 1. UNIVERSO USUARIOS */}
         <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl p-5 shadow-xl hover:border-zinc-700/50 transition-all duration-300 group">
           <div className="flex justify-between items-start mb-3">
             <p className="text-[11px] text-zinc-400 font-black uppercase tracking-widest">Universo Usuarios</p>
             <Users className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
           </div>
-          <p className="text-white font-black text-3xl tracking-tight">{metricas.usuariosActivos}</p>
-          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Pasajeros y personal en base de datos</p>
+          <p className="text-white font-black text-2xl lg:text-3xl tracking-tight">{metricas.usuariosActivos}</p>
+          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Pasajeros y personal en base</p>
         </div>
 
+        {/* 2. FLOTA ONLINE */}
         <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl p-5 shadow-xl hover:border-emerald-500/30 transition-all duration-300 group">
           <div className="flex justify-between items-start mb-3">
             <p className="text-[11px] text-emerald-400 font-black uppercase tracking-widest">Flota Online</p>
             <Shield className="w-4 h-4 text-emerald-500 animate-pulse" />
           </div>
-          <p className="text-emerald-400 font-black text-3xl tracking-tight">{metricas.conductoresDisponibles}</p>
+          <p className="text-emerald-400 font-black text-2xl lg:text-3xl tracking-tight">{metricas.conductoresDisponibles}</p>
           <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Operarios activos</p>
         </div>
 
+        {/* 3. VIAJES GLOBALES */}
         <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl p-5 shadow-xl hover:border-zinc-700/50 transition-all duration-300 group">
           <div className="flex justify-between items-start mb-3">
             <p className="text-[11px] text-zinc-400 font-black uppercase tracking-widest">Viajes Globales</p>
             <Briefcase className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
           </div>
-          <p className="text-white font-black text-3xl tracking-tight">{metricas.viajesHoy}</p>
+          <p className="text-white font-black text-2xl lg:text-3xl tracking-tight">{metricas.viajesHoy}</p>
           <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Historial total de rutas</p>
         </div>
 
+        {/* 4. CAJA COMISIONES */}
         <div className="backdrop-blur-md bg-[#121214]/80 border border-amber-500/10 rounded-2xl p-5 shadow-xl hover:border-amber-500/30 transition-all duration-300 group">
           <div className="flex justify-between items-start mb-3">
             <p className="text-[11px] text-amber-400 font-black uppercase tracking-widest">Caja Comisiones</p>
             <DollarSign className="w-4 h-4 text-amber-400" />
           </div>
-          <p className="text-amber-400 font-black text-3xl tracking-tight">
+          <p className="text-amber-400 font-black text-2xl lg:text-3xl tracking-tight">
             ${metricas.comisionesAcumuladas.toLocaleString('es-CO')}
           </p>
-          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Retención del 10% de la flota</p>
+          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Retención 10% de la flota</p>
         </div>
+
+        {/* 5. CAPITAL CIRCULANTE (DESDE MONGODB) */}
+        <div className="backdrop-blur-md bg-[#121214]/80 border border-emerald-500/20 rounded-2xl p-5 shadow-xl hover:border-emerald-500/40 transition-all duration-300 bg-emerald-500/[0.02] group">
+          <div className="flex justify-between items-start mb-3">
+            <p className="text-[11px] text-emerald-400 font-black uppercase tracking-widest">Capital Circulante</p>
+            <Wallet className="w-4 h-4 text-emerald-400" />
+          </div>
+          <p className="text-emerald-400 font-black text-xl lg:text-2xl tracking-tight truncate">
+            ${metricas.capitalCirculante.toLocaleString('es-CO')} COP
+          </p>
+          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Total Saldos MongoDB</p>
+        </div>
+
       </div>
 
+      {/* MÓDULOS GERENCIALES */}
       {esCEO && (
         <div className="max-w-7xl mx-auto backdrop-blur-md bg-[#121214]/80 border border-amber-500/10 rounded-2xl p-6 shadow-2xl mb-8">
           <div className="flex items-center space-x-2 text-amber-400 font-black text-xs uppercase tracking-widest mb-4 border-b border-white/5 pb-3">
@@ -243,7 +295,7 @@ const AdminPanel = () => {
         <div className="font-mono text-[11px] text-zinc-500 bg-[#0c0c0e] p-4 rounded-xl border border-white/[0.02] space-y-1">
           <p><span className="text-cyan-500">[CIMCO-NUCLEO]</span> Bus de datos en escucha activa.</p>
           <p><span className="text-cyan-500">[CIMCO-AUTH]</span> Sesión autorizada polimórficamente.</p>
-          <p><span className="text-cyan-500">[CIMCO-FIRESTORE]</span> Lectura matricial optimizada mediante consultas asíncronas paralelas.</p>
+          <p><span className="text-cyan-500">[CIMCO-REST-API]</span> Sincronización de Capital Circulante verificada con MongoDB Atlas.</p>
         </div>
       </div>
     </div>

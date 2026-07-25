@@ -1,14 +1,39 @@
-// Versión Arquitectura: V14.5 - Blindaje de Ciclo de Vida y Sanitización Completa de Malla
+// Versión Arquitectura: V14.7 - Estandarización de Datos NoSQL y Normalización Estricta de Entidades
 /**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\ListaOperadores.jsx
- * Misión: Renderizar la malla de operadores aplicando normalización estder y control estricto de desmonte.
- * Ajuste V14.5: Inyección de `isMounted` en callback de Firestore para erradicar fugas en cambios de vista rápidos.
+ * Ubicación: frontend\src\components\admin\ListaOperadores.jsx
+ * Misión: Renderizar la malla de operadores aplicando normalización canónica de variables (rol/estado), fallback de identidad, persisitelia unificada y control estricto de desmonte.
+ * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, doc, updateDoc, query } from 'firebase/firestore';
 import { Shield, ShieldAlert, UserCheck, UserX, Search, Loader, Database } from 'lucide-react';
+
+// 🔧 Pipeline Canonizador Centralizado de Entidades NoSQL (Garantiza interoperabilidad sin mutación destructiva)
+const normalizarEntidadUsuario = (idDoc, rawData = {}) => {
+    const rolEstandar = (rawData?.rol || rawData?.role || 'operador').toString().toLowerCase().trim();
+    
+    // Normalización booleana y textual unificada para retrocompatibilidad
+    let esActivo = true;
+    if (rawData?.isActive !== undefined) {
+        esActivo = Boolean(rawData.isActive);
+    } else if (rawData?.estado !== undefined) {
+        esActivo = rawData.estado === 'active';
+    }
+
+    const estadoEstandar = esActivo ? 'active' : 'inactive';
+
+    return {
+        id: idDoc,
+        ...rawData,
+        // Claves Canonizadas Estandarizadas
+        rol: rolEstandar,
+        role: rolEstandar, // Alias de compatibilidad hacia la vista
+        estado: estadoEstandar,
+        isActive: esActivo
+    };
+};
 
 const ListaOperadores = () => {
     const [usuarios, setUsuarios] = useState([]);
@@ -26,24 +51,9 @@ const ListaOperadores = () => {
         const unsubscribe = onSnapshot(q, 
             (snapshot) => {
                 if (!isMounted.current) return;
-                const lista = snapshot.docs.map(doc => {
-                    const data = doc.data();
-                    const roleEstandar = (data?.role || data?.rol || 'operador').toLowerCase().trim();
-
-                    let activoBool = true;
-                    if (data?.isActive !== undefined) {
-                        activoBool = data.isActive;
-                    } else if (data?.estado !== undefined) {
-                        activoBool = data.estado === 'active';
-                    }
-
-                    return {
-                        id: doc.id,
-                        ...data,
-                        role: roleEstandar,
-                        isActive: activoBool
-                    };
-                });
+                const lista = snapshot.docs.map(docSnap => 
+                    normalizarEntidadUsuario(docSnap.id, docSnap.data())
+                );
                 
                 setUsuarios(lista);
                 setLoading(false);
@@ -73,6 +83,7 @@ const ListaOperadores = () => {
             const pathColeccion = FIRESTORE_PATHS?.users || 'usuarios';
             const docRef = doc(db, pathColeccion, id);
 
+            // ⚡ Persistencia dual estandarizada para garantizar migración paulatina sin rompimiento de clientes antiguos
             await updateDoc(docRef, {
                 isActive: nuevoEstadoBool,
                 estado: nuevoEstadoString 
@@ -82,16 +93,28 @@ const ListaOperadores = () => {
         }
     };
 
+    // 🔧 Helper para obtener el nombre a mostrar de manera limpia
+    const obtenerNombreMostrar = (u) => {
+        const nombreDirecto = u?.nombre || u?.nombreCompleto || u?.displayName;
+        if (nombreDirecto && nombreDirecto !== 'SIN REGISTRO') {
+            return nombreDirecto;
+        }
+        if (u?.email) {
+            return u.email.split('@')[0].replace(/[._-]/g, ' ').toUpperCase();
+        }
+        return `OPERADOR ${(u?.rol || u?.role || '').toUpperCase() || 'REGISTRADO'}`;
+    };
+
     const usuariosFiltrados = usuarios.filter(u => {
         const queryNormalize = busqueda.toLowerCase().trim();
-        const nombre = (u?.nombre || '').toLowerCase();
+        const nombre = obtenerNombreMostrar(u).toLowerCase();
         const email = (u?.email || '').toLowerCase();
-        const role = (u?.role || '').toLowerCase();
+        const rol = (u?.rol || u?.role || '').toLowerCase();
         const id = (u?.id || '').toLowerCase();
 
         return nombre.includes(queryNormalize) || 
                email.includes(queryNormalize) || 
-               role.includes(queryNormalize) ||
+               rol.includes(queryNormalize) ||
                id.includes(queryNormalize);
     });
 
@@ -146,12 +169,13 @@ const ListaOperadores = () => {
                                 <tbody className="divide-y divide-white/5 text-xs text-zinc-300">
                                     {usuariosFiltrados.map((u) => {
                                         const keyEstable = u.id || `op-node-${Math.random()}`;
+                                        const rolVisual = u.rol || u.role || 'operador';
                                         
                                         return (
                                             <tr key={keyEstable} className="hover:bg-white/[0.01] transition-colors duration-150">
                                                 <td className="p-4 pl-6">
                                                     <div className="font-bold text-zinc-200 uppercase truncate max-w-[180px]">
-                                                        {u?.nombre || 'SIN REGISTRO'}
+                                                        {obtenerNombreMostrar(u)}
                                                     </div>
                                                     <div className="text-[9px] text-zinc-600 font-mono tracking-wide mt-0.5">ID: {u.id}</div>
                                                 </td>
@@ -160,14 +184,14 @@ const ListaOperadores = () => {
                                                 </td>
                                                 <td className="p-4">
                                                     <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider flex items-center gap-1 w-fit ${
-                                                        u.role === 'admin' || u.role === 'gerente'
+                                                        rolVisual === 'admin' || rolVisual === 'gerente'
                                                             ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-500'
-                                                            : u.role === 'conductor' || u.role === 'mototaxi'
+                                                            : rolVisual === 'conductor' || rolVisual === 'mototaxi'
                                                             ? 'bg-purple-500/10 border-purple-500/20 text-purple-400'
                                                             : 'bg-zinc-800/40 border-white/5 text-zinc-400'
                                                     }`}>
                                                         <Shield size={10} />
-                                                        {u.role}
+                                                        {rolVisual}
                                                     </span>
                                                 </td>
                                                 <td className="p-4">

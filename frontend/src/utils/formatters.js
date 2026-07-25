@@ -1,8 +1,8 @@
-// Versión Arquitectura: V1.0 - Centralización de Formateadores de Geolocalización y Direcciones Estructuradas
+// Versión Arquitectura: V1.1 - Consolidación de Formateadores de Geolocalización, Monedas y Normalizaciones
 /**
  * Ubicación: frontend/src/utils/formatters.js
- * Misión: Proveer funciones puras de normalización de payloads de localización para la UI de CIMCO.
- * Ajuste V1.0: Extracción de lógica duplicada con blindaje estricto contra propiedades nulas o indefinidas.
+ * Misión: Proveer funciones puras de normalización de payloads de localización, moneda y cadenas para la UI de CIMCO.
+ * Ajuste V1.1: Inclusión del helper global de formateo de moneda colombiana (COP) para reutilización en dashboards de administración y billeteras.
  */
 
 /**
@@ -39,4 +39,18 @@ export const formatDireccion = (nodo) => {
     }
     
     return 'Ubicación Estructurada';
+};
+
+/**
+ * Formatea un valor numérico al estándar de moneda oficial de Colombia (COP).
+ * @param {number|string} valor - Valor a formatear.
+ * @returns {string} Cadena formateada en pesos colombianos (ej. $ 15.000).
+ */
+export const formatearMoneda = (valor = 0) => {
+    const montoNumerico = Number(valor) || 0;
+    return new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'COP',
+        minimumFractionDigits: 0
+    }).format(montoNumerico);
 };

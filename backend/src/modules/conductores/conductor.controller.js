@@ -1,10 +1,8 @@
-// Versión Arquitectura: V16.4 - Sanitización Transaccional de Billetera y Unificación de Saldos
+// Versión Arquitectura: V16.6 - Agregación Atómica de Capital Circulante en MongoDB Atlas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión unificada de operarios, telemetría GPS reactiva, inyección contable y motor de radar radial.
- * Ajuste V16.4: Integración del helper de sanitización `sanitizarPayloadConductor` y neutralización de la clave obsoleta `saldoWallet`.
- * Se preserva intacta la integración transaccional ACID mediante findOneAndUpdate, el control perimetral anti-bypass
- * y el manejo de errores atómicos en MongoDB Atlas y Firestore.
+ * Misión: Gestión unificada de operarios, telemetría GPS reactiva, inyección contable, motor de radar radial y cálculo atómico de capital circulante.
+ * Ajuste V16.6: Integración de la función obtenerCapitalCirculante utilizando la pipeline de agregación $group.
  */
 
 import mongoose from 'mongoose';
@@ -25,7 +23,7 @@ export const sanitizarPayloadConductor = (data) => {
     if (!data || typeof data !== 'object') return {};
     const payload = { ...data };
     
-    // Si viene saldoWallet o saldo, se consolida estrictamente en saldo
+    // Si viene saldoWallet o saldo, se consolida strictly en saldo
     if (payload.saldoWallet !== undefined || payload.saldo !== undefined) {
         const monto = Number(payload.saldo ?? payload.saldoWallet ?? 0);
         payload.saldo = isNaN(monto) || monto < 0 ? 0 : monto;
@@ -64,6 +62,33 @@ export const registrarConductor = async (req, res) => {
         const payloadSanitizado = sanitizarPayloadConductor(req.body);
         const nuevoConductor = new Conductor(payloadSanitizado);
         await nuevoConductor.save();
+
+        // Espejo inicial en Firestore
+        try {
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+            const docFirestoreId = nuevoConductor.uid || nuevoConductor._id.toString();
+
+            await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
+                uid: docFirestoreId,
+                nombre: nuevoConductor.nombre,
+                email: nuevoConductor.email,
+                telefono: nuevoConductor.telefonoMovil,
+                estado: nuevoConductor.estado || 'inactive',
+                isActive: nuevoConductor.isActive ?? true,
+                createdAt: new Date().toISOString()
+            }, { merge: true });
+
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                id: docFirestoreId,
+                nombreUsuario: nuevoConductor.nombre,
+                saldo: nuevoConductor.saldo || 0,
+                balance: nuevoConductor.saldo || 0,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsErr) {
+            console.warn("⚠️ [CIMCO-CONDUCTOR-SYNC-WARN] Error inicializando Firestore:", fsErr.message);
+        }
         
         return res.status(201).json({ success: true, data: nuevoConductor });
     } catch (error) {
@@ -89,10 +114,10 @@ export const obtenerConductores = async (req, res) => {
 
 export const obtenerConductorPorId = async (req, res) => {
     try {
-        if (!req || !req.params || (!req.params.id && !req.params.uid)) {
+        if (!req || !req.params || (!req.params.id && !req.params.uid && !req.params.conductorId)) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de conductor ausente en los parámetros." });
         }
-        const targetId = req.params.id || req.params.uid;
+        const targetId = req.params.id || req.params.uid || req.params.conductorId;
         
         const conductor = await Conductor.findOne({
             $or: [
@@ -106,7 +131,6 @@ export const obtenerConductorPorId = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Conductor no encontrado' });
         }
 
-        // Limpieza de campo heredado/obsoleto
         delete conductor.saldoWallet;
 
         return res.status(200).json({ success: true, data: conductor, conductor });
@@ -123,7 +147,7 @@ export const actualizarConductor = async (req, res) => {
             return res.status(400).json({ success: false, message: "⚠️ Datos ausentes para la actualización." });
         }
         
-        const targetId = req.params.id || req.params.uid || req.body.conductorId || req.body.id;
+        const targetId = req.params.id || req.params.uid || req.params.conductorId || req.body.conductorId || req.body.id;
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de conductor ausente para la actualización." });
         }
@@ -151,6 +175,21 @@ export const actualizarConductor = async (req, res) => {
 
         delete conductorActualizado.saldoWallet;
 
+        // Sincronizar actualización en Firestore
+        try {
+            const docFirestoreId = conductorActualizado.uid || conductorActualizado._id.toString();
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+            
+            const firestoreUpdate = {};
+            if (conductorActualizado.nombre) firestoreUpdate.nombre = conductorActualizado.nombre;
+            if (conductorActualizado.telefonoMovil) firestoreUpdate.telefono = conductorActualizado.telefonoMovil;
+            if (conductorActualizado.estado) firestoreUpdate.estado = conductorActualizado.estado;
+
+            await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set(firestoreUpdate, { merge: true });
+        } catch (fsError) {
+            console.warn("⚠️ [CIMCO-CONDUCTOR-UPDATE-WARN] Falló la réplica a Firestore:", fsError.message);
+        }
+
         return res.status(200).json({ 
             success: true, 
             message: 'Conductor actualizado con éxito',
@@ -164,13 +203,23 @@ export const actualizarConductor = async (req, res) => {
 
 export const eliminarConductor = async (req, res) => {
     try {
-        if (!req || !req.params || !req.params.id) {
+        const targetId = req.params.id || req.params.uid;
+        if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de conductor ausente para la eliminación." });
         }
-        const conductorEliminado = await Conductor.findByIdAndDelete(req.params.id);
+
+        const conductorEliminado = await Conductor.findOneAndDelete({
+            $or: [
+                { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                { uid: targetId },
+                { conductorId: targetId }
+            ]
+        });
+
         if (!conductorEliminado) {
             return res.status(404).json({ success: false, message: 'Conductor no encontrado' });
         }
+
         return res.status(200).json({ success: true, message: 'Conductor eliminado correctamente' });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
@@ -183,7 +232,9 @@ export const eliminarConductor = async (req, res) => {
  */
 export const obtenerConductoresDisponibles = async (req, res) => {
     try {
-        const conductoresDisponibles = await Conductor.find({ estado: 'active' }).lean();
+        const conductoresDisponibles = await Conductor.find({ 
+            $or: [{ estado: 'active' }, { estado: 'disponible' }]
+        }).lean();
         
         const dataLimpia = conductoresDisponibles.map(c => {
             delete c.saldoWallet;
@@ -197,6 +248,37 @@ export const obtenerConductoresDisponibles = async (req, res) => {
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * 🧮 OBTENER CAPITAL CIRCULANTE CONSOLIDADO
+ * Realiza una agregación $group directamente en MongoDB Atlas
+ * para calcular la sumatoria total de saldos sin transferir documentos.
+ */
+export const obtenerCapitalCirculante = async (req, res) => {
+    try {
+        const resultado = await Conductor.aggregate([
+            {
+                $group: {
+                    _id: null,
+                    totalCapital: { $sum: "$saldo" }
+                }
+            }
+        ]);
+
+        const capitalTotal = resultado.length > 0 ? resultado[0].totalCapital : 0;
+
+        return res.status(200).json({
+            success: true,
+            totalCapital: capitalTotal
+        });
+    } catch (error) {
+        console.error("❌ Error calculando capital circulante:", error);
+        return res.status(500).json({ 
+            success: false, 
+            message: "Error interno calculando el capital circulante." 
+        });
     }
 };
 
@@ -258,6 +340,21 @@ export const recargarSaldoAdmin = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
+        // Réplica defensiva hacia la colección de billeteras en Firestore
+        try {
+            const docFirestoreId = conductor.uid || conductor._id.toString();
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                id: docFirestoreId,
+                nombreUsuario: conductor.nombre,
+                saldo: nuevoSaldo,
+                balance: nuevoSaldo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsWalletErr) {
+            console.warn("⚠️ [CIMCO-WALLET-SYNC-WARN] Falló réplica de recarga a Firestore:", fsWalletErr.message);
+        }
+
         return res.status(200).json({
             success: true,
             message: `Recarga exitosa. Nuevo saldo: $${nuevoSaldo} COP`,
@@ -273,8 +370,7 @@ export const recargarSaldoAdmin = async (req, res) => {
 };
 
 /**
- * ALIAS DE ADAPTACIÓN CONTABLE (recargarBilleteraPorAdmin):
- * Resuelve directamente el SyntaxError mapeando la petición del router hacia la lógica atómica core.
+ * ALIAS DE ADAPTACIÓN CONTABLE (recargarBilleteraPorAdmin)
  */
 export const recargarBilleteraPorAdmin = recargarSaldoAdmin;
 
@@ -307,6 +403,19 @@ export const ajustarSaldo = async (req, res) => {
 
         if (!conductor) {
             return res.status(404).json({ success: false, message: 'Conductor no encontrado' });
+        }
+
+        // Espejo en Firestore
+        try {
+            const docFirestoreId = conductor.uid || conductor._id.toString();
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                saldo: conductor.saldo,
+                balance: conductor.saldo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsErr) {
+            console.warn("⚠️ Error replicando ajuste de saldo a Firestore:", fsErr.message);
         }
 
         return res.status(200).json({
@@ -344,18 +453,17 @@ export const descontarComisionViaje = async (req, res) => {
             saldo: { $gte: comisionNum }
         };
 
-        // 🛡️ Delegar la matemática y la validación concurrente a MongoDB Atlas directamente para evitar condiciones de carrera
         const conductor = await Conductor.findOneAndUpdate(
             query,
             { 
                 $inc: { saldo: -comisionNum },
                 $unset: { saldoWallet: "" }
             },
-            { new: false, session } // Capturamos saldoAnterior pre-mutación de manera atómica
+            { new: false, session }
         );
 
         if (!conductor) {
-            throw new Error("Conductor no localizado o saldo en billetera insuficiente ($0) para esta operación simultánea.");
+            throw new Error("Conductor no localizado o saldo en billetera insuficiente para esta operación.");
         }
 
         const saldoAnterior = Number(conductor.saldo || 0);
@@ -374,6 +482,19 @@ export const descontarComisionViaje = async (req, res) => {
 
         await session.commitTransaction();
         session.endSession();
+
+        // Réplica defensiva hacia Firestore
+        try {
+            const docFirestoreId = conductor.uid || conductor._id.toString();
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                saldo: nuevoSaldo,
+                balance: nuevoSaldo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsErr) {
+            console.warn("⚠️ Error replicando descuento en Firestore:", fsErr.message);
+        }
 
         return res.status(200).json({ 
             success: true, 
@@ -423,8 +544,7 @@ export const obtenerHistorialSaldos = async (req, res) => {
 };
 
 /**
- * ADAPTADOR DE TRAZABILIDAD INTEGRAL:
- * Mapea 'obtenerHistorialConductor' de manera directa sobre el modelo de saldos indexados.
+ * ADAPTADOR DE TRAZABILIDAD INTEGRAL
  */
 export const obtenerHistorialConductor = obtenerHistorialSaldos;
 
@@ -432,9 +552,6 @@ export const obtenerHistorialConductor = obtenerHistorialSaldos;
 // 3. CONTROL DE ESTADO OPERATIVO Y RADAR DE PROXIMIDAD
 // ==================================================================
 
-/**
- * ACTUALIZACIÓN DE ESTADO OPERATIVO HÍBRIDO
- */
 export const actualizarEstadoConductor = async (req, res) => {
     try {
         if (!req || !req.body) {
@@ -481,10 +598,6 @@ export const actualizarEstadoConductor = async (req, res) => {
     }
 };
 
-/**
- * MOTOR DE RADAR GEOGRÁFICO: Localiza las unidades activas más cercanas al pasajero.
- * Consume coordenadas Query Parameters (?lat=...&lng=...&radio=...) para realizar la agregación 2dsphere.
- */
 export const obtenerConductoresCercanos = async (req, res) => {
     try {
         if (!req || !req.query || !req.query.lat || !req.query.lng) {
@@ -493,7 +606,12 @@ export const obtenerConductoresCercanos = async (req, res) => {
 
         const latitud = parseFloat(req.query.lat);
         const longitud = parseFloat(req.query.lng);
-        const radioMetros = parseFloat(req.query.radio) || 5000; 
+        // Soporte para radio recibido en metros o kilómetros
+        const radioParam = req.query.radio || req.query.radioMaxKm;
+        let radioMetros = parseFloat(radioParam) || 5000;
+        if (radioParam && parseFloat(radioParam) < 100) {
+            radioMetros = parseFloat(radioParam) * 1000; // Si venía en KM (ej: 5km -> 5000m)
+        }
 
         if (isNaN(latitud) || isNaN(longitud)) {
             return res.status(400).json({ success: false, message: "⚠️ Formato de coordenadas geográficas inválido." });
@@ -511,7 +629,7 @@ export const obtenerConductoresCercanos = async (req, res) => {
             },
             {
                 $project: {
-                    saldoWallet: 0 // Exclusión explícita en proyección de agregación
+                    saldoWallet: 0
                 }
             }
         ]);
@@ -584,9 +702,6 @@ export const actualizarRadarUbicacion = async (conductorId, lat, lng) => {
     }
 };
 
-/**
- * RECEPCIÓN EN CALIENTE DE TELEMETRÍA SATELITAL
- */
 export const actualizarUbicacionGPS = async (req, res) => {
     try {
         if (!req || !req.body) {

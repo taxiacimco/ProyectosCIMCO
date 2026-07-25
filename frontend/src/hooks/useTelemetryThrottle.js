@@ -1,13 +1,13 @@
-// Versión Arquitectura: V1.2 - Unificación de Emisión de Eventos de Seguimiento de Telemetría Core
+// Versión Arquitectura: V1.3 - Amortiguación Táctica de Telemetría y Suavizado Visual
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useTelemetryThrottle.js
  * Misión: Limitar la velocidad de actualización de coordenadas para mitigar lag en la UI y sincronizar las transmisiones en tiempo real.
- * Ajuste V1.2: Redirección del canal de transmisión de telemetría hacia el estándar unificado del socket manager, eliminando eventos redundantes y aplicando guardas estrictas.
+ * Ajuste V1.3: Calibración de delay a 2000ms, preservación de datos de rumbo (bearing/heading) y saneamiento doble de llaves geográficas.
  */
 
 import { useState, useRef, useEffect } from 'react';
 
-export const useTelemetryThrottle = (delay = 1500) => {
+export const useTelemetryThrottle = (delay = 2000) => {
   const [throttledData, setThrottledData] = useState({});
   const lastUpdated = useRef({});
   const timeoutRefs = useRef({});
@@ -34,11 +34,19 @@ export const useTelemetryThrottle = (delay = 1500) => {
     const ejecutarActualizacion = (id, payload, timestamp) => {
       if (!isMounted.current) return;
 
-      // Estructuración limpia del reporte de geolocalización con fallback estructural
+      const lat = Number(payload?.latitud || payload?.lat || 0);
+      const lng = Number(payload?.longitud || payload?.lng || 0);
+
+      // Estructuración limpia del reporte de geolocalización con fallback estructural y soporte de rumbo
       const saneadoPayload = {
-        latitud: payload?.latitud || payload?.lat || 0,
-        longitud: payload?.longitud || payload?.lng || 0,
-        velocidad: payload?.velocidad || 0,
+        latitud: lat,
+        longitud: lng,
+        lat: lat,
+        lng: lng,
+        velocidad: Number(payload?.velocidad || payload?.speed || 0),
+        bearing: Number(payload?.bearing || payload?.heading || 0),
+        heading: Number(payload?.heading || payload?.bearing || 0),
+        accuracy: Number(payload?.accuracy || 0),
         cooperativa: payload?.cooperativa || 'Particular',
         empresa: payload?.empresa || 'Particular'
       };
@@ -48,14 +56,14 @@ export const useTelemetryThrottle = (delay = 1500) => {
         [id]: {
           ...prev[id],
           ...saneadoPayload,
-          ultimoReporte: new Date(timestamp)
+          ultimoReporte: new Date(timestamp),
+          updatedAt: new Date(timestamp).toISOString()
         }
       }));
       
       lastUpdated.current[id] = timestamp;
 
       // ESTRATEGIA DE EMISIÓN DE EVENTO UNIFICADO AL BACKEND VIA WEBSOCKET (SOCKET.IO CORE)
-      // Se utiliza el canal integrado estándar deprecando llamadas redundantes
       if (socketInstance && typeof socketInstance.emit === 'function') {
         socketInstance.emit('actualizar_ubicacion', {
           vehiculoId: String(id),

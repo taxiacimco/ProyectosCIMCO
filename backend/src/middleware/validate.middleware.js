@@ -1,11 +1,13 @@
-// Versión Arquitectura: V19.5 - Normalización Blindada Multi-Formato y Puentes de Retrocompatibilidad Síncrona
+// Versión Arquitectura: V19.6 - Generación Unívoca de UUIDs Criptográficos y Normalización Blindada
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\validate.middleware.js
  * Misión: Validar y sanitizar los payloads de despacho perimetral (Urbano, Intermunicipal e Inmediato) antes de impactar el bus de datos central.
- * Ajuste V19.5: FUSIÓN ATÓMICA. Integración quirúrgica de extracción polimórfica de coordenadas híbridas (planas y anidadas).
- *               Soporta de forma adaptativa y transparente la omisión de 'viajeId' en '/despachar-inmediato',
- *               hidratando con éxito los objetos geométricos para el controlador ACID sin generar regresiones de producción.
+ * Ajuste V19.6: FUSIÓN ATÓMICA. Se integra el módulo nativo 'crypto' (crypto.randomUUID()) para garantizar la generación unívoca
+ *               de identificadores de viaje en el puente de retrocompatibilidad intermunicipal, reemplazando la generación aleatoria pseudo-débil.
+ *               Se preservan intactas las guardas polimórficas de coordenadas, el flujo de despacho inmediato y las reglas financieras.
  */
+
+import crypto from 'crypto';
 
 const logLocal = (msg) => {
     console.log(`[${new Date().toLocaleString('es-CO')}] 📡 [CIMCO-VALIDACION] ${msg}`);
@@ -161,10 +163,10 @@ export const validarDespacho = (req, res, next) => {
         req.body.conductorId = String(conductorId).trim();
         req.body.fleetId = String(fleetId).trim();
 
-        // 🌉 6. PUENTE DE RETROCOMPATIBILIDAD (Normalización para viaje.controller.js)
-        // Si el frontend no envió un 'viajeId' explícito, la aduana lo fabrica de forma determinista
+        // 🌉 6. PUENTE DE RETROCOMPATIBILIDAD (Normalización determinista con crypto.randomUUID)
+        // Si el frontend no envió un 'viajeId' explícito, la aduana lo fabrica usando UUIDs nativos de alta entropía
         if (!viajeId) {
-            req.body.viajeId = `V_INT_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+            req.body.viajeId = `V_INT_${Date.now()}_${crypto.randomUUID().substring(0, 8).toUpperCase()}`;
         }
 
     } else {

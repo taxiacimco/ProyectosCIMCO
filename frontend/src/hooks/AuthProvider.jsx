@@ -1,13 +1,15 @@
-// Versión Arquitectura: V21.8 - Tolerancia a Fallos Satelitales Firebase y Sincronización Estricta MongoDB-Firebase
+// Versión Arquitectura: V22.0 - Despliegue Directo de Instancia Auth y Desacoplamiento de getAuth
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
  * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO.
+ * Ajuste V22.0: Consumo directo del singleton `auth` importado desde @/config/firebase.
  */
 
 import React, { useState, useEffect } from 'react';
 import api from '@/config/api';
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { getAuth, signInAnonymously, signOut, sendPasswordResetEmail } from 'firebase/auth'; 
+import { auth } from '@/config/firebase';
+import { signInAnonymously, signOut, sendPasswordResetEmail } from 'firebase/auth'; 
 import { AuthContext } from '@/hooks/AuthContext';
 
 export const AuthProvider = ({ children }) => {
@@ -42,9 +44,8 @@ export const AuthProvider = ({ children }) => {
                 } else {
                     // 🛡️ PROTECCIÓN ANTI-FALLO FATAL: Canal anónimo envuelto para tolerancia a fallos
                     try {
-                        const authFirebase = getAuth();
-                        if (!authFirebase.currentUser) {
-                            await signInAnonymously(authFirebase);
+                        if (auth && !auth.currentUser) {
+                            await signInAnonymously(auth);
                             console.log("📡 [CIMCO-AUTH] Canal anónimo de telemetría desplegado con éxito.");
                         }
                     } catch (fbError) {
@@ -83,7 +84,7 @@ export const AuthProvider = ({ children }) => {
         try {
             setLoading(true);
             
-            // ⚡ CORE FIX: Cambiamos 'email' por 'identifier' para cumplir con los requerimientos estrictos del validador de backend
+            // ⚡ CORE FIX: Se envía 'identifier' para cumplir con los requerimientos estrictos del validador de backend
             const respuesta = await api.post('/auth/login', { 
                 identifier: email, 
                 password: password 
@@ -107,18 +108,17 @@ export const AuthProvider = ({ children }) => {
                 api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
                 setUser(userData);
 
-                // 🛡️ Autenticación paralela en Firebase protegida contra fallos (Tolerancia del Ecosistema)
+                // 🛡️ Autenticación paralela en Firebase protegida contra fallos
                 try {
-                    const authFirebase = getAuth();
-                    if (!authFirebase.currentUser) {
-                        await signInAnonymously(authFirebase);
+                    if (auth && !auth.currentUser) {
+                        await signInAnonymously(auth);
                         console.log("📡 [CIMCO-AUTH-FIREBASE] Enlace satelital anónimo acoplado con éxito.");
                     }
                 } catch (fbError) {
                     console.warn("⚠️ [CIMCO-AUTH-WARNING] El puente satelital Firebase falló de forma no fatal. Operando en modo degradado local:", fbError.message);
                 }
 
-                return { success: true, user: userData };
+                return { success: true, user: userData, data: respuesta.data };
             }
             
             return { success: false, message: respuesta.data?.message || "Credenciales incorrectas." };
@@ -154,8 +154,8 @@ export const AuthProvider = ({ children }) => {
 
     const resetPasswordCentral = async (email) => {
         try {
-            const authFirebase = getAuth();
-            await sendPasswordResetEmail(authFirebase, email);
+            if (!auth) throw new Error("Instancia de Firebase Auth no inicializada.");
+            await sendPasswordResetEmail(auth, email);
             return { success: true };
         } catch (error) {
             console.error("❌ [CIMCO-AUTH] Quiebre en la pasarela de recuperación de Firebase:", error);
@@ -173,9 +173,8 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         
         try {
-            const authFirebase = getAuth();
-            if (authFirebase.currentUser) {
-                await signOut(authFirebase);
+            if (auth && auth.currentUser) {
+                await signOut(auth);
                 console.log("🧹 [CIMCO-AUTH] Canal satelital Firebase cerrado y purgado de forma segura.");
             }
         } catch (error) {
@@ -191,6 +190,7 @@ export const AuthProvider = ({ children }) => {
             loading, 
             initialized, 
             loginLocal, 
+            login: loginLocal, // Alias de compatibilidad unificado
             logout, 
             registerCentral, 
             resetPasswordCentral 

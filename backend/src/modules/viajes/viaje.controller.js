@@ -1,34 +1,21 @@
-// Versión Arquitectura: V14.11 - Blindaje de Aislamiento ACID, Mitigación de Concurrencia y Sincronización Contable
+// Versión Arquitectura: V16.10 - Blindaje ACID, Historiales, Cancelación Atómica y Sincronización Firestore
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
- * Misión: Procesar flujos operativos, liquidación contable (10% comisión) y sincronización Firestore.
- * Ajuste V14.11: Corrección de simetría en HistorialSaldo sustituyendo el campo erróneo `conductorId` 
- * por la propiedad de relación correcta `conductor` para evitar descalces en auditorías de saldo.
+ * Misión: Procesar flujos operativos, liquidación contable (10% comisión), cancelación y sincronización Firestore.
+ * Ajuste V16.10: Normalización de imports relativos, refinamiento de concurrencia ACID y consistencia en payloads.
  */
 
-import Viaje from '#models/Viaje.js';
-import Conductor from '#models/Conductor.js';
-import Usuario from '#models/Usuario.js';
-import HistorialSaldo from '#models/HistorialSaldo.js';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import { dbFirestore, FIRESTORE_PATHS } from '#config/firebase.js';
+import Viaje from '../../models/Viaje.js';
+import Conductor from '../../models/Conductor.js';
+import Usuario from '../../models/Usuario.js';
+import HistorialSaldo from '../../models/HistorialSaldo.js';
+import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 import { FieldValue } from 'firebase-admin/firestore';
 
 // Auxiliar de retardo con aleatoriedad (Jitter) para dispersar la ráfaga concurrentemente
 const esperarGarantizado = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// 🧠 Algoritmo de Distancia Esférica (Haversine)
-const calcularDistanciaHaversine = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; 
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; 
-};
 
 // ==================================================================
 // 0. CREACIÓN Y DESPACHO INMEDIATO (BLOQUEO TRANSACCIONAL DESDE ANDÉN)
@@ -50,18 +37,18 @@ export const crearYDespacharViajeAtomico = async (req, res) => {
     if (!origenTexto || typeof origenTexto !== 'string' || origenTexto.trim() === '') return res.status(400).json({ success: false, message: 'Falta parámetro obligatorio: origenTexto' });
     if (!destinoTexto || typeof destinoTexto !== 'string' || destinoTexto.trim() === '') return res.status(400).json({ success: false, message: 'Falta parámetro obligatorio: destinoTexto' });
 
-    if (!req.usuario || !req.usuario.id) {
+    const operadorLogico = req.usuario || req.user;
+    if (!operadorLogico || (!operadorLogico.id && !operadorLogico._id)) {
         return res.status(401).json({ success: false, message: 'Credenciales de operador ausentes en la terminal de despacho.' });
     }
 
-    const despachadorId = String(req.usuario.id);
-    const despachadorRol = String(req.usuario.rol || req.usuario.role || '').toLowerCase();
+    const despachadorId = String(operadorLogico.id || operadorLogico._id);
+    const despachadorRol = String(operadorLogico.rol || operadorLogico.role || '').toLowerCase();
 
     if (despachadorRol !== 'despachador' && despachadorRol !== 'admin' && despachadorRol !== 'ceo') {
         return res.status(403).json({ success: false, message: 'Acceso denegado. Su rol no cuenta con privilegios de asignación en andén.' });
     }
 
-    // ⚡ FIX DETECCIÓN CASTEO OBJETOID: Genera un ObjectId hexadecimal de 24 caracteres válido para Mongoose
     let idViajeFinal;
     if (viajeId && mongoose.Types.ObjectId.isValid(viajeId)) {
         idViajeFinal = new mongoose.Types.ObjectId(viajeId);
@@ -73,7 +60,6 @@ export const crearYDespacharViajeAtomico = async (req, res) => {
     session.startTransaction();
 
     try {
-        // 🔥 OPTIMIZACIÓN CONCURRENTE: Mutación directa con filtro atómico para prevenir doble asignación simultánea del conductor
         const conductor = await Conductor.findOneAndUpdate(
             { _id: conductorId, estadoOperativo: 'DISPONIBLE' },
             { 
@@ -105,7 +91,6 @@ export const crearYDespacharViajeAtomico = async (req, res) => {
             });
         }
 
-        // 2. Inserción aislada del nuevo viaje asignado directamente con el ObjectId verificado
         const [nuevoViaje] = await Viaje.create([{
             _id: idViajeFinal,
             pasajeroId,
@@ -125,10 +110,12 @@ export const crearYDespacharViajeAtomico = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        // 📡 Sincronización post-commit no bloqueante en Firebase Firestore
         if (dbFirestore) {
-            const viajeRef = dbFirestore.collection(FIRESTORE_PATHS.viajes || 'viajes').doc(String(idViajeFinal));
-            const conductorRef = dbFirestore.collection(FIRESTORE_PATHS.conductores || 'conductores').doc(String(conductorId));
+            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+
+            const viajeRef = dbFirestore.collection(coleccionViajes).doc(String(idViajeFinal));
+            const conductorRef = dbFirestore.collection(coleccionConductores).doc(String(conductorId));
 
             Promise.all([
                 viajeRef.set({
@@ -237,8 +224,9 @@ export const solicitarViaje = async (req, res) => {
             estadoViaje: 'solicitado'
         });
 
-        if (dbFirestore && FIRESTORE_PATHS?.viajes) {
-            dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(String(nuevoViaje._id)).set({
+        if (dbFirestore) {
+            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+            dbFirestore.collection(coleccionViajes).doc(String(nuevoViaje._id)).set({
                 viajeId: String(nuevoViaje._id),
                 pasajeroId: String(pasajeroId),
                 origen,
@@ -345,13 +333,16 @@ export const aceptarViaje = async (req, res) => {
         session.endSession();
 
         if (dbFirestore) {
+            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+
             Promise.all([
-                dbFirestore.collection(FIRESTORE_PATHS.viajes || 'viajes').doc(String(viajeId)).update({
+                dbFirestore.collection(coleccionViajes).doc(String(viajeId)).update({
                     conductorId: String(conductorId),
                     estadoViaje: 'aceptado',
                     updatedAt: FieldValue.serverTimestamp()
                 }),
-                dbFirestore.collection(FIRESTORE_PATHS.conductores || 'conductores').doc(String(conductorId)).update({
+                dbFirestore.collection(coleccionConductores).doc(String(conductorId)).update({
                     estado: 'busy',
                     estadoOperativo: 'OCUPADO',
                     viajeActualId: String(viajeId),
@@ -377,7 +368,7 @@ export const aceptarViaje = async (req, res) => {
 };
 
 // ==================================================================
-// 3. SUBSISTEMA DE LIQUIDACIÓN Y CIERRE DE SERVICIOS (VERSIÓN ACID V14.11)
+// 3. SUBSISTEMA DE LIQUIDACIÓN Y CIERRE DE SERVICIOS
 // ==================================================================
 export const completarViaje = async (req, res) => {
     const MAX_REINTENTOS = 8;
@@ -441,7 +432,6 @@ export const completarViaje = async (req, res) => {
             viaje.estadoViaje = 'completado';
             await viaje.save({ session });
 
-            // 🚀 CORRECCIÓN CRÍTICA DE ASIMETRÍA: Se cambia conductorId por conductor
             await HistorialSaldo.create([{
                 conductor: conductorId, 
                 viajeId,
@@ -461,8 +451,11 @@ export const completarViaje = async (req, res) => {
                 console.log(`📈 [CIMCO-PRODUCCION-AUDIT] Viaje ${viajeId} liquidado con éxito tras mitigar colisiones. Intentos: ${intento}. Latencia total: ${latenciaTotal}ms.`);
             }
 
-            if (dbFirestore && FIRESTORE_PATHS?.conductores) {
-                dbFirestore.collection(FIRESTORE_PATHS.conductores).doc(String(conductorId)).update({
+            if (dbFirestore) {
+                const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+                const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+
+                dbFirestore.collection(coleccionConductores).doc(String(conductorId)).update({
                     saldo: FieldValue.increment(-comision),
                     balance: FieldValue.increment(-comision),
                     estado: 'active',
@@ -470,10 +463,8 @@ export const completarViaje = async (req, res) => {
                     viajeActualId: null,
                     updatedAt: FieldValue.serverTimestamp()
                 }).catch(e => console.error("🚨 Error diferido Firestore (Conductor):", e));
-            }
 
-            if (dbFirestore && FIRESTORE_PATHS?.viajes) {
-                dbFirestore.collection(FIRESTORE_PATHS.viajes).doc(String(viajeId)).update({
+                dbFirestore.collection(coleccionViajes).doc(String(viajeId)).update({
                     estadoViaje: 'completado', 
                     updatedAt: FieldValue.serverTimestamp()
                 }).catch(e => console.error("🚨 Error diferido Firestore (Viaje):", e));
@@ -515,7 +506,117 @@ export const completarViaje = async (req, res) => {
 };
 
 // ==================================================================
-// 4. WEBHOOK WOMPI
+// 4. CANCELACIÓN ATÓMICA DE VIAJES
+// ==================================================================
+export const cancelarViaje = async (req, res) => {
+    const { viajeId, motivo } = req.body || {};
+    const targetId = viajeId || req.params.id;
+
+    if (!targetId) {
+        return res.status(400).json({ success: false, message: 'Identificador del viaje requerido para cancelación.' });
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const viaje = await Viaje.findById(targetId).session(session);
+        if (!viaje) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ success: false, message: 'Viaje no encontrado.' });
+        }
+
+        if (viaje.estado === 'cancelado' || viaje.estadoViaje === 'cancelado') {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(200).json({ success: true, message: 'El viaje ya se encontraba cancelado.' });
+        }
+
+        viaje.estado = 'cancelado';
+        viaje.estadoViaje = 'cancelado';
+        if (motivo) viaje.motivoCancelacion = motivo;
+        await viaje.save({ session });
+
+        // Liberación del conductor si estaba asignado
+        if (viaje.conductorId) {
+            await Conductor.findByIdAndUpdate(
+                viaje.conductorId,
+                { $set: { estado: 'active', estadoOperativo: 'DISPONIBLE', viajeActualId: null } },
+                { session }
+            );
+
+            if (dbFirestore) {
+                const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+                dbFirestore.collection(coleccionConductores).doc(String(viaje.conductorId)).update({
+                    estado: 'active',
+                    estadoOperativo: 'DISPONIBLE',
+                    viajeActualId: null,
+                    updatedAt: FieldValue.serverTimestamp()
+                }).catch(e => console.error("🚨 Error liberando conductor en Firestore:", e));
+            }
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+
+        if (dbFirestore) {
+            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+            dbFirestore.collection(coleccionViajes).doc(String(targetId)).update({
+                estadoViaje: 'cancelado',
+                updatedAt: FieldValue.serverTimestamp()
+            }).catch(e => console.error("🚨 Error actualizando cancelación en Firestore:", e));
+        }
+
+        return res.status(200).json({ success: true, message: 'Viaje cancelado y recursos liberados correctamente.', data: viaje });
+
+    } catch (error) {
+        if (session.inTransaction()) await session.abortTransaction();
+        session.endSession();
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ==================================================================
+// 5. CONSULTAS DE LECTURA DE VIAJES
+// ==================================================================
+export const obtenerViajes = async (req, res) => {
+    try {
+        const { estado, conductorId, pasajeroId, limit = 50 } = req.query;
+        const filtro = {};
+
+        if (estado) filtro.$or = [{ estado }, { estadoViaje: estado }];
+        if (conductorId) filtro.conductorId = conductorId;
+        if (pasajeroId) filtro.pasajeroId = pasajeroId;
+
+        const viajes = await Viaje.find(filtro)
+            .sort({ createdAt: -1 })
+            .limit(Number(limit))
+            .lean();
+
+        return res.status(200).json({ success: true, contador: viajes.length, data: viajes });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const obtenerViajePorId = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const viaje = await Viaje.findById(id).lean();
+
+        if (!viaje) {
+            return res.status(404).json({ success: false, message: 'Viaje no encontrado' });
+        }
+
+        return res.status(200).json({ success: true, data: viaje });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ==================================================================
+// 6. WEBHOOK WOMPI
 // ==================================================================
 export const recibirAlertaWompiLocal = async (req, res) => {
     try {
@@ -543,7 +644,7 @@ export const recibirAlertaWompiLocal = async (req, res) => {
 };
 
 // ==================================================================
-// 5. DISTRIBUCIÓN LOGÍSTICA ATÓMICA BLINDADA (FUSIÓN MONGO-FIREBASE ACID)
+// 7. DISTRIBUCIÓN LOGÍSTICA ATÓMICA BLINDADA
 // ==================================================================
 export const despacharViajeAtomico = async (req, res) => {
     if (!req || !req.body) {
@@ -553,12 +654,13 @@ export const despacharViajeAtomico = async (req, res) => {
     const { viajeId, conductorId, tarifa, valor, metodoPago } = req.body;
     const tarifaFinal = tarifa !== undefined ? tarifa : valor;
     
-    if (!req.usuario || !req.usuario.id) {
+    const operadorLogico = req.usuario || req.user;
+    if (!operadorLogico || (!operadorLogico.id && !operadorLogico._id)) {
         return res.status(401).json({ success: false, message: 'Credenciales de operador ausentes en la terminal.' });
     }
 
-    const despachadorId = String(req.usuario.id); 
-    const despachadorRol = String(req.usuario.rol || req.usuario.role || '').toLowerCase();
+    const despachadorId = String(operadorLogico.id || operadorLogico._id); 
+    const despachadorRol = String(operadorLogico.rol || operadorLogico.role || '').toLowerCase();
 
     if (despachadorRol !== 'despachador' && despachadorRol !== 'admin' && despachadorRol !== 'ceo') {
         return res.status(403).json({ success: false, message: 'Acceso denegado. Rol no autorizado para inyección logística.' });
@@ -613,8 +715,11 @@ export const despacharViajeAtomico = async (req, res) => {
         session.endSession();
 
         if (dbFirestore) {
-            const viajeRef = dbFirestore.collection(FIRESTORE_PATHS.viajes || 'viajes').doc(String(viajeId));
-            const conductorRef = dbFirestore.collection(FIRESTORE_PATHS.conductores || 'conductores').doc(String(conductorId));
+            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+
+            const viajeRef = dbFirestore.collection(coleccionViajes).doc(String(viajeId));
+            const conductorRef = dbFirestore.collection(coleccionConductores).doc(String(conductorId));
 
             const actualizacionViajeFirebase = {
                 estadoViaje: 'asignado',
@@ -664,6 +769,9 @@ export default {
     solicitarViaje,
     aceptarViaje,
     completarViaje,
+    cancelarViaje,
+    obtenerViajes,
+    obtenerViajePorId,
     recibirAlertaWompiLocal,
     despacharViajeAtomico
 };

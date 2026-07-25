@@ -1,17 +1,17 @@
-// Versión Arquitectura: V15.6 - Resolución Dinámica Estricta de Axios Anti-Localhost y Blindaje JWT
+// Versión Arquitectura: V15.7 - Resolución Dinámica Estricta de Axios Anti-Localhost y Blindaje JWT
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
  * Misión: Centralización de Axios e inyección inteligente de endpoints sin dependencias huérfanas.
- * Ajuste V15.6: Homologación estricta de rutas de producción y consistencia de sufijos de API.
+ * Ajuste V15.7: Estandarización de fallback de IP neutra (127.0.0.1) y consumo de VITE_API_URL.
  */
 
 import axios from 'axios';
 
-// 🔌 RESOLUCIÓN ESTRICTA DE LA URL BASE BASADA EN ENTORNO V15.6
-export const HOST_IP = import.meta.env.VITE_HOST_IP || '192.168.100.34';
+// 🔌 RESOLUCIÓN ESTRICTA DE LA URL BASE BASADA EN ENTORNO
+export const HOST_IP = import.meta.env.VITE_HOST_IP || '127.0.0.1';
 
 const DETERMINAR_URL_BASE = () => {
-    // 1. Prioridad Absoluta: La variable unificada nueva del build (Evita IPs quemadas en producción)
+    // 1. Prioridad Absoluta: Variable unificada desde .env / build
     if (import.meta.env.VITE_API_URL) {
         return import.meta.env.VITE_API_URL;
     }
@@ -24,7 +24,7 @@ export const API_CORE_URL = DETERMINAR_URL_BASE();
 // 🔍 RESOLUCIÓN DE CLOUD FUNCTIONS COMPATIBLE CON PRODUCCIÓN TLS
 const PROJ_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'pelagic-chalice-467818-e1';
 export const API_FUNCTIONS_URL = import.meta.env.PROD 
-    ? import.meta.env.VITE_API_FUNCTIONS_URL || `https://api-tx.taxiacimco.com/api/v1` // ✅ Sufijo de API unificado para producción
+    ? import.meta.env.VITE_API_FUNCTIONS_URL || `https://api-tx.taxiacimco.com/api/v1`
     : `http://${HOST_IP}:5001/${PROJ_ID}/us-central1`;
 
 export const api = axios.create({

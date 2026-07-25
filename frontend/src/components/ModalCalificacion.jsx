@@ -1,8 +1,8 @@
-// Versión Arquitectura: V12.0 - PROD READY: Atomización Verdadera por Lógica de Batches NoSQL y Blindaje de Sanitización String
+// Versión Arquitectura: V13.0 - Migración de Concurrencia Estricta mediante runTransaction NoSQL
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\ModalCalificacion.jsx
- * Misión: Desplegar modal de calificación y persistir de manera estrictamente atómica (All-or-Nothing) 
- * tanto el cambio en el documento de viaje legado como la nueva topología relacional en /calificaciones.
+ * Misión: Desplegar modal de calificación y persistir mediante transacción ACID aislada (runTransaction) 
+ * el estado del viaje y el registro desacoplado en /calificaciones, previniendo condiciones de carrera.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism (backdrop-blur-xl, bg-[#121214]/80, border-white/5).
  */
 
@@ -10,7 +10,7 @@ import React, { useState, useEffect } from 'react';
 import { Star, CheckCircle, MessageSquare, Tag, X, AlertTriangle } from 'lucide-react';
 import { db as globalDb, FIRESTORE_PATHS } from '@/config/firebase';
 import { useAuth } from '@/hooks/useAuth';
-import { doc, collection, serverTimestamp, getDoc, writeBatch } from 'firebase/firestore';
+import { doc, collection, serverTimestamp, runTransaction } from 'firebase/firestore';
 
 const ModalCalificacion = ({ 
     isOpen, 
@@ -74,50 +74,58 @@ const ModalCalificacion = ({
             const rutaCalificacionesColeccion = FIRESTORE_PATHS?.calificaciones || 'calificaciones';
 
             const viajeRef = doc(db, rutaViajeColeccion, idViaje);
-            
-            // 🛡️ Extracción en tiempo real del receptor para evitar vulnerabilidades de spoofing
-            let receptorId = "DESCONOCIDO";
-            const viajeSnap = await getDoc(viajeRef);
-            
-            if (viajeSnap.exists()) {
-                const viajeData = viajeSnap.data();
-                receptorId = rolUsuario === 'pasajero'
+            const nuevaCalificacionRef = doc(collection(db, rutaCalificacionesColeccion));
+
+            // 🚀 MIGRACIÓN A RUNTRANSACTION: Consistencia estricta ante accesos/escrituras concurrentes
+            await runTransaction(db, async (transaction) => {
+                // 1. Fase de Lectura Obligatoria en la Transacción
+                const viajeSnap = await transaction.get(viajeRef);
+
+                if (!viajeSnap.exists()) {
+                    throw new Error("El viaje de referencia fue purgado del servidor.");
+                }
+
+                const viajeData = viajeSnap.data() || {};
+
+                // Blindaje contra calificaciones duplicadas por el mismo rol
+                if (rolUsuario === 'pasajero' && viajeData.calificacionAlConductor) {
+                    throw new Error("Ya has registrado la calificación para este conductor.");
+                }
+                if (rolUsuario !== 'pasajero' && viajeData.calificacionAlPasajero) {
+                    throw new Error("Ya has registrado la calificación para este pasajero.");
+                }
+
+                // 🛡️ Extracción en tiempo real del receptor para evitar vulnerabilidades de spoofing
+                const receptorId = rolUsuario === 'pasajero'
                     ? (viajeData.conductorId || viajeData.idConductor || "DESCONOCIDO")
                     : (viajeData.pasajeroId || viajeData.usuarioId || "DESCONOCIDO");
-            } else {
-                throw new Error("El viaje de referencia fue purgado del servidor.");
-            }
 
-            // 🚀 INICIALIZACIÓN DE BATCH EN FIREBASE (Garantiza transaccionalidad All-or-Nothing)
-            const batch = writeBatch(db);
+                // 2. Fase de Escritura en la Transacción
+                const campoUpdate = rolUsuario === 'pasajero' 
+                    ? { calificacionAlConductor: rating } 
+                    : { calificacionAlPasajero: rating };
+                
+                transaction.update(viajeRef, campoUpdate);
 
-            // Operación 1: Preparar la mutación del documento del viaje legacy
-            const campoUpdate = rolUsuario === 'pasajero' 
-                ? { calificacionAlConductor: rating } 
-                : { calificacionAlPasajero: rating };
-            batch.update(viajeRef, campoUpdate);
+                const documentoCalificacion = {
+                    viajeId: idViaje,
+                    evaluadorId: user?.uid || "ANÓNIMO",
+                    evaluadorRol: rolUsuario || "pasajero",
+                    receptorId: receptorId,
+                    puntuacion: rating,
+                    comentarios: (comentarios || '').trim().substring(0, 150), // 🛡️ Truncado preventivo estricto
+                    etiquetas: etiquetasSeleccionadas || [],
+                    fechaCreacion: serverTimestamp()
+                };
 
-            // Operación 2: Generar referencia con ID autogenerado para el nuevo documento descentralizado
-            const nuevaCalificacionRef = doc(collection(db, rutaCalificacionesColeccion));
-            const documentoCalificacion = {
-                viajeId: idViaje,
-                evaluadorId: user?.uid || "ANÓNIMO",
-                evaluadorRol: rolUsuario || "pasajero",
-                receptorId: receptorId,
-                puntuacion: rating,
-                comentarios: comentarios.trim().substring(0, 150), // 🛡️ Truncado preventivo estricto
-                etiquetas: etiquetasSeleccionadas,
-                fechaCreacion: serverTimestamp()
-            };
-            batch.set(nuevaCalificacionRef, documentoCalificacion);
-
-            // ⚡ Disparo Único del Batch a la Red
-            await batch.commit();
+                transaction.set(nuevaCalificacionRef, documentoCalificacion);
+            });
 
             onFinalizarCalificacion();
         } catch (error) {
             console.error("❌ [CIMCO-RATING-ENGINE] Fallo crítico de mutación transaccional:", error);
-            setErrorOperativo(error.message.includes("purgado") 
+            setErrorOperativo(
+                error.message.includes("purgado") || error.message.includes("Ya has registrado")
                 ? error.message 
                 : "Error de red: No se pudo consolidar la calificación en el Libro Mayor."
             );
@@ -229,7 +237,7 @@ const ModalCalificacion = ({
                     className="w-full bg-yellow-500 hover:bg-yellow-400 disabled:opacity-30 disabled:cursor-not-allowed text-black font-black uppercase text-[10px] tracking-widest py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(234,179,8,0.2)] border-0 cursor-pointer"
                 >
                     <CheckCircle size={14} /> 
-                    {enviando ? 'COMPROMETIENDO BATCH...' : 'CONSOLIDAR EVALUACIÓN'}
+                    {enviando ? 'PROCESANDO TRANSACCIÓN...' : 'CONSOLIDAR EVALUACIÓN'}
                 </button>
             </div>
         </div>

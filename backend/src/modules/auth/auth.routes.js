@@ -1,7 +1,8 @@
-// Versión Arquitectura: V15.8 - Sincronización de Endpoints con Controlador Polimórfico V21.15
+// Versión Arquitectura: V15.10 - Inclusión de Alias de Rutas para Actualización de Perfil
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
- * Misión: Enrutador perimetral de autenticación alineado al 100% con las exportaciones del controlador V21.15.
+ * Misión: Enrutador perimetral de autenticación alineado con soporte multicamino para perfil.
+ * Ajuste V15.10: Normalización de sintaxis de importación y mantenimiento de rutas duplicadas por alias.
  */
 
 import express from 'express'; 
@@ -14,7 +15,7 @@ import {
     verificarTelefono,
     updateProfile
 } from './auth.controller.js';
-import { validateRegisterPayload, verificarToken, esDespachador } from '../../middleware/auth.middleware.js';
+import { validateRegisterPayload, verificarToken } from '../../middleware/auth.middleware.js';
 
 const router = express.Router();
 
@@ -71,8 +72,11 @@ router.post('/restablecer', verificarOTPyRestablecer);
 router.post('/verificar-telefono', verificarTelefono);
 
 /**
- * 🔄 GESTIÓN DE PERFIL DE USUARIO (Ruta Protegida)
+ * 🔄 GESTIÓN DE PERFIL DE USUARIO (Rutas Protegidas con Alias de Compatibilidad)
  */
 router.put('/update-profile', verificarToken, updateProfile);
+router.put('/perfil', verificarToken, updateProfile);
+router.put('/profile', verificarToken, updateProfile);
+router.patch('/update-profile', verificarToken, updateProfile);
 
 export default router;

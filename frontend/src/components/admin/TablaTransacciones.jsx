@@ -1,26 +1,28 @@
-// Versión Arquitectura: V1.4 - Extracción Segura de Timestamps y Blindaje Antifrase
+// Versión Arquitectura: V1.5 - Desacoplamiento de Helper de Fechas hacia Módulo Global Compartido @/utils/dateUtils
 /**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\TablaTransacciones.jsx
- * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism.
- * Saneamiento V1.4: Adaptación inteligente del objeto Timestamp de Firestore antes del parseo de fecha local.
+ * Ubicación: frontend\src\components\admin\TablaTransacciones.jsx
+ * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism CIMCO-UI V9.3.
+ * Refactor V1.5: Migración de resolverFechaSegura desde lógica inline local hacia la utilidad compartida @/utils/dateUtils.
  */
 
 import React from 'react';
 import { ArrowUpRight, ArrowDownLeft, Clock, CircleDollarSign, Database } from 'lucide-react';
-import { formatFechaColombia } from '@/utils/dateFormatter'; 
+import { formatFechaColombia } from '@/utils/dateFormatter';
+import { resolverFechaSegura } from '@/utils/dateUtils';
 
-const formatearMoneda = (valor) => {
+const formatearMoneda = (valor = 0) => {
+    const montoNumerico = Number(valor) || 0;
     return new Intl.NumberFormat('es-CO', {
         style: 'currency',
         currency: 'COP',
         minimumFractionDigits: 0
-    }).format(valor);
+    }).format(montoNumerico);
 };
 
 const TablaTransacciones = ({ transacciones = [] }) => {
     
     const renderBadgeTipo = (tipo = '') => {
-        const t = tipo.toUpperCase();
+        const t = String(tipo).toUpperCase().trim();
         if (t === 'RECARGA' || t === 'CREDIT') {
             return (
                 <span className="flex items-center gap-1.5 w-fit text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md">
@@ -37,19 +39,6 @@ const TablaTransacciones = ({ transacciones = [] }) => {
         );
     };
 
-    // Helper interno para desempaquetar de forma segura cualquier tipo de fecha proveniente de Firestore
-    const resolverFechaSegura = (campoFecha) => {
-        if (!campoFecha) return null;
-        // Si es un Timestamp de Firestore, ejecutamos toDate() de forma segura
-        if (typeof campoFecha === 'object' && campoFecha.toDate && typeof campoFecha.toDate === 'function') {
-            return campoFecha.toDate();
-        }
-        if (campoFecha?.seconds) {
-            return new Date(campoFecha.seconds * 1000);
-        }
-        return campoFecha;
-    };
-
     return (
         <div className="w-full backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl overflow-hidden shadow-xl">
             <div className="p-4 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
@@ -60,12 +49,12 @@ const TablaTransacciones = ({ transacciones = [] }) => {
                     </h3>
                 </div>
                 <div className="text-[9px] font-bold text-zinc-500 bg-zinc-950/60 border border-white/5 px-2 py-1 rounded uppercase tracking-wider font-mono">
-                    Registros: {transacciones?.length || 0}
+                    Registros: {Array.isArray(transacciones) ? transacciones.length : 0}
                 </div>
             </div>
 
             <div className="overflow-x-auto w-full">
-                {!transacciones || transacciones.length === 0 ? (
+                {!Array.isArray(transacciones) || transacciones.length === 0 ? (
                     <div className="p-8 flex flex-col items-center justify-center text-center gap-2">
                         <Database className="text-zinc-600 animate-pulse" size={24} />
                         <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-500">
@@ -86,6 +75,7 @@ const TablaTransacciones = ({ transacciones = [] }) => {
                             {transacciones.map((tx, index) => {
                                 const keyTransaccion = tx?.id || tx?._id || tx?.referencia || `tx-fallback-${index}`;
                                 const fechaObjetivo = resolverFechaSegura(tx?.fecha || tx?.createdAt || tx?.timestamp);
+                                const tipoString = String(tx?.tipo || tx?.type || '').toUpperCase();
 
                                 return (
                                     <tr key={keyTransaccion} className="hover:bg-white/[0.02] transition-colors duration-150 group">
@@ -115,7 +105,7 @@ const TablaTransacciones = ({ transacciones = [] }) => {
 
                                         <td className="p-4 text-right pr-6">
                                             <span className={`text-sm font-mono font-black ${
-                                                tx?.tipo?.toUpperCase() === 'RECARGA' || tx?.tipo?.toUpperCase() === 'CREDIT' || tx?.type?.toUpperCase() === 'RECARGA'
+                                                tipoString === 'RECARGA' || tipoString === 'CREDIT'
                                                 ? 'text-emerald-400' 
                                                 : 'text-cyan-400'
                                             }`}>

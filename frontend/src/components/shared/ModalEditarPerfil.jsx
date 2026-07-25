@@ -1,3 +1,5 @@
+// Versión Arquitectura: V2.1 - Implementación de Sanitización y Validación Regex de Teléfono Móvil (Colombia 10 Dígitos)
+
 import React, { useState, useEffect } from "react";
 import { X, Save, Phone, User, Landmark, Loader2 } from "lucide-react";
 import api from "@/config/api";
@@ -13,15 +15,16 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
     empresa: "",
   });
 
-  // Sincronizar datos del usuario logueado al abrir el modal
+  // Sincronizar datos del usuario logueado al abrir el modal con guardas anti-undefined
   useEffect(() => {
     if (user) {
       setFormData({
-        nombre: user.nombre || user.fullName || "",
-        telefonoMovil: user.telefonoMovil || user.telefono || "",
-        cooperativa: user.cooperativa || "",
-        empresa: user.empresa || "",
+        nombre: user?.nombre || user?.fullName || "",
+        telefonoMovil: user?.telefonoMovil || user?.telefono || "",
+        cooperativa: user?.cooperativa || "",
+        empresa: user?.empresa || "",
       });
+      setError("");
     }
   }, [user, isOpen]);
 
@@ -29,6 +32,14 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
+    
+    // Sanitización en vivo para el campo teléfono (solo dígitos)
+    if (name === "telefonoMovil") {
+      const sanitizedValue = value.replace(/\D/g, "").slice(0, 10);
+      setFormData((prev) => ({ ...prev, [name]: sanitizedValue }));
+      return;
+    }
+
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -37,11 +48,37 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
     setLoading(true);
     setError("");
 
+    // Blindaje de seguridad y sanitización preliminar
+    const nombreSanitizado = (formData.nombre || "").trim();
+    const telefonoLimpio = (formData.telefonoMovil || "").trim();
+
+    if (!nombreSanitizado) {
+      setError("El nombre completo es un campo obligatorio.");
+      setLoading(false);
+      return;
+    }
+
+    // Validación estricta con Expresión Regular para formato celular en Colombia (10 dígitos iniciando en 3)
+    const regexTelefonoColombia = /^3\d{9}$/;
+    if (!regexTelefonoColombia.test(telefonoLimpio)) {
+      setError("Ingrese un número celular válido de Colombia (10 dígitos iniciando con 3).");
+      setLoading(false);
+      return;
+    }
+
+    const payloadFormat = {
+      ...formData,
+      nombre: nombreSanitizado,
+      telefonoMovil: telefonoLimpio,
+      cooperativa: (formData.cooperativa || "").trim(),
+      empresa: (formData.empresa || "").trim(),
+    };
+
     try {
       // Petición PUT dinámica al controlador unificado de autenticación/perfil
-      const response = await api.put("/auth/update-profile", formData);
+      const response = await api.put("/auth/update-profile", payloadFormat);
       
-      if (response.data.success) {
+      if (response?.data?.success) {
         if (onUpdateSuccess) {
           onUpdateSuccess(response.data.user);
         }
@@ -49,7 +86,7 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
       }
     } catch (err) {
       console.error("❌ Error actualizando perfil:", err);
-      setError(err.response?.data?.message || "Ocurrió un error al guardar los cambios.");
+      setError(err?.response?.data?.message || "Ocurrió un error al guardar los cambios.");
     } finally {
       setLoading(false);
     }
@@ -62,6 +99,7 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
         {/* Botón Cerrar */}
         <button 
           onClick={onClose}
+          type="button"
           className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors"
         >
           <X size={20} />
@@ -101,11 +139,12 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
               <Phone size={12} className="text-zinc-500" /> Teléfono Móvil de Contacto
             </label>
             <input 
-              type="text"
+              type="tel"
               name="telefonoMovil"
               value={formData.telefonoMovil}
               onChange={handleChange}
               required
+              maxLength={10}
               placeholder="Ej: 3101234567"
               className="w-full bg-[#0c0c0e] border border-white/5 rounded-xl px-3 py-3 text-xs text-white outline-none focus:border-orange-500/40 transition-all font-mono placeholder:text-zinc-700"
             />
@@ -122,10 +161,11 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
                 name="cooperativa"
                 value={formData.cooperativa || formData.empresa}
                 onChange={(e) => {
+                  const val = e.target.value;
                   setFormData(prev => ({
                     ...prev,
-                    cooperativa: e.target.value,
-                    empresa: e.target.value
+                    cooperativa: val,
+                    empresa: val
                   }));
                 }}
                 placeholder="Ej: Terminal La Jagua"

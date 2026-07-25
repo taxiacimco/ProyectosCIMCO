@@ -1,24 +1,26 @@
-// Versión Arquitectura: V1.10 - Estabilización de Selección en Stream y Resiliencia Numérica
+// Versión Arquitectura: V2.0.0 - Unificación Reactiva Usuarios/Billeteras + Fallback CIMCO Sanitizado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
- * Misión: Monitoreo transaccional de wallets e inyección de recargas autorizadas en tiempo real.
- * Ajuste V1.10: Optimización del efecto de re-selección por identidad persistente y blindaje de formateo.
+ * Misión: Monitoreo transaccional de saldos con sincronización automática de usuarios/wallets,
+ *         auto-inicialización de bóvedas y sanitización estricta de identidades de la flota.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
-import { collection, onSnapshot, doc, updateDoc, addDoc, query, increment, serverTimestamp } from 'firebase/firestore';
-import { Wallet, ArrowUpRight, ShieldAlert, Search, DollarSign, ServerOff, Loader, CheckCircle2 } from 'lucide-react';
+import { collection, onSnapshot, doc, updateDoc, setDoc, addDoc, query, increment, serverTimestamp } from 'firebase/firestore';
+import { Wallet, ArrowUpRight, ShieldAlert, Search, DollarSign, ServerOff, Loader, CheckCircle2, Shield } from 'lucide-react';
 
 const GestionBilleteras = () => {
-    const [wallets, setWallets] = useState([]);
+    const [usuarios, setUsuarios] = useState([]);
+    const [walletsMap, setWalletsMap] = useState({});
     const [busqueda, setBusqueda] = useState('');
     const [selectedWallet, setSelectedWallet] = useState(null);
     const [montoAbono, setMontoAbono] = useState('');
     const [procesando, setProcesando] = useState(false);
     const [errorTransaccion, setErrorTransaccion] = useState(null);
     const [exitoTransaccion, setExitoTransaccion] = useState(false);
-    const [loading, setLoading] = useState(true);
+    const [loadingUsuarios, setLoadingUsuarios] = useState(true);
+    const [loadingWallets, setLoadingWallets] = useState(true);
 
     const isMounted = useRef(true);
 
@@ -29,46 +31,122 @@ const GestionBilleteras = () => {
         };
     }, []);
 
+    // 1️⃣ Suscripción en Tiempo Real a la Colección de Usuarios
     useEffect(() => {
-        setLoading(true);
-        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-        const q = query(collection(db, pathBilleteras));
+        setLoadingUsuarios(true);
+        const pathUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
+        const qUsers = query(collection(db, pathUsuarios));
 
-        const unsubscribe = onSnapshot(q, 
+        const unsubscribeUsers = onSnapshot(qUsers,
             (snapshot) => {
                 if (!isMounted.current) return;
-                const lista = snapshot.docs.map(docSnap => ({
+                const listaUsers = snapshot.docs.map(docSnap => ({
                     id: docSnap.id,
                     ...docSnap.data()
                 }));
-                setWallets(lista);
-                setLoading(false);
+                setUsuarios(listaUsers);
+                setLoadingUsuarios(false);
+            },
+            (err) => {
+                console.error("❌ [CIMCO-USERS-STREAM-ERROR]:", err);
+                if (isMounted.current) {
+                    setErrorTransaccion("Fallo al sincronizar directorio de la flota.");
+                    setLoadingUsuarios(false);
+                }
+            }
+        );
+
+        return () => unsubscribeUsers();
+    }, []);
+
+    // 2️⃣ Suscripción en Tiempo Real a la Colección de Billeteras
+    useEffect(() => {
+        setLoadingWallets(true);
+        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'wallets';
+        const qWallets = query(collection(db, pathBilleteras));
+
+        const unsubscribeWallets = onSnapshot(qWallets,
+            (snapshot) => {
+                if (!isMounted.current) return;
+                const map = {};
+                snapshot.docs.forEach(docSnap => {
+                    map[docSnap.id] = {
+                        id: docSnap.id,
+                        ...docSnap.data()
+                    };
+                });
+                setWalletsMap(map);
+                setLoadingWallets(false);
             },
             (err) => {
                 console.error("❌ [CIMCO-WALLETS-STREAM-ERROR]:", err);
                 if (isMounted.current) {
                     setErrorTransaccion("Fallo crítico de sincronización con la bóveda de datos.");
-                    setLoading(false);
+                    setLoadingWallets(false);
                 }
             }
         );
 
-        return () => unsubscribe();
+        return () => unsubscribeWallets();
     }, []);
 
-    // Sincronizar selección activa comparando id y balances reales para evitar ciclos infinitos de render
+    // 🔧 Sanitización y resolución de nombres para la flota
+    const obtenerNombreMostrar = (nodo) => {
+        if (!nodo) return 'NODO DESCONOCIDO';
+
+        const nombreDirecto = nodo.nombreUsuario || 
+                              nodo.nombreCompleto || 
+                              nodo.nombre || 
+                              nodo.fullName || 
+                              nodo.displayName || 
+                              nodo.userName;
+
+        if (nombreDirecto && nombreDirecto !== 'SIN REGISTRO') {
+            return nombreDirecto;
+        }
+
+        if (nodo.email) {
+            return nodo.email.split('@')[0].replace(/[._-]/g, ' ').toUpperCase();
+        }
+
+        return `OPERADOR ${(nodo.rol || nodo.role || 'SISTEMA').toUpperCase()}`;
+    };
+
+    // 3️⃣ Construcción Unificada: Fusiona Usuarios con Billeteras Existentes
+    const listaBovedasUnificada = usuarios
+        .filter(u => {
+            const rol = (u.role || u.rol || '').toLowerCase().trim();
+            // Excluye superusuarios/gerencia de la grilla de abonados
+            return rol !== 'admin' && rol !== 'ceo' && rol !== 'gerente';
+        })
+        .map(u => {
+            const wData = walletsMap[u.id] || {};
+            const saldoExistente = wData.balance !== undefined ? wData.balance : (wData.saldo !== undefined ? wData.saldo : 0);
+
+            return {
+                id: u.id,
+                uid: u.id,
+                nombre: obtenerNombreMostrar(u),
+                email: u.email || 'SIN_CORREO',
+                rol: (u.role || u.rol || 'PASAJERO').toUpperCase(),
+                balance: Number(saldoExistente),
+                existeEnWallets: Boolean(walletsMap[u.id]),
+                rawUserData: u,
+                rawWalletData: wData
+            };
+        });
+
+    // Mantener la selección sincronizada en vivo si cambia el saldo
     useEffect(() => {
         if (selectedWallet) {
-            const actualizada = wallets.find(w => w.id === selectedWallet.id);
+            const actualizada = listaBovedasUnificada.find(w => w.id === selectedWallet.id);
             if (actualizada && isMounted.current) {
-                const balanceActual = actualizada.balance || actualizada.saldo || 0;
-                const balancePrevio = selectedWallet.balance || selectedWallet.saldo || 0;
-                if (balanceActual !== balancePrevio || actualizada.id !== selectedWallet.id) {
+                if (actualizada.balance !== selectedWallet.balance || actualizada.id !== selectedWallet.id) {
                     setSelectedWallet(actualizada);
                 }
             }
         }
-    }, [wallets, selectedWallet]);
+    }, [walletsMap, usuarios]);
 
     const handleMontoChange = (e) => {
         const valRaw = e.target.value.replace(/\D/g, ''); 
@@ -90,21 +168,32 @@ const GestionBilleteras = () => {
         setExitoTransaccion(false);
 
         try {
-            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'wallets';
             const pathAuditoria = FIRESTORE_PATHS?.transactions || 'transacciones';
 
             const walletRef = doc(db, pathBilleteras, selectedWallet.id);
             const auditRef = collection(db, pathAuditoria);
 
-            const campoBalanceActualizar = ('balance' in selectedWallet) ? 'balance' : (('saldo' in selectedWallet) ? 'saldo' : 'balance');
-
-            await updateDoc(walletRef, {
-                [campoBalanceActualizar]: increment(montoNumerico),
-                ultimaActualizacion: serverTimestamp()
-            });
+            if (selectedWallet.existeEnWallets) {
+                const campoBalance = ('balance' in selectedWallet.rawWalletData) ? 'balance' : 'balance';
+                await updateDoc(walletRef, {
+                    [campoBalance]: increment(montoNumerico),
+                    ultimaActualizacion: serverTimestamp()
+                });
+            } else {
+                await setDoc(walletRef, {
+                    usuarioId: selectedWallet.id,
+                    nombreUsuario: selectedWallet.nombre,
+                    rolUsuario: selectedWallet.rol,
+                    balance: montoNumerico,
+                    creadoEl: serverTimestamp(),
+                    ultimaActualizacion: serverTimestamp()
+                });
+            }
 
             await addDoc(auditRef, {
                 usuarioId: selectedWallet.id,
+                nombreUsuario: selectedWallet.nombre,
                 tipo: 'RECARGA',
                 monto: montoNumerico,
                 timestamp: serverTimestamp(),
@@ -129,13 +218,17 @@ const GestionBilleteras = () => {
         }
     };
 
-    const filteredWallets = wallets.filter(w => {
+    const filteredWallets = listaBovedasUnificada.filter(w => {
         const queryTerm = busqueda.toLowerCase().trim();
         const id = (w.id || '').toLowerCase();
-        const nombre = (w.nombreUsuario || w.nombre || w.userName || '').toLowerCase();
-        const rol = (w.rolUsuario || w.rol || w.userRole || '').toLowerCase();
-        return id.includes(queryTerm) || nombre.includes(queryTerm) || rol.includes(queryTerm);
+        const nombre = (w.nombre || '').toLowerCase();
+        const rol = (w.rol || '').toLowerCase();
+        const email = (w.email || '').toLowerCase();
+
+        return id.includes(queryTerm) || nombre.includes(queryTerm) || rol.includes(queryTerm) || email.includes(queryTerm);
     });
+
+    const isLoading = loadingUsuarios || loadingWallets;
 
     return (
         <div className="w-full flex flex-col gap-4 font-mono antialiased text-zinc-100">
@@ -166,7 +259,7 @@ const GestionBilleteras = () => {
                         </h3>
                     </div>
 
-                    {loading ? (
+                    {isLoading ? (
                         <div className="h-64 flex flex-col items-center justify-center gap-2">
                             <Loader className="animate-spin text-yellow-500" size={24} />
                             <span className="text-[9px] text-zinc-500 uppercase tracking-widest">Sincronizando Bóveda de Saldos...</span>
@@ -174,14 +267,13 @@ const GestionBilleteras = () => {
                     ) : filteredWallets.length === 0 ? (
                         <div className="h-64 flex flex-col items-center justify-center gap-2 border border-dashed border-white/5 rounded-2xl bg-white/[0.002]">
                             <ServerOff className="text-zinc-700" size={28} />
-                            <span className="text-[9px] text-zinc-500 uppercase tracking-widest">No se detectaron carteras activas</span>
+                            <span className="text-[9px] text-zinc-500 uppercase tracking-widest">No se detectaron carteras activas recargables</span>
                         </div>
                     ) : (
                         <div className="max-h-[420px] overflow-y-auto divide-y divide-white/5 pr-1">
                             {filteredWallets.map((w) => {
                                 const keyEstable = w.id || `wallet-node-${Math.random()}`;
                                 const isSelected = selectedWallet?.id === w.id;
-                                const saldoNumerico = Number(w.balance || w.saldo || 0);
 
                                 return (
                                     <div 
@@ -199,15 +291,15 @@ const GestionBilleteras = () => {
                                     >
                                         <div>
                                             <p className="text-xs font-bold text-zinc-200 uppercase truncate max-w-[180px]">
-                                                {w.nombreUsuario || w.nombre || w.userName || 'NODO DESCONOCIDO'}
+                                                {w.nombre}
                                             </p>
                                             <p className="text-[9px] text-zinc-600 font-mono mt-0.5">
-                                                ID: {w.id} • ROL: <span className="text-zinc-400 uppercase">{w.rolUsuario || w.rol || w.userRole || 'PASAJERO'}</span>
+                                                ID: {w.id} • ROL: <span className="text-zinc-400 uppercase">{w.rol}</span>
                                             </p>
                                         </div>
                                         <div className="text-right">
                                             <p className="text-xs font-black text-emerald-400">
-                                                ${isNaN(saldoNumerico) ? '0' : saldoNumerico.toLocaleString('es-CO')} COP
+                                                ${w.balance.toLocaleString('es-CO')} COP
                                             </p>
                                             <p className="text-[8px] text-zinc-500 uppercase tracking-widest mt-0.5">
                                                 Saldo Disponible
@@ -235,7 +327,7 @@ const GestionBilleteras = () => {
                                 <div className="bg-zinc-950/60 border border-white/5 rounded-xl p-3">
                                     <span className="text-[8px] font-black tracking-widest text-zinc-500 uppercase">Beneficiario Seleccionado</span>
                                     <p className="text-xs font-bold text-white mt-1 uppercase">
-                                        {selectedWallet.nombreUsuario || selectedWallet.nombre || selectedWallet.userName || 'NODO DESCONOCIDO'}
+                                        {selectedWallet.nombre}
                                     </p>
                                     <p className="text-[9px] text-zinc-400 font-mono mt-0.5 truncate">
                                         ID: {selectedWallet.id}
@@ -243,7 +335,7 @@ const GestionBilleteras = () => {
                                     <div className="mt-2.5 pt-2 border-t border-white/5 flex justify-between items-center">
                                         <span className="text-[9px] text-zinc-500 uppercase font-black">Saldo Actual:</span>
                                         <span className="text-xs font-black text-emerald-400">
-                                            ${Number(selectedWallet.balance || selectedWallet.saldo || 0).toLocaleString('es-CO')} COP
+                                            ${selectedWallet.balance.toLocaleString('es-CO')} COP
                                         </span>
                                     </div>
                                 </div>

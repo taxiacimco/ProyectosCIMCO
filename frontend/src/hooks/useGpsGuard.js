@@ -1,8 +1,7 @@
-// Versión Arquitectura: V16.1 - Sincronización Radial con Control de Inundación (Throttling Telemetría)
+// Versión Arquitectura: V16.2 - Sincronización Radial Homologada
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useGpsGuard.js
  * Misión: Centinela Perimetral de Rutas con control de ráfagas para Sockets.
- * Ajuste V16.1: Inyección de un filtro de tiempo (Throttling) para limitar emisiones de red a un máximo de 3 segundos.
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -16,7 +15,7 @@ export const useGpsGuard = (maxAccuracyThreshold = 50) => {
   
   // ⏱️ Guarda de tiempo para mitigar inundación de eventos en el Socket Network
   const ultimoReporteRef = useRef(0);
-  const INTERVALO_MINIMO_REPORTE = 3000; // 3 segundos (Tiempo óptimo para tracking urbano)
+  const INTERVALO_MINIMO_REPORTE = 3000; // 3 segundos
 
   // 1. Instanciar el flujo continuo del chip GPS
   const { coordenadas, error, permisoDenegado } = useLocation(maxAccuracyThreshold);
@@ -33,14 +32,17 @@ export const useGpsGuard = (maxAccuracyThreshold = 50) => {
       const ahora = Date.now();
       if (ahora - ultimoReporteRef.current >= INTERVALO_MINIMO_REPORTE) {
         if (isConnected && socket) {
-          socket.emit('actualizar_radar_gps', { 
-            lat, 
-            lng, 
+          // ⚡ HOMOLOGACIÓN DE EVENTO: Se utiliza 'actualizar_ubicacion' para guardar coherencia con useTelemetryThrottle
+          socket.emit('actualizar_ubicacion', { 
+            latitud: lat, 
+            longitud: lng, 
+            lat,
+            lng,
             accuracy, 
+            timestamp: ahora,
             updatedAt: new Date().toISOString()
           });
           
-          // Actualizar la estampa de tiempo del último paquete enviado con éxito
           ultimoReporteRef.current = ahora;
         }
       }

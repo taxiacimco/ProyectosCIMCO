@@ -1,18 +1,17 @@
-// Versión Arquitectura: V21.16 - Blindaje de Tipos y Guardas en Mapeo de Variables de Perfil
+// Versión Arquitectura: V21.18 - Extracción Multiclave de UID y Resiliencia en Sincronización
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros).
- * Ajuste V21.16: Integración quirúrgica y blindaje estricto anti-undefined en los métodos de mapeo del payload dentro de updateProfile.
+ * Ajuste V21.18: Normalización de imports relativos, guardas defensivas en Firestore y preservación polimórfica.
  */
 
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 
-// 🚀 GOBERNANZA DE IMPORTACIONES: Resolución nativa de Subpath Imports e Inclusión de Pasajero
-import Conductor from '#models/Conductor.js';
-import Usuario from '#models/Usuario.js';
-import Pasajero from '#models/Pasajero.js';
-import { dbFirestore, FIRESTORE_PATHS } from '#config/firebase.js';
+import Conductor from '../../models/Conductor.js';
+import Usuario from '../../models/Usuario.js';
+import Pasajero from '../../models/Pasajero.js';
+import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 
 // 🔒 BLINDAJE DE FIRMA: Si la variable de entorno no está definida, el servidor aborta
 if (!process.env.JWT_SECRET) {
@@ -109,42 +108,44 @@ export const register = async (req, res) => {
         await nuevoUsuario.save();
 
         // Sincronización hacia Firebase Firestore con Denormalización Saneada de Wallet
-        try {
-            const coleccionFirestore = esPasajero 
-                ? (FIRESTORE_PATHS?.users || 'usuarios') 
-                : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
+        if (dbFirestore) {
+            try {
+                const coleccionFirestore = esPasajero 
+                    ? (FIRESTORE_PATHS?.users || 'usuarios') 
+                    : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
 
-            const payloadFirestore = {
-                uid: String(nuevoUsuario._id),
-                email: nuevoUsuario.email,
-                nombre: nuevoUsuario.nombre,
-                telefono: nuevoUsuario.telefonoMovil,
-                rol: nuevoUsuario.rol,
-                isActive: true,
-                cooperativa: nuevoUsuario.cooperativa || 'Particular',
-                empresa: nuevoUsuario.empresa || 'Particular',
-                createdAt: new Date().toISOString()
-            };
+                const payloadFirestore = {
+                    uid: String(nuevoUsuario._id),
+                    email: nuevoUsuario.email,
+                    nombre: nuevoUsuario.nombre,
+                    telefono: nuevoUsuario.telefonoMovil,
+                    rol: nuevoUsuario.rol,
+                    isActive: true,
+                    cooperativa: nuevoUsuario.cooperativa || 'Particular',
+                    empresa: nuevoUsuario.empresa || 'Particular',
+                    createdAt: new Date().toISOString()
+                };
 
-            if (esConductor) {
-                payloadFirestore.isOnline = false;
+                if (esConductor) {
+                    payloadFirestore.isOnline = false;
+                }
+
+                await dbFirestore.collection(coleccionFirestore).doc(String(nuevoUsuario._id)).set(payloadFirestore);
+
+                // Denormalización de Billetera/Wallet en Firestore para evitar fallas del frontend
+                const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+                await dbFirestore.collection(pathBilleteras).doc(String(nuevoUsuario._id)).set({
+                    id: String(nuevoUsuario._id),
+                    nombreUsuario: nuevoUsuario.nombre,
+                    rolUsuario: nuevoUsuario.rol,
+                    balance: 0,
+                    saldo: 0,
+                    ultimaActualizacion: new Date().toISOString()
+                });
+
+            } catch (firestoreError) {
+                console.warn("⚠️ [CIMCO-AUTH-SYNC-WARN] Falló el espejo en Firebase Firestore:", firestoreError.message);
             }
-
-            await dbFirestore.collection(coleccionFirestore).doc(String(nuevoUsuario._id)).set(payloadFirestore);
-
-            // Denormalización de Billetera/Wallet en Firestore para evitar fallas del frontend
-            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-            await dbFirestore.collection(pathBilleteras).doc(String(nuevoUsuario._id)).set({
-                id: String(nuevoUsuario._id),
-                nombreUsuario: nuevoUsuario.nombre,
-                rolUsuario: nuevoUsuario.rol,
-                balance: 0,
-                saldo: 0,
-                ultimaActualizacion: new Date().toISOString()
-            });
-
-        } catch (firestoreError) {
-            console.warn("⚠️ [CIMCO-AUTH-SYNC-WARN] Falló el espejo en Firebase Firestore:", firestoreError.message);
         }
 
         return res.status(201).json({
@@ -210,7 +211,8 @@ export const login = async (req, res) => {
         // Generación del Token JWT Operativo de TAXIA CIMCO
         const token = jwt.sign(
             { 
-                id: cuentaEncontrada._id, 
+                id: cuentaEncontrada._id,
+                _id: cuentaEncontrada._id,
                 rol: cuentaEncontrada.rol || 'pasajero'
             },
             JWT_SECRET,
@@ -285,7 +287,7 @@ export const solicitarOTP = async (req, res) => {
         return res.status(200).json({ 
             success: true, 
             message: "Código de verificación generado con éxito.",
-            debugOtp: process.env.NODE_ENV !== 'production' ? codigoOTP : undefined // Expuesto solo en fase de laboratorio
+            debugOtp: process.env.NODE_ENV !== 'production' ? codigoOTP : undefined
         });
 
     } catch (error) {
@@ -343,7 +345,6 @@ export const verificarOTPyRestablecer = async (req, res) => {
             return res.status(400).json({ success: false, message: "Código de verificación incorrecto." });
         }
 
-        // Todo correcto: Encriptar la nueva contraseña
         const newHashedPassword = await bcrypt.hash(nuevaPassword, 10);
 
         const condicionesUsuario = [
@@ -351,18 +352,7 @@ export const verificarOTPyRestablecer = async (req, res) => {
             { email: inputLimpio.toLowerCase() },
             { telefonoMovil: inputLimpio }
         ];
-        const condicionesConductor = [
-            { _id: usuario._id },
-            { email: inputLimpio.toLowerCase() },
-            { telefonoMovil: inputLimpio }
-        ];
-        const condicionesPasajero = [
-            { _id: usuario._id },
-            { email: inputLimpio.toLowerCase() },
-            { telefonoMovil: inputLimpio }
-        ];
 
-        // ⚡ ACTUALIZACIÓN CONCURRENTE SEGREGADA Y SECUENCIAL
         let modificado = await Usuario.findOneAndUpdate(
             { $or: condicionesUsuario }, 
             { password: newHashedPassword },
@@ -371,7 +361,7 @@ export const verificarOTPyRestablecer = async (req, res) => {
         
         if (!modificado) {
             modificado = await Conductor.findOneAndUpdate(
-                { $or: condicionesConductor }, 
+                { $or: condicionesUsuario }, 
                 { password: newHashedPassword },
                 { new: true }
             );
@@ -379,7 +369,7 @@ export const verificarOTPyRestablecer = async (req, res) => {
 
         if (!modificado) {
             modificado = await Pasajero.findOneAndUpdate(
-                { $or: condicionesPasajero },
+                { $or: condicionesUsuario },
                 { password: newHashedPassword },
                 { new: true }
             );
@@ -401,7 +391,7 @@ export const verificarOTPyRestablecer = async (req, res) => {
 };
 
 /**
- * 📡 VERIFICACIÓN DE DISPONIBILIDAD TELEFÓNICA (MIGRADO Y EXPUESTO)
+ * 📡 VERIFICACIÓN DE DISPONIBILIDAD TELEFÓNICA
  */
 export const verificarTelefono = async (req, res) => {
     try {
@@ -411,7 +401,6 @@ export const verificarTelefono = async (req, res) => {
         
         const telBusqueda = String(req.body.telefono || req.body.telefonoMovil).trim();
 
-        // ⚡ TRIPLE HANDSHAKE DE VERIFICACIÓN TELEFÓNICA
         const [u, c, p] = await Promise.all([
             Usuario.findOne({ telefonoMovil: telBusqueda }),
             Conductor.findOne({ telefonoMovil: telBusqueda }),
@@ -431,12 +420,11 @@ export const verificarTelefono = async (req, res) => {
 
 /**
  * 🔄 ACTUALIZACIÓN DE DATOS DE PERFIL (POLIMÓRFICO CONCURRENTE)
- * Modifica los datos del usuario logueado en Mongo y replica de inmediato en Firebase Firestore.
  */
 export const updateProfile = async (req, res) => {
     try {
-        const { id, rol } = req.user || req.body || {}; 
-        const userId = id || req.body?.userId;
+        const userId = req.user?.id || req.user?._id || req.user?.uid || req.body?.id || req.body?.userId;
+        const rolExtraido = req.user?.rol || req.body?.rol;
 
         if (!userId) {
             return res.status(400).json({ success: false, message: "No se encontró un identificador de sesión válido." });
@@ -447,12 +435,11 @@ export const updateProfile = async (req, res) => {
         const telefonoLimpio = telefonoMovil ? String(telefonoMovil).trim() : undefined;
         const terminalAsignada = cooperativa || empresa || undefined;
 
-        // 1. Identificar el modelo target usando resolución estricta
         let modeloTarget;
         let esPasajero = false;
         let esConductor = false;
 
-        const rolNormalizado = rol ? String(rol).toLowerCase().trim() : 'pasajero';
+        const rolNormalizado = rolExtraido ? String(rolExtraido).toLowerCase().trim() : 'pasajero';
 
         if (rolNormalizado === 'pasajero') {
             modeloTarget = Pasajero;
@@ -464,12 +451,10 @@ export const updateProfile = async (req, res) => {
             modeloTarget = Usuario;
         }
 
-        // 2. Preparar payload de actualización para MongoDB
         const updateData = {};
         if (nombreLimpio) updateData.nombre = nombreLimpio;
         if (telefonoLimpio) updateData.telefonoMovil = telefonoLimpio;
         
-        // Sincronización incondicional de cooperativa y empresa en Mongoose para evitar descartes de variables indexadas
         if (terminalAsignada) {
             updateData.cooperativa = terminalAsignada;
             updateData.empresa = terminalAsignada;
@@ -481,7 +466,6 @@ export const updateProfile = async (req, res) => {
             { new: true }
         );
 
-        // Fallback por si hay descalce de rol en el Token: búsqueda secuencial de emergencia
         if (!usuarioActualizado) {
             const [uFallback, cFallback, pFallback] = await Promise.all([
                 Usuario.findById(userId),
@@ -498,36 +482,40 @@ export const updateProfile = async (req, res) => {
             return res.status(404).json({ success: false, message: "El usuario no fue localizado en el núcleo de base de datos." });
         }
 
-        // 3. Sincronizar concurrentemente en Firebase Firestore usando set-merge defensivo
-        try {
-            const coleccionTarget = esPasajero 
-                ? (FIRESTORE_PATHS?.users || 'usuarios') 
-                : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
+        if (dbFirestore) {
+            try {
+                const coleccionTarget = esPasajero 
+                    ? (FIRESTORE_PATHS?.users || 'usuarios') 
+                    : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
 
-            const firestoreUpdate = {};
-            if (nombreLimpio) firestoreUpdate.nombre = nombreLimpio;
-            if (nombreLimpio) firestoreUpdate.fullName = nombreLimpio; 
-            if (telefonoLimpio) firestoreUpdate.telefono = telefonoLimpio;
-            if (telefonoLimpio) firestoreUpdate.telefonoMovil = telefonoLimpio;
-            
-            if (terminalAsignada) {
-                firestoreUpdate.cooperativa = terminalAsignada;
-                firestoreUpdate.empresa = terminalAsignada;
+                const firestoreUpdate = {};
+                if (nombreLimpio) {
+                    firestoreUpdate.nombre = nombreLimpio;
+                    firestoreUpdate.fullName = nombreLimpio;
+                }
+                if (telefonoLimpio) {
+                    firestoreUpdate.telefono = telefonoLimpio;
+                    firestoreUpdate.telefonoMovil = telefonoLimpio;
+                }
+                
+                if (terminalAsignada) {
+                    firestoreUpdate.cooperativa = terminalAsignada;
+                    firestoreUpdate.empresa = terminalAsignada;
+                }
+
+                await dbFirestore.collection(coleccionTarget).doc(String(userId)).set(firestoreUpdate, { merge: true });
+
+                if (nombreLimpio) {
+                    const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+                    await dbFirestore.collection(pathBilleteras).doc(String(userId)).set({
+                        nombreUsuario: nombreLimpio,
+                        ultimaActualizacion: new Date().toISOString()
+                    }, { merge: true });
+                }
+
+            } catch (firestoreErr) {
+                console.warn(`⚠️ [CIMCO-UPDATE-SYNC-WARN] Error de replicación en Firebase: ${firestoreErr.message}`);
             }
-
-            // set con merge evita excepciones si por algún motivo no existía el registro en Firestore
-            await dbFirestore.collection(coleccionTarget).doc(String(userId)).set(firestoreUpdate, { merge: true });
-
-            if (nombreLimpio) {
-                const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-                await dbFirestore.collection(pathBilleteras).doc(String(userId)).set({
-                    nombreUsuario: nombreLimpio,
-                    ultimaActualizacion: new Date().toISOString()
-                }, { merge: true });
-            }
-
-        } catch (firestoreErr) {
-            console.warn(`⚠️ [CIMCO-UPDATE-SYNC-WARN] Error de replicación en Firebase: ${firestoreErr.message}`);
         }
 
         return res.status(200).json({
@@ -547,4 +535,13 @@ export const updateProfile = async (req, res) => {
         console.error("🚨 [CIMCO-PROFILE-UPDATE-FATAL] Error crítico en la pasarela de actualización:", error);
         return res.status(500).json({ success: false, message: "Error interno al procesar los ajustes de perfil." });
     }
+};
+
+export default {
+    register,
+    login,
+    solicitarOTP,
+    verificarOTPyRestablecer,
+    verificarTelefono,
+    updateProfile
 };

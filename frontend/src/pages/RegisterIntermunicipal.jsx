@@ -1,7 +1,7 @@
-// Versión Arquitectura: V1.8 - Carga Documental y Contrato Unificado Intermunicipal
+// Versión Arquitectura: V1.9 - Integración de Indicadores visuales de Peso Máximo Documental (5MB)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterIntermunicipal.jsx
- * Misión: Captura de operadores de mediana distancia con validación estricta de archivos y payload estandarizado.
+ * Misión: Captura de operadores de mediana distancia con UI informativa de restricciones documentales.
  * Estilo: CIMCO-UI V9.3 Glassmorphism (Indigo Theme).
  */
 
@@ -252,11 +252,19 @@ const RegisterIntermunicipal = () => {
 
           {/* 📂 SECCIÓN DE CARGA DOCUMENTAL GLASSMORPHISM */}
           <div className="border-t border-white/5 pt-5">
-            <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5 mb-1">
-              <FileText size={12} className="text-indigo-400" /> Archivos de Verificación Nacional Terrestre (Obligatorios)
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5">
+                <FileText size={12} className="text-indigo-400" /> Archivos de Verificación Nacional Terrestre (Obligatorios)
+              </label>
+              
+              {/* 💡 INDICADOR DESTACADO DE LÍMITE DE TAMAÑO */}
+              <span className="text-[9px] font-mono font-bold bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-md uppercase">
+                Máx. {MAX_FILE_SIZE_MB} MB por archivo
+              </span>
+            </div>
+
             <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide mb-3">
-              Formatos admitidos: JPG, PNG, PDF (Máx. 5MB por archivo)
+              Formatos admitidos: JPG, PNG, WEBP, PDF • Tamaño máximo permitido: <strong className="text-indigo-400">5 MB</strong>
             </p>
             
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -266,6 +274,7 @@ const RegisterIntermunicipal = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {cedulaFile ? cedulaFile.name : "Cédula PDF/Img"}
                 </span>
+                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 
@@ -280,6 +289,7 @@ const RegisterIntermunicipal = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {licenciaFile ? licenciaFile.name : "Licencia C2/C3"}
                 </span>
+                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 
@@ -294,6 +304,7 @@ const RegisterIntermunicipal = () => {
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {tarjetaFile ? tarjetaFile.name : "Tarjeta Propiedad"}
                 </span>
+                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 

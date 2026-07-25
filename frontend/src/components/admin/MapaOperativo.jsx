@@ -1,8 +1,8 @@
-// Versión Arquitectura: V17.2 - Optimización Multi-Tenant Estricta y Blindaje de Ciclos de Efecto
+// Versión Arquitectura: V17.3 - Escucha Multi-Evento Homologada y Movimiento Suave de Marcadores
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
  * Misión: Despliegue táctico y renderizado de unidades mediante Leaflet.js enganchado a un amortiguador de alta frecuencia.
- * Ajuste V17.2: Corrección estricta en la guarda Multi-Tenant de WebSockets y estabilización de dependencias de efectos.
+ * Ajuste V17.3: Inclusión del evento socket 'actualizar_ubicacion', delay calibrado a 2000ms y suavizado CSS en marcadores.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -33,7 +33,7 @@ const createCustomIcon = (rol) => {
     `;
     return L.divIcon({
         html: svgHtml,
-        className: 'custom-div-icon',
+        className: 'custom-div-icon smooth-marker-transition',
         iconSize: [28, 28],
         iconAnchor: [14, 28],
         popupAnchor: [0, -28]
@@ -47,10 +47,10 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
     const [errorServicio, setErrorServicio] = useState(null);
     const isMounted = useRef(true);
 
-    // 🔥 Consola del Amortiguador Térmico (Delay configurado a 1500ms para liberar carga del procesador de renderizado)
-    const [vehiculosSuaves, actualizarCoordenadas] = useTelemetryThrottle(1500);
+    // 🔥 Consola del Amortiguador Térmico (Delay óptimo de 2000ms para movimiento fluido y balance de CPU)
+    const [vehiculosSuaves, actualizarCoordenadas] = useTelemetryThrottle(2000);
     
-    // Guardamos la función en una referencia mutable para evitar re-suscripciones a los canales si cambia por falta de useCallback
+    // Guardamos la función en una referencia mutable para evitar re-suscripciones innecesarias en useEffect
     const actualizarCoordenadasRef = useRef(actualizarCoordenadas);
     
     useEffect(() => {
@@ -115,20 +115,19 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         return () => unsubscribe();
     }, [cooperativaFiltro]);
 
-    // CANAL 2: Telemetría por WebSockets en caliente (Redirección Inmediata al Amortiguador)
+    // CANAL 2: Telemetría por WebSockets en caliente (Suscripción Multi-Evento)
     useEffect(() => {
         if (!socket) return;
 
         const handleTelemetria = (data) => {
             if (!isMounted.current || !data) return;
-            const conductorId = data?.conductorId || data?.id || data?.usuarioId;
+            const conductorId = data?.vehiculoId || data?.conductorId || data?.id || data?.usuarioId;
             const lat = parseFloat(data?.latitud || data?.lat || data?.position?.lat || data?.coordenadas?.lat);
             const lng = parseFloat(data?.longitud || data?.lng || data?.position?.lng || data?.coordenadas?.lng);
 
             if (!conductorId || isNaN(lat) || isNaN(lng)) return;
 
             // 🏢 REGLA MULTI-TENANT OPTIMIZADA: Saneamiento estricto bajo contexto de cooperativa
-            // Si la trama WS no trae la cooperativa, verificamos en nuestro estado guardado si corresponde a la autorizada
             const unidadExistente = vehiculosSuaves[conductorId];
             const coopUnidad = data?.cooperativa || data?.empresa || unidadExistente?.cooperativa;
 
@@ -149,15 +148,17 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
             });
         };
 
+        // ⚡ REGISTRO DUAL DE EVENTOS: Soporta tanto el canal de radar central como el canal unificado de ubicación
+        socket.on('actualizar_ubicacion', handleTelemetria);
         socket.on('telemetria_central_radar', handleTelemetria);
 
         return () => {
+            socket.off('actualizar_ubicacion', handleTelemetria);
             socket.off('telemetria_central_radar', handleTelemetria);
         };
-    // Añadimos vehiculosSuaves a las dependencias para que el validador multi-tenant tenga la información más fresca en tiempo real
     }, [socket, cooperativaFiltro, vehiculosSuaves]);
 
-    // Conversión a matriz limpia y saneamiento del buscador predictivo sobre la telemetría suavizada
+    // Conversión a matriz limpia y saneamiento del buscador predictivo
     const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
 
     const filtrados = listaMarcadoresSuaves.filter(m => {
@@ -279,6 +280,11 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                 .custom-popup .leaflet-popup-content-wrapper { background: transparent; box-shadow: none; padding: 0; z-index: 2000; }
                 .custom-popup .leaflet-popup-tip-container { display: none; }
                 .custom-popup .leaflet-popup-content { margin: 0; width: auto !important; }
+                
+                /* Smooth Transition para desplazamiento fluido de marcadores en el mapa */
+                .smooth-marker-transition {
+                    transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+                }
             `}</style>
         </div>
     );

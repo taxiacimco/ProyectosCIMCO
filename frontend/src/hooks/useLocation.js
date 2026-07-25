@@ -1,14 +1,15 @@
-// Versión Arquitectura: V1.0 - Core de Telemetría y Geolocalización Móvil
+// Versión Arquitectura: V1.1 - Core de Telemetría y Geolocalización Urbana de Alta Precisión
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useLocation.js
  * Misión: Consumir el chip GPS nativo del dispositivo con filtrado de precisión milimétrica.
- * Protección: Exclusión de rebotes de señal (falsos positivos > 50 metros) y manejo atómico de estados.
+ * Protección: Exclusión de rebotes de señal (falsos positivos > 35m) y normalización de coordenadas.
  */
 import { useState, useEffect, useRef } from 'react';
 
-export const useLocation = (maxAccuracyThreshold = 50) => {
+export const useLocation = (maxAccuracyThreshold = 35) => {
     const [coordenadas, setCoordenadas] = useState(null);
     const [cargando, setCargando] = useState(true);
+    const [escaneandoPrecision, setEscaneandoPrecision] = useState(true);
     const [error, setError] = useState(null);
     const [permisoDenegado, setPermisoDenegado] = useState(false);
     
@@ -19,41 +20,49 @@ export const useLocation = (maxAccuracyThreshold = 50) => {
         if (!navigator.geolocation) {
             setError("La API de geolocalización no es soportada por este navegador/dispositivo.");
             setCargando(false);
+            setEscaneandoPrecision(false);
             return;
         }
 
         // Configuración nativa forzada para exigir el uso de satélites GPS activos
         const opcionesGps = {
-            enableHighAccuracy: true, // Forzar GPS de alta precisión en móviles
-            timeout: 15000,           // Esperar máximo 15 segundos por lectura
-            maximumAge: 0             // No recuperar ubicaciones en caché, exigir datos frescos
+            enableHighAccuracy: true, // Forzar GPS de alta precisión en dispositivos móviles
+            timeout: 15000,           // Esperar máximo 15 segundos por lectura de hardware
+            maximumAge: 0             // Exigir datos frescos directamente de los satélites
         };
 
         const handleSuccess = (position) => {
             const { latitude, longitude, accuracy } = position.coords;
 
-            // 🛡️ Capa 1: Filtro de Precisión Estrictamente Móvil
-            // Ignorar rebotes de antenas de celdas o proxies de red que den un margen > 50 metros
+            // 🛡️ Capa 1: Filtro de Precisión Urbana Estricta
+            // Ignorar rebotes de antenas celulares o proxies con margen superior al umbral configurado
             if (accuracy > maxAccuracyThreshold) {
-                console.warn(`[GPS-REBOTE] Ubicación descartada. Precisión insuficiente: ${accuracy}m (Límite: ${maxAccuracyThreshold}m)`);
+                console.warn(`⚠️ [GPS-REBOTE] Lectura descartada. Precisión actual: ${Math.round(accuracy)}m (Máximo permitido: ${maxAccuracyThreshold}m)`);
+                setEscaneandoPrecision(true);
+                setCargando(false); // Liberar pantalla de carga inicial indicando que el sensor responde
                 return;
             }
 
+            // ⚡ Sincronización Homologada de Coordenadas (Soporta sintaxis lat/lng y latitud/longitud)
             setCoordenadas({
                 lat: latitude,
                 lng: longitude,
+                latitud: latitude,
+                longitud: longitude,
                 accuracy: accuracy,
-                timestamp: position.timestamp
+                timestamp: position.timestamp || Date.now()
             });
+
             setError(null);
             setPermisoDenegado(false);
             setCargando(false);
+            setEscaneandoPrecision(false);
         };
 
         const handleError = (geoError) => {
             console.error("❌ [CIMCO-GPS-ERROR] Fallo en la adquisición de coordenadas:", geoError);
             
-            // Evaluar código de error nativo del W3C Geolocation API
+            // Evaluar código de error nativo de la W3C Geolocation API
             if (geoError.code === geoError.PERMISSION_DENIED) {
                 setPermisoDenegado(true);
                 setError("El usuario revocó los permisos de acceso al módulo GPS.");
@@ -65,6 +74,7 @@ export const useLocation = (maxAccuracyThreshold = 50) => {
                 setError(geoError.message || "Error desconocido en el sensor de ubicación.");
             }
             setCargando(false);
+            setEscaneandoPrecision(false);
         };
 
         // ⚡ Inicialización del stream continuo de telemetría reactiva
@@ -74,7 +84,7 @@ export const useLocation = (maxAccuracyThreshold = 50) => {
             opcionesGps
         );
 
-        // 🧼 Cleanup del Hook: Liberar el hardware del GPS para mitigar drenado de batería
+        // 🧼 Cleanup del Hook: Liberar el hardware del GPS para evitar drenado de batería
         return () => {
             if (watchIdRef.current !== null) {
                 navigator.geolocation.clearWatch(watchIdRef.current);
@@ -83,5 +93,5 @@ export const useLocation = (maxAccuracyThreshold = 50) => {
         };
     }, [maxAccuracyThreshold]);
 
-    return { coordenadas, cargando, error, permisoDenegado };
+    return { coordenadas, cargando, escaneandoPrecision, error, permisoDenegado };
 };

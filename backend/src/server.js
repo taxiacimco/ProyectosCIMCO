@@ -1,8 +1,8 @@
-// Versión Arquitectura: V16.7 - Registro del Enrutador Perimetral de Pasajeros
+// Versión Arquitectura: V16.9 - Inyección Perimetral del Módulo Cooperativas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado, orquestación de sockets
- * e inyección del enrutador de Pasajeros (/api/pasajeros) junto con Usuarios, Conductores y Viajes.
+ * e inyección del enrutador de Cooperativas (/api/cooperativas) junto con Pasajeros, Usuarios, Conductores y Viajes.
  */
 
 import 'dotenv/config';
@@ -18,6 +18,7 @@ import conductorRoutes from '#modules/conductores/conductor.routes.js';
 import viajeRoutes from '#modules/viajes/viaje.routes.js';
 import usuarioRoutes from './modules/usuarios/usuario.routes.js';
 import pasajeroRoutes from './modules/pasajeros/pasajero.routes.js';
+import cooperativaRoutes from './modules/cooperativas/cooperativa.routes.js'; // 👈 Enrutador de Cooperativas
 import { inicializarSockets } from '#modules/sockets/socket.manager.js';
 
 const app = express();
@@ -74,13 +75,14 @@ app.get('/health', (req, res) => {
 });
 
 // ==================================================================\\
-// 🚀 ENRUTADORES GENERALES DEL SISTEMA
+// 🚀 ENRUTADORES GENERALES DEL SISTEMA (PREFIJO BASE: /api)
 // ==================================================================\\
 app.use('/api/auth', authRoutes);
 app.use('/api/conductores', conductorRoutes);
 app.use('/api/viajes', viajeRoutes);
 app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/pasajeros', pasajeroRoutes);
+app.use('/api/cooperativas', cooperativaRoutes); // 👈 Canal de Servicios para Gestión de Cooperativas
 
 // Sincronización de CORS para WebSockets (Socket.IO)
 const io = new Server(httpServer, {

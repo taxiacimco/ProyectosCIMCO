@@ -1,9 +1,11 @@
-// Versión Arquitectura: V2.0 - PROD READY: Soporte POJO Deserializado y Control Exhaustivo de Instancias Cronológicas Inválidas
+// Versión Arquitectura: V2.1 - Integración de Delegación Transparente a resolverFechaSegura
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\utils\dateFormatter.js
  * Misión: Estandarizar y aislar el formateo cronológico bajo el huso horario oficial de operaciones ('America/Bogota').
- * Ajuste V2.0: Soporte nativo para POJOs sin prototipo (Caché/State), desestructuración de opciones y validador isNaN.
+ * Refactor V2.1: Integración directa con resolverFechaSegura para delegación atómica de parseo de fechas.
  */
+
+import { resolverFechaSegura } from '@/utils/dateUtils';
 
 /**
  * Formatea un timestamp híbrido a la nomenclatura cronológica oficial de Colombia (dd/mm/aaaa, hh:mm:ss AM/PM).
@@ -16,29 +18,17 @@ export const formatFechaColombia = (fechaOriginal, opcionesOverride = {}) => {
     if (!fechaOriginal) return "S/D";
     
     try {
-        let date;
+        // Delegación de resolución al helper centralizado
+        const date = resolverFechaSegura(fechaOriginal);
 
-        // 1. Caso nativo: Instancia clásica de Firebase Timestamp con prototipo activo
-        if (typeof fechaOriginal.toDate === 'function') {
-            date = fechaOriginal.toDate();
-        } 
-        // 2. Caso POJO Deserializado: Pérdida de prototipo al viajar por Contexto, Redux, Zustand o LocalStorage ({seconds, nanoseconds})
-        else if (fechaOriginal && typeof fechaOriginal === 'object' && 'seconds' in fechaOriginal) {
-            date = new Date(fechaOriginal.seconds * 1000);
-        } 
-        // 3. Casos estándar: Instancia Date nativa, String ISO, o enteros de milisegundos
-        else {
-            date = new Date(fechaOriginal);
-        }
-
-        // 🛡️ Validación Física de Instancia Valida (Evita la propagación de la cadena "Invalid Date")
-        if (isNaN(date.getTime())) {
+        // 🛡️ Validación Física de Instancia Válida
+        if (!date || isNaN(date.getTime())) {
             console.warn("⚠️ [CIMCO-DATE] Estampa de tiempo ilegible o corrupta recibida:", fechaOriginal);
             return "Fecha Inválida";
         }
 
         // Nomenclatura base unificada para la mesa de control de la central
-        const opcionesPredeterminadas = {
+        const opcionesPredetermadas = {
             timeZone: 'America/Bogota',
             day: '2-digit',
             month: '2-digit',
@@ -50,7 +40,7 @@ export const formatFechaColombia = (fechaOriginal, opcionesOverride = {}) => {
             ...opcionesOverride
         };
 
-        return date.toLocaleString('es-CO', opcionesPredeterminadas);
+        return date.toLocaleString('es-CO', opcionesPredetermadas);
     } catch (error) {
         console.error("❌ [CIMCO-DATE-CRITICAL] Fallo de procesamiento en el motor de tiempo:", error);
         return "Error de Fecha";
