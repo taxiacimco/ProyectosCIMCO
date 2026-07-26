@@ -1,4 +1,4 @@
-// Versión Arquitectura: V4.3 - Acoplamiento Atómico y Reutilización de Configuración
+// Versión Arquitectura: V4.4 - Acoplamiento Atómico y Reutilización de Configuración
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\secondaryAuth.js
  * Misión: Proveer una instancia de autenticación secundaria aislada para registro de sub-usuarios sin romper la sesión activa del CEO.
@@ -6,6 +6,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { HOST_IP } from './api.js';
 
 // 🔌 Configuración unificada simulada idéntica a la gobernanza principal
 const firebaseConfig = {
@@ -22,13 +23,12 @@ const secondaryApp = initializeApp(firebaseConfig, "SecondaryAuthApp");
 export const secondaryAuth = getAuth(secondaryApp);
 
 // 🛡️ ENLACE PERIMETRAL AL EMULADOR DE AUTH SECUNDARIO
-const hostname = window.location.hostname;
+const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
 const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname.includes("192.168.") || hostname.includes("ngrok-free.dev");
 
 if (import.meta.env.DEV && isLocal && import.meta.env.VITE_FIREBASE_EMULATOR === 'true') {
-  const LOCAL_HOST_IP = import.meta.env.VITE_HOST_IP || '192.168.100.34';
-  connectAuthEmulator(secondaryAuth, `http://${LOCAL_HOST_IP}:9099`, { disableWarnings: true });
-  console.log("🤖 Emulador de Autenticación Secundaria Vinculado con Éxito.");
+  connectAuthEmulator(secondaryAuth, `http://${HOST_IP}:9099`, { disableWarnings: true });
+  console.log(`🤖 Emulador de Autenticación Secundaria Vinculado en http://${HOST_IP}:9099`);
 }
 
 export default secondaryAuth;

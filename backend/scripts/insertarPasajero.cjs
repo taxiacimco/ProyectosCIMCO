@@ -1,113 +1,65 @@
-// Versión Arquitectura: V1.3 - Corrección de Case-Sensitivity mediante Expresión Regular y Unificación de Telemetría
-/**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarPasajero.cjs
- * Misión: Sanitizar y sembrar el dataset de pasajeros en MongoDB Atlas utilizando casillas nativas y Types.ObjectId.
- */
-
+// C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarPasajero.cjs
 const mongoose = require('mongoose');
 const path = require('path');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
-const mongoURI = process.env.MONGO_URI || process.env.MONGODB_URI || process.env.DB_URI;
+const mongoURI = process.env.MONGO_URI || process.env.MONGODB_URI;
 
-if (!mongoURI) {
-    console.error("⚠️ [ALERTA DE ARQUITECTURA] Error de inicialización: No se detectó variable de conexión en el archivo .env.");
-    process.exit(1);
-}
-
-// CORRECCIÓN: Se remueve el campo '_id' rígido del esquema para permitir que Mongoose maneje la asignación reactiva sin reventar
 const PasajeroSchema = new mongoose.Schema({
-    nombre: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    telefono: { type: String, required: true },
-    uid: { type: String, required: true, unique: true }, 
+    nombre: String,
+    email: { type: String, unique: true },
+    telefono: String,
+    uid: String, 
     rol: { type: String, default: 'pasajero' },
     role: { type: String, default: 'pasajero' },
-    estado: { type: String, default: 'activo' },
-    fechaRegistro: { type: Date, default: Date.now }
-}, { collection: 'pasajeros', versionKey: false });
+    subrol: { type: String, default: 'pasajero' },
+    saldo: { type: Number, default: 0 },
+    estado: { type: String, default: 'activo' }
+}, { collection: 'usuarios', versionKey: false });
 
 const Pasajero = mongoose.models.PasajeroSeeder || mongoose.model('PasajeroSeeder', PasajeroSchema);
 
 const pasajerosDePrueba = [
     {
+        _id: new mongoose.Types.ObjectId("6a29b491c8d7b14cd8f85871"),
         nombre: "milevis Pasajero Test",
         email: "milevis@test.com",
         telefono: "3003503249",
-        uid: "6a29b491c8d7b14cd8f85871", // Su UID de Firebase e Identificador unificado
+        uid: "6a29b491c8d7b14cd8f85871",
         rol: "pasajero",
         role: "pasajero",
+        subrol: "pasajero",
+        saldo: 20000,
         estado: "activo"
     },
     {
+        _id: new mongoose.Types.ObjectId("6a4ab95a9afcfb7540cd9876"),
         nombre: "Carlos Fuentes (Test Pasajero)",
         email: "carlos.pasajero@taxiacimco.com",
-        telefono: "+573001234567",
-        uid: "FB_UID_PASAJERO_CARLOS_PROD_TEST",
+        telefono: "3001234567",
+        uid: "6a4ab95a9afcfb7540cd9876",
         rol: "pasajero",
         role: "pasajero",
-        estado: "activo"
-    },
-    {
-        nombre: "Diana Mendoza Altahona",
-        email: "diana.mendoza@gmail.com",
-        telefono: "+573157654321",
-        uid: "FB_UID_PASAJERO_DIANA_PROD_TEST",
-        rol: "pasajero",
-        role: "pasajero",
+        subrol: "pasajero",
+        saldo: 15000,
         estado: "activo"
     }
 ];
 
 const ejecutarSeeder = async () => {
     try {
-        console.log("📡 Conectando con el Clúster de MongoDB Atlas...");
-        // CORRECCIÓN REACTIVA: Expresión regular robusta para insensibilidad a caja
+        console.log("📡 Conectando a MongoDB Atlas...");
         await mongoose.connect(mongoURI.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco'));
-        console.log("✅ Conexión perimetral establecida.");
 
-        console.log("⚡ Iniciando inyección atómica de pasajeros...");
-        let insertados = 0;
-        let omitidos = 0;
-
-        for (const passengerData of pasajerosDePrueba) {
-            // Guardas de Seguridad anti-undefined para el payload
-            if (!passengerData || !passengerData.email || !passengerData.uid) {
-                console.log("⚠️ [CIMCO-VALIDACIÓN] Payload de pasajero malformado u omitido.");
-                continue;
-            }
-
-            const pasajeroExistente = await Pasajero.findOne({
-                $or: [
-                    { email: passengerData.email },
-                    { uid: passengerData.uid }
-                ]
-            });
-
-            if (pasajeroExistente) {
-                console.log(`ℹ️ [OMITIDO] El pasajero [${passengerData.nombre}] ya existe en la base de datos.`);
-                omitidos++;
-            } else {
-                // Instanciamos el modelo de Mongoose dejando que asigne su _id nativo, preservando la sincronización en 'uid'
-                const nuevoPasajero = new Pasajero(passengerData);
-                await nuevoPasajero.save();
-                console.log(`🚀 [INYECTADO] Pasajero creado con éxito: ${passengerData.nombre} (UID: ${passengerData.uid})`);
-                insertados++;
-            }
+        for (const p of pasajerosDePrueba) {
+            await Pasajero.findByIdAndUpdate(p._id, { $set: p }, { upsert: true, new: true });
+            console.log(`🚀 Pasajero sincronizado: ${p.nombre} | Saldo: $${p.saldo} COP`);
         }
-
-        console.log("\n📊 --- RESUMEN DE TELEMETRÍA SEEDER ---");
-        console.log(`✅ Registros procesados e inyectados: ${insertados}`);
-        console.log(`ℹ️ Registros omitidos por preexistencia: ${omitidos}`);
-        console.log("----------------------------------------\n");
-
     } catch (error) {
-        // CORRECCIÓN DE DEUDA TÉCNICA: Log corregido para pasajeros
-        console.error("❌ Error crítico durante la ejecución del seeder de pasajeros:", error);
+        console.error("❌ Error en seeder de pasajeros:", error);
     } finally {
         await mongoose.connection.close();
-        console.log("🛑 Proceso de sembrado finalizado de forma segura.");
         process.exit(0);
     }
 };

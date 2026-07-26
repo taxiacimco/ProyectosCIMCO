@@ -1,8 +1,7 @@
-// Versión Arquitectura: V16.6 - Agregación Atómica de Capital Circulante en MongoDB Atlas
+// Versión Arquitectura: V17.0 - Módulo Conductores: Atómico, Auditable y Multi-Subrol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión unificada de operarios, telemetría GPS reactiva, inyección contable, motor de radar radial y cálculo atómico de capital circulante.
- * Ajuste V16.6: Integración de la función obtenerCapitalCirculante utilizando la pipeline de agregación $group.
+ * Misión: Gestión unificada de operarios, telemetría GPS, recargas atómicas, auditoría en Firestore y radar.
  */
 
 import mongoose from 'mongoose';
@@ -11,46 +10,71 @@ import HistorialSaldo from '../../models/HistorialSaldo.js';
 import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js'; 
 import { FieldValue } from 'firebase-admin/firestore'; 
 
+/**
+ * Helper para registrar transacciones auditables en Firestore
+ */
+const registrarTransaccionFirestore = async ({
+    idUsuario,
+    rol,
+    subrol,
+    monto,
+    saldoAnterior,
+    saldoNuevo,
+    tipoOperacion,
+    autorizadoPor,
+    referencia
+}) => {
+    try {
+        const pathTransacciones = FIRESTORE_PATHS?.transactions || 'transacciones';
+        await dbFirestore.collection(pathTransacciones).add({
+            idUsuario,
+            rol,
+            subrol: subrol || 'mototaxi',
+            monto,
+            saldoAnterior,
+            saldoNuevo,
+            tipoOperacion,
+            autorizadoPor: autorizadoPor || 'SISTEMA',
+            referencia: referencia || `TX-${Date.now()}`,
+            timestamp: FieldValue.serverTimestamp(),
+            fechaRegistro: new Date().toISOString()
+        });
+    } catch (error) {
+        console.warn("⚠️ [FIRESTORE-TX-WARN] No se pudo registrar la transacción en Firestore:", error.message);
+    }
+};
+
 // ==================================================================
-// 🛡️ GUARDAS DE ARQUITECTURA AVANZADAS Y SANITIZACIÓN (ANTI-FRAUDE)
+// 🛡️ GUARDAS DE ARQUITECTURA Y SANITIZACIÓN
 // ==================================================================
 
-/**
- * 🛡️ Helper de sanitización: Garantiza que cualquier valor de saldo/saldoWallet
- * se unifique en la propiedad 'saldo' y elimina claves duplicadas.
- */
 export const sanitizarPayloadConductor = (data) => {
     if (!data || typeof data !== 'object') return {};
     const payload = { ...data };
     
-    // Si viene saldoWallet o saldo, se consolida strictly en saldo
     if (payload.saldoWallet !== undefined || payload.saldo !== undefined) {
         const monto = Number(payload.saldo ?? payload.saldoWallet ?? 0);
         payload.saldo = isNaN(monto) || monto < 0 ? 0 : monto;
-        delete payload.saldoWallet; // Eliminación activa de la clave obsoleta
+        delete payload.saldoWallet;
     }
     
     return payload;
 };
 
-/**
- * Detiene inmediatamente la ejecución si se intenta procesar una recarga artificial 
- * a través de endpoints de depuración dentro de un entorno de producción real.
- */
 export const verificarBypassDesarrollo = (req, res, next) => {
     const ENTORNO_ACTUAL = process.env.NODE_ENV || 'development';
     if (ENTORNO_ACTUAL === 'production') {
-        console.error("⚠️ [ALERTA DE ARQUITECTURA] Intento de evasión de saldos detectado y neutralizado en producción.");
+        console.error("⚠️ [ALERTA] Evasión de saldos denegada en producción.");
         return res.status(403).json({
             success: false,
-            message: "⚠️ ALERTA DE ARQUITECTURA: Las recargas de stress-test están ESTRICTAMENTE PROHIBIDAS en el clúster de producción."
+            message: "⚠️ ALERTA DE ARQUITECTURA: Operación prohibida en producción."
         });
     }
     next();
 };
 
 // ==================================================================
-// 1. CONSULTAS LOGÍSTICAS BÁSICAS Y COMPATIBILIDAD DE ENRUTAMIENTO
+// 1. CONSULTAS LOGÍSTICAS BÁSICAS Y COMPATIBILIDAD
 // ==================================================================
 
 export const registrarConductor = async (req, res) => {
@@ -63,7 +87,6 @@ export const registrarConductor = async (req, res) => {
         const nuevoConductor = new Conductor(payloadSanitizado);
         await nuevoConductor.save();
 
-        // Espejo inicial en Firestore
         try {
             const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
             const docFirestoreId = nuevoConductor.uid || nuevoConductor._id.toString();
@@ -74,6 +97,7 @@ export const registrarConductor = async (req, res) => {
                 email: nuevoConductor.email,
                 telefono: nuevoConductor.telefonoMovil,
                 estado: nuevoConductor.estado || 'inactive',
+                subrol: nuevoConductor.subrol || nuevoConductor.tipoVehiculo || 'mototaxi',
                 isActive: nuevoConductor.isActive ?? true,
                 createdAt: new Date().toISOString()
             }, { merge: true });
@@ -87,7 +111,7 @@ export const registrarConductor = async (req, res) => {
                 ultimaActualizacion: new Date().toISOString()
             }, { merge: true });
         } catch (fsErr) {
-            console.warn("⚠️ [CIMCO-CONDUCTOR-SYNC-WARN] Error inicializando Firestore:", fsErr.message);
+            console.warn("⚠️ [SYNC-WARN] Error inicializando Firestore:", fsErr.message);
         }
         
         return res.status(201).json({ success: true, data: nuevoConductor });
@@ -99,8 +123,6 @@ export const registrarConductor = async (req, res) => {
 export const obtenerConductores = async (req, res) => {
     try {
         const conductores = await Conductor.find().lean();
-        
-        // Limpieza preventiva de campos obsoletos en lecturas masivas
         const conductoresSanitizados = conductores.map(c => {
             delete c.saldoWallet;
             return c;
@@ -115,7 +137,7 @@ export const obtenerConductores = async (req, res) => {
 export const obtenerConductorPorId = async (req, res) => {
     try {
         if (!req || !req.params || (!req.params.id && !req.params.uid && !req.params.conductorId)) {
-            return res.status(400).json({ success: false, message: "⚠️ Identificador de conductor ausente en los parámetros." });
+            return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
         const targetId = req.params.id || req.params.uid || req.params.conductorId;
         
@@ -144,12 +166,12 @@ export const obtenerPerfil = obtenerConductorPorId;
 export const actualizarConductor = async (req, res) => {
     try {
         if (!req || !req.body) {
-            return res.status(400).json({ success: false, message: "⚠️ Datos ausentes para la actualización." });
+            return res.status(400).json({ success: false, message: "⚠️ Datos ausentes." });
         }
         
         const targetId = req.params.id || req.params.uid || req.params.conductorId || req.body.conductorId || req.body.id;
         if (!targetId) {
-            return res.status(400).json({ success: false, message: "⚠️ Identificador de conductor ausente para la actualización." });
+            return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
 
         const updateData = sanitizarPayloadConductor(req.body);
@@ -164,7 +186,7 @@ export const actualizarConductor = async (req, res) => {
             },
             { 
                 $set: updateData,
-                $unset: { saldoWallet: "" } // $unset forzado para purgar la clave de MongoDB Atlas
+                $unset: { saldoWallet: "" }
             },
             { new: true, runValidators: true }
         ).lean();
@@ -175,7 +197,6 @@ export const actualizarConductor = async (req, res) => {
 
         delete conductorActualizado.saldoWallet;
 
-        // Sincronizar actualización en Firestore
         try {
             const docFirestoreId = conductorActualizado.uid || conductorActualizado._id.toString();
             const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
@@ -184,10 +205,13 @@ export const actualizarConductor = async (req, res) => {
             if (conductorActualizado.nombre) firestoreUpdate.nombre = conductorActualizado.nombre;
             if (conductorActualizado.telefonoMovil) firestoreUpdate.telefono = conductorActualizado.telefonoMovil;
             if (conductorActualizado.estado) firestoreUpdate.estado = conductorActualizado.estado;
+            if (conductorActualizado.subrol || conductorActualizado.tipoVehiculo) {
+                firestoreUpdate.subrol = conductorActualizado.subrol || conductorActualizado.tipoVehiculo;
+            }
 
             await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set(firestoreUpdate, { merge: true });
         } catch (fsError) {
-            console.warn("⚠️ [CIMCO-CONDUCTOR-UPDATE-WARN] Falló la réplica a Firestore:", fsError.message);
+            console.warn("⚠️ [SYNC-WARN] Falló réplica a Firestore:", fsError.message);
         }
 
         return res.status(200).json({ 
@@ -205,7 +229,7 @@ export const eliminarConductor = async (req, res) => {
     try {
         const targetId = req.params.id || req.params.uid;
         if (!targetId) {
-            return res.status(400).json({ success: false, message: "⚠️ Identificador de conductor ausente para la eliminación." });
+            return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
 
         const conductorEliminado = await Conductor.findOneAndDelete({
@@ -226,10 +250,6 @@ export const eliminarConductor = async (req, res) => {
     }
 };
 
-/**
- * ADAPTADOR DE COMPATIBILIDAD FLOTA DISPONIBLE:
- * Retorna de forma directa todos los conductores en estado operativo activo ('active').
- */
 export const obtenerConductoresDisponibles = async (req, res) => {
     try {
         const conductoresDisponibles = await Conductor.find({ 
@@ -251,11 +271,6 @@ export const obtenerConductoresDisponibles = async (req, res) => {
     }
 };
 
-/**
- * 🧮 OBTENER CAPITAL CIRCULANTE CONSOLIDADO
- * Realiza una agregación $group directamente en MongoDB Atlas
- * para calcular la sumatoria total de saldos sin transferir documentos.
- */
 export const obtenerCapitalCirculante = async (req, res) => {
     try {
         const resultado = await Conductor.aggregate([
@@ -283,20 +298,17 @@ export const obtenerCapitalCirculante = async (req, res) => {
 };
 
 // ==================================================================
-// 2. BILLETERA ATÓMICA CIMCO (RECARGAS, AJUSTES Y CONTABILIDAD DE SALDOS)
+// 2. BILLETERA ATÓMICA CIMCO (RECARGAS, AJUSTES Y CONTABILIDAD AUDITADA)
 // ==================================================================
 
 export const recargarSaldoAdmin = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-        if (!req || !req.body) {
-            await session.abortTransaction();
-            return res.status(400).json({ success: false, message: "⚠️ Payload contable ausente." });
-        }
         const { conductorId, id, uid, monto, referencia, nota } = req.body;
         const targetId = conductorId || id || uid;
         const montoNum = parseFloat(monto);
+        const adminId = req.user?.id || req.user?._id || 'ADMIN_SYSTEM';
 
         if (!targetId || isNaN(montoNum) || montoNum <= 0) {
             await session.abortTransaction();
@@ -311,7 +323,15 @@ export const recargarSaldoAdmin = async (req, res) => {
             ]
         };
 
-        const conductor = await Conductor.findOne(query).session(session);
+        const conductor = await Conductor.findOneAndUpdate(
+            query,
+            { 
+                $inc: { saldo: montoNum },
+                $unset: { saldoWallet: "" } 
+            },
+            { new: false, session }
+        );
+
         if (!conductor) {
             await session.abortTransaction();
             return res.status(404).json({ success: false, message: "Conductor no localizado." });
@@ -319,12 +339,6 @@ export const recargarSaldoAdmin = async (req, res) => {
 
         const saldoAnterior = Number(conductor.saldo || 0);
         const nuevoSaldo = saldoAnterior + montoNum;
-        
-        conductor.saldo = nuevoSaldo;
-        if (conductor._doc && conductor._doc.saldoWallet !== undefined) {
-            delete conductor._doc.saldoWallet;
-        }
-        await conductor.save({ session });
 
         const nuevoHistorial = new HistorialSaldo({
             conductor: conductor._id,
@@ -340,20 +354,27 @@ export const recargarSaldoAdmin = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Réplica defensiva hacia la colección de billeteras en Firestore
-        try {
-            const docFirestoreId = conductor.uid || conductor._id.toString();
-            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
-                id: docFirestoreId,
-                nombreUsuario: conductor.nombre,
-                saldo: nuevoSaldo,
-                balance: nuevoSaldo,
-                ultimaActualizacion: new Date().toISOString()
-            }, { merge: true });
-        } catch (fsWalletErr) {
-            console.warn("⚠️ [CIMCO-WALLET-SYNC-WARN] Falló réplica de recarga a Firestore:", fsWalletErr.message);
-        }
+        const docFirestoreId = conductor.uid || conductor._id.toString();
+        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+        await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+            id: docFirestoreId,
+            nombreUsuario: conductor.nombre,
+            saldo: nuevoSaldo,
+            balance: nuevoSaldo,
+            ultimaActualizacion: new Date().toISOString()
+        }, { merge: true });
+
+        await registrarTransaccionFirestore({
+            idUsuario: docFirestoreId,
+            rol: 'conductor',
+            subrol: conductor.subrol || conductor.tipoVehiculo || 'mototaxi',
+            monto: montoNum,
+            saldoAnterior,
+            saldoNuevo: nuevoSaldo,
+            tipoOperacion: 'RECARGA',
+            autorizadoPor: adminId,
+            referencia: referencia || `ADM-${Date.now()}`
+        });
 
         return res.status(200).json({
             success: true,
@@ -369,19 +390,17 @@ export const recargarSaldoAdmin = async (req, res) => {
     }
 };
 
-/**
- * ALIAS DE ADAPTACIÓN CONTABLE (recargarBilleteraPorAdmin)
- */
 export const recargarBilleteraPorAdmin = recargarSaldoAdmin;
 
 export const ajustarSaldo = async (req, res) => {
     try {
         const targetId = req.params.uid || req.params.id || req.body.conductorId;
-        const { monto, operacion } = req.body; // operacion: 'recarga' | 'descuento'
+        const { monto, operacion, nota } = req.body;
+        const adminId = req.user?.id || req.user?._id || 'ADMIN_SYSTEM';
 
         const montoNum = Number(monto);
         if (!targetId || isNaN(montoNum) || montoNum <= 0) {
-            return res.status(400).json({ success: false, message: "⚠️ Parámetros de ajuste de saldo inválidos." });
+            return res.status(400).json({ success: false, message: "⚠️ Parámetros de ajuste inválidos." });
         }
 
         const incremento = operacion === 'descuento' ? -Math.abs(montoNum) : Math.abs(montoNum);
@@ -398,29 +417,39 @@ export const ajustarSaldo = async (req, res) => {
                 $inc: { saldo: incremento },
                 $unset: { saldoWallet: "" } 
             },
-            { new: true, runValidators: true }
+            { new: false }
         );
 
         if (!conductor) {
             return res.status(404).json({ success: false, message: 'Conductor no encontrado' });
         }
 
-        // Espejo en Firestore
-        try {
-            const docFirestoreId = conductor.uid || conductor._id.toString();
-            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
-                saldo: conductor.saldo,
-                balance: conductor.saldo,
-                ultimaActualizacion: new Date().toISOString()
-            }, { merge: true });
-        } catch (fsErr) {
-            console.warn("⚠️ Error replicando ajuste de saldo a Firestore:", fsErr.message);
-        }
+        const saldoAnterior = Number(conductor.saldo || 0);
+        const nuevoSaldo = saldoAnterior + incremento;
+        const docFirestoreId = conductor.uid || conductor._id.toString();
+
+        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+        await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+            saldo: nuevoSaldo,
+            balance: nuevoSaldo,
+            ultimaActualizacion: new Date().toISOString()
+        }, { merge: true });
+
+        await registrarTransaccionFirestore({
+            idUsuario: docFirestoreId,
+            rol: 'conductor',
+            subrol: conductor.subrol || conductor.tipoVehiculo || 'mototaxi',
+            monto: Math.abs(montoNum),
+            saldoAnterior,
+            saldoNuevo,
+            tipoOperacion: operacion === 'descuento' ? 'DEBITO' : 'RECARGA',
+            autorizadoPor: adminId,
+            referencia: `AJUSTE-${Date.now()}`
+        });
 
         return res.status(200).json({
             success: true,
-            nuevoSaldo: conductor.saldo,
+            nuevoSaldo,
             message: `Saldo ${operacion === 'descuento' ? 'descontado' : 'recargado'} correctamente`
         });
     } catch (error) {
@@ -434,7 +463,7 @@ export const descontarComisionViaje = async (req, res) => {
     session.startTransaction();
     try {
         if (!req || !req.body) {
-            throw new Error("⚠️ Payload contable de débito ausente.");
+            throw new Error("⚠️ Payload de débito ausente.");
         }
         
         const { conductorId, comision, viajeId } = req.body;
@@ -463,7 +492,7 @@ export const descontarComisionViaje = async (req, res) => {
         );
 
         if (!conductor) {
-            throw new Error("Conductor no localizado o saldo en billetera insuficiente para esta operación.");
+            throw new Error("Conductor no localizado o saldo insuficiente.");
         }
 
         const saldoAnterior = Number(conductor.saldo || 0);
@@ -483,18 +512,26 @@ export const descontarComisionViaje = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        // Réplica defensiva hacia Firestore
-        try {
-            const docFirestoreId = conductor.uid || conductor._id.toString();
-            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
-                saldo: nuevoSaldo,
-                balance: nuevoSaldo,
-                ultimaActualizacion: new Date().toISOString()
-            }, { merge: true });
-        } catch (fsErr) {
-            console.warn("⚠️ Error replicando descuento en Firestore:", fsErr.message);
-        }
+        const docFirestoreId = conductor.uid || conductor._id.toString();
+        
+        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+        await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+            saldo: nuevoSaldo,
+            balance: nuevoSaldo,
+            ultimaActualizacion: new Date().toISOString()
+        }, { merge: true });
+
+        await registrarTransaccionFirestore({
+            idUsuario: docFirestoreId,
+            rol: 'conductor',
+            subrol: conductor.subrol || conductor.tipoVehiculo || 'mototaxi',
+            monto: comisionNum,
+            saldoAnterior,
+            saldoNuevo,
+            tipoOperacion: 'DEBITO',
+            autorizadoPor: 'SISTEMA_VIAJES',
+            referencia: viajeId ? `VIAJE-${viajeId}` : `DEB-${Date.now()}`
+        });
 
         return res.status(200).json({ 
             success: true, 
@@ -516,11 +553,11 @@ export const descontarComisionViaje = async (req, res) => {
 export const obtenerHistorialSaldos = async (req, res) => {
     try {
         if (!req || !req.params) {
-            return res.status(400).json({ success: false, message: "⚠️ Parámetros de solicitud ausentes." });
+            return res.status(400).json({ success: false, message: "⚠️ Parámetros ausentes." });
         }
         const targetId = req.params.conductorId || req.params.id || req.params.uid;
         if (!targetId) {
-            return res.status(400).json({ success: false, message: "⚠️ Parámetro conductorId requerido en la ruta." });
+            return res.status(400).json({ success: false, message: "⚠️ Parámetro conductorId requerido." });
         }
         
         const conductor = await Conductor.findOne({
@@ -543,9 +580,6 @@ export const obtenerHistorialSaldos = async (req, res) => {
     }
 };
 
-/**
- * ADAPTADOR DE TRAZABILIDAD INTEGRAL
- */
 export const obtenerHistorialConductor = obtenerHistorialSaldos;
 
 // ==================================================================
@@ -555,14 +589,14 @@ export const obtenerHistorialConductor = obtenerHistorialSaldos;
 export const actualizarEstadoConductor = async (req, res) => {
     try {
         if (!req || !req.body) {
-            return res.status(400).json({ success: false, message: "⚠️ Datos de solicitud ausentes para actualizar el estado operativo." });
+            return res.status(400).json({ success: false, message: "⚠️ Datos ausentes." });
         }
         
         const id = req.params.id || req.params.uid || req.body.conductorId || req.body.id;
         const { estado } = req.body; 
 
         if (!id) {
-            return res.status(400).json({ success: false, message: "⚠️ Identificador del conductor ausente en la petición." });
+            return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
 
         if (!['active', 'inactive', 'suspended', 'busy', 'offline', 'disponible', 'ocupado'].includes(estado)) {
@@ -582,7 +616,7 @@ export const actualizarEstadoConductor = async (req, res) => {
         );
 
         if (!conductor) {
-            return res.status(404).json({ success: false, message: "Conductor no localizado en base de datos Atlas." });
+            return res.status(404).json({ success: false, message: "Conductor no localizado en Atlas." });
         }
 
         const docFirestoreId = conductor.uid || conductor._id.toString();
@@ -601,20 +635,19 @@ export const actualizarEstadoConductor = async (req, res) => {
 export const obtenerConductoresCercanos = async (req, res) => {
     try {
         if (!req || !req.query || !req.query.lat || !req.query.lng) {
-            return res.status(400).json({ success: false, message: "⚠️ Coordenadas de origen de búsqueda (lat, lng) ausentes." });
+            return res.status(400).json({ success: false, message: "⚠️ Coordenadas ausentes." });
         }
 
         const latitud = parseFloat(req.query.lat);
         const longitud = parseFloat(req.query.lng);
-        // Soporte para radio recibido en metros o kilómetros
         const radioParam = req.query.radio || req.query.radioMaxKm;
         let radioMetros = parseFloat(radioParam) || 5000;
         if (radioParam && parseFloat(radioParam) < 100) {
-            radioMetros = parseFloat(radioParam) * 1000; // Si venía en KM (ej: 5km -> 5000m)
+            radioMetros = parseFloat(radioParam) * 1000;
         }
 
         if (isNaN(latitud) || isNaN(longitud)) {
-            return res.status(400).json({ success: false, message: "⚠️ Formato de coordenadas geográficas inválido." });
+            return res.status(400).json({ success: false, message: "⚠️ Coordenadas inválidas." });
         }
 
         const conductoresCercanos = await Conductor.aggregate([
@@ -651,14 +684,12 @@ export const obtenerConductoresCercanos = async (req, res) => {
 export const actualizarRadarUbicacion = async (conductorId, lat, lng) => {
     try {
         if (!conductorId || lat === undefined || lng === undefined) {
-            console.error("❌ [RADAR-DB-ERROR] Telemetría incompleta o valores indefinidos recibidos.");
             return false;
         }
         const longNum = parseFloat(lng);
         const latNum = parseFloat(lat);
 
         if (isNaN(longNum) || isNaN(latNum)) {
-            console.error(`❌ [RADAR-DB-ERROR] Valores numéricos inválidos para Conductor [${conductorId}]: lng=${lng}, lat=${lat}`);
             return false;
         }
 
@@ -697,7 +728,7 @@ export const actualizarRadarUbicacion = async (conductorId, lat, lng) => {
 
         return true;
     } catch (error) {
-        console.error(`❌ [RADAR-DB-ERROR] Error crítico de persistencia en Atlas/Firestore:`, error.message);
+        console.error(`❌ [RADAR-DB-ERROR] Error en Atlas/Firestore:`, error.message);
         return false;
     }
 };
@@ -705,22 +736,22 @@ export const actualizarRadarUbicacion = async (conductorId, lat, lng) => {
 export const actualizarUbicacionGPS = async (req, res) => {
     try {
         if (!req || !req.body) {
-            return res.status(400).json({ success: false, message: "⚠️ Payload de telemetría HTTP ausente." });
+            return res.status(400).json({ success: false, message: "⚠️ Payload de telemetría ausente." });
         }
         
         const id = req.params.id || req.params.uid || req.body.conductorId || req.body.id;
         const { lat, lng } = req.body;
 
         if (!id) {
-            return res.status(400).json({ success: false, message: "⚠️ Identificador de unidad ausente para inyección GPS." });
+            return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
 
         const exito = await actualizarRadarUbicacion(id, lat, lng);
         if (!exito) {
-            return res.status(500).json({ success: false, message: "Error interno procesando las coordenadas geográficas." });
+            return res.status(500).json({ success: false, message: "Error procesando coordenadas." });
         }
 
-        return res.status(200).json({ success: true, message: "Telemetría satelital sincronizada correctamente." });
+        return res.status(200).json({ success: true, message: "Telemetría sincronizada correctamente." });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }

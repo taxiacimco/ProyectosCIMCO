@@ -1,14 +1,53 @@
-// Versión Arquitectura: V16.9 - Réplica Síncrona en Firestore y Manejo de Direcciones Favoritas
+// Versión Arquitectura: V17.0 - Módulo Pasajeros (Gestión de Perfil, Direcciones Favoritas y Billetera Virtual)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
- * Misión: Gestión integral de perfiles de pasajeros, direcciones favoritas e historial de trayectos.
- * Ajuste V16.9: Verificación defensiva e integridad de datos preservada.
+ * Misión: Gestión integral de perfiles de pasajeros, direcciones favoritas, historial de trayectos y operaciones de saldo/billetera.
  */
 
 import mongoose from 'mongoose';
 import Pasajero from '../../models/Pasajero.js';
 import Viaje from '../../models/Viaje.js';
+import HistorialSaldo from '../../models/HistorialSaldo.js';
 import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
+import { FieldValue } from 'firebase-admin/firestore';
+
+/**
+ * Helper para registrar transacciones auditables en Firestore
+ */
+const registrarTransaccionFirestore = async ({
+    idUsuario,
+    rol,
+    subrol,
+    monto,
+    saldoAnterior,
+    saldoNuevo,
+    tipoOperacion,
+    autorizadoPor,
+    referencia
+}) => {
+    try {
+        const pathTransacciones = FIRESTORE_PATHS?.transactions || 'transacciones';
+        await dbFirestore.collection(pathTransacciones).add({
+            idUsuario: idUsuario?.toString(),
+            rol,
+            subrol: subrol || 'cliente',
+            monto,
+            saldoAnterior,
+            saldoNuevo,
+            tipoOperacion,
+            autorizadoPor: autorizadoPor || 'SISTEMA',
+            referencia: referencia || `TX-${Date.now()}`,
+            timestamp: FieldValue.serverTimestamp(),
+            fechaRegistro: new Date().toISOString()
+        });
+    } catch (error) {
+        console.warn("⚠️ [FIRESTORE-TX-WARN] No se pudo registrar la transacción en Firestore:", error.message);
+    }
+};
+
+// ==================================================================
+// 1. GESTIÓN GENERAL DE PASAJEROS Y PERFIL
+// ==================================================================
 
 /**
  * 📋 Obtener listado de pasajeros (Uso administrativo)
@@ -102,6 +141,10 @@ export const actualizarPerfilPasajero = async (req, res) => {
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+
+// ==================================================================
+// 2. DIRECCIONES FAVORITAS E HISTORIAL DE TRAYECTOS
+// ==================================================================
 
 /**
  * 📍 Guardar Dirección Favorita con Replicación a Firestore
@@ -229,6 +272,135 @@ export const obtenerHistorialViajesPasajero = async (req, res) => {
 
         return res.status(200).json({ success: true, contador: viajes.length, data: viajes });
     } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// ==================================================================
+// 3. BILLETERA VIRTUAL Y SALDO DEL PASAJERO
+// ==================================================================
+
+/**
+ * 💰 Consultar saldo del pasajero
+ */
+export const obtenerSaldoPasajero = async (req, res) => {
+    try {
+        const targetId = req.params.id || req.user?.id || req.user?._id || req.user?.uid;
+        if (!targetId) {
+            return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente." });
+        }
+
+        const pasajero = await Pasajero.findOne({
+            $or: [
+                { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                { uid: targetId }
+            ]
+        }).select('saldo nombre email').lean();
+
+        if (!pasajero) {
+            return res.status(404).json({ success: false, message: 'Pasajero no encontrado.' });
+        }
+
+        return res.status(200).json({
+            success: true,
+            saldo: pasajero.saldo || 0,
+            data: pasajero
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * 💳 Recargar saldo a Pasajero con incremento atómico ($inc) y auditoría
+ */
+export const recargarSaldoPasajero = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+        const { pasajeroId, id, uid, monto, referencia, nota } = req.body;
+        const targetId = pasajeroId || id || uid;
+        const montoNum = parseFloat(monto);
+        const adminId = req.user?.id || req.user?._id || 'SISTEMA_PASAJERO';
+
+        if (!targetId || isNaN(montoNum) || montoNum <= 0) {
+            await session.abortTransaction();
+            return res.status(400).json({ success: false, message: "Parámetros de recarga inválidos." });
+        }
+
+        const pasajero = await Pasajero.findOneAndUpdate(
+            {
+                $or: [
+                    { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                    { uid: targetId }
+                ]
+            },
+            { $inc: { saldo: montoNum } },
+            { new: false, session } // Devuelve el estado anterior
+        );
+
+        if (!pasajero) {
+            await session.abortTransaction();
+            return res.status(404).json({ success: false, message: "Pasajero no localizado." });
+        }
+
+        const saldoAnterior = Number(pasajero.saldo || 0);
+        const saldoNuevo = saldoAnterior + montoNum;
+
+        // Historial en MongoDB
+        const nuevoHistorial = new HistorialSaldo({
+            conductor: pasajero._id, // Mantenemos compatibilidad con el esquema
+            tipo: 'recarga_pasajero',
+            monto: montoNum,
+            saldoAnterior,
+            saldoNuevo,
+            referencia: referencia || `PAS-${Date.now()}`,
+            descripcion: nota || 'Recarga de saldo a pasajero'
+        });
+        await nuevoHistorial.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        const docFirestoreId = pasajero.uid || pasajero._id.toString();
+
+        // Actualizar espejo Billetera en Firestore
+        try {
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                id: docFirestoreId,
+                nombreUsuario: pasajero.nombre,
+                saldo: saldoNuevo,
+                balance: saldoNuevo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsWalletErr) {
+            console.warn("⚠️ Error actualizando billetera de pasajero en Firestore:", fsWalletErr.message);
+        }
+
+        // Auditoría centralizada Firestore
+        await registrarTransaccionFirestore({
+            idUsuario: docFirestoreId,
+            rol: 'pasajero',
+            subrol: 'cliente',
+            monto: montoNum,
+            saldoAnterior,
+            saldoNuevo,
+            tipoOperacion: 'RECARGA_PASAJERO',
+            autorizadoPor: adminId,
+            referencia: referencia || `PAS-${Date.now()}`
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: `Recarga de pasajero exitosa. Nuevo saldo: $${saldoNuevo} COP`,
+            saldoNuevo,
+            data: { saldoNuevo }
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(500).json({ success: false, message: error.message });
     }
 };

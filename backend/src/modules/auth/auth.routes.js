@@ -1,8 +1,7 @@
-// Versión Arquitectura: V15.10 - Inclusión de Alias de Rutas para Actualización de Perfil
+// Versión Arquitectura: V15.11 - Rutas de Autenticación y Perfil
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
  * Misión: Enrutador perimetral de autenticación alineado con soporte multicamino para perfil.
- * Ajuste V15.10: Normalización de sintaxis de importación y mantenimiento de rutas duplicadas por alias.
  */
 
 import express from 'express'; 

@@ -1,17 +1,17 @@
-// Versión Arquitectura: V15.2 - Orquestador y Cliente Central de Socket.io (CIMCO-RADAR LINK)
+// Versión Arquitectura: V15.3 - Orquestador y Cliente Central de Socket.io (CIMCO-RADAR LINK)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\socket.js
- * Misión: Configuración y exportación del cliente centralizado de WebSockets acoplado a variables V15.1.
+ * Misión: Configuración y exportación del cliente centralizado de WebSockets acoplado a la red unificada.
  */
 
 import { io } from 'socket.io-client';
+import { HOST_IP } from './api.js';
 
-// Determina dinámicamente el canal radial basándose puramente en la variable del entorno actual
+// Determina dinámicamente el canal radial basándose en la variable de entorno o la IP unificada
 const DETERMINAR_SOCKET_URL = () => {
     if (import.meta.env.VITE_SOCKET_URL) {
         return import.meta.env.VITE_SOCKET_URL;
     }
-    const HOST_IP = import.meta.env.VITE_HOST_IP || '192.168.100.34';
     return `http://${HOST_IP}:3000`;
 };
 
@@ -25,11 +25,13 @@ export const socket = io(SOCKET_URL, {
     reconnection: true,
     reconnectionAttempts: 10,
     reconnectionDelay: 2000,
-    transports: ['websocket'], // Forzar transporte rápido de WebSocket puro sin polling largo
-    secure: esProduccion,      // Habilita wss:// automáticamente si la app corre compilada en la nube
+    transports: ['websocket'], // Forzar transporte rápido de WebSocket puro
+    secure: esProduccion,      // Habilita wss:// automáticamente en producción
     auth: (cb) => {
         // Inyección dinámica de credenciales seguras en el apretón de manos (handshake)
         const token = localStorage.getItem('cimco_token') || localStorage.getItem('token');
         cb({ token });
     }
 });
+
+export default socket;

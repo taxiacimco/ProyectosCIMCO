@@ -1,8 +1,8 @@
-// Versión Arquitectura: V16.9 - Telemetría Radial, Desacoplamiento de BD y Difusión Multi-Sala
+// Versión Arquitectura: V17.0 - Unificación de Eventos Telemétricos y Optimización de Ancho de Banda
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\sockets\socket.manager.js
  * Misión: Administrar el ciclo de vida de las conexiones, salas automáticas y despacho en tiempo real con alta latencia/concurrencia.
- * Ajuste V16.9: Normalización de imports relativos, tolerancia a fallos en el Event Loop y saneamiento de salas.
+ * Ajuste V17.0: Consolidación del canal de telemetría a 'actualizar_ubicacion' para eliminar la redundancia de par de emisiones a la central.
  */
 
 import { socketAuthMiddleware } from '../../middleware/socketAuth.middleware.js';
@@ -98,9 +98,9 @@ export const inicializarSockets = (io) => {
                     socket.to('sala_conductores').emit('pasajero_movido', payloadUniversal);
                 }
 
-                // 🎚️ DIFUSIÓN DIRIGIDA A CENTRAL DE CONTROL (Despachadores y Admins)
+                // 🎚️ DIFUSIÓN CANÓNICA A CENTRAL DE CONTROL (Despachadores y Admins)
+                // Se emite un único evento estandarizado ('actualizar_ubicacion')
                 socket.to('sala_despachadores').to('sala_admins').emit('actualizar_ubicacion', payloadUniversal);
-                socket.to('sala_despachadores').to('sala_admins').emit('telemetria_central_radar', payloadUniversal);
 
             } catch (err) {
                 console.error(`[SOCKET-MGR-ERROR] Error procesando telemetría de ${usuarioId}:`, err.message);

@@ -1,13 +1,14 @@
-// Versión Arquitectura: V4.7 - Fusión Atómica de Inicialización Asíncrona Fallback y Ajuste de Puertos del Emulador 8085
+// Versión Arquitectura: V4.8 - Inclusión del Helper de Auditoría Financiera y Extensión de Rutas Firestore
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\config\firebase.js
- * Misión: Configuración y acoplamiento táctico del Firebase Admin SDK con soporte híbrido para emuladores locales y producción.
+ * Misión: Configuración del Firebase Admin SDK con soporte híbrido (Emulador/Producción) y auditoría centralizada en Firestore.
  */
 
 import admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { readFileSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { join, dirname, resolve } from 'path';
+import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,11 +19,12 @@ const __dirname = dirname(__filename);
 // ==================================================================
 export const RUTA_VIAJES_PROD = "artifacts/taxiacimco-app/public/data/viajes";
 
-// Fusión atómica de colecciones: preservamos transacciones e incorporamos conductores_activos homologado
 export const FIRESTORE_PATHS = {
     conductores: 'conductores_activos',
     viajes: 'viajes',
-    transacciones: 'transacciones'
+    transacciones: 'transacciones',
+    users: 'usuarios',
+    wallets: 'billeteras'
 };
 
 // 🛡️ CONTROLADORES DE ENTORNO (ANTI-UNDEFINED)
@@ -53,13 +55,11 @@ if (!admin.apps.length) {
         } catch (e) {
             // Fallback directo cargando el JSON físico si el método implícito no encuentra la variable de entorno
             try {
-                // Soporte síncrono inicial para exportaciones atómicas inmediatas del módulo
                 const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
                 admin.initializeApp({
                     credential: admin.credential.cert(serviceAccount)
                 });
             } catch (err) {
-                // Fallback secundario asíncrono para preservar la compatibilidad con la versión V4.2 anterior
                 readFile(serviceAccountPath, 'utf8')
                     .then((data) => {
                         const serviceAccountAsync = JSON.parse(data);
@@ -88,3 +88,48 @@ if (esEntornoDesarrollo) {
         ssl: false
     });
 }
+
+/**
+ * 💻 HELPER CENTRALIZADO PARA AUDITORÍA EN FIRESTORE
+ * Registra movimientos de recargas, débitos y ajustes en la colección de transacciones.
+ */
+export const registrarTransaccionFirestore = async ({
+    idUsuario,
+    rol,
+    subrol = 'N/A',
+    monto,
+    saldoAnterior,
+    saldoNuevo,
+    tipoOperacion, // 'RECARGA', 'DEBITO', 'AJUSTE'
+    autorizadoPor,
+    referencia
+}) => {
+    try {
+        if (!dbFirestore) return;
+        const coleccionTransacciones = FIRESTORE_PATHS?.transacciones || 'transacciones';
+
+        await dbFirestore.collection(coleccionTransacciones).add({
+            idUsuario: String(idUsuario),
+            rol: String(rol).toLowerCase(),
+            subrol: String(subrol).toLowerCase(),
+            monto: Number(monto),
+            saldoAnterior: Number(saldoAnterior),
+            saldoNuevo: Number(saldoNuevo),
+            tipoOperacion: String(tipoOperacion).toUpperCase(),
+            autorizadoPor: String(autorizadoPor || 'SISTEMA'),
+            referencia: referencia || `TRX-${Date.now()}`,
+            timestamp: FieldValue.serverTimestamp()
+        });
+        
+    } catch (error) {
+        console.warn("⚠️ [CIMCO-FIRESTORE-AUDIT-WARN] Error registrando auditoría de transacción:", error.message);
+    }
+};
+
+export default {
+    db,
+    dbFirestore,
+    FIRESTORE_PATHS,
+    RUTA_VIAJES_PROD,
+    registrarTransaccionFirestore
+};

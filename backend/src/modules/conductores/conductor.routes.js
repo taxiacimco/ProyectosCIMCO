@@ -1,8 +1,7 @@
-// Versión Arquitectura: V11.12 - Métrica de Capital Circulante y Protección de Rutas Estáticas
+// Versión Arquitectura: V12.0 - Definición de Rutas de Conductores
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
- * Misión: Asegurar el correcto mapeo de endpoints para el ciclo de vida del conductor, telemetría y contabilidad interna.
- * Ajuste V11.12: Inserción previa de la ruta de agregación métrica /metricas/capital-circulante antes de parámetros numéricos/dinámicos.
+ * Misión: Mapeo de endpoints para el ciclo de vida del conductor, telemetría y recargas auditadas.
  */
 
 import express from 'express';
@@ -29,7 +28,7 @@ import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
 const router = express.Router();
 
 // ==================================================================
-// 🛡️ MIDDLEWARE: SANITIZACIÓN DE PARÁMETROS RADIALES (ANTI-ABUSO)
+// 🛡️ MIDDLEWARE: SANITIZACIÓN DE PARÁMETROS RADIALES
 // ==================================================================
 const validarTelemetriaRadar = (req, res, next) => {
     if (!req || !req.query) {
@@ -44,14 +43,14 @@ const validarTelemetriaRadar = (req, res, next) => {
     if (!lat || !lng) {
         return res.status(400).json({
             success: false,
-            message: "⚠️ Parámetros de geolocalización insuficientes para inicializar barrido radial."
+            message: "⚠️ Parámetros de geolocalización insuficientes."
         });
     }
 
     if (isNaN(parseFloat(lat)) || isNaN(parseFloat(lng))) {
         return res.status(400).json({
             success: false,
-            message: "⚠️ Estructura de coordenadas corrupta o con tipo de dato incorrecto."
+            message: "⚠️ Coordenadas corruptas o con tipo de dato incorrecto."
         });
     }
 
@@ -64,62 +63,54 @@ const validarTelemetriaRadar = (req, res, next) => {
 router.post('/registrar', registrarConductor);
 router.post('/', registrarConductor);
 router.get('/', obtenerConductores);
-
-// 📡 RUTA DE TELEMETRÍA BÁSICA
 router.get('/disponibles', obtenerConductoresDisponibles);
 
 /**
- * 📊 MÉTRICAS ADMINISTRATIVAS Y FINANCIERAS
- * @route   GET /api/conductores/metricas/capital-circulante
- * Ubicada antes de /:id para evitar intercepción de la ruta dinámicamente.
+ * 📊 MÉTRICAS ADMINISTRATIVAS
  */
 router.get('/metricas/capital-circulante', verificarToken, esAdmin, obtenerCapitalCirculante);
 
 /**
  * 📍 RADAR GEOESPACIAL
- * @route   GET /api/conductores/radar/cercanos
  */
 router.get('/radar/cercanos', validarTelemetriaRadar, obtenerConductoresCercanos);
 
 /**
- * 📡 TELEMETRÍA EN CALIENTE
- * @route   POST /api/conductores/actualizar-ubicacion
+ * 📡 TELEMETRÍA GPS
  */
 router.post('/actualizar-ubicacion', actualizarUbicacionGPS);
 
 /**
- * 🔄 SINCRONIZADOR HÍBRIDO DE ESTADOS
- * @route   PUT /api/conductores/estado
+ * 🔄 ESTADOS
  */
 router.put('/estado', actualizarEstadoConductor);
 
 // ==================================================================
-// 🔍 CONSULTAS Y MODIFICACIONES POR ID (REST STACK)
-// ==================================================================
-router.get('/:id', obtenerConductorPorId);
-router.put('/:id', actualizarConductor);
-router.delete('/:id', eliminarConductor);
-
-// ==================================================================
-// 🛡️ RUTAS BLINDADAS (Requieren Autenticación / Roles)
+// 🛡️ RUTAS BLINDADAS DE FINANZAS Y CRÍTICAS
 // ==================================================================
 router.get('/:conductorId/historial', verificarToken, obtenerHistorialConductor);
 router.post('/descuento-comision', verificarToken, descontarComisionViaje);
 router.put('/ajustar-saldo/:uid', verificarToken, esAdmin, ajustarSaldo);
 
 /**
- * 💰 RUTA CRÍTICA: Recargas Manuales por Administración
- * @route   POST /api/conductores/saldos/admin/recargar
+ * 💰 RUTA CRÍTICA: Recargas por Administración
  */
 router.post('/saldos/admin/recargar', verificarToken, esAdmin, recargarBilleteraPorAdmin);
 
 // ==================================================================
-// 🛠️ RUTA EXCLUSIVA DE DEPURACIÓN PARA ENTORNOS DE DESARROLLO / STRESS TEST
+// 🔍 CONSULTAS Y MODIFICACIONES POR ID (RUTAS DINÁMICAS AL FINAL)
+// ==================================================================
+router.get('/:id', obtenerConductorPorId);
+router.put('/:id', actualizarConductor);
+router.delete('/:id', eliminarConductor);
+
+// ==================================================================
+// 🛠️ RUTA DE DEPURACIÓN EN DESARROLLO
 // ==================================================================
 router.put('/bypass-stress-saldo', verificarBypassDesarrollo, async (req, res) => {
     try {
         if (!req || !req.body) {
-            return res.status(400).json({ success: false, message: "⚠️ Payload de bypass corrupto o ausente." });
+            return res.status(400).json({ success: false, message: "⚠️ Payload corrupto o ausente." });
         }
 
         const { conductorId, saldo } = req.body;

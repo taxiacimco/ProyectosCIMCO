@@ -1,13 +1,12 @@
-// Versión Arquitectura: V15.7 - Resolución Dinámica Estricta de Axios Anti-Localhost y Blindaje JWT
+// Versión Arquitectura: V15.8 - Resolución Dinámica Estricta de Axios Anti-Localhost y Blindaje JWT
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
  * Misión: Centralización de Axios e inyección inteligente de endpoints sin dependencias huérfanas.
- * Ajuste V15.7: Estandarización de fallback de IP neutra (127.0.0.1) y consumo de VITE_API_URL.
  */
 
 import axios from 'axios';
 
-// 🔌 RESOLUCIÓN ESTRICTA DE LA URL BASE BASADA EN ENTORNO
+// 🔌 RESOLUCIÓN ESTRICTA DE LA IP DE RED (ÚNICA FUENTE DE VERDAD GLOBAL)
 export const HOST_IP = import.meta.env.VITE_HOST_IP || '127.0.0.1';
 
 const DETERMINAR_URL_BASE = () => {
@@ -55,7 +54,7 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA
+// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA Y AUTO-CLEANUP
 api.interceptors.response.use(
     (response) => {
         try {

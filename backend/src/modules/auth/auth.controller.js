@@ -1,8 +1,8 @@
-// Versión Arquitectura: V21.18 - Extracción Multiclave de UID y Resiliencia en Sincronización
+// Versión Arquitectura: V21.19 - Optimización Polimórfica de Perfiles, Normalización de Roles y Limpieza OTP
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros).
- * Ajuste V21.18: Normalización de imports relativos, guardas defensivas en Firestore y preservación polimórfica.
+ * Ajuste V21.19: Corrección de mapas de roles operativos/administrativos en updateProfile y gestión limpia de OTPs.
  */
 
 import jwt from 'jsonwebtoken';
@@ -20,9 +20,23 @@ if (!process.env.JWT_SECRET) {
 }
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// 🛡️ BÓVEDA OTP EN MEMORIA
+// 🛡️ BÓVEDA OTP EN MEMORIA CON LIMPIEZA AUTOMÁTICA
 const otpStore = new Map();
-const ROLES_OPERATIVOS = ['conductor', 'despachador', 'mototaxi', 'motoparrillero', 'motocarga', 'intermunicipal'];
+
+// Mapeo preciso de categorización de roles
+const ROLES_CONDUCTORES = ['conductor', 'mototaxi', 'motoparrillero', 'motocarga', 'intermunicipal'];
+const ROLES_ADMINISTRATIVOS = ['despachador', 'admin', 'ceo'];
+const ROLES_OPERATIVOS = [...ROLES_CONDUCTORES, ...ROLES_ADMINISTRATIVOS];
+
+// Mantenimiento preventivo: Eliminación de OTPs expirados cada 10 minutos para evitar fugas de memoria
+setInterval(() => {
+    const ahora = Date.now();
+    for (const [clave, datos] of otpStore.entries()) {
+        if (ahora > datos.expira) {
+            otpStore.delete(clave);
+        }
+    }
+}, 10 * 60 * 1000);
 
 /**
  * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO (POLIMÓRFICO)
@@ -79,7 +93,7 @@ export const register = async (req, res) => {
                 empresa: 'Particular'
             });
             esPasajero = true;
-        } else if (ROLES_OPERATIVOS.includes(rolNormalizado)) {
+        } else if (ROLES_CONDUCTORES.includes(rolNormalizado)) {
             nuevoUsuario = new Conductor({
                 nombre,
                 email: emailLimpio,
@@ -419,7 +433,7 @@ export const verificarTelefono = async (req, res) => {
 };
 
 /**
- * 🔄 ACTUALIZACIÓN DE DATOS DE PERFIL (POLIMÓRFICO CONCURRENTE)
+ * 🔄 ACTUALIZACIÓN DE DATOS DE PERFIL (POLIMÓRFICO CONCURRENTE CORREGIDO)
  */
 export const updateProfile = async (req, res) => {
     try {
@@ -439,15 +453,17 @@ export const updateProfile = async (req, res) => {
         let esPasajero = false;
         let esConductor = false;
 
-        const rolNormalizado = rolExtraido ? String(rolExtraido).toLowerCase().trim() : 'pasajero';
+        const rolNormalizado = rolExtraido ? String(rolExtraido).toLowerCase().trim() : '';
 
+        // Mapeo preciso de selección de modelo
         if (rolNormalizado === 'pasajero') {
             modeloTarget = Pasajero;
             esPasajero = true;
-        } else if (ROLES_OPERATIVOS.includes(rolNormalizado)) {
+        } else if (ROLES_CONDUCTORES.includes(rolNormalizado)) {
             modeloTarget = Conductor;
             esConductor = true;
         } else {
+            // Usuarios del sistema: Despachadores, Admins, CEOs y roles generales
             modeloTarget = Usuario;
         }
 
@@ -466,6 +482,7 @@ export const updateProfile = async (req, res) => {
             { new: true }
         );
 
+        // Fallback Seguro Polimórfico en caso de que el rol suministrado difiera de la colección real
         if (!usuarioActualizado) {
             const [uFallback, cFallback, pFallback] = await Promise.all([
                 Usuario.findById(userId),
@@ -473,15 +490,23 @@ export const updateProfile = async (req, res) => {
                 Pasajero.findById(userId)
             ]);
             
-            if (uFallback) { usuarioActualizado = await Usuario.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); esPasajero = false; esConductor = false; }
-            else if (cFallback) { usuarioActualizado = await Conductor.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); esPasajero = false; esConductor = true; }
-            else if (pFallback) { usuarioActualizado = await Pasajero.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); esPasajero = true; esConductor = false; }
+            if (uFallback) { 
+                usuarioActualizado = await Usuario.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); 
+                esPasajero = false; esConductor = false; 
+            } else if (cFallback) { 
+                usuarioActualizado = await Conductor.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); 
+                esPasajero = false; esConductor = true; 
+            } else if (pFallback) { 
+                usuarioActualizado = await Pasajero.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); 
+                esPasajero = true; esConductor = false; 
+            }
         }
 
         if (!usuarioActualizado) {
             return res.status(404).json({ success: false, message: "El usuario no fue localizado en el núcleo de base de datos." });
         }
 
+        // Reflejo en Firebase Firestore
         if (dbFirestore) {
             try {
                 const coleccionTarget = esPasajero 

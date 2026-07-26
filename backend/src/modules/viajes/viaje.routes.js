@@ -2,7 +2,6 @@
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.routes.js
  * Misión: Enrutador centralizado con interceptación de payloads e inyección de aduana perimetral.
- * Ajuste V16.10: Normalización de sintaxis de importación y preservación del orden jerárquico.
  */
 
 import express from 'express';

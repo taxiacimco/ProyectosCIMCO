@@ -1,8 +1,8 @@
-// Versión Arquitectura: V16.10 - Blindaje ACID, Historiales, Cancelación Atómica y Sincronización Firestore
+// Versión Arquitectura: V16.11 - Blindaje ACID, Despacho Flexible y Sincronización Firestore
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
  * Misión: Procesar flujos operativos, liquidación contable (10% comisión), cancelación y sincronización Firestore.
- * Ajuste V16.10: Normalización de imports relativos, refinamiento de concurrencia ACID y consistencia en payloads.
+ * Ajuste V16.11: Extensión de estados permitidos ('aceptado') en despacharViajeAtomico para re-despacho desde central.
  */
 
 import crypto from 'crypto';
@@ -699,8 +699,9 @@ export const despacharViajeAtomico = async (req, res) => {
         }
         if (metodoPago !== undefined) updateMongoViaje.metodoPago = String(metodoPago);
 
+        // 🚨 AJUSTE V16.11: Extensión de $in para admitir viajes en estado 'aceptado' re-despachados por central
         const viajeAsignado = await Viaje.findOneAndUpdate(
-            { _id: viajeId, estado: { $in: ['solicitado', 'pending'] } },
+            { _id: viajeId, estado: { $in: ['solicitado', 'pending', 'aceptado'] } },
             { $set: updateMongoViaje },
             { new: true, session }
         );

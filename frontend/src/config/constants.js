@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.0 - PROD READY: Matriz de Gobernanza Temática y Control de Acceso (ACL)
+// Versión Arquitectura: V12.1 - Matriz de Gobernanza Temática y Exportación Flexible
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\constants.js
  * Misión: Centralizar los diccionarios, roles oficiales y niveles de acceso jerárquicos del ecosistema.
@@ -26,7 +26,7 @@ export const DEFAULT_ACCESS_LEVELS = {
     [ROLES.PASAJERO]: 0,          // Punto de partida base
     [ROLES.CONDUCTOR]: 10,        // Acceso a Consola Conductor y Telemetría
     [ROLES.DESPACHADOR]: 30,      // Control de despachos de su flota asignada
-    [ROLES.SECRETARIA]: 50,      // Staff operativo: Puede ver el Mapa en Vivo pero no destruir datos
+    [ROLES.SECRETARIA]: 50,       // Staff operativo: Puede ver el Mapa en Vivo pero no destruir datos
     [ROLES.ADMIN]: 99             // CEO / Control Absoluto de Nodos y Módulo Financiero
 };
 
@@ -35,4 +35,12 @@ export const COLLECTIONS = {
     VIAJES: 'viajes',
     VIAJES_INTERMUNICIPALES: 'viajes_intermunicipales',
     USUARIOS: 'usuarios'
+};
+
+// 🔹 EXPORTACIÓN POR DEFECTO PARA SOPORTAR AMBAS FORMAS DE IMPORTACIÓN
+export default {
+    ROLES,
+    VEHICLE_TYPES,
+    DEFAULT_ACCESS_LEVELS,
+    COLLECTIONS
 };
