@@ -1,15 +1,18 @@
-// Versión Arquitectura: V2.0 - Inyección Múltiple y Asignación Nativa de ObjectId
+// Versión Arquitectura: V2.1 - Inyección Múltiple, Hash Encriptado y ObjectId Nativo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarConductor.cjs
  */
 
 const { MongoClient } = require('mongodb');
 const path = require('path');
+const bcrypt = require('bcryptjs');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 let URI_ATLAS = process.env.MONGODB_URI || process.env.MONGO_URI;
 URI_ATLAS = URI_ATLAS.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco');
+
+const defaultPasswordHash = bcrypt.hashSync('123456', 10);
 
 const escuadronConductores = [
     {
@@ -72,20 +75,25 @@ async function sembrarEscuadron() {
             console.log(`🔍 Verificando preexistencia del piloto: ${piloto.email}...`);
             const existe = await coleccion.findOne({ email: piloto.email });
 
-            // NOTA ARQUITECTÓNICA: Omitimos el campo _id a propósito para que MongoDB asigne el ObjectId nativo
+            const passHash = piloto.clave ? bcrypt.hashSync(piloto.clave, 10) : defaultPasswordHash;
+
             const payload = {
                 uid: piloto.uid,
                 nombre: piloto.nombre,
                 email: piloto.email,
+                password: passHash,
+                passwordHash: passHash,
                 rol: "conductor",
                 role: "conductor",
                 subrol: piloto.subrol,
                 telefono: piloto.telefono,
+                telefonoMovil: piloto.telefono,
                 placa: piloto.placa,
                 numeroInterno: piloto.numeroInterno,
                 cooperativa: piloto.cooperativa || null,
                 flota_id: piloto.flota_id || null,
                 estado: "activo",
+                isActive: true,
                 saldo: 20000,
                 saldoWallet: 20000,
                 fechaCreacion: new Date(),

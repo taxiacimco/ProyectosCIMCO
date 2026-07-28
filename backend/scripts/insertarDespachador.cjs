@@ -1,15 +1,18 @@
-// Versión Arquitectura: V2.0 - Asignación Nativa de ObjectId y Sincronización
+// Versión Arquitectura: V2.1 - Asignación Nativa de Hash de Contraseña y Compatibilidad
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarDespachador.cjs
  */
 
 const { MongoClient } = require('mongodb');
 const path = require('path');
+const bcrypt = require('bcryptjs');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 let URI_ATLAS = process.env.MONGODB_URI || process.env.MONGO_URI;
 URI_ATLAS = URI_ATLAS.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco');
+
+const defaultPasswordHash = bcrypt.hashSync('123456', 10);
 
 async function sembrarDespachador() {
     const client = new MongoClient(URI_ATLAS, { connectTimeoutMS: 10000 });
@@ -27,16 +30,19 @@ async function sembrarDespachador() {
         console.log(`🔍 [CIMCO-DESPACHADOR] Verificando nodo: ${emailObjetivo}...`);
         const existe = await coleccion.findOne({ email: emailObjetivo });
 
-        // NOTA ARQUITECTÓNICA: El _id estricto fue removido. Mongoose se encargará.
         const payload = {
             uid: uidObjetivo,
             nombre: "Pitoloco Maestro",
             fullName: "Despachador Central La Jagua",
             email: emailObjetivo,
+            password: defaultPasswordHash,
+            passwordHash: defaultPasswordHash,
             rol: "despachador",
             role: "despachador",
             telefono: "3108889944",
+            telefonoMovil: "3108889944",
             estado: "activo",
+            isActive: true,
             access_level: 30,
             saldo: 3000,
             cooperativa_nombre: "COOPERATIVA TERMINAL DE LA JAGUA",

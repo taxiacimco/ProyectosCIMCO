@@ -1,21 +1,21 @@
-// Versión Arquitectura: V23.1 - Parametrización Dinámica de URL Base para Entornos Híbridos y Producción
+// Versión Arquitectura: V23.3 - Selección Dinámica de Entorno Híbrido (Local / Producción)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
- * Misión: Generación de códigos QR de reclutamiento institucional que redirigen a las vistas de registro/login parametrizadas por rol.
+ * Misión: Generación de códigos QR de reclutamiento con conmutador dinámico entre Entorno Local (LAN) y Producción (Vercel).
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
- * Ajuste V23.1: Enrutamiento dinámico de PRODUCCION_BASE_URL mediante import.meta.env.VITE_FRONTEND_URL con fallback a window.location.origin.
  */
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
-import { QrCode, Download, RefreshCw, ShieldCheck, Loader, AlertTriangle, Printer, Layers, Eye, Trash2, Calendar, UserPlus } from 'lucide-react';
+import { QrCode, Download, RefreshCw, ShieldCheck, Loader, AlertTriangle, Printer, Layers, Eye, Trash2, Calendar, UserPlus, Globe, Laptop } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 const QrGenerator = () => {
     const { user } = useAuth();
     const [rolSeleccionado, setRolSeleccionado] = useState('mototaxi');
+    const [entorno, setEntorno] = useState('produccion'); // 'produccion' | 'local'
     const [qrGenerado, setQrGenerado] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -23,10 +23,21 @@ const QrGenerator = () => {
     const [loadingHistorial, setLoadingHistorial] = useState(true);
     const qrRef = useRef(null);
 
-    // 🌐 BASE URL DINÁMICA: Toma la variable VITE_FRONTEND_URL del .env o el origen del navegador
-    const PRODUCCION_BASE_URL = (import.meta.env.VITE_FRONTEND_URL || window.location.origin).replace(/\/$/, '');
+    // 🌐 DEFINICIÓN DE ENTORNOS
+    const URL_PRODUCCION = "https://frontend-opal-eight-58.vercel.app";
+    
+    // Obtiene automáticamente la IP/Host de la red local o fallback a localhost
+    const getUrlLocal = () => {
+        if (typeof window !== 'undefined') {
+            return `${window.location.protocol}//${window.location.hostname}:5173`;
+        }
+        return "http://localhost:5173";
+    };
 
-    // Diccionario de Roles del Ecosistema TAXIA CIMCO con sus etiquetas legibles
+    // Determina la Base URL según el entorno seleccionado
+    const baseUrlActiva = entorno === 'produccion' ? URL_PRODUCCION : getUrlLocal();
+
+    // Diccionario de Roles del Ecosistema TAXIA CIMCO
     const ROLES_CONTEXTO = {
         mototaxi: 'MOTOTAXI / OPERADOR',
         motoparrillero: 'MOTOPARRILLERO',
@@ -36,15 +47,15 @@ const QrGenerator = () => {
         pasajero: 'PASAJERO / USUARIO'
     };
 
-    // Construye la URL de enrutamiento asignando el parámetro de rol para que la vista de Auth lo procese
-    const getRutaDestinoRol = (role = rolSeleccionado) => {
+    // Construye la URL de enrutamiento asignando el parámetro de rol
+    const getRutaDestinoRol = (role = rolSeleccionado, base = baseUrlActiva) => {
         const rolLimpio = (role || '').trim().toLowerCase();
-        return `${PRODUCCION_BASE_URL}/register?role=${rolLimpio}`;
+        return `${base}/register?role=${rolLimpio}`;
     };
 
     const targetUrlString = getRutaDestinoRol();
 
-    // Sincronización en tiempo real con Firestore de la bitácora de códigos institucionales
+    // Sincronización en tiempo real con Firestore
     useEffect(() => {
         const pathColeccion = FIRESTORE_PATHS?.qrs || 'qrs';
         const q = query(collection(db, pathColeccion), orderBy('fechaCreacion', 'desc'));
@@ -79,6 +90,7 @@ const QrGenerator = () => {
             await addDoc(collection(db, pathColeccion), {
                 entidadId: rolSeleccionado.toUpperCase(),
                 tipo: 'REGISTRO_ROL',
+                entorno: entorno.toUpperCase(),
                 creadoPor: user?.email || 'CEO_ADMIN',
                 fechaCreacion: serverTimestamp(),
                 payloadUrl: targetUrlString
@@ -107,6 +119,11 @@ const QrGenerator = () => {
     const handleCargarDesdeHistorial = (registro) => {
         if (registro && registro.entidadId && ROLES_CONTEXTO[registro.entidadId.toLowerCase()]) {
             setRolSeleccionado(registro.entidadId.toLowerCase());
+            if (registro.payloadUrl?.includes('vercel.app')) {
+                setEntorno('produccion');
+            } else {
+                setEntorno('local');
+            }
             setQrGenerado(true);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -135,7 +152,7 @@ const QrGenerator = () => {
                     const pngURL = canvas.toDataURL('image/png');
                     const downloadLink = document.createElement('a');
                     downloadLink.href = pngURL;
-                    downloadLink.download = `CIMCO_REGISTRO_${(rolSeleccionado || '').toUpperCase()}.png`;
+                    downloadLink.download = `CIMCO_QR_${entorno.toUpperCase()}_${(rolSeleccionado || '').toUpperCase()}.png`;
                     downloadLink.click();
                 }
                 urlContext.revokeObjectURL(blobURL);
@@ -148,12 +165,13 @@ const QrGenerator = () => {
 
     const buildCentralLogoDataUrl = () => {
         const tag = (rolSeleccionado || 'CIMCO').substring(0, 4).toUpperCase();
+        const modeTag = entorno === 'produccion' ? 'PROD' : 'DEV';
         const svgString = `
             <svg xmlns="http://www.w3.org/2000/svg" width="180" height="75" viewBox="0 0 180 75">
                 <rect width="100%" height="100%" fill="#121214" rx="12"/>
                 <rect width="100%" height="100%" fill="none" stroke="#eab308" stroke-width="3" rx="12"/>
-                <text x="50%" y="32" font-family="monospace" font-size="14" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">TAXIA CIMCO</text>
-                <text x="50%" y="58" font-family="monospace" font-size="15" font-weight="900" fill="#eab308" text-anchor="middle" letter-spacing="2">[${tag}]</text>
+                <text x="50%" y="30" font-family="monospace" font-size="13" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">TAXIA CIMCO</text>
+                <text x="50%" y="56" font-family="monospace" font-size="14" font-weight="900" fill="#eab308" text-anchor="middle" letter-spacing="1">[${tag} - ${modeTag}]</text>
             </svg>
         `;
         return `data:image/svg+xml;utf8,${encodeURIComponent(svgString.trim())}`;
@@ -163,7 +181,7 @@ const QrGenerator = () => {
         <div className="space-y-6 w-full max-w-7xl mx-auto animate-in fade-in duration-300">
             <div className="flex flex-col lg:flex-row gap-6">
                 
-                {/* FORMULARIO DE CONTROL DE ROLES */}
+                {/* FORMULARIO DE CONTROL DE ROLES Y ENTORNO */}
                 <div className="flex-1 backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-6 shadow-2xl flex flex-col justify-between">
                     <div>
                         <div className="flex items-center gap-3 border-b border-white/5 pb-4 mb-6">
@@ -171,8 +189,8 @@ const QrGenerator = () => {
                                 <UserPlus size={20} className="text-yellow-500" />
                             </div>
                             <div>
-                                <h2 className="text-xs font-black uppercase tracking-widest text-zinc-200">Enrutamiento Estático por Roles</h2>
-                                <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">Estrategia de Reclutamiento de Usuarios y Flotas</p>
+                                <h2 className="text-xs font-black uppercase tracking-widest text-zinc-200">Enrutamiento por Roles y Entornos</h2>
+                                <p className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-0.5">Estrategia Híbrida: Pruebas Locales y Producción Nube</p>
                             </div>
                         </div>
 
@@ -184,6 +202,40 @@ const QrGenerator = () => {
                         )}
 
                         <form onSubmit={handleGenerarQrRol} className="flex flex-col gap-5">
+                            
+                            {/* SELECTOR DE ENTORNO (LOCAL VS PRODUCCIÓN) */}
+                            <div>
+                                <label className="text-[9px] uppercase tracking-widest text-zinc-500 font-black flex items-center gap-1.5 mb-2">
+                                    <Globe size={10} /> Selecciona el Entorno Destino
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setEntorno('produccion'); setQrGenerado(false); }}
+                                        className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all ${
+                                            entorno === 'produccion'
+                                                ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.15)]'
+                                                : 'bg-zinc-950/60 border-white/5 text-zinc-500 hover:text-zinc-300'
+                                        }`}
+                                    >
+                                        <Globe size={12} /> Producción (Vercel)
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => { setEntorno('local'); setQrGenerado(false); }}
+                                        className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all ${
+                                            entorno === 'local'
+                                                ? 'bg-blue-500/20 border-blue-500 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.15)]'
+                                                : 'bg-zinc-950/60 border-white/5 text-zinc-500 hover:text-zinc-300'
+                                        }`}
+                                    >
+                                        <Laptop size={12} /> Pruebas Locales (LAN)
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* SELECTOR DE ROL */}
                             <div>
                                 <label className="text-[9px] uppercase tracking-widest text-zinc-500 font-black flex items-center gap-1.5 mb-2">
                                     <Layers size={10} /> Selecciona el perfil destino del QR
@@ -201,13 +253,13 @@ const QrGenerator = () => {
 
                             <div className="bg-zinc-950/40 border border-white/5 p-3 rounded-xl">
                                 <p className="text-[10px] text-zinc-400 leading-relaxed font-medium">
-                                    Al escanear esta matriz, el dispositivo móvil abrirá directamente el flujo corporativo de registro preconfigurando la interfaz para el perfil <span className="text-yellow-500 font-bold uppercase">{rolSeleccionado}</span>.
+                                    Generando QR para el rol <span className="text-yellow-500 font-bold uppercase">{rolSeleccionado}</span> en el entorno de <span className={entorno === 'produccion' ? 'text-yellow-400 font-bold uppercase' : 'text-blue-400 font-bold uppercase'}>{entorno}</span>.
                                 </p>
                             </div>
 
                             <button type="submit" disabled={loading} className="w-full bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/20 text-yellow-500 font-bold uppercase text-[10px] tracking-widest py-3.5 rounded-xl transition-all flex items-center justify-center gap-2">
                                 {loading ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                                Compilar Matriz de Captación QR
+                                Compilar Matriz [{entorno.toUpperCase()}]
                             </button>
                         </form>
                     </div>
@@ -231,6 +283,11 @@ const QrGenerator = () => {
                                 />
                             </div>
                             <div className="text-center px-4 w-full">
+                                <div className="flex items-center justify-center gap-2 mb-1">
+                                    <span className={`text-[9px] px-2 py-0.5 rounded font-black uppercase ${entorno === 'produccion' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
+                                        ENTORNO: {entorno}
+                                    </span>
+                                </div>
                                 <h4 className="text-xs font-black text-white uppercase tracking-widest">PERFIL DESTINO: {(rolSeleccionado || '').toUpperCase()}</h4>
                                 <p className="text-[8px] text-zinc-500 font-mono break-all mt-1 bg-black/40 p-2 rounded-lg border border-white/5">{targetUrlString}</p>
                             </div>
@@ -265,30 +322,36 @@ const QrGenerator = () => {
                     <div className="text-center py-8 text-zinc-600 text-xs font-mono uppercase border border-dashed border-white/5 rounded-xl">No hay registros de códigos de captación guardados.</div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
-                        {historialQrs.map((item) => (
-                          <div key={item.id} className="bg-zinc-950/50 border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 hover:border-white/10 transition-colors">
-                              <div className="min-w-0 space-y-1">
-                                  <div className="flex items-center gap-1.5 font-mono text-[9px]">
-                                      <span className="px-1.5 py-0.5 rounded font-black uppercase bg-yellow-500/10 text-yellow-400">
-                                          {item.entidadId || 'N/A'}
-                                      </span>
-                                  </div>
-                                  <p className="text-[8px] text-zinc-500 font-mono truncate max-w-[200px]">{item.payloadUrl}</p>
-                                  <div className="flex items-center gap-1 text-[8px] text-zinc-600">
-                                      <Calendar size={10} /> {item.fechaCreacion?.toDate ? item.fechaCreacion.toDate().toLocaleDateString('es-CO') : 'Reciente'}
-                                  </div>
-                              </div>
+                        {historialQrs.map((item) => {
+                            const esProd = item.payloadUrl?.includes('vercel.app');
+                            return (
+                                <div key={item.id} className="bg-zinc-950/50 border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 hover:border-white/10 transition-colors">
+                                    <div className="min-w-0 space-y-1">
+                                        <div className="flex items-center gap-1.5 font-mono text-[9px]">
+                                            <span className="px-1.5 py-0.5 rounded font-black uppercase bg-yellow-500/10 text-yellow-400">
+                                                {item.entidadId || 'N/A'}
+                                            </span>
+                                            <span className={`px-1 py-0.2 rounded font-black uppercase text-[8px] ${esProd ? 'bg-yellow-500/20 text-yellow-300' : 'bg-blue-500/20 text-blue-300'}`}>
+                                                {esProd ? 'PROD' : 'LOCAL'}
+                                            </span>
+                                        </div>
+                                        <p className="text-[8px] text-zinc-500 font-mono truncate max-w-[200px]">{item.payloadUrl}</p>
+                                        <div className="flex items-center gap-1 text-[8px] text-zinc-600">
+                                            <Calendar size={10} /> {item.fechaCreacion?.toDate ? item.fechaCreacion.toDate().toLocaleDateString('es-CO') : 'Reciente'}
+                                        </div>
+                                    </div>
 
-                              <div className="flex items-center gap-1 shrink-0">
-                                  <button onClick={() => handleCargarDesdeHistorial(item)} title="Ver en Visor" className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors">
-                                      <Eye size={12} />
-                                  </button>
-                                  <button onClick={() => handleEliminarRegistro(item.id)} title="Dar de baja" className="p-2 rounded-lg bg-red-500/5 text-red-500/70 hover:text-red-400 hover:bg-red-500/10 transition-colors">
-                                      <Trash2 size={12} />
-                                  </button>
-                              </div>
-                          </div>
-                        ))}
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button onClick={() => handleCargarDesdeHistorial(item)} title="Ver en Visor" className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors">
+                                            <Eye size={12} />
+                                        </button>
+                                        <button onClick={() => handleEliminarRegistro(item.id)} title="Dar de baja" className="p-2 rounded-lg bg-red-500/5 text-red-500/70 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                                            <Trash2 size={12} />
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
             </div>

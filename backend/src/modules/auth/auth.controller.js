@@ -1,8 +1,7 @@
-// Versión Arquitectura: V21.19 - Optimización Polimórfica de Perfiles, Normalización de Roles y Limpieza OTP
+// Versión Arquitectura: V21.20 - Inserción Defensiva en Login, Búsqueda Polimórfica y Anti-Crash
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros).
- * Ajuste V21.19: Corrección de mapas de roles operativos/administrativos en updateProfile y gestión limpia de OTPs.
  */
 
 import jwt from 'jsonwebtoken';
@@ -66,9 +65,9 @@ export const register = async (req, res) => {
 
         // Validación de Teléfono Duplicado
         const [uTel, cTel, pTel] = await Promise.all([
-            Usuario.findOne({ telefonoMovil }),
-            Conductor.findOne({ telefonoMovil }),
-            Pasajero.findOne({ telefonoMovil })
+            Usuario.findOne({ $or: [{ telefonoMovil }, { telefono: telefonoMovil }] }),
+            Conductor.findOne({ $or: [{ telefonoMovil }, { telefono: telefonoMovil }] }),
+            Pasajero.findOne({ $or: [{ telefonoMovil }, { telefono: telefonoMovil }] })
         ]);
 
         if (uTel || cTel || pTel) {
@@ -86,9 +85,13 @@ export const register = async (req, res) => {
                 nombre,
                 email: emailLimpio,
                 password: hashedPassword,
+                passwordHash: hashedPassword,
                 telefonoMovil,
+                telefono: telefonoMovil,
                 rol: 'pasajero',
+                role: 'pasajero',
                 isActive: true,
+                estado: 'activo',
                 cooperativa: 'Particular',
                 empresa: 'Particular'
             });
@@ -98,11 +101,15 @@ export const register = async (req, res) => {
                 nombre,
                 email: emailLimpio,
                 password: hashedPassword,
+                passwordHash: hashedPassword,
                 telefonoMovil,
+                telefono: telefonoMovil,
                 rol: rolNormalizado,
+                role: rolNormalizado,
                 cooperativa: terminalAsignada,
                 empresa: terminalAsignada,
                 isActive: true,
+                estado: 'activo',
                 isOnline: false
             });
             esConductor = true;
@@ -111,11 +118,15 @@ export const register = async (req, res) => {
                 nombre,
                 email: emailLimpio,
                 password: hashedPassword,
+                passwordHash: hashedPassword,
                 telefonoMovil,
+                telefono: telefonoMovil,
                 rol: rolNormalizado,
+                role: rolNormalizado,
                 cooperativa: terminalAsignada,
                 empresa: terminalAsignada,
-                isActive: true
+                isActive: true,
+                estado: 'activo'
             });
         }
 
@@ -180,7 +191,7 @@ export const register = async (req, res) => {
 };
 
 /**
- * 🔑 INICIO DE SESIÓN POLIMÓRFICO CON TRIPLE COMPROBACIÓN SÍNCRONA
+ * 🔑 INICIO DE SESIÓN POLIMÓRFICO CON TRIPLE COMPROBACIÓN SÍNCRONA (RE-CALIBRADO V21.20)
  */
 export const login = async (req, res) => {
     try {
@@ -197,7 +208,13 @@ export const login = async (req, res) => {
         if (esCorreo) {
             consulta.email = inputLimpio.toLowerCase();
         } else {
-            consulta.telefonoMovil = inputLimpio;
+            // Consulta polimórfica para soportar tanto 'telefonoMovil' como 'telefono'
+            consulta = {
+                $or: [
+                    { telefonoMovil: inputLimpio },
+                    { telefono: inputLimpio }
+                ]
+            };
         }
 
         // Ejecución Concurrente del Triple Handshake de Búsqueda
@@ -213,11 +230,24 @@ export const login = async (req, res) => {
             return res.status(401).json({ success: false, message: "Credenciales de acceso incorrectas o inexistentes." });
         }
 
-        if (!cuentaEncontrada.isActive) {
+        const estaActivo = cuentaEncontrada.isActive !== undefined ? cuentaEncontrada.isActive : (cuentaEncontrada.estado === 'activo');
+        if (!estaActivo) {
             return res.status(403).json({ success: false, message: "Esta cuenta se encuentra suspendida. Contacte soporte administrativo." });
         }
 
-        const passwordValido = await bcrypt.compare(password, cuentaEncontrada.password);
+        // 🛡️ COMPUERTA DEFENSIVA ANTI-CRASH: Verificar existencia de la hash de la clave
+        const hashAlmacenada = cuentaEncontrada.password || cuentaEncontrada.passwordHash;
+
+        if (!hashAlmacenada) {
+            console.warn(`⚠️ [CIMCO-AUTH-WARN] La cuenta ID ${cuentaEncontrada._id} (${cuentaEncontrada.email}) carece de contraseña encriptada.`);
+            return res.status(401).json({ 
+                success: false, 
+                message: "El usuario no tiene una contraseña configurada o activa." 
+            });
+        }
+
+        // Validación atómica de la clave mediante Bcrypt
+        const passwordValido = await bcrypt.compare(password, hashAlmacenada);
         if (!passwordValido) {
             return res.status(401).json({ success: false, message: "Credenciales de acceso incorrectas o inexistentes." });
         }
@@ -227,7 +257,7 @@ export const login = async (req, res) => {
             { 
                 id: cuentaEncontrada._id,
                 _id: cuentaEncontrada._id,
-                rol: cuentaEncontrada.rol || 'pasajero'
+                rol: cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero'
             },
             JWT_SECRET,
             { expiresIn: '24h' }
@@ -241,8 +271,8 @@ export const login = async (req, res) => {
                 id: cuentaEncontrada._id,
                 nombre: cuentaEncontrada.nombre,
                 email: cuentaEncontrada.email,
-                rol: cuentaEncontrada.rol || 'pasajero',
-                telefonoMovil: cuentaEncontrada.telefonoMovil,
+                rol: cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero',
+                telefonoMovil: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono || "",
                 cooperativa: cuentaEncontrada.cooperativa || cuentaEncontrada.empresa || ""
             }
         });
@@ -270,7 +300,12 @@ export const solicitarOTP = async (req, res) => {
         if (esCorreo) {
             consulta.email = inputLimpio.toLowerCase();
         } else {
-            consulta.telefonoMovil = inputLimpio;
+            consulta = {
+                $or: [
+                    { telefonoMovil: inputLimpio },
+                    { telefono: inputLimpio }
+                ]
+            };
         }
 
         // Búsqueda en los tres dominios de datos
@@ -286,17 +321,19 @@ export const solicitarOTP = async (req, res) => {
             return res.status(404).json({ success: false, message: "No se localizó ninguna cuenta asociada a dicho identificador." });
         }
 
+        const telefonoContacto = usuarioExistente.telefonoMovil || usuarioExistente.telefono;
+
         // Generación de código numérico de 6 dígitos
         const codigoOTP = Math.floor(100000 + Math.random() * 900000).toString();
         
         // Registrar OTP en la bóveda volátil con tiempo de expiración (5 minutos)
-        otpStore.set(usuarioExistente.telefonoMovil, {
+        otpStore.set(telefonoContacto, {
             codigo: codigoOTP,
             expira: Date.now() + 5 * 60 * 1000,
             usuarioId: usuarioExistente._id
         });
 
-        console.log(`🔑 [CIMCO-OTP-GATEWAY] Código generado para ${usuarioExistente.telefonoMovil}: [ ${codigoOTP} ] (Válido por 5 minutos)`);
+        console.log(`🔑 [CIMCO-OTP-GATEWAY] Código generado para ${telefonoContacto}: [ ${codigoOTP} ] (Válido por 5 minutos)`);
 
         return res.status(200).json({ 
             success: true, 
@@ -328,10 +365,15 @@ export const verificarOTPyRestablecer = async (req, res) => {
         if (esCorreo) {
             consulta.email = inputLimpio.toLowerCase();
         } else {
-            consulta.telefonoMovil = inputLimpio;
+            consulta = {
+                $or: [
+                    { telefonoMovil: inputLimpio },
+                    { telefono: inputLimpio }
+                ]
+            };
         }
 
-        // Localizar el usuario en primer lugar para obtener su número telefónico de correspondencia OTP
+        // Localizar el usuario en primer lugar
         const [u, c, p] = await Promise.all([
             Usuario.findOne(consulta),
             Conductor.findOne(consulta),
@@ -344,14 +386,15 @@ export const verificarOTPyRestablecer = async (req, res) => {
             return res.status(404).json({ success: false, message: "Identificador de cuenta inválido." });
         }
 
-        const registroOTP = otpStore.get(usuario.telefonoMovil);
+        const telefonoContacto = usuario.telefonoMovil || usuario.telefono;
+        const registroOTP = otpStore.get(telefonoContacto);
 
         if (!registroOTP) {
             return res.status(400).json({ success: false, message: "No se ha solicitado ningún código para este número o ya expiró." });
         }
 
         if (Date.now() > registroOTP.expira) {
-            otpStore.delete(usuario.telefonoMovil);
+            otpStore.delete(telefonoContacto);
             return res.status(400).json({ success: false, message: "El código de verificación ha expirado. Solicite uno nuevo." });
         }
 
@@ -364,19 +407,25 @@ export const verificarOTPyRestablecer = async (req, res) => {
         const condicionesUsuario = [
             { _id: usuario._id },
             { email: inputLimpio.toLowerCase() },
-            { telefonoMovil: inputLimpio }
+            { telefonoMovil: inputLimpio },
+            { telefono: inputLimpio }
         ];
+
+        const payloadUpdate = {
+            password: newHashedPassword,
+            passwordHash: newHashedPassword
+        };
 
         let modificado = await Usuario.findOneAndUpdate(
             { $or: condicionesUsuario }, 
-            { password: newHashedPassword },
+            payloadUpdate,
             { new: true }
         );
         
         if (!modificado) {
             modificado = await Conductor.findOneAndUpdate(
                 { $or: condicionesUsuario }, 
-                { password: newHashedPassword },
+                payloadUpdate,
                 { new: true }
             );
         }
@@ -384,7 +433,7 @@ export const verificarOTPyRestablecer = async (req, res) => {
         if (!modificado) {
             modificado = await Pasajero.findOneAndUpdate(
                 { $or: condicionesUsuario },
-                { password: newHashedPassword },
+                payloadUpdate,
                 { new: true }
             );
         }
@@ -393,8 +442,8 @@ export const verificarOTPyRestablecer = async (req, res) => {
             return res.status(404).json({ success: false, message: "No se encontró ninguna entidad vinculada a este identificador." });
         }
 
-        otpStore.delete(usuario.telefonoMovil);
-        console.log(`🔒 [CIMCO-SECURITY] Credenciales actualizadas vía OTP en Colección Central para: ${usuario.telefonoMovil}`);
+        otpStore.delete(telefonoContacto);
+        console.log(`🔒 [CIMCO-SECURITY] Credenciales actualizadas vía OTP en Colección Central para: ${telefonoContacto}`);
 
         return res.status(200).json({ success: true, message: "Contraseña actualizada correctamente." });
 
@@ -414,11 +463,12 @@ export const verificarTelefono = async (req, res) => {
         }
         
         const telBusqueda = String(req.body.telefono || req.body.telefonoMovil).trim();
+        const consultaTel = { $or: [{ telefonoMovil: telBusqueda }, { telefono: telBusqueda }] };
 
         const [u, c, p] = await Promise.all([
-            Usuario.findOne({ telefonoMovil: telBusqueda }),
-            Conductor.findOne({ telefonoMovil: telBusqueda }),
-            Pasajero.findOne({ telefonoMovil: telBusqueda })
+            Usuario.findOne(consultaTel),
+            Conductor.findOne(consultaTel),
+            Pasajero.findOne(consultaTel)
         ]);
 
         if (u || c || p) {
@@ -469,7 +519,10 @@ export const updateProfile = async (req, res) => {
 
         const updateData = {};
         if (nombreLimpio) updateData.nombre = nombreLimpio;
-        if (telefonoLimpio) updateData.telefonoMovil = telefonoLimpio;
+        if (telefonoLimpio) {
+            updateData.telefonoMovil = telefonoLimpio;
+            updateData.telefono = telefonoLimpio;
+        }
         
         if (terminalAsignada) {
             updateData.cooperativa = terminalAsignada;
@@ -551,7 +604,7 @@ export const updateProfile = async (req, res) => {
                 nombre: usuarioActualizado.nombre,
                 email: usuarioActualizado.email,
                 rol: usuarioActualizado.rol || usuarioActualizado.role || rolNormalizado,
-                telefonoMovil: usuarioActualizado.telefonoMovil,
+                telefonoMovil: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono || "",
                 cooperativa: usuarioActualizado.cooperativa || usuarioActualizado.empresa || ""
             }
         });
