@@ -1,7 +1,7 @@
-// Versión Arquitectura: V23.3 - Selección Dinámica de Entorno Híbrido (Local / Producción)
+// Versión Arquitectura: V23.4 - Selección Dinámica de Entorno Híbrido con Integración de Túnel Cloudflare
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
- * Misión: Generación de códigos QR de reclutamiento con conmutador dinámico entre Entorno Local (LAN) y Producción (Vercel).
+ * Misión: Generación de códigos QR de reclutamiento con conmutador dinámico entre Entorno de Túnel/Local y Producción (Vercel).
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
  */
 
@@ -26,8 +26,11 @@ const QrGenerator = () => {
     // 🌐 DEFINICIÓN DE ENTORNOS
     const URL_PRODUCCION = "https://frontend-opal-eight-58.vercel.app";
     
-    // Obtiene automáticamente la IP/Host de la red local o fallback a localhost
+    // Obtiene dinámicamente la URL del Túnel de Cloudflare desde .env o detecta la del navegador
     const getUrlLocal = () => {
+        if (import.meta.env.VITE_FRONTEND_URL) {
+            return import.meta.env.VITE_FRONTEND_URL;
+        }
         if (typeof window !== 'undefined') {
             return `${window.location.protocol}//${window.location.hostname}:5173`;
         }
@@ -230,7 +233,7 @@ const QrGenerator = () => {
                                                 : 'bg-zinc-950/60 border-white/5 text-zinc-500 hover:text-zinc-300'
                                         }`}
                                     >
-                                        <Laptop size={12} /> Pruebas Locales (LAN)
+                                        <Laptop size={12} /> Pruebas Locales (Túnel/LAN)
                                     </button>
                                 </div>
                             </div>
