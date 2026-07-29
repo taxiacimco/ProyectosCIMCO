@@ -1,1 +1,22 @@
-.vercel
+# Arquitectura Frontend - CIMCO NEXUS
+# Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\.gitignore
+
+# Dependencias y Builds
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Despliegue en Vercel
+.vercel/
+
+# Variables de Entorno Locales
+.env
+.env.local
+.env.development
+.env.production.local
+
+# Logs locales
+*-debug.log
+npm-debug.log*

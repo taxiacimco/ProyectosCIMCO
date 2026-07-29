@@ -1,7 +1,7 @@
-# Versión Arquitectura: V1.2 - Blindaje Perimetral Absoluto Anti-Filtraciones Monorepo CIMCO
+# Versión Arquitectura: V1.3 - Blindaje Perimetral Absoluto Anti-Filtraciones Monorepo CIMCO
 # Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\.gitignore
 
-# 📦 Dependencias y Artefactos de Compilación
+# 📦 Dependencias y Artefactos de Compilación Globales
 node_modules/
 .wrangler/
 dist/
@@ -17,21 +17,29 @@ dist/
 # ⚙️ Configuraciones de Servidores y Despliegue Permitidas
 !wrangler.toml
 
-# 🔒 Blindaje de Entornos Locales (General)
+# 🔒 Blindaje de Entornos Locales y Secretos
 .env
 .env.local
 .env.development
-.env.production.local
+.env.*.local
 
-# 🚀 Perímetro de Seguridad Crítico Backend (Rutas Monorepo Explícitas)
+# 🚀 Perímetro de Seguridad Crítico Backend
 backend/.env
 backend/serviceAccountKey.json
 
-# 📋 Logs y Archivos Temporales de Depuración
+# 📋 Logs y Archivos Temporales de Depuración (Firebase, Vite, Node)
 *-debug.log
+*-debug.log*
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+hub-debug.log*
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.DS_Storenode_modules/
-backend/node_modules/
-backend/serviceAccountKey.json
+.DS_Store
+
+# 💾 Archivos del Sistema Operativo y Editores
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,15 @@
+# Arquitectura Backend - CIMCO CORE API
+# Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\.gitignore
+
+# Dependencias Node.js
+node_modules/
+
+# Credenciales y Secretos de Producción / Firebase Admin
+.env
+serviceAccountKey.json
+*.pem
+
+# Logs de ejecución
+*-debug.log
+logs/
+*.log
