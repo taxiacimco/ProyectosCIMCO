@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.6 - Code Splitting con Lazy Loading y Módulos Protegidos CIMCO-UI V9.3
+// Versión Arquitectura: V21.7 - Code Splitting con Lazy Loading, Módulos Protegidos y Puentes QR Integrados
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
  * Misión: Orquestar el direccionamiento centralizado, inyectar puentes QR, blindar con autenticación basada en roles 
@@ -28,7 +28,7 @@ const RegisterAdmin = lazy(() => import('@/pages/RegisterAdmin'));
 const AdminDashboard = lazy(() => import('@/pages/admin/AdminDashboard'));
 const AdminPanel = lazy(() => import('@/pages/admin/AdminPanel'));
 const QrGenerator = lazy(() => import('@/pages/admin/QrGenerator'));
-const Cooperativas = lazy(() => import('@/pages/admin/Cooperativas')); // 👈 Carga perezosa del Módulo Cooperativas
+const Cooperativas = lazy(() => import('@/pages/admin/Cooperativas'));
 
 // 👤 Módulo de Pasajeros (Lazy Loaded)
 const HomePasajero = lazy(() => import('@/pages/pasajero/HomePasajero'));
@@ -53,7 +53,7 @@ const RouterLoadingScreen = ({ mensaje }) => (
     </div>
 );
 
-// 🛡️ ADUANA UNIFICADA: Componente Guard de Rutas Protegidas sin fugas de Props al DOM
+// 🛡️ ADUANA UNIFICADA: Componente Guard de Rutas Protegidas
 export const ProtectedRoute = ({ children, allowedRoles = [] }) => {
     const { user, loading } = useAuth();
     
@@ -65,19 +65,15 @@ export const ProtectedRoute = ({ children, allowedRoles = [] }) => {
         return <Navigate to="/login" replace />;
     }
 
-    // 🛡️ Saneamiento preventivo de roles para evitar desbordamiento por nulidad
     const userRole = (user?.rol || user?.role || '').toLowerCase().trim();
     
-    // ⚡ Evaluación y bypass para privilegios administrativos (Superusuario / CEO)
     const isAdmin = userRole === 'admin' || user?.access_level === 99 || user?.level === 10 || userRole === 'gerente';
     if (isAdmin) {
         return children;
     }
 
-    // Normalización interna de roles equivalentes de conductores de mototaxi
     const normalizedRole = (userRole === 'conductor' || userRole === 'moto') ? 'mototaxi' : userRole;
 
-    // Normalización de la matriz de roles permitidos
     const safeAllowedRoles = Array.isArray(allowedRoles)
         ? allowedRoles.map(role => role?.trim()?.toLowerCase())
         : [];
@@ -106,7 +102,7 @@ const AppRouter = () => {
                     <Route path="/register-despachador" element={<RegisterDespachador />} />
                     <Route path="/register-intermunicipal" element={<RegisterIntermunicipal />} />
                     
-                    {/* ⚡ RUTA RESTRINGIDA DE DESARROLLO (Lazy Loaded) */}
+                    {/* RUTA RESTRINGIDA DE DESARROLLO */}
                     <Route 
                         path="/register-admin" 
                         element={
@@ -116,18 +112,18 @@ const AppRouter = () => {
                         } 
                     />
                     
-                    {/* 🛡️ RUTAS ADMINISTRATIVAS PROTEGIDAS */}
+                    {/* RUTAS ADMINISTRATIVAS PROTEGIDAS */}
                     <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><AdminDashboard /></ProtectedRoute>} />
                     <Route path="/admin/panel" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><AdminPanel /></ProtectedRoute>} />
                     <Route path="/admin/qr" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><QrGenerator /></ProtectedRoute>} />
-                    <Route path="/admin/cooperativas" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><Cooperativas /></ProtectedRoute>} /> {/* 👈 Nueva Ruta Registrada */}
+                    <Route path="/admin/cooperativas" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><Cooperativas /></ProtectedRoute>} />
                     
-                    {/* 🛡️ RUTAS PASAJERO PROTEGIDAS */}
+                    {/* RUTAS PASAJERO PROTEGIDAS */}
                     <Route path="/pasajero/home" element={<ProtectedRoute allowedRoles={['pasajero']}><HomePasajero /></ProtectedRoute>} />
                     <Route path="/pasajero/perfil" element={<ProtectedRoute allowedRoles={['pasajero']}><PerfilPasajero /></ProtectedRoute>} />
                     <Route path="/pasajero/historial" element={<ProtectedRoute allowedRoles={['pasajero']}><HistorialViajes /></ProtectedRoute>} />
                     
-                    {/* 🛡️ RUTAS LOGÍSTICAS Y FLOTA PROTEGIDAS */}
+                    {/* RUTAS LOGÍSTICAS Y FLOTA PROTEGIDAS */}
                     <Route path="/despachador/home" element={<ProtectedRoute allowedRoles={['despachador']}><HomeDespachador /></ProtectedRoute>} />
                     <Route path="/intermunicipal/home" element={<ProtectedRoute allowedRoles={['intermunicipal']}><HomeIntermunicipal /></ProtectedRoute>} />
                     <Route path="/motocarga/home" element={<ProtectedRoute allowedRoles={['motocarga']}><HomeMotocarga /></ProtectedRoute>} />
@@ -135,7 +131,7 @@ const AppRouter = () => {
                     <Route path="/mototaxi/home" element={<ProtectedRoute allowedRoles={['mototaxi']}><HomeMototaxi /></ProtectedRoute>} />
                     <Route path="/motoparrillero/home" element={<ProtectedRoute allowedRoles={['motoparrillero']}><HomeMotoparrillero /></ProtectedRoute>} />
                     
-                    {/* 🚀 PUENTES DE ENTRADA DIRECTA PARA CÓDIGOS QR OMNICANAL (Flujo Invertido Público Dinámico) */}
+                    {/* 🚀 PUENTES DE ENTRADA DIRECTA PARA CÓDIGOS QR OMNICANAL */}
                     <Route path="/mototaxi" element={<Navigate to="/login?role=moto" replace />} />
                     <Route path="/moto-parrillero" element={<Navigate to="/login?role=moto" replace />} />
                     <Route path="/motocarga" element={<Navigate to="/login?role=motocarga" replace />} />
@@ -152,7 +148,7 @@ const AppRouter = () => {
     );
 };
 
-// 🔄 Componente de Redirección Dinámica Blindado V21.0
+// 🔄 Componente de Redirección Dinámica
 const RoleBasedRedirect = () => {
     const { user, loading } = useAuth();
 
