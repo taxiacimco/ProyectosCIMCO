@@ -1,7 +1,8 @@
-// Versión Arquitectura: V9.9.6 - Integración de Plugin Tailwind v4 y Preservación de Reglas Perimetrales de Red
+// Versión Arquitectura: V9.9.7 - Soporte Multidominio Cloudflare HTTP/2 y Preservación de Reglas Perimetrales
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\vite.config.js
- * Misión: Asegurar el procesamiento de estilos con @tailwindcss/vite manteniendo alias @, proxy hacia backend local y aislamiento anti-ciclos de chunks.
+ * Misión: Asegurar el procesamiento de estilos con @tailwindcss/vite manteniendo alias @, 
+ *         proxy hacia backend local, soporte para túneles de Cloudflare y aislamiento anti-ciclos de chunks.
  */
 
 import { defineConfig } from 'vite';
@@ -21,14 +22,13 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    host: '0.0.0.0', // Escucha activa para permitir conexiones desde el teléfono por IP
+    host: '0.0.0.0', // Escucha activa para permitir conexiones externas/móviles
     historyApiFallback: true,
     allowedHosts: [
       '192.168.100.34',
       'localhost',
       '127.0.0.1',
-      'globosely-appreciative-zander.ngrok-free.app',
-      'globosely-appreciative-zander.ngrok-free.dev',
+      '.trycloudflare.com', // 👈 Habilitado comodín para permitir cualquier túnel dinámico de Cloudflare
       '.ngrok-free.app',
       '.ngrok-free.dev'
     ],
@@ -51,7 +51,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000, // Ajuste del umbral operacional para producción
     rollupOptions: {
       output: {
-        // Corrección definitiva del ciclo: Evitamos clasificar arbitrariamente todo el node_modules
+        // Corrección del ciclo: Clasificación de librerías para optimización de bundles
         manualChunks(id) {
           // Bloque exclusivo para el núcleo de la aplicación reactiva
           if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-router-dom/')) {
