@@ -1,4 +1,4 @@
-// Versión Arquitectura: V23.4 - Selección Dinámica de Entorno Híbrido con Integración de Túnel Cloudflare
+// Versión Arquitectura: V23.5 - Selección Dinámica de Entorno Híbrido y Alineación de Rutas QR de Producción
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
  * Misión: Generación de códigos QR de reclutamiento con conmutador dinámico entre Entorno de Túnel/Local y Producción (Vercel).
@@ -50,10 +50,21 @@ const QrGenerator = () => {
         pasajero: 'PASAJERO / USUARIO'
     };
 
-    // Construye la URL de enrutamiento asignando el parámetro de rol
+    // Mapeo directo a las rutas amigables declaradas en AppRouter.jsx
+    const RUTAS_AMIGABLES_ROL = {
+        mototaxi: '/mototaxi',
+        motoparrillero: '/moto-parrillero',
+        motocarga: '/motocarga',
+        despachador: '/despachador',
+        intermunicipal: '/intermunicipal',
+        pasajero: '/pasajero'
+    };
+
+    // Construye la URL de enrutamiento directo según la matriz de AppRouter
     const getRutaDestinoRol = (role = rolSeleccionado, base = baseUrlActiva) => {
         const rolLimpio = (role || '').trim().toLowerCase();
-        return `${base}/register?role=${rolLimpio}`;
+        const subRuta = RUTAS_AMIGABLES_ROL[rolLimpio] || `/login?role=${rolLimpio}`;
+        return `${base}${subRuta}`;
     };
 
     const targetUrlString = getRutaDestinoRol();
