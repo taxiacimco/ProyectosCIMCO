@@ -1,8 +1,8 @@
-// Versión Arquitectura: V14.6 - Estandarización de Colección de Billetera y Limpieza de Select de Modalidad Flota
+// Versión Arquitectura: V14.7 - Integración de Punto de Recogida GPS Editable y Dirección de Destino en Tarjeta Formulario Pasajero
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
- * Misión: Emisión activa de telemetría, solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS), edición de perfil y pasarela de billetera.
- * Ajuste V14.6: Estandarización de la lectura de la billetera desde FIRESTORE_PATHS.wallets con fallback retrocompatible hacia usuarios y corrección del string de selección intermunicipal.
+ * Misión: Emisión activa de telemetría, solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS), edición de perfil, pasarela de billetera y selección avanzada de punto de recogida + destino.
+ * Ajuste V14.7: Reestructuración de la tarjeta del formulario de la orden para incluir el campo de Punto de Recogida GPS editable y Dirección de Destino.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -12,7 +12,7 @@ import { signInAnonymously } from 'firebase/auth';
 import { useAuth } from '@/hooks/useAuth';
 import { useGpsGuard } from '@/hooks/useGpsGuard';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, DollarSign, Send, MessageSquare, Activity, Wallet, QrCode, Banknote, ShieldAlert, User, Edit3, X, CreditCard } from 'lucide-react';
+import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, DollarSign, Send, MessageSquare, Activity, Wallet, QrCode, Banknote, ShieldAlert, User, Edit3, X, CreditCard, Crosshair } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import GpsRequiredModal from '@/components/shared/GpsRequiredModal';
@@ -74,6 +74,7 @@ const HomePasajero = () => {
     const [conductoresActivos, setConductoresActivos] = useState([]);
     const [tipoServicio, setTipoServicio] = useState('mototaxi');
     const [metodoPago, setMetodoPago] = useState('EFECTIVO');
+    const [origenText, setOrigenText] = useState('Ubicación actual (GPS)');
     const [destinoText, setDestinoText] = useState('');
     const [estadoViaje, setEstadoViaje] = useState('IDLE'); 
     const [datosConductor, setDatosConductor] = useState(null);
@@ -347,6 +348,7 @@ const HomePasajero = () => {
                 nombrePasajero: perfilFirestore.nombre,
                 tipoServicio,
                 metodoPago,
+                origen: origenText.trim() || 'Ubicación actual (GPS)',
                 destino: destinoText.trim(),
                 estado: 'BUSCANDO',
                 coordenadasInicio: { lat: coordsActuales[0], lng: coordsActuales[1] },
@@ -414,7 +416,7 @@ const HomePasajero = () => {
                     </div>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.6</span>
+                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.7</span>
                         </h1>
                         <div className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
@@ -455,22 +457,45 @@ const HomePasajero = () => {
                     {seccionActiva === 'radar' && (
                         <>
                             {estadoViaje === 'IDLE' && (
-                                <div className="p-5 rounded-2xl border border-white/5 bg-[#121214]/60 relative overflow-hidden group transition-all duration-300 hover:border-white/10">
+                                <div className="p-5 rounded-2xl border border-white/5 bg-[#121214]/60 relative overflow-hidden group transition-all duration-300 hover:border-white/10 shadow-xl">
                                     <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-2xl pointer-events-none" />
                                     <h2 className="text-xs font-black uppercase tracking-widest text-cyan-400 mb-4 flex items-center gap-2">
                                         <Compass size={14} className="animate-spin-slow" /> Configurar Nueva Orden
                                     </h2>
                                     <form onSubmit={handleSolicitarServicio} className="flex flex-col gap-4">
+                                        {/* PUNTO DE RECOGIDA GPS EDITABLE */}
                                         <div className="flex flex-col gap-1.5">
-                                            <label className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold">Destino de Arribo</label>
+                                            <label className="text-[10px] uppercase tracking-widest text-emerald-400 font-bold flex items-center gap-1">
+                                                <Crosshair size={12} className="text-emerald-400 animate-pulse" />
+                                                Punto de Recogida (GPS)
+                                            </label>
                                             <div className="relative">
-                                                <MapPin size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                                                <MapPin size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-500" />
+                                                <input 
+                                                    type="text"
+                                                    value={origenText}
+                                                    onChange={(e) => setOrigenText(e.target.value)}
+                                                    placeholder="Ej: Ubicación actual (GPS) o Mi Casa"
+                                                    className="w-full bg-[#161619] border border-emerald-500/20 rounded-xl py-3 pl-10 pr-4 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* DIRECCIÓN DE DESTINO */}
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="text-[10px] uppercase tracking-widest text-cyan-400 font-bold flex items-center gap-1">
+                                                <Navigation size={12} className="text-cyan-400" />
+                                                Dirección de Destino
+                                            </label>
+                                            <div className="relative">
+                                                <MapPin size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-cyan-500" />
                                                 <input 
                                                     type="text"
                                                     value={destinoText}
                                                     onChange={(e) => setDestinoText(e.target.value)}
                                                     placeholder="¿A dónde nos dirigimos hoy?"
-                                                    className="w-full bg-[#161619] border border-white/5 rounded-xl py-3 pl-10 pr-4 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/40 focus:ring-1 focus:ring-cyan-500/40 transition-all"
+                                                    className="w-full bg-[#161619] border border-cyan-500/20 rounded-xl py-3 pl-10 pr-4 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 transition-all"
+                                                    required
                                                 />
                                             </div>
                                         </div>

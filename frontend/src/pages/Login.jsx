@@ -1,15 +1,15 @@
-// Versión Arquitectura: V19.25 - Autenticación Híbrida con Regex Telefónico Estricto y CIMCO-UI V9.3
+// Versión Arquitectura: V19.27 - Actualización Visual UI: Pill de Conexión Segura Agnóstico/Dinamizado por Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
  * Misión: Componente de autenticación unificado con soporte híbrido (celular/correo), 
- *         validación por máscara/Regex telefónica, visibilidad de contraseña interactiva 
- *         e intercepción de Query Strings (?role=).
+ *         validación por máscara/Regex telefónica, visibilidad de contraseña interactiva,
+ *         intercepción de Query Strings (?role=) y pill de conexión segura neutral/dinámico.
  */
 
 import React, { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Eye, EyeOff, ShieldAlert, KeyRound, Terminal, UserPlus, HelpCircle, Phone, Mail } from 'lucide-react';
+import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail } from 'lucide-react';
 
 // Expresión regular para validar celulares (Soporta formato celular CO de 10 dígitos o formato int. E.164 de 7-15 dígitos)
 const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
@@ -115,28 +115,28 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070709] flex flex-col items-center justify-center p-4 relative overflow-hidden select-none font-sans">
+    <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center p-4 relative overflow-hidden select-none font-sans">
       
       {/* VECTOR ESTÉTICO DE FONDO */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-cyan-500/5 rounded-full blur-[120px] pointer-events-none z-0" />
       <div className="absolute top-1/3 left-1/4 w-[300px] h-[300px] bg-yellow-500/[0.02] rounded-full blur-[100px] pointer-events-none z-0" />
 
       {/* CONTENEDOR CENTRAL NEO-GLASSMORPHISM */}
-      <div className="w-full max-w-[420px] backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-8 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.9)] relative z-10 transition-all duration-500">
+      <div className="w-full max-w-[420px] backdrop-blur-md bg-[#1E293B]/80 border border-white/10 rounded-3xl p-8 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.9)] relative z-10 transition-all duration-500">
         
         {/* ENCABEZADO DE CONSOLA */}
         <div className="text-center mb-8 relative">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-cyan-500/[0.06] border border-cyan-500/10 rounded-full mb-4">
-            <Terminal size={10} className="text-cyan-400 animate-pulse" />
-            <span className="text-[9px] font-mono tracking-[0.25em] text-cyan-400 uppercase font-black">
-              SECURE_HANDSHAKE_V19.25
+          <div className="flex items-center justify-center gap-2 px-3 py-1 bg-cyan-950/40 border border-cyan-500/30 rounded-full w-fit mx-auto mb-4">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+            <span className="text-xs font-semibold text-cyan-300 tracking-wide uppercase">
+              Conexión Segura {roleParam ? `- ${roleParam.toUpperCase()}` : ''}
             </span>
           </div>
           <h1 className="text-white font-black text-3xl tracking-tighter uppercase font-sans">
             TAXIA<span className="text-cyan-500 ml-1.5 font-bold tracking-widest text-2xl">CIMCO</span>
           </h1>
-          <p className="text-zinc-500 font-mono text-[9px] uppercase tracking-[0.2em] mt-1.5 font-bold">
-            Consola de Autenticación de Operadores
+          <p className="text-xs font-medium text-slate-400 text-center uppercase tracking-wider mt-2 mb-2">
+            Centro Inteligente de Movilidad Colombia
           </p>
         </div>
 
@@ -166,11 +166,11 @@ const Login = () => {
           
           {/* CAMPO: IDENTIFICADOR TELEFÓNICO / CORREO CON DETECCIÓN DINÁMICA DE ICONO */}
           <div className="space-y-1.5">
-            <label className="text-zinc-500 font-mono text-[9px] uppercase tracking-widest font-black pl-1 flex items-center gap-1.5">
+            <label className="text-slate-400 text-xs font-medium pl-1 flex items-center gap-1.5">
               {isEmailInput ? (
-                <Mail size={11} className="text-cyan-400" />
+                <Mail size={13} className="text-cyan-400" />
               ) : (
-                <Phone size={11} className="text-cyan-400" />
+                <Phone size={13} className="text-cyan-400" />
               )}
               <span>Identificador Operativo (Celular o Correo)</span>
             </label>
@@ -180,7 +180,7 @@ const Login = () => {
                 placeholder="EJ: 3001234567 O OPERADOR@CORREO.COM"
                 disabled={loading}
                 maxLength={isEmailInput ? 100 : 15}
-                className="w-full bg-[#0a0a0c]/60 border border-white/5 rounded-xl py-3.5 px-4 text-zinc-100 font-mono text-xs placeholder:text-zinc-700 tracking-wider focus:outline-none focus:border-cyan-500/30 focus:bg-[#0f0f12] transition-all disabled:opacity-50"
+                className="w-full bg-[#0f172a]/60 border border-white/10 rounded-xl py-3.5 px-4 text-slate-100 text-xs placeholder:text-slate-500 tracking-wider focus:outline-none focus:border-cyan-500/50 focus:bg-[#0f172a] transition-all disabled:opacity-50"
                 value={identifier}
                 onChange={handleIdentifierChange}
                 required
@@ -191,7 +191,7 @@ const Login = () => {
           {/* CAMPO: LLAVE DE ACCESO */}
           <div className="space-y-1.5">
             <div className="flex justify-between items-center pl-1">
-              <label className="text-zinc-500 font-mono text-[9px] uppercase tracking-widest font-black block">
+              <label className="text-slate-400 text-xs font-medium block">
                 Clave de Acceso
               </label>
             </div>
@@ -200,7 +200,7 @@ const Login = () => {
                 type={showPassword ? "text" : "password"}
                 placeholder="••••••••••••"
                 disabled={loading}
-                className="w-full bg-[#0a0a0c]/60 border border-white/5 rounded-xl py-3.5 pl-4 pr-12 text-zinc-100 font-mono text-xs placeholder:text-zinc-700 tracking-[0.25em] focus:outline-none focus:border-cyan-500/30 focus:bg-[#0f0f12] transition-all disabled:opacity-50"
+                className="w-full bg-[#0f172a]/60 border border-white/10 rounded-xl py-3.5 pl-4 pr-12 text-slate-100 text-xs placeholder:text-slate-500 tracking-[0.25em] focus:outline-none focus:border-cyan-500/50 focus:bg-[#0f172a] transition-all disabled:opacity-50"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -210,7 +210,7 @@ const Login = () => {
                 tabIndex="-1"
                 disabled={loading}
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors bg-transparent border-none outline-none cursor-pointer p-0 block disabled:opacity-30"
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors bg-transparent border-none outline-none cursor-pointer p-0 block disabled:opacity-30"
               >
                 {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
@@ -221,30 +221,30 @@ const Login = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-cyan-600 to-cyan-700 hover:from-cyan-500 hover:to-cyan-600 disabled:from-cyan-900/40 disabled:to-cyan-900/40 disabled:opacity-40 text-black font-mono font-black text-[10px] uppercase tracking-[0.3em] py-4 rounded-xl transition-all duration-300 shadow-[0_0_20px_rgba(6,182,212,0.15)] hover:shadow-[0_0_30px_rgba(6,182,212,0.3)] active:scale-[0.98] cursor-pointer disabled:cursor-not-allowed mt-2 flex items-center justify-center gap-2"
+            className="w-full py-3.5 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg transition-all transform active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed mt-2"
           >
-            <KeyRound size={12} className="text-black shrink-0" />
-            {loading ? "SÍNCRO_NODO..." : "ABRIR_SESION_TACTICA"}
+            <KeyRound size={14} className="text-white shrink-0" />
+            <span>{loading ? "Sincronizando..." : "Iniciar sesión"}</span>
           </button>
 
         </form>
 
         {/* PASARELA DE ENLACES PERIMETRALES */}
-        <div className="mt-8 pt-6 border-t border-white/[0.05] grid grid-cols-2 gap-4 relative z-10">
+        <div className="mt-8 pt-6 border-t border-white/[0.08] grid grid-cols-2 gap-4 relative z-10">
           <button 
             type="button"
             onClick={handleRegisterRedirect}
-            className="flex flex-col items-center gap-2 p-3 rounded-xl border border-white/5 hover:border-cyan-500/30 bg-black/20 transition-all text-decoration-none group cursor-pointer w-full bg-transparent outline-none"
+            className="flex flex-col items-center gap-2 p-3 rounded-xl border border-white/10 hover:border-cyan-500/40 bg-slate-900/40 transition-all text-decoration-none group cursor-pointer w-full outline-none"
           >
-            <UserPlus size={16} className="text-cyan-500 group-hover:scale-110 transition-transform" />
-            <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 group-hover:text-cyan-400 transition-colors">Crear Cuenta</span>
+            <UserPlus size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-medium text-slate-300 group-hover:text-cyan-300 transition-colors">Crear Cuenta</span>
           </button>
           <Link 
             to="/forgot-password" 
-            className="flex flex-col items-center gap-2 p-3 rounded-xl border border-white/5 hover:border-yellow-500/30 bg-black/20 transition-all text-decoration-none group"
+            className="flex flex-col items-center gap-2 p-3 rounded-xl border border-white/10 hover:border-yellow-500/40 bg-slate-900/40 transition-all text-decoration-none group"
           >
-            <HelpCircle size={16} className="text-yellow-500 group-hover:scale-110 transition-transform" />
-            <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400 group-hover:text-yellow-400 transition-colors">Soporte TI</span>
+            <HelpCircle size={16} className="text-yellow-400 group-hover:scale-110 transition-transform" />
+            <span className="text-xs font-medium text-slate-300 group-hover:text-yellow-300 transition-colors">Soporte TI</span>
           </Link>
         </div>
 
