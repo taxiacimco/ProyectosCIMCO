@@ -1,10 +1,10 @@
-// Versión Arquitectura: V16.4 - Depuración Definitiva de saldoWallet e Integración de Guardas Billetera
+// Versión Arquitectura: V16.9 - Integración Estado Administrativo PENDIENTE y Aprobación Manual
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
- * Integridad: Fusión Atómica. Eliminación estricta de la clave obsoleta 'saldoWallet', consolidación
- * en el estándar único 'saldo' y adición de hooks pre-save/pre-update para sanitización transaccional
- * y prevención de reinyección de campos duplicados.
+ * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
+ * unificación de billetera en 'saldo', índice 2dsphere) e integra el estado administrativo de aprobación
+ * manual ('PENDIENTE', 'APROBADO', 'SUSPENDIDO', 'RECHAZADO') con 'PENDIENTE' e isActive: false por defecto.
  */
 
 import mongoose from 'mongoose';
@@ -38,6 +38,10 @@ const ConductorSchema = new mongoose.Schema({
         required: true,
         unique: true, 
         sparse: true 
+    },
+    telefonoMovil: {
+        type: String,
+        sparse: true
     },
     password: { 
         type: String, 
@@ -87,30 +91,36 @@ const ConductorSchema = new mongoose.Schema({
         trim: true,
         default: 'Particular'
     },
+    // 🔴 SEGURIDAD Y APROBACIÓN ADMINISTRATIVA: Estado de auditoría manual
+    estadoAdministrativo: {
+        type: String,
+        enum: ['PENDIENTE', 'APROBADO', 'SUSPENDIDO', 'RECHAZADO'],
+        default: 'PENDIENTE',
+        uppercase: true
+    },
     // Campo tradicional extendido para soportar los estados del controlador
     estado: { 
         type: String, 
-        enum: ['active', 'busy', 'offline', 'disponible', 'ocupado', 'en_ruta', 'asignado'],
-        default: 'offline',
-        lowercase: true 
+        enum: ['active', 'busy', 'offline', 'disponible', 'ocupado', 'en_ruta', 'asignado', 'PENDIENTE', 'APROBADO', 'SUSPENDIDO', 'RECHAZADO'],
+        default: 'PENDIENTE' 
     },
     // 🛡️ GUARDA SEMÁNTICA OPERATIVA: Control atómico e inequívoco para bloqueos transaccionales rápidos
     estadoOperativo: {
         type: String,
         enum: ['DISPONIBLE', 'OCUPADO', 'NO_DISPONIBLE'],
-        default: 'DISPONIBLE',
+        default: 'NO_DISPONIBLE',
         uppercase: true
     },
     isActive: { 
         type: Boolean, 
-        default: true 
+        default: false 
     },
     uid: { 
         type: String 
     },
     flota_id: { 
         type: String, 
-        default: null 
+        default: 'GENERAL' 
     },
     viajeActualId: {
         type: String,
@@ -139,18 +149,27 @@ const ConductorSchema = new mongoose.Schema({
 // Índices optimizados para el motor de geolocalización y bloqueos transaccionales
 ConductorSchema.index({ ubicacion: "2dsphere" });
 ConductorSchema.index({ estadoOperativo: 1 });
+ConductorSchema.index({ estadoAdministrativo: 1 });
 
 // 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados, Geometría y Sanitización Financiera Anti-Undefined
 ConductorSchema.pre('save', function(next) {
     const cond = this;
 
-    // Sincronización automática del estado operativo semántico basado en el estado transaccional o viaje asignado
-    if (cond.isModified('estado') || cond.isModified('viajeActualId')) {
-        const est = cond.estado ? String(cond.estado).toLowerCase() : 'offline';
+    // Sincronización de espejo para teléfono y teléfonoMóvil
+    if (cond.telefono && !cond.telefonoMovil) {
+        cond.telefonoMovil = cond.telefono;
+    }
+
+    // Normalización de Estado Administrativo vs Estado Operativo
+    if (cond.isModified('estado') || cond.isModified('estadoAdministrativo') || cond.isModified('viajeActualId')) {
+        const est = cond.estado ? String(cond.estado).toUpperCase() : 'PENDIENTE';
         
-        if (cond.viajeActualId || ['busy', 'ocupado', 'en_ruta', 'asignado'].includes(est)) {
+        if (['PENDIENTE', 'SUSPENDIDO', 'RECHAZADO'].includes(est) || cond.estadoAdministrativo === 'PENDIENTE') {
+            cond.isActive = false;
+            cond.estadoOperativo = 'NO_DISPONIBLE';
+        } else if (cond.viajeActualId || ['BUSY', 'OCUPADO', 'EN_RUTA', 'ASIGNADO'].includes(est)) {
             cond.estadoOperativo = 'OCUPADO';
-        } else if (['active', 'disponible'].includes(est)) {
+        } else if (['ACTIVE', 'DISPONIBLE', 'APROBADO'].includes(est)) {
             cond.estadoOperativo = 'DISPONIBLE';
         } else {
             cond.estadoOperativo = 'NO_DISPONIBLE';

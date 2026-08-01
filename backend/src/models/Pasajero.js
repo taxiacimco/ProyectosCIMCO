@@ -1,10 +1,9 @@
-// Versión Arquitectura: V16.8 - Eliminación de Índice Duplicado UID en Modelo Pasajero
+// Versión Arquitectura: V16.9 - Homologación de Modelo Pasajero para Aprobación Automática e Ingreso Directo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
- * Integridad: Depuración de índice explícito en la propiedad `uid` para silenciar la advertencia
- * de duplicidad en Mongoose, manteniendo la restricción sparse en la definición de campo
- * e índice GeoJSON 2dsphere activo.
+ * Integridad: Fusión Atómica. Preserva cifrado Bcrypt, esquema de direcciones favoritas, soporte
+ * GeoJSON 2dsphere y garantiza aprobación automática inmediata (`isActive: true`, `estado: 'APROBADO'`).
  */
 
 import mongoose from 'mongoose';
@@ -58,9 +57,10 @@ const pasajeroSchema = new mongoose.Schema({
         type: String,
         default: 'pasajero'
     },
+    // 🟢 APROBACIÓN AUTOMÁTICA: Nace APROBADO/activo por defecto para evitar fricciones de registro
     estado: {
         type: String,
-        default: 'offline'
+        default: 'APROBADO'
     },
     isActive: {
         type: Boolean,
@@ -103,7 +103,7 @@ const pasajeroSchema = new mongoose.Schema({
     versionKey: false
 });
 
-// Índices optimizados (se remueve declaración duplicada de uid)
+// Índices optimizados
 pasajeroSchema.index({ "coordenadas.coordinates": "2dsphere" }, { background: true });
 
 // 🛡️ Sincronización Homóloga de Variables y Cifrado

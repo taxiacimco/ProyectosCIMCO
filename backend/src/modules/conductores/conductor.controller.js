@@ -1,7 +1,7 @@
-// Versión Arquitectura: V17.0 - Módulo Conductores: Atómico, Auditable y Multi-Subrol
+// Versión Arquitectura: V18.0 - Módulo Conductores: Atómico, Auditable, Multi-Subrol y Control de Aprobación
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión unificada de operarios, telemetría GPS, recargas atómicas, auditoría en Firestore y radar.
+ * Misión: Gestión unificada de operarios, aprobación administrativa, telemetría GPS, recargas atómicas y sincronización Firestore.
  */
 
 import mongoose from 'mongoose';
@@ -74,8 +74,114 @@ export const verificarBypassDesarrollo = (req, res, next) => {
 };
 
 // ==================================================================
-// 1. CONSULTAS LOGÍSTICAS BÁSICAS Y COMPATIBILIDAD
+// 1. GESTIÓN ADMINISTRATIVA Y REGISTRO (APROBACIÓN Y ESTADOS)
 // ==================================================================
+
+/**
+ * 🟢/🔴 CAMBIAR ESTADO DEL CONDUCTOR (Secretaría / Administración)
+ * Permite cambiar el estado a 'APROBADO', 'SUSPENDIDO', 'RECHAZADO' o 'PENDIENTE'.
+ */
+export const cambiarEstadoConductor = async (req, res) => {
+    try {
+        const targetId = req.params.id || req.params.uid || req.body.conductorId;
+        const { nuevoEstado, estado } = req.body;
+        
+        const estadoFinal = String(nuevoEstado || estado || '').toUpperCase().trim();
+
+        if (!targetId) {
+            return res.status(400).json({ success: false, message: "⚠️ Identificador de conductor requerido." });
+        }
+
+        const estadosValidos = ['APROBADO', 'SUSPENDIDO', 'RECHAZADO', 'PENDIENTE'];
+        if (!estadosValidos.includes(estadoFinal)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: `Estado no válido. Los estados permitidos son: ${estadosValidos.join(', ')}` 
+            });
+        }
+
+        const estaAprobado = estadoFinal === 'APROBADO';
+
+        const conductor = await Conductor.findOneAndUpdate(
+            {
+                $or: [
+                    { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                    { uid: targetId },
+                    { conductorId: targetId }
+                ]
+            },
+            { 
+                $set: { 
+                    estado: estadoFinal,
+                    estadoAdministrativo: estadoFinal,
+                    isActive: estaAprobado,
+                    // Si se suspende o rechaza, se apaga de la malla automáticamente
+                    ...(!estaAprobado && { isOnline: false, estadoOperativo: 'NO_DISPONIBLE' })
+                },
+                $unset: { saldoWallet: "" }
+            },
+            { new: true, runValidators: true }
+        ).lean();
+
+        if (!conductor) {
+            return res.status(404).json({ success: false, message: 'Conductor no encontrado' });
+        }
+
+        delete conductor.saldoWallet;
+
+        // Sincronización en tiempo real hacia Firestore
+        if (dbFirestore) {
+            try {
+                const docFirestoreId = conductor.uid || conductor._id.toString();
+                const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+                
+                await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
+                    estado: estadoFinal,
+                    estadoAdministrativo: estadoFinal,
+                    isActive: estaAprobado,
+                    ...(!estaAprobado && { isOnline: false, estadoOperativo: 'NO_DISPONIBLE' }),
+                    ultimaActualizacion: FieldValue.serverTimestamp()
+                }, { merge: true });
+            } catch (fsErr) {
+                console.warn("⚠️ [SYNC-WARN] Falló réplica de cambio de estado a Firestore:", fsErr.message);
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `El conductor ahora está ${estadoFinal}`,
+            data: conductor
+        });
+
+    } catch (error) {
+        console.error("🚨 [CONDUCTORES-CAMBIAR-ESTADO-FATAL]:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * 📋 OBTENER TODOS LOS CONDUCTORES (Consola de Administración / Secretaría)
+ */
+export const obtenerTodosConductores = async (req, res) => {
+    try {
+        const conductores = await Conductor.find().sort({ createdAt: -1 }).lean();
+        const conductoresSanitizados = conductores.map(c => {
+            delete c.saldoWallet;
+            return c;
+        });
+
+        return res.status(200).json({ 
+            success: true, 
+            total: conductoresSanitizados.length,
+            data: conductoresSanitizados 
+        });
+    } catch (error) {
+        console.error("🚨 [CONDUCTORES-OBTENER-TODOS-FATAL]:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+export const obtenerConductores = obtenerTodosConductores;
 
 export const registrarConductor = async (req, res) => {
     try {
@@ -84,6 +190,14 @@ export const registrarConductor = async (req, res) => {
         }
         
         const payloadSanitizado = sanitizarPayloadConductor(req.body);
+        
+        // Forzar estado PENDIENTE en el registro manual directo si no se especifica
+        if (!payloadSanitizado.estado) {
+            payloadSanitizado.estado = 'PENDIENTE';
+            payloadSanitizado.estadoAdministrativo = 'PENDIENTE';
+            payloadSanitizado.isActive = false;
+        }
+
         const nuevoConductor = new Conductor(payloadSanitizado);
         await nuevoConductor.save();
 
@@ -96,9 +210,10 @@ export const registrarConductor = async (req, res) => {
                 nombre: nuevoConductor.nombre,
                 email: nuevoConductor.email,
                 telefono: nuevoConductor.telefonoMovil,
-                estado: nuevoConductor.estado || 'inactive',
+                estado: nuevoConductor.estado,
+                estadoAdministrativo: nuevoConductor.estadoAdministrativo || nuevoConductor.estado,
                 subrol: nuevoConductor.subrol || nuevoConductor.tipoVehiculo || 'mototaxi',
-                isActive: nuevoConductor.isActive ?? true,
+                isActive: nuevoConductor.isActive ?? false,
                 createdAt: new Date().toISOString()
             }, { merge: true });
 
@@ -115,20 +230,6 @@ export const registrarConductor = async (req, res) => {
         }
         
         return res.status(201).json({ success: true, data: nuevoConductor });
-    } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-export const obtenerConductores = async (req, res) => {
-    try {
-        const conductores = await Conductor.find().lean();
-        const conductoresSanitizados = conductores.map(c => {
-            delete c.saldoWallet;
-            return c;
-        });
-
-        return res.status(200).json({ success: true, data: conductoresSanitizados });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -253,7 +354,10 @@ export const eliminarConductor = async (req, res) => {
 export const obtenerConductoresDisponibles = async (req, res) => {
     try {
         const conductoresDisponibles = await Conductor.find({ 
-            $or: [{ estado: 'active' }, { estado: 'disponible' }]
+            $and: [
+                { $or: [{ estado: 'APROBADO' }, { estado: 'activo' }, { estado: 'active' }, { estado: 'disponible' }] },
+                { isActive: true }
+            ]
         }).lean();
         
         const dataLimpia = conductoresDisponibles.map(c => {
@@ -583,9 +687,13 @@ export const obtenerHistorialSaldos = async (req, res) => {
 export const obtenerHistorialConductor = obtenerHistorialSaldos;
 
 // ==================================================================
-// 3. CONTROL DE ESTADO OPERATIVO Y RADAR DE PROXIMIDAD
+// 3. CONTROL DE ESTADO OPERATIVO (ENCENDIDO DE MALLA) Y RADAR
 // ==================================================================
 
+/**
+ * 🔒 ACTUALIZAR ESTADO OPERATIVO / ENCENDER MALLA
+ * Restringe el paso a 'ONLINE', 'active' o 'disponible' únicamente a conductores con estado 'APROBADO' e 'isActive: true'.
+ */
 export const actualizarEstadoConductor = async (req, res) => {
     try {
         if (!req || !req.body) {
@@ -593,40 +701,60 @@ export const actualizarEstadoConductor = async (req, res) => {
         }
         
         const id = req.params.id || req.params.uid || req.body.conductorId || req.body.id;
-        const { estado } = req.body; 
+        const { estado, isOnline } = req.body; 
 
         if (!id) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
 
-        if (!['active', 'inactive', 'suspended', 'busy', 'offline', 'disponible', 'ocupado'].includes(estado)) {
-            return res.status(400).json({ success: false, message: "⚠️ Estado operativo inválido." });
+        // Búsqueda previa del conductor para verificar acreditación
+        const conductorExistente = await Conductor.findOne({
+            $or: [
+                { _id: mongoose.Types.ObjectId.isValid(id) ? id : null },
+                { uid: id },
+                { conductorId: id }
+            ]
+        });
+
+        if (!conductorExistente) {
+            return res.status(404).json({ success: false, message: "Conductor no localizado en el sistema." });
+        }
+
+        const estadoActual = String(conductorExistente.estado || conductorExistente.estadoAdministrativo || '').toUpperCase();
+        const estaAprobado = (estadoActual === 'APROBADO' || estadoActual === 'ACTIVO') && conductorExistente.isActive === true;
+
+        const intentaEncender = isOnline === true || ['active', 'disponible', 'active', 'ONLINE'].includes(estado);
+
+        // 🛑 COMPUERTA DE SEGURIDAD: Bloquear encendido si no está APROBADO
+        if (intentaEncender && !estaAprobado) {
+            return res.status(403).json({
+                success: false,
+                code: 'DRIVER_NOT_APPROVED',
+                message: "Acceso denegado: Su cuenta debe estar en estado APROBADO para poder encender la malla y recibir servicios."
+            });
         }
 
         const conductor = await Conductor.findOneAndUpdate(
-            {
-                $or: [
-                    { _id: mongoose.Types.ObjectId.isValid(id) ? id : null },
-                    { uid: id },
-                    { conductorId: id }
-                ]
+            { _id: conductorExistente._id },
+            { 
+                $set: { 
+                    estado,
+                    ...(isOnline !== undefined && { isOnline }),
+                    ...(intentaEncender && { estadoOperativo: 'DISPONIBLE' })
+                } 
             },
-            { $set: { estado } },
             { new: true }
         );
-
-        if (!conductor) {
-            return res.status(404).json({ success: false, message: "Conductor no localizado en Atlas." });
-        }
 
         const docFirestoreId = conductor.uid || conductor._id.toString();
         const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
         await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
             estado,
+            isOnline: conductor.isOnline ?? intentaEncender,
             ultimaActualizacion: FieldValue.serverTimestamp()
         }, { merge: true });
 
-        return res.status(200).json({ success: true, message: `Estado actualizado a ${estado}`, data: conductor });
+        return res.status(200).json({ success: true, message: `Estado operativo actualizado a ${estado}`, data: conductor });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -656,7 +784,11 @@ export const obtenerConductoresCercanos = async (req, res) => {
                     near: { type: "Point", coordinates: [longitud, latitud] },
                     distanceField: "distanciaMetros",
                     maxDistance: radioMetros,
-                    query: { estado: { $in: ["active", "disponible"] } }, 
+                    // Solo proyectar en el radar conductores APROBADOS e isActive: true
+                    query: { 
+                        estado: { $in: ["active", "disponible", "APROBADO"] },
+                        isActive: true
+                    }, 
                     spherical: true
                 }
             },
@@ -693,36 +825,45 @@ export const actualizarRadarUbicacion = async (conductorId, lat, lng) => {
             return false;
         }
 
-        const conductor = await Conductor.findOneAndUpdate(
-            {
-                $or: [
-                    { _id: mongoose.Types.ObjectId.isValid(conductorId) ? conductorId : null },
-                    { uid: conductorId },
-                    { conductorId: conductorId }
-                ]
-            },
+        // Verificar acreditación antes de actualizar ubicación en vivo
+        const conductor = await Conductor.findOne({
+            $or: [
+                { _id: mongoose.Types.ObjectId.isValid(conductorId) ? conductorId : null },
+                { uid: conductorId },
+                { conductorId: conductorId }
+            ]
+        });
+
+        if (!conductor) return false;
+
+        const estadoActual = String(conductor.estado || conductor.estadoAdministrativo || '').toUpperCase();
+        if ((estadoActual !== 'APROBADO' && estadoActual !== 'ACTIVO') || conductor.isActive === false) {
+            console.warn(`🔒 [RADAR-REJECT] El conductor ${conductor._id} intentó enviar GPS sin estar APROBADO.`);
+            return false;
+        }
+
+        const conductorActualizado = await Conductor.findOneAndUpdate(
+            { _id: conductor._id },
             {
                 $set: {
                     'coordenadas.type': 'Point',
                     'coordenadas.coordinates': [longNum, latNum],
                     'ubicacion.type': 'Point',
-                    'ubicacion.coordinates': [longNum, latNum],
-                    estado: 'active' 
+                    'ubicacion.coordinates': [longNum, latNum]
                 }
             },
             { new: true, upsert: false }
         );
 
-        if (!conductor) return false;
+        if (!conductorActualizado) return false;
 
-        const docFirestoreId = conductor.uid || conductor._id.toString();
+        const docFirestoreId = conductorActualizado.uid || conductorActualizado._id.toString();
         const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
         await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
             coordenadas: {
                 latitude: latNum,
                 longitude: longNum
             },
-            estado: 'active',
             ultimaActualizacion: FieldValue.serverTimestamp()
         }, { merge: true });
 
@@ -748,7 +889,7 @@ export const actualizarUbicacionGPS = async (req, res) => {
 
         const exito = await actualizarRadarUbicacion(id, lat, lng);
         if (!exito) {
-            return res.status(500).json({ success: false, message: "Error procesando coordenadas." });
+            return res.status(403).json({ success: false, message: "Error procesando coordenadas o conductor no aprobado." });
         }
 
         return res.status(200).json({ success: true, message: "Telemetría sincronizada correctamente." });

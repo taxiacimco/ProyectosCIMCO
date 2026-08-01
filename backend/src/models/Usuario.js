@@ -1,9 +1,9 @@
-// Versión Arquitectura: V16.5 - Modelo Usuario con Extensión Despachador Terminal y Billetera Unificada
+// Versión Arquitectura: V16.9 - Modelo Usuario con Soporte de Activación Directa y Aprobación de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva sincronización bidireccional (rol ↔ role, saldo ↔ balance), hashing bcrypt,
- * campos de geolocalización GeoJSON y agrega atributos dedicados para la gestión de despachadores de terminales (terminal_id, codigoDespachador).
+ * atributos para despachadores de terminales y asegura compatibilidad de estados activos inmediatos para usuarios no retenidos.
  */
 
 import mongoose from 'mongoose';
@@ -78,10 +78,10 @@ const usuarioSchema = new mongoose.Schema({
     },
     estado: {
         type: String,
-        enum: ['active', 'inactive', 'suspended', 'offline', 'online', 'activo'],
-        default: 'offline'
+        enum: ['active', 'inactive', 'suspended', 'offline', 'online', 'activo', 'APROBADO', 'PENDIENTE'],
+        default: 'APROBADO'
     },
-    // 🛡️ CAMPO PARA LOGROS DE AUTENTICACIÓN
+    // 🛡️ CAMPO PARA ACTIVACIÓN DIRECTA DE CUENTAS
     isActive: {
         type: Boolean,
         default: true

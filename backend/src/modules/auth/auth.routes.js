@@ -1,7 +1,9 @@
-// Versión Arquitectura: V15.11 - Rutas de Autenticación y Perfil
+// Versión Arquitectura: V15.12 - Rutas de Autenticación y Perfil
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
  * Misión: Enrutador perimetral de autenticación alineado con soporte multicamino para perfil.
+ * Integridad: Preserva el interceptor híbrido multipart/form-data, middlewares de validación
+ * de payload y ruteo a las funciones exportadas del auth.controller.js.
  */
 
 import express from 'express'; 

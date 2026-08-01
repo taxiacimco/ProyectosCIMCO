@@ -1,7 +1,8 @@
-// Versión Arquitectura: V21.20 - Inserción Defensiva en Login, Búsqueda Polimórfica y Anti-Crash
+// Versión Arquitectura: V21.21 - Integración Atómica Onboarding Conductores (PENDIENTE) vs Pasajeros (APROBADO)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
- * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros).
+ * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros)
+ * e implementación del flujo diferido de activación (Conductores nacen PENDIENTES/Inactivos; Pasajeros nacen APROBADOS/Activos).
  */
 
 import jwt from 'jsonwebtoken';
@@ -23,8 +24,8 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const otpStore = new Map();
 
 // Mapeo preciso de categorización de roles
-const ROLES_CONDUCTORES = ['conductor', 'mototaxi', 'motoparrillero', 'motocarga', 'intermunicipal'];
-const ROLES_ADMINISTRATIVOS = ['despachador', 'admin', 'ceo'];
+const ROLES_CONDUCTORES = ['conductor', 'mototaxi', 'motoparrillero', 'motocarga', 'intermunicipal', 'conductor_intermunicipal'];
+const ROLES_ADMINISTRATIVOS = ['despachador', 'admin', 'secretaria', 'staff', 'ceo'];
 const ROLES_OPERATIVOS = [...ROLES_CONDUCTORES, ...ROLES_ADMINISTRATIVOS];
 
 // Mantenimiento preventivo: Eliminación de OTPs expirados cada 10 minutos para evitar fugas de memoria
@@ -38,18 +39,22 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 /**
- * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO (POLIMÓRFICO)
+ * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO (POLIMÓRFICO CON FLUJO DIFERIDO DE APROBACIÓN)
  */
 export const register = async (req, res) => {
     try {
-        const { email, password, nombre, telefonoMovil, rol, cooperativa, empresa } = req.body || {};
+        const { email, password, nombre, telefonoMovil, telefono, rol, role, subrol, placa, numeroInterno, cooperativa, empresa } = req.body || {};
 
-        if (!email || !password || !nombre || !telefonoMovil || !rol) {
+        const telFinal = telefonoMovil || telefono;
+        const rolSuministrado = rol || role;
+
+        if (!email || !password || !nombre || !telFinal || !rolSuministrado) {
             return res.status(400).json({ success: false, message: "Todos los campos obligatorios deben ser suministrados." });
         }
 
         const emailLimpio = String(email).toLowerCase().trim();
-        const rolNormalizado = String(rol).toLowerCase().trim();
+        const rolNormalizado = String(rolSuministrado).toLowerCase().trim();
+        const subrolFinal = subrol ? String(subrol).toLowerCase().trim() : (rolNormalizado === 'conductor' ? 'mototaxi' : rolNormalizado);
         const terminalAsignada = cooperativa || empresa || (ROLES_OPERATIVOS.includes(rolNormalizado) ? 'Particular' : 'TAXIA');
 
         // 🛡️ VALIDACIÓN DE DUPLICADOS EN TODAS LAS COLECCIONES (CONCURRENTE)
@@ -65,9 +70,9 @@ export const register = async (req, res) => {
 
         // Validación de Teléfono Duplicado
         const [uTel, cTel, pTel] = await Promise.all([
-            Usuario.findOne({ $or: [{ telefonoMovil }, { telefono: telefonoMovil }] }),
-            Conductor.findOne({ $or: [{ telefonoMovil }, { telefono: telefonoMovil }] }),
-            Pasajero.findOne({ $or: [{ telefonoMovil }, { telefono: telefonoMovil }] })
+            Usuario.findOne({ $or: [{ telefonoMovil: telFinal }, { telefono: telFinal }] }),
+            Conductor.findOne({ $or: [{ telefonoMovil: telFinal }, { telefono: telFinal }] }),
+            Pasajero.findOne({ $or: [{ telefonoMovil: telFinal }, { telefono: telFinal }] })
         ]);
 
         if (uTel || cTel || pTel) {
@@ -80,59 +85,85 @@ export const register = async (req, res) => {
         let esPasajero = false;
         let esConductor = false;
 
+        // 🟢 ROL: PASAJERO (Aprobación e Ingreso Inmediato)
         if (rolNormalizado === 'pasajero') {
             nuevoUsuario = new Pasajero({
                 nombre,
+                fullName: nombre,
                 email: emailLimpio,
                 password: hashedPassword,
                 passwordHash: hashedPassword,
-                telefonoMovil,
-                telefono: telefonoMovil,
+                telefonoMovil: telFinal,
+                telefono: telFinal,
                 rol: 'pasajero',
                 role: 'pasajero',
                 isActive: true,
-                estado: 'activo',
+                estado: 'APROBADO',
                 cooperativa: 'Particular',
-                empresa: 'Particular'
+                empresa: 'Particular',
+                saldo: 0
             });
             esPasajero = true;
-        } else if (ROLES_CONDUCTORES.includes(rolNormalizado)) {
+        } 
+        // 🔴 ROL: CONDUCTOR (Requiere Aprobación Manual por Admin/Secretaría)
+        else if (ROLES_CONDUCTORES.includes(rolNormalizado)) {
+            if (!placa || !numeroInterno) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: "Para el registro de un conductor se requiere la placa y el número interno del vehículo." 
+                });
+            }
+
             nuevoUsuario = new Conductor({
                 nombre,
                 email: emailLimpio,
                 password: hashedPassword,
                 passwordHash: hashedPassword,
-                telefonoMovil,
-                telefono: telefonoMovil,
+                telefonoMovil: telFinal,
+                telefono: telFinal,
                 rol: rolNormalizado,
                 role: rolNormalizado,
+                subrol: subrolFinal,
+                placa: String(placa).toUpperCase().trim(),
+                numeroInterno: String(numeroInterno).trim(),
                 cooperativa: terminalAsignada,
                 empresa: terminalAsignada,
-                isActive: true,
-                estado: 'activo',
-                isOnline: false
+                flota_id: 'GENERAL',
+                
+                // 🔴 RETENCIÓN ADMINISTRATIVA: Nace PENDIENTE e INACTIVO hasta verificación manual
+                estadoAdministrativo: 'PENDIENTE',
+                estado: 'PENDIENTE',
+                estadoOperativo: 'NO_DISPONIBLE',
+                isActive: false,
+                isOnline: false,
+                saldo: 0
             });
             esConductor = true;
-        } else {
+        } 
+        // 🏢 OTROS ROLES DEL SISTEMA (Admins, Secretarías, Despachadores)
+        else {
             nuevoUsuario = new Usuario({
                 nombre,
+                fullName: nombre,
                 email: emailLimpio,
                 password: hashedPassword,
                 passwordHash: hashedPassword,
-                telefonoMovil,
-                telefono: telefonoMovil,
+                telefonoMovil: telFinal,
+                telefono: telFinal,
                 rol: rolNormalizado,
                 role: rolNormalizado,
                 cooperativa: terminalAsignada,
                 empresa: terminalAsignada,
                 isActive: true,
-                estado: 'activo'
+                estado: 'APROBADO',
+                saldo: 0,
+                balance: 0
             });
         }
 
         await nuevoUsuario.save();
 
-        // Sincronización hacia Firebase Firestore con Denormalización Saneada de Wallet
+        // Sincronización hacia Firebase Firestore con Denormalización Saneada de Billetera
         if (dbFirestore) {
             try {
                 const coleccionFirestore = esPasajero 
@@ -145,7 +176,9 @@ export const register = async (req, res) => {
                     nombre: nuevoUsuario.nombre,
                     telefono: nuevoUsuario.telefonoMovil,
                     rol: nuevoUsuario.rol,
-                    isActive: true,
+                    subrol: nuevoUsuario.subrol || null,
+                    estado: nuevoUsuario.estado,
+                    isActive: nuevoUsuario.isActive,
                     cooperativa: nuevoUsuario.cooperativa || 'Particular',
                     empresa: nuevoUsuario.empresa || 'Particular',
                     createdAt: new Date().toISOString()
@@ -153,6 +186,9 @@ export const register = async (req, res) => {
 
                 if (esConductor) {
                     payloadFirestore.isOnline = false;
+                    payloadFirestore.placa = nuevoUsuario.placa;
+                    payloadFirestore.numeroInterno = nuevoUsuario.numeroInterno;
+                    payloadFirestore.estadoAdministrativo = nuevoUsuario.estadoAdministrativo;
                 }
 
                 await dbFirestore.collection(coleccionFirestore).doc(String(nuevoUsuario._id)).set(payloadFirestore);
@@ -173,14 +209,32 @@ export const register = async (req, res) => {
             }
         }
 
+        // Respuesta diferenciada según la categoría del onboarding
+        if (esConductor) {
+            return res.status(201).json({
+                success: true,
+                message: "Registro recibido. Su cuenta está en revisión por la administración.",
+                data: {
+                    id: nuevoUsuario._id,
+                    nombre: nuevoUsuario.nombre,
+                    email: nuevoUsuario.email,
+                    rol: nuevoUsuario.rol,
+                    estado: nuevoUsuario.estado,
+                    isActive: nuevoUsuario.isActive
+                }
+            });
+        }
+
         return res.status(201).json({
             success: true,
-            message: "Registro completado con éxito.",
-            user: {
+            message: "Registro e ingreso completado con éxito.",
+            data: {
                 id: nuevoUsuario._id,
                 nombre: nuevoUsuario.nombre,
                 email: nuevoUsuario.email,
-                rol: nuevoUsuario.rol
+                rol: nuevoUsuario.rol,
+                estado: nuevoUsuario.estado,
+                isActive: nuevoUsuario.isActive
             }
         });
 
@@ -191,7 +245,7 @@ export const register = async (req, res) => {
 };
 
 /**
- * 🔑 INICIO DE SESIÓN POLIMÓRFICO CON TRIPLE COMPROBACIÓN SÍNCRONA (RE-CALIBRADO V21.20)
+ * 🔑 INICIO DE SESIÓN POLIMÓRFICO CON TRIPLE COMPROBACIÓN SÍNCRONA
  */
 export const login = async (req, res) => {
     try {
@@ -230,9 +284,21 @@ export const login = async (req, res) => {
             return res.status(401).json({ success: false, message: "Credenciales de acceso incorrectas o inexistentes." });
         }
 
-        const estaActivo = cuentaEncontrada.isActive !== undefined ? cuentaEncontrada.isActive : (cuentaEncontrada.estado === 'activo');
+        // 🔴 BLOQUEO POR REVISIÓN PENDIENTE / SUSPENSIÓN
+        const estadoEvaluado = cuentaEncontrada.estado ? String(cuentaEncontrada.estado).toUpperCase() : '';
+        const estadoAdmin = cuentaEncontrada.estadoAdministrativo ? String(cuentaEncontrada.estadoAdministrativo).toUpperCase() : '';
+
+        if (estadoEvaluado === 'PENDIENTE' || estadoAdmin === 'PENDIENTE') {
+            return res.status(403).json({
+                success: false,
+                code: 'ACCOUNT_PENDING_APPROVAL',
+                message: "Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación."
+            });
+        }
+
+        const estaActivo = cuentaEncontrada.isActive !== undefined ? cuentaEncontrada.isActive : (['activo', 'APROBADO', 'active'].includes(cuentaEncontrada.estado));
         if (!estaActivo) {
-            return res.status(403).json({ success: false, message: "Esta cuenta se encuentra suspendida. Contacte soporte administrativo." });
+            return res.status(403).json({ success: false, message: "Esta cuenta se encuentra inactiva o suspendida. Contacte soporte administrativo." });
         }
 
         // 🛡️ COMPUERTA DEFENSIVA ANTI-CRASH: Verificar existencia de la hash de la clave
@@ -272,6 +338,7 @@ export const login = async (req, res) => {
                 nombre: cuentaEncontrada.nombre,
                 email: cuentaEncontrada.email,
                 rol: cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero',
+                estado: cuentaEncontrada.estado,
                 telefonoMovil: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono || "",
                 cooperativa: cuentaEncontrada.cooperativa || cuentaEncontrada.empresa || ""
             }

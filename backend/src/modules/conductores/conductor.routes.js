@@ -1,17 +1,18 @@
-// Versión Arquitectura: V12.0 - Definición de Rutas de Conductores
+// Versión Arquitectura: V13.0 - Definición de Rutas de Conductores y Administración
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
- * Misión: Mapeo de endpoints para el ciclo de vida del conductor, telemetría y recargas auditadas.
+ * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría y recargas auditadas.
  */
 
 import express from 'express';
 import Conductor from '../../models/Conductor.js';
 import { 
     registrarConductor, 
-    obtenerConductores, 
+    obtenerTodosConductores, 
     obtenerConductorPorId,
     actualizarConductor,
     eliminarConductor,
+    cambiarEstadoConductor,
     obtenerHistorialConductor, 
     obtenerConductoresDisponibles,
     obtenerConductoresCercanos, 
@@ -58,12 +59,19 @@ const validarTelemetriaRadar = (req, res, next) => {
 };
 
 // ==================================================================
-// 📡 RUTAS PÚBLICAS / DE LOGÍSTICA GENERAL
+// 📡 RUTAS DE ADMINISTRACIÓN Y CONSULTA GENERAL
 // ==================================================================
 router.post('/registrar', registrarConductor);
 router.post('/', registrarConductor);
-router.get('/', obtenerConductores);
+router.get('/', obtenerTodosConductores);
 router.get('/disponibles', obtenerConductoresDisponibles);
+
+/**
+ * 🏢 APROBACIÓN Y CAMBIO DE ESTADO (Secretaría / Admin)
+ */
+router.put('/cambiar-estado/:id', verificarToken, esAdmin, cambiarEstadoConductor);
+router.patch('/cambiar-estado/:id', verificarToken, esAdmin, cambiarEstadoConductor);
+router.put('/:id/estado-admin', verificarToken, esAdmin, cambiarEstadoConductor);
 
 /**
  * 📊 MÉTRICAS ADMINISTRATIVAS
@@ -81,7 +89,7 @@ router.get('/radar/cercanos', validarTelemetriaRadar, obtenerConductoresCercanos
 router.post('/actualizar-ubicacion', actualizarUbicacionGPS);
 
 /**
- * 🔄 ESTADOS
+ * 🔄 ESTADOS OPERATIVOS (Encendido de Malla)
  */
 router.put('/estado', actualizarEstadoConductor);
 
