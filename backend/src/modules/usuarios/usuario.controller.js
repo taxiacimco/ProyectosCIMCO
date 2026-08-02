@@ -1,4 +1,4 @@
-// Versión Arquitectura: V18.0 - Directorio Unificado Unico & Prevención de Duplicados
+// Versión Arquitectura: V19.0 - Integración Atómica de Recarga/Ajuste Gerencial Multi-Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
  * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado y flujo financiero.
@@ -456,6 +456,128 @@ export const recargarSaldoDespachador = async (req, res) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * 💰 Ajuste Manual de Saldo (Abono / Débito - CEO)
+ * Permite abonar saldo o realizar devoluciones/débitos a cualquier usuario.
+ */
+export const recargarSaldo = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+        const targetId = req.params.id || req.body.id || req.body.uid;
+        const { monto, tipoOperacion = 'RECARGA', motivo = 'Ajuste Gerencial' } = req.body;
+        const adminId = req.user?.id || req.user?._id || 'ADMIN_CENTRAL';
+
+        const montoNumerico = parseFloat(monto);
+        if (!targetId || isNaN(montoNumerico) || montoNumerico <= 0) {
+            await session.abortTransaction();
+            return res.status(400).json({ 
+                success: false, 
+                message: "⚠️ Debe proporcionar un ID de usuario válido y un monto mayor a 0." 
+            });
+        }
+
+        // Buscar el usuario objetivo
+        const usuario = await Usuario.findOne({
+            $or: [
+                { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                { uid: targetId }
+            ]
+        }).session(session);
+
+        if (!usuario) {
+            await session.abortTransaction();
+            return res.status(404).json({ success: false, message: "⚠️ Usuario no encontrado." });
+        }
+
+        // Obtener saldo actual (soporta campo `saldoWallet` o `saldo`)
+        const saldoAnterior = Number(usuario.saldoWallet ?? usuario.saldo ?? 0);
+        let deltaSaldo = montoNumerico;
+
+        // Validación estricta para Débito/Devolución
+        if (tipoOperacion === 'DEBITO') {
+            if (saldoAnterior < montoNumerico) {
+                await session.abortTransaction();
+                return res.status(400).json({
+                    success: false,
+                    message: `⚠️ Saldo insuficiente para realizar la devolución. Saldo disponible: $${saldoAnterior.toLocaleString('es-CO')} COP.`
+                });
+            }
+            deltaSaldo = -montoNumerico;
+        }
+
+        // Actualizar el saldo en el modelo
+        const saldoNuevo = saldoAnterior + deltaSaldo;
+        usuario.saldoWallet = saldoNuevo;
+        usuario.saldo = saldoNuevo; // Mantener sincronía de campos
+        await usuario.save({ session });
+
+        // Registrar Historial auditable en MongoDB
+        const nuevoHistorial = new HistorialSaldo({
+            conductor: usuario._id,
+            usuarioId: usuario._id,
+            tipo: tipoOperacion === 'DEBITO' ? 'debito_manual' : 'recarga_manual',
+            monto: deltaSaldo,
+            saldoAnterior,
+            saldoNuevo,
+            referencia: `AJUSTE-${Date.now()}`,
+            descripcion: tipoOperacion === 'DEBITO' 
+                ? `Devolución de Saldo / Débito: ${motivo}` 
+                : `Abono de Saldo / Recarga: ${motivo}`
+        });
+        await nuevoHistorial.save({ session });
+
+        await session.commitTransaction();
+        session.endSession();
+
+        const docFirestoreId = usuario.uid || usuario._id.toString();
+
+        // Espejo de Billetera en Firebase Firestore
+        try {
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                id: docFirestoreId,
+                nombreUsuario: usuario.nombre,
+                saldo: saldoNuevo,
+                saldoWallet: saldoNuevo,
+                balance: saldoNuevo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsWalletErr) {
+            console.warn("⚠️ [FIRESTORE-WALLET-WARN] Error actualizando billetera:", fsWalletErr.message);
+        }
+
+        // Auditoría centralizada en Firestore
+        await registrarTransaccionFirestore({
+            idUsuario: docFirestoreId,
+            rol: usuario.rol || usuario.role || 'usuario',
+            subrol: usuario.subrol || 'general',
+            monto: deltaSaldo,
+            saldoAnterior,
+            saldoNuevo,
+            tipoOperacion: tipoOperacion === 'DEBITO' ? 'DEBITO_GERENCIAL' : 'RECARGA_GERENCIAL',
+            autorizadoPor: adminId,
+            referencia: `AJUSTE-${Date.now()}`
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: tipoOperacion === 'DEBITO' 
+                ? `Devolución de $${montoNumerico.toLocaleString('es-CO')} COP procesada. Nuevo saldo: $${saldoNuevo.toLocaleString('es-CO')} COP`
+                : `Abono de $${montoNumerico.toLocaleString('es-CO')} COP acreditado. Nuevo saldo: $${saldoNuevo.toLocaleString('es-CO')} COP`,
+            saldoNuevo,
+            saldoActual: saldoNuevo,
+            data: { saldoNuevo }
+        });
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error("❌ Error en recargarSaldo:", error);
         return res.status(500).json({ success: false, message: error.message });
     }
 };

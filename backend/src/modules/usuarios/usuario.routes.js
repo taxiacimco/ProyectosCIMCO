@@ -1,7 +1,7 @@
-// Versión Arquitectura: V18.0 - Enrutamiento Jerarquizado de Directorio Global y Usuarios
+// Versión Arquitectura: V19.0 - Enrutamiento Jerarquizado de Directorio Global y Usuarios Multi-Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.routes.js
- * Misión: Enrutamiento seguro y jerarquizado de directorio global unificado, gestión de usuarios, asignación de terminales y recargas.
+ * Misión: Enrutamiento seguro y jerarquizado de directorio global unificado, gestión de usuarios, asignación de terminales y recargas/ajustes gerenciales.
  */
 
 import { Router } from 'express';
@@ -14,7 +14,8 @@ import {
     obtenerDespachadores, 
     asignarTerminalDespachador,
     obtenerSaldoDespachador,
-    recargarSaldoDespachador
+    recargarSaldoDespachador,
+    recargarSaldo
 } from './usuario.controller.js';
 import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
 
@@ -26,14 +27,18 @@ const router = Router();
 router.get('/directorio-global', verificarToken, esAdmin, obtenerDirectorioGlobal);
 
 // ==================================================================
-// 2. RUTAS DE DESPACHADORES (Rutas específicas ordenadas al inicio)
+// 2. RUTAS DE DESPACHADORES Y FINANZAS MULTI-ROL (Rutas específicas ordenadas al inicio)
 // ==================================================================
 router.get('/rol/despachadores', verificarToken, obtenerDespachadores);
 router.post('/despachador/asignar-terminal', verificarToken, esAdmin, asignarTerminalDespachador);
 
-// 💰 FINANZAS Y SALDOS DE DESPACHADORES
+// 💰 FINANZAS Y SALDOS DE DESPACHADORES Y USUARIOS MULTIRROL
 router.get('/despachador/saldo/:id', verificarToken, obtenerSaldoDespachador);
 router.post('/despachador/recargar', verificarToken, esAdmin, recargarSaldoDespachador);
+
+// 💳 ENDPOINTS PARA AJUSTE DE SALDO (ABONO / DÉBITO) POR EL ADMIN
+router.put('/:id/recargar', verificarToken, esAdmin, recargarSaldo);
+router.post('/:id/recargar', verificarToken, esAdmin, recargarSaldo);
 
 // ==================================================================
 // 3. RUTAS PERFIL PROPIO (Soporte por Token)

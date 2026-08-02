@@ -1,7 +1,7 @@
-// Versión Arquitectura: V13.1 - Consola de Recarga Multirrol Universal CIMCO NEXUS con Deduplicación
+// Versión Arquitectura: V14.0 - Consola de Ajuste Multirrol de Saldo (Abono / Débito Manual) CIMCO NEXUS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
- * Misión: Monitoreo global de saldos y ejecución de recargas de capital para todos los actores:
+ * Misión: Monitoreo global de saldos y ejecución de ajustes de capital (Abono / Débito Manual) para todos los actores:
  *         Pasajeros, Mototaxistas, Motoparrilleros, Montacargas, Despachadores y Conductores.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
@@ -14,7 +14,7 @@ import {
     AlertCircle, CheckCircle2, ShieldAlert, ServerOff, Loader
 } from 'lucide-react';
 // 🛡️ IMPORTANTE: Importación del helper de deduplicación
-import { deduplicarEntidades } from '../../utils/deduplicar';
+import { deduplicarEntidades } from '@/utils/deduplicar';
 
 // ✅ Normalización de API_BASE_URL para evitar sufijos '/api' duplicados
 const RAW_API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
@@ -44,6 +44,7 @@ export const GestionBilleteras = () => {
     const [busqueda, setBusqueda] = useState('');
     const [cuentaSeleccionada, setCuentaSeleccionada] = useState(null);
     const [montoRecarga, setMontoRecarga] = useState('');
+    const [tipoOperacion, setTipoOperacion] = useState('RECARGA'); // 'RECARGA' | 'DEBITO'
     const [procesandoRecarga, setProcesandoRecarga] = useState(false);
     const [mensajeNotificacion, setMensajeNotificacion] = useState(null);
 
@@ -163,7 +164,7 @@ export const GestionBilleteras = () => {
             }
         );
 
-        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'wallets';
+        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
         const qWallets = query(collection(db, pathBilleteras));
 
         const unsubscribeWallets = onSnapshot(qWallets,
@@ -204,6 +205,7 @@ export const GestionBilleteras = () => {
         return {
             ...c,
             saldo: Number(saldoFinal),
+            saldoWallet: Number(saldoFinal),
             existeEnWallets: Boolean(walletsMap[c.id])
         };
     });
@@ -225,7 +227,7 @@ export const GestionBilleteras = () => {
 
     // 🔍 FILTRADO EN TIEMPO REAL MULTICRITERIO
     const cuentasFiltradas = cuentasUnificadas.filter(c => {
-        const query = busqueda.toLowerCase().trim();
+        const queryStr = busqueda.toLowerCase().trim();
         const nombre = (c.nombre || '').toLowerCase();
         const telefono = (c.telefono || '').toLowerCase();
         const email = (c.email || '').toLowerCase();
@@ -234,12 +236,12 @@ export const GestionBilleteras = () => {
         const id = (c.id || '').toLowerCase();
 
         return (
-            nombre.includes(query) ||
-            telefono.includes(query) ||
-            email.includes(query) ||
-            rol.includes(query) ||
-            subrol.includes(query) ||
-            id.includes(query)
+            nombre.includes(queryStr) ||
+            telefono.includes(queryStr) ||
+            email.includes(queryStr) ||
+            rol.includes(queryStr) ||
+            subrol.includes(queryStr) ||
+            id.includes(queryStr)
         );
     });
 
@@ -248,7 +250,7 @@ export const GestionBilleteras = () => {
         setMontoRecarga(valRaw);
     };
 
-    // 💳 PROCESAR RECARGA DIRECTA DE SALDO (HÍBRIDO REST + FIRESTORE FALLBACK)
+    // 💳 PROCESAR AJUSTE MULTIRROL DE SALDO (ABONO / DÉBITO MANUAL - REST + FIRESTORE FALLBACK)
     const ejecutarRecarga = async (e) => {
         e.preventDefault();
         if (!cuentaSeleccionada || !montoRecarga) return;
@@ -259,22 +261,29 @@ export const GestionBilleteras = () => {
             return;
         }
 
+        const saldoDisponible = Number(cuentaSeleccionada.saldoWallet ?? cuentaSeleccionada.saldo ?? 0);
+
+        if (tipoOperacion === 'DEBITO' && montoNumerico > saldoDisponible) {
+            mostrarNotificacion(`No puedes debitar más del saldo disponible ($${saldoDisponible.toLocaleString('es-CO')} COP)`, 'error');
+            return;
+        }
+
         setProcesandoRecarga(true);
         let transaccionExitosa = false;
 
-        // Intentar ejecución vía Endpoint Backend Express
+        // Intentar ejecución vía Endpoint Backend Express (/usuarios/:id/recargar)
         try {
             const token = localStorage.getItem('cimco_token');
-            const res = await fetch(`${API_BASE_URL}/api/conductores/recargar-billetera`, {
-                method: 'POST',
+            const res = await fetch(`${API_BASE_URL}/api/usuarios/${cuentaSeleccionada.id}/recargar`, {
+                method: 'PUT',
                 headers: {
                     'Authorization': token ? `Bearer ${token}` : '',
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    usuarioId: cuentaSeleccionada.id,
-                    origen: cuentaSeleccionada.origen,
-                    monto: montoNumerico
+                    monto: montoNumerico,
+                    tipoOperacion,
+                    motivo: tipoOperacion === 'DEBITO' ? 'Devolución de Saldo' : 'Abono de Saldo'
                 })
             });
 
@@ -285,30 +294,35 @@ export const GestionBilleteras = () => {
                 }
             }
         } catch (err) {
-            console.warn('⚠️ API REST inaccesible para abono, aplicando fallback directo en Firestore...', err);
+            console.warn('⚠️ API REST inaccesible para ajuste, aplicando fallback directo en Firestore...', err);
         }
 
         // Fallback / Respaldo directo en Firestore para garantizar integridad
         try {
-            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'wallets';
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
             const pathAuditoria = FIRESTORE_PATHS?.transactions || 'transacciones';
 
             const walletRef = doc(db, pathBilleteras, cuentaSeleccionada.id);
             const auditRef = collection(db, pathAuditoria);
 
+            const deltaMonto = tipoOperacion === 'DEBITO' ? -montoNumerico : montoNumerico;
+
             if (cuentaSeleccionada.existeEnWallets) {
                 await updateDoc(walletRef, {
-                    balance: increment(montoNumerico),
-                    saldo: increment(montoNumerico),
+                    balance: increment(deltaMonto),
+                    saldo: increment(deltaMonto),
+                    saldoWallet: increment(deltaMonto),
                     ultimaActualizacion: serverTimestamp()
                 });
             } else {
+                const nuevoSaldoBase = Math.max(0, saldoDisponible + deltaMonto);
                 await setDoc(walletRef, {
                     usuarioId: cuentaSeleccionada.id,
                     nombreUsuario: cuentaSeleccionada.nombre,
                     rolUsuario: (cuentaSeleccionada.subrol || cuentaSeleccionada.rol || 'USUARIO').toUpperCase(),
-                    balance: montoNumerico,
-                    saldo: montoNumerico,
+                    balance: nuevoSaldoBase,
+                    saldo: nuevoSaldoBase,
+                    saldoWallet: nuevoSaldoBase,
                     creadoEl: serverTimestamp(),
                     ultimaActualizacion: serverTimestamp()
                 });
@@ -317,10 +331,10 @@ export const GestionBilleteras = () => {
             await addDoc(auditRef, {
                 usuarioId: cuentaSeleccionada.id,
                 nombreUsuario: cuentaSeleccionada.nombre,
-                tipo: 'RECARGA',
-                monto: montoNumerico,
+                tipo: tipoOperacion === 'DEBITO' ? 'DEBITO_MANUAL' : 'RECARGA_MANUAL',
+                monto: deltaMonto,
                 timestamp: serverTimestamp(),
-                referencia: `RECARGA_MANUAL_ADMIN_${Date.now().toString().slice(-6)}`,
+                referencia: `AJUSTE_MANUAL_ADMIN_${Date.now().toString().slice(-6)}`,
                 ejecutor: 'ADMINISTRADOR_SISTEMA'
             });
 
@@ -328,14 +342,18 @@ export const GestionBilleteras = () => {
         } catch (err) {
             if (!transaccionExitosa) {
                 console.error('❌ [CIMCO-RECARGA] Fallo transaccional:', err);
-                mostrarNotificacion('Error al procesar la recarga de saldo en la red de bóvedas', 'error');
+                mostrarNotificacion('Error al procesar el ajuste de saldo en la red de bóvedas', 'error');
                 setProcesandoRecarga(false);
                 return;
             }
         }
 
         if (isMounted.current && transaccionExitosa) {
-            mostrarNotificacion(`Recarga exitosa de $${montoNumerico.toLocaleString('es-CO')} COP a ${cuentaSeleccionada.nombre}`);
+            const msgConfirmacion = tipoOperacion === 'DEBITO'
+                ? `Devolución exitosa de $${montoNumerico.toLocaleString('es-CO')} COP a ${cuentaSeleccionada.nombre}`
+                : `Abono exitoso de $${montoNumerico.toLocaleString('es-CO')} COP a ${cuentaSeleccionada.nombre}`;
+            
+            mostrarNotificacion(msgConfirmacion, 'exito');
             setMontoRecarga('');
             setCuentaSeleccionada(null);
             setProcesandoRecarga(false);
@@ -467,7 +485,7 @@ export const GestionBilleteras = () => {
                 {/* CONSOLA DE TRANSMISIÓN / RECARGA (1 COLUMNA EN LG) */}
                 <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl p-4 shadow-xl space-y-3">
                     <h3 className="text-xs font-black uppercase tracking-widest text-zinc-400 flex items-center gap-2 px-1">
-                        <DollarSign size={14} className="text-emerald-400" /> CONSOLA DE RECARGA DIRECTA
+                        <DollarSign size={14} className="text-emerald-400" /> CONSOLA DE AJUSTE DE SALDO
                     </h3>
 
                     <div className="bg-zinc-900/60 border border-white/5 rounded-2xl p-5 sticky top-24">
@@ -495,12 +513,38 @@ export const GestionBilleteras = () => {
                                     </div>
                                 </div>
 
+                                {/* Toggle Selector de Operación */}
+                                <div className="flex gap-2 mb-4 bg-zinc-950 p-1 rounded-lg border border-white/10">
+                                    <button
+                                        type="button"
+                                        onClick={() => setTipoOperacion('RECARGA')}
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${
+                                            tipoOperacion === 'RECARGA'
+                                                ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/20'
+                                                : 'text-zinc-400 hover:text-white'
+                                        }`}
+                                    >
+                                        + Recargar / Abonar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setTipoOperacion('DEBITO')}
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all ${
+                                            tipoOperacion === 'DEBITO'
+                                                ? 'bg-red-500 text-white shadow-lg shadow-red-500/20'
+                                                : 'text-zinc-400 hover:text-white'
+                                        }`}
+                                    >
+                                        - Débito / Devolución
+                                    </button>
+                                </div>
+
                                 <div className="space-y-1">
                                     <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
-                                        Monto a Recargar (COP)
+                                        {tipoOperacion === 'DEBITO' ? 'Monto a Debitar (COP)' : 'Monto a Recargar (COP)'}
                                     </label>
                                     <div className="relative">
-                                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400 font-bold">$</span>
+                                        <span className={`absolute left-3.5 top-1/2 -translate-y-1/2 font-bold ${tipoOperacion === 'DEBITO' ? 'text-red-400' : 'text-emerald-400'}`}>$</span>
                                         <input 
                                             type="text"
                                             value={montoRecarga}
@@ -508,7 +552,9 @@ export const GestionBilleteras = () => {
                                             placeholder="Ej: 20000"
                                             disabled={procesandoRecarga}
                                             required
-                                            className="w-full bg-zinc-950 border border-white/10 rounded-xl pl-8 pr-4 py-2.5 text-sm font-bold text-white placeholder-zinc-600 focus:outline-none focus:border-emerald-500/50 transition-colors"
+                                            className={`w-full bg-zinc-950 border border-white/10 rounded-xl pl-8 pr-4 py-2.5 text-sm font-bold text-white placeholder-zinc-600 focus:outline-none transition-colors ${
+                                                tipoOperacion === 'DEBITO' ? 'focus:border-red-500/50' : 'focus:border-emerald-500/50'
+                                            }`}
                                         />
                                     </div>
                                 </div>
@@ -523,7 +569,7 @@ export const GestionBilleteras = () => {
                                             disabled={procesandoRecarga}
                                             className="py-1.5 bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg text-[10px] font-bold text-zinc-300 hover:text-white transition-colors"
                                         >
-                                            +${(valor / 1000)}k
+                                            {tipoOperacion === 'DEBITO' ? '-' : '+'}${(valor / 1000)}k
                                         </button>
                                     ))}
                                 </div>
@@ -540,15 +586,19 @@ export const GestionBilleteras = () => {
                                     <button
                                         type="submit"
                                         disabled={procesandoRecarga || !montoRecarga}
-                                        className="w-2/3 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-black uppercase tracking-wider shadow-[0_0_15px_rgba(16,185,129,0.2)] transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                                        className={`w-2/3 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 ${
+                                            tipoOperacion === 'DEBITO'
+                                                ? 'bg-red-600 hover:bg-red-500 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)]'
+                                                : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_15px_rgba(16,185,129,0.2)]'
+                                        }`}
                                     >
                                         {procesandoRecarga ? (
                                             <>
-                                                <Loader size={14} className="animate-spin text-black" />
+                                                <Loader size={14} className={`animate-spin ${tipoOperacion === 'DEBITO' ? 'text-white' : 'text-black'}`} />
                                                 <span>Procesando...</span>
                                             </>
                                         ) : (
-                                            'Abonar Saldo'
+                                            tipoOperacion === 'DEBITO' ? 'PROCESAR DEVOLUCIÓN' : 'ABONAR SALDO'
                                         )}
                                     </button>
                                 </div>
