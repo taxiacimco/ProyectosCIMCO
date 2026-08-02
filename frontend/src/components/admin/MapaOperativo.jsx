@@ -1,8 +1,8 @@
-// Versión Arquitectura: V17.3 - Escucha Multi-Evento Homologada y Movimiento Suave de Marcadores
+// Versión Arquitectura: V17.4 - Escucha Multi-Evento, Movimiento Suave de Marcadores y Deduplicación Táctica
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
  * Misión: Despliegue táctico y renderizado de unidades mediante Leaflet.js enganchado a un amortiguador de alta frecuencia.
- * Ajuste V17.3: Inclusión del evento socket 'actualizar_ubicacion', delay calibrado a 2000ms y suavizado CSS en marcadores.
+ * Ajuste V17.4: Integración del helper de deduplicación de entidades para filtrado estricto de marcadores.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -14,6 +14,8 @@ import { useTelemetryThrottle } from '@/hooks/useTelemetryThrottle';
 import { Search, Signal, Activity, AlertCircle, Radio } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+// 🛡️ IMPORTANTE: Importación del helper de deduplicación
+import { deduplicarEntidades } from '../../utils/deduplicar';
 
 // 🛡️ Inicialización blindada y segura de marcadores para compatibilidad total en producción
 delete L.Icon.Default.prototype._getIconUrl;
@@ -158,10 +160,15 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         };
     }, [socket, cooperativaFiltro, vehiculosSuaves]);
 
-    // Conversión a matriz limpia y saneamiento del buscador predictivo
+    // Conversión a matriz limpia y deduplicación táctica
     const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
+    
+    // 🛡️ APLICAMOS DEDUPLICACIÓN ANTES DE FILTRAR Y RENDERIZAR
+    const marcadoresUnicos = typeof deduplicarEntidades === 'function' 
+        ? deduplicarEntidades(listaMarcadoresSuaves)
+        : listaMarcadoresSuaves;
 
-    const filtrados = listaMarcadoresSuaves.filter(m => {
+    const filtrados = marcadoresUnicos.filter(m => {
         const queryTerm = busqueda.toLowerCase().trim();
         const nombre = (m.nombre || '').toLowerCase();
         const id = (m.id || '').toLowerCase();

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V13.0 - Definición de Rutas de Conductores y Administración
+// Versión Arquitectura: V19.0 - Definición de Rutas de Conductores y Administración (Deduplicado)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
  * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría y recargas auditadas.
@@ -22,7 +22,8 @@ import {
     ajustarSaldo,
     actualizarUbicacionGPS,
     actualizarEstadoConductor,
-    verificarBypassDesarrollo
+    verificarBypassDesarrollo,
+    validarConductorUnico
 } from './conductor.controller.js';
 import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
 
@@ -61,8 +62,8 @@ const validarTelemetriaRadar = (req, res, next) => {
 // ==================================================================
 // 📡 RUTAS DE ADMINISTRACIÓN Y CONSULTA GENERAL
 // ==================================================================
-router.post('/registrar', registrarConductor);
-router.post('/', registrarConductor);
+router.post('/registrar', validarConductorUnico, registrarConductor);
+router.post('/', validarConductorUnico, registrarConductor);
 router.get('/', obtenerTodosConductores);
 router.get('/disponibles', obtenerConductoresDisponibles);
 

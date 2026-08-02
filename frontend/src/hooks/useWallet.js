@@ -1,14 +1,15 @@
-// Versión Arquitectura: V7.4 - Gobernanza Contable Definitiva (Escritura Transaccional Blindada)
+// Versión Arquitectura: V7.5 - Gobernanza Contable Definitiva (Doble Sincronización SSOT MongoDB/Firestore)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
- * Misión: Forzar la sincronización exacta con Firestore y proveer mutaciones atómicas seguras para liquidaciones.
- * Ajuste V7.4: Mitigación de condiciones de carrera mediante uso estricto de transacciones aisladas en Firestore.
+ * Misión: Forzar la sincronización exacta con Firestore y MongoDB Atlas tras débitos transaccionales.
+ * Ajuste V7.5: Inyección de sincronización REST en segundo plano con MongoDB (SSOT) post-transacción Firestore.
  */
 
 import { useState, useEffect } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
+import api from '@/config/api';
 
 export const useWallet = () => {
     const { user, actualizarEstadoLocal } = useAuth();
@@ -16,12 +17,11 @@ export const useWallet = () => {
     const [saldo, setSaldo] = useState(user?.saldo || user?.balance || 0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [isMutating, setIsMutating] = useState(false); // Flag de bloqueo para operaciones de escritura
+    const [isMutating, setIsMutating] = useState(false);
 
     const idCrudo = user ? (user.uid || user._id || user.id || user.conductorId) : null;
     const idDocumentoUnificado = idCrudo ? String(idCrudo).trim() : null;
 
-    // Determinar de manera única la colección contable
     const coleccionDestino = (FIRESTORE_PATHS && FIRESTORE_PATHS.wallets) 
         ? FIRESTORE_PATHS.wallets 
         : ((FIRESTORE_PATHS && FIRESTORE_PATHS.conductores) ? FIRESTORE_PATHS.conductores : 'wallets');
@@ -38,8 +38,6 @@ export const useWallet = () => {
             try {
                 const referenciaBilletera = doc(db, coleccionDestino, idDocumentoUnificado);
                 
-                console.log(`📡 [CIMCO-WALLET-SYNC] Abriendo pasarela reactiva en: ${coleccionDestino}/${idDocumentoUnificado}`);
-
                 unsubscribeFirestore = onSnapshot(referenciaBilletera, (snapshot) => {
                     if (snapshot.exists()) {
                         const datosEnVivo = snapshot.data();
@@ -54,7 +52,7 @@ export const useWallet = () => {
                             }
                         }
                     } else {
-                        console.warn(`⚠️ [CIMCO-SYNC] Documento Firestore [${coleccionDestino}/${idDocumentoUnificado}] inexistente. Estado default ($0).`);
+                        console.warn(`⚠️ [CIMCO-SYNC] Documento Firestore [${coleccionDestino}/${idDocumentoUnificado}] inexistente.`);
                     }
                     setLoading(false);
                 }, (err) => {
@@ -78,8 +76,7 @@ export const useWallet = () => {
     }, [idDocumentoUnificado, coleccionDestino]);
 
     /**
-     * ⚡ MUTACIÓN QUIRÚRGICA TRANSACCIONAL (Blindaje Anti-Condición de Carrera)
-     * Diseñada específicamente para soportar ráfagas concurrentes de débitos (Test de Estrés)
+     * ⚡ MUTACIÓN TRANSACCIONAL DUAL (Firestore + Sincronización REST MongoDB)
      */
     const procesarDebitoTransaccional = async (montoDebito, motivo = "DEBITO_OPERATIVO") => {
         if (!idDocumentoUnificado) throw new Error("No hay un identificador de usuario válido para la transacción.");
@@ -88,15 +85,15 @@ export const useWallet = () => {
         setIsMutating(true);
         const referenciaBilletera = doc(db, coleccionDestino, idDocumentoUnificado);
         
-        // 🛡️ Obtener referencia de colección para pre-generar la ruta de destino de forma síncrona
         const coleccionHistorial = collection(db, 'historial_saldos');
         const nuevoDocHistorialRef = doc(coleccionHistorial);
 
         try {
+            // STEP 1: Escritura Atómica en Firestore (Garantiza respuesta rápida en UI)
             await runTransaction(db, async (transaction) => {
                 const sfDoc = await transaction.get(referenciaBilletera);
                 if (!sfDoc.exists()) {
-                    throw new Error("La billetera destino no existe en la base de datos.");
+                    throw new Error("La billetera destino no existe en Firestore.");
                 }
 
                 const datosActuales = sfDoc.data();
@@ -108,14 +105,12 @@ export const useWallet = () => {
 
                 const nuevoSaldoCalculado = saldoActual - montoDebito;
 
-                // 🗄️ Escritura atómica 1: Actualización del saldo financiero
                 transaction.update(referenciaBilletera, {
                     saldo: nuevoSaldoCalculado,
                     balance: nuevoSaldoCalculado,
                     ultimaActualizacion: serverTimestamp()
                 });
 
-                // 🗄️ Escritura atómica 2: Auditoría del historial (¡Aislada de forma segura en la transacción!)
                 transaction.set(nuevoDocHistorialRef, {
                     usuarioId: idDocumentoUnificado,
                     tipo: 'DEBITO',
@@ -126,6 +121,18 @@ export const useWallet = () => {
                     fecha: serverTimestamp()
                 });
             });
+
+            // STEP 2: Sincronización en segundo plano con MongoDB Atlas (SSOT Backend)
+            try {
+                await api.post('/wallet/debit', {
+                    usuarioId: idDocumentoUnificado,
+                    monto: montoDebito,
+                    concepto: motivo
+                });
+                console.log("🌐 [CIMCO-WALLET-SSOT] Sincronización con MongoDB Atlas completada con éxito.");
+            } catch (apiErr) {
+                console.warn("⚠️ [CIMCO-WALLET-SYNC-WARN] Transacción Firestore exitosa, pero falló el sync REST con MongoDB:", apiErr.message);
+            }
 
             setIsMutating(false);
             return true;

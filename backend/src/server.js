@@ -1,4 +1,4 @@
-// Versión Arquitectura: V16.9 - Inyección Perimetral del Módulo Cooperativas
+// Versión Arquitectura: V17.0 - Inyección de Endpoint Directorio Global CIMCO Nexus
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado, orquestación de sockets
@@ -18,7 +18,7 @@ import conductorRoutes from '#modules/conductores/conductor.routes.js';
 import viajeRoutes from '#modules/viajes/viaje.routes.js';
 import usuarioRoutes from './modules/usuarios/usuario.routes.js';
 import pasajeroRoutes from './modules/pasajeros/pasajero.routes.js';
-import cooperativaRoutes from './modules/cooperativas/cooperativa.routes.js'; // 👈 Enrutador de Cooperativas
+import cooperativaRoutes from './modules/cooperativas/cooperativa.routes.js';
 import { inicializarSockets } from '#modules/sockets/socket.manager.js';
 
 const app = express();
@@ -75,6 +75,49 @@ app.get('/health', (req, res) => {
 });
 
 // ==================================================================\\
+// 🌐 ENDPOINT DIRECTORIO GLOBAL (CONSOLA CEO / ADMIN)
+// ==================================================================\\
+app.get('/api/usuarios/directorio-global', async (req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    if (!db) {
+      return res.status(503).json({ success: false, message: "Base de datos no inicializada" });
+    }
+
+    // Consulta paralela a las 3 colecciones
+    const [usuarios, pasajeros, conductores] = await Promise.all([
+      db.collection('usuarios').find({}).toArray(),
+      db.collection('pasajeros').find({}).toArray(),
+      db.collection('conductores').find({}).toArray()
+    ]);
+
+    // Normalización de datos para la interfaz
+    const directorio = [
+      ...usuarios.map(u => ({ 
+        ...u, 
+        origenColeccion: 'usuarios', 
+        rolNormalizado: (u.rol || u.role || 'usuario').toLowerCase() 
+      })),
+      ...pasajeros.map(p => ({ 
+        ...p, 
+        origenColeccion: 'pasajeros', 
+        rolNormalizado: 'pasajero' 
+      })),
+      ...conductores.map(c => ({ 
+        ...c, 
+        origenColeccion: 'conductores', 
+        rolNormalizado: 'conductor' 
+      }))
+    ];
+
+    res.json({ success: true, total: directorio.length, data: directorio });
+  } catch (error) {
+    logLocal(`🚨 [DIRECTORIO-GLOBAL-ERROR] ${error.message}`);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ==================================================================\\
 // 🚀 ENRUTADORES GENERALES DEL SISTEMA (PREFIJO BASE: /api)
 // ==================================================================\\
 app.use('/api/auth', authRoutes);
@@ -82,7 +125,7 @@ app.use('/api/conductores', conductorRoutes);
 app.use('/api/viajes', viajeRoutes);
 app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/pasajeros', pasajeroRoutes);
-app.use('/api/cooperativas', cooperativaRoutes); // 👈 Canal de Servicios para Gestión de Cooperativas
+app.use('/api/cooperativas', cooperativaRoutes);
 
 // Sincronización de CORS para WebSockets (Socket.IO)
 const io = new Server(httpServer, {

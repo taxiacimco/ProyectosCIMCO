@@ -1,7 +1,7 @@
-// Versión Arquitectura: V17.0 - Refactorización Módulo Despachadores/Usuarios y Gestión Financiera
+// Versión Arquitectura: V18.0 - Directorio Unificado Unico & Prevención de Duplicados
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
- * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), asignación de terminales y flujo financiero de despachadores.
+ * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado y flujo financiero.
  */
 
 import mongoose from 'mongoose';
@@ -45,8 +45,50 @@ const registrarTransaccionFirestore = async ({
 };
 
 // ==================================================================
-// 1. GESTIÓN GENERAL DE USUARIOS
+// 1. GESTIÓN GENERAL Y DIRECTORIO GLOBAL DE USUARIOS
 // ==================================================================
+
+/**
+ * 🌐 Directorio Global Centralizado y Anti-Duplicados
+ * Retorna todos los actores del sistema unificados y limpios por ID/Email/Teléfono
+ */
+export const obtenerDirectorioGlobal = async (req, res) => {
+    try {
+        // Consultar la base de datos de usuarios excluyendo contraseñas
+        const usuariosBrutos = await Usuario.find().select('-password').lean();
+
+        // Mapa de deduplicación defensiva
+        const mapaUnico = new Map();
+
+        usuariosBrutos.forEach((u) => {
+            // Generación de clave única usando _id, uid, o email/teléfono como salvaguarda
+            const idKey = u._id ? u._id.toString() : (u.uid || u.email || u.telefono || u.telefonoMovil);
+
+            if (idKey && !mapaUnico.has(idKey)) {
+                // Normalización de orígenes y roles para visibilidad homogénea en UI
+                const usuarioLimpio = {
+                    ...u,
+                    id: u._id ? u._id.toString() : u.uid,
+                    rolNormalizado: (u.rol || u.role || 'pasajero').toLowerCase(),
+                    origenColeccion: u.origenColeccion || 'USUARIOS'
+                };
+                mapaUnico.set(idKey, usuarioLimpio);
+            }
+        });
+
+        const listaLimpia = Array.from(mapaUnico.values());
+
+        return res.status(200).json({
+            success: true,
+            total: listaLimpia.length,
+            usuarios: listaLimpia,
+            data: listaLimpia
+        });
+    } catch (error) {
+        console.error("❌ Error en obtenerDirectorioGlobal:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
 
 /**
  * 📋 Obtener listado de usuarios filtrado opcionalmente por rol
@@ -61,7 +103,44 @@ export const obtenerUsuarios = async (req, res) => {
         }
 
         const usuarios = await Usuario.find(filtro).select('-password').lean();
-        return res.status(200).json({ success: true, contador: usuarios.length, data: usuarios });
+        
+        // Aplicar deduplicación por seguridad
+        const mapaUnico = new Map();
+        usuarios.forEach(u => {
+            const key = u._id ? u._id.toString() : u.email;
+            if (key && !mapaUnico.has(key)) mapaUnico.set(key, u);
+        });
+
+        const listaFiltrada = Array.from(mapaUnico.values());
+
+        return res.status(200).json({ success: true, contador: listaFiltrada.length, data: listaFiltrada });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * 🛡️ Middleware/Función de Validación Anti-Duplicados previo al registro
+ */
+export const validarRegistroUnico = async (req, res, next) => {
+    try {
+        const { email, telefono, telefonoMovil } = req.body;
+        const telContacto = telefono || telefonoMovil;
+
+        const condiciones = [];
+        if (email) condiciones.push({ email: email.toLowerCase().trim() });
+        if (telContacto) condiciones.push({ telefono: telContacto }, { telefonoMovil: telContacto });
+
+        if (condiciones.length > 0) {
+            const usuarioExistente = await Usuario.findOne({ $or: condiciones }).lean();
+            if (usuarioExistente) {
+                return res.status(400).json({
+                    success: false,
+                    message: "⚠️ El correo electrónico o número de teléfono ya está registrado en el sistema."
+                });
+            }
+        }
+        next();
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -325,7 +404,7 @@ export const recargarSaldoDespachador = async (req, res) => {
 
         // Registro de Historial en MongoDB
         const nuevoHistorial = new HistorialSaldo({
-            conductor: despachador._id, // Referencia polimórfica de cuenta
+            conductor: despachador._id,
             tipo: 'recarga_despachador',
             monto: montoNum,
             saldoAnterior,

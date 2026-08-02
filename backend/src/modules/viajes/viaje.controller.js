@@ -1,8 +1,8 @@
-// Versión Arquitectura: V16.11 - Blindaje ACID, Despacho Flexible y Sincronización Firestore
+// Versión Arquitectura: V18.2 - Integración Quirúrgica Transición 'EN_CURSO' y Resiliencia ESM
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
- * Misión: Procesar flujos operativos, liquidación contable (10% comisión), cancelación y sincronización Firestore.
- * Ajuste V16.11: Extensión de estados permitidos ('aceptado') en despacharViajeAtomico para re-despacho desde central.
+ * Misión: Procesar flujos operativos, liquidación contable (10% comisión), transición de estados, cancelación y sincronización Firestore.
+ * Ajuste V18.2: Implementación atómica de iniciarViaje (transición a 'en_curso') con sincronización en espejo Firestore.
  */
 
 import crypto from 'crypto';
@@ -368,6 +368,78 @@ export const aceptarViaje = async (req, res) => {
 };
 
 // ==================================================================
+// 2.1 INICIO TRANSACCIONAL DEL RECORRIDO (TRANSICIÓN A 'EN_CURSO')
+// ==================================================================
+export const iniciarViaje = async (req, res) => {
+    if (!req || !req.body) {
+        return res.status(400).json({ success: false, message: 'Payload de inicio de viaje inválido o ausente.' });
+    }
+
+    const { viajeId } = req.body;
+    const targetViajeId = viajeId || req.params?.id;
+
+    if (!targetViajeId || !mongoose.Types.ObjectId.isValid(targetViajeId)) {
+        return res.status(400).json({ success: false, message: 'Identificador BSON de viaje inválido o no suministrado.' });
+    }
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const viaje = await Viaje.findOneAndUpdate(
+            { 
+                _id: targetViajeId, 
+                estado: { $in: ['aceptado', 'asignado', 'solicitado'] } 
+            },
+            { 
+                $set: { 
+                    estado: 'en_curso', 
+                    estadoViaje: 'en_curso',
+                    fechaInicio: new Date()
+                } 
+            },
+            { new: true, session }
+        );
+
+        if (!viaje) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(409).json({
+                success: false,
+                code: 'INVALID_TRIP_STATE_TRANSITION',
+                message: 'No se puede iniciar el viaje. El servicio no existe o no se encuentra en un estado previo válido (aceptado/asignado).'
+            });
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+
+        if (dbFirestore) {
+            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+            dbFirestore.collection(coleccionViajes).doc(String(targetViajeId)).update({
+                estadoViaje: 'en_curso',
+                fechaInicio: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp()
+            }).catch(e => console.error("🚨 Error diferido Firestore en iniciarViaje:", e));
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Recorrido iniciado oficialmente. Estado actualizado a EN_CURSO.',
+            data: viaje
+        });
+
+    } catch (error) {
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        session.endSession();
+        console.error("🚨 [CIMCO-START-TRIP-ERR]:", error);
+        return res.status(500).json({ success: false, message: 'Error interno al procesar el inicio del recorrido.' });
+    }
+};
+
+// ==================================================================
 // 3. SUBSISTEMA DE LIQUIDACIÓN Y CIERRE DE SERVICIOS
 // ==================================================================
 export const completarViaje = async (req, res) => {
@@ -578,7 +650,7 @@ export const cancelarViaje = async (req, res) => {
 };
 
 // ==================================================================
-// 5. CONSULTAS DE LECTURA DE VIAJES
+// 5. CONSULTAS DE LECTURA E HISTORIAL DE VIAJES
 // ==================================================================
 export const obtenerViajes = async (req, res) => {
     try {
@@ -600,19 +672,65 @@ export const obtenerViajes = async (req, res) => {
     }
 };
 
+export const obtenerHistorialViajes = async (req, res) => {
+    try {
+        const usuarioLogueado = req.usuario || req.user;
+        const { limit = 50, page = 1 } = req.query;
+        const skip = (Number(page) - 1) * Number(limit);
+        const filtro = {};
+
+        if (usuarioLogueado) {
+            const userId = usuarioLogueado.id || usuarioLogueado._id;
+            const userRole = String(usuarioLogueado.rol || usuarioLogueado.role || '').toLowerCase();
+
+            if (userRole === 'conductor') {
+                filtro.conductorId = userId;
+            } else if (userRole === 'pasajero' || userRole === 'usuario') {
+                filtro.pasajeroId = userId;
+            }
+        }
+
+        const viajes = await Viaje.find(filtro)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(Number(limit))
+            .lean();
+
+        const total = await Viaje.countDocuments(filtro);
+
+        return res.status(200).json({
+            success: true,
+            total,
+            pagina: Number(page),
+            limite: Number(limit),
+            data: viajes
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 export const obtenerViajePorId = async (req, res) => {
     try {
         const { id } = req.params;
+        if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ success: false, message: 'Identificador BSON de viaje inválido.' });
+        }
+
         const viaje = await Viaje.findById(id).lean();
 
         if (!viaje) {
-            return res.status(404).json({ success: false, message: 'Viaje no encontrado' });
+            return res.status(404).json({ success: false, message: 'Viaje no encontrado.' });
         }
 
         return res.status(200).json({ success: true, data: viaje });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
+};
+
+export const obtenerDetalleViaje = async (req, res) => {
+    return obtenerViajePorId(req, res);
 };
 
 // ==================================================================
@@ -699,7 +817,6 @@ export const despacharViajeAtomico = async (req, res) => {
         }
         if (metodoPago !== undefined) updateMongoViaje.metodoPago = String(metodoPago);
 
-        // 🚨 AJUSTE V16.11: Extensión de $in para admitir viajes en estado 'aceptado' re-despachados por central
         const viajeAsignado = await Viaje.findOneAndUpdate(
             { _id: viajeId, estado: { $in: ['solicitado', 'pending', 'aceptado'] } },
             { $set: updateMongoViaje },
@@ -769,10 +886,13 @@ export default {
     crearYDespacharViajeAtomico,
     solicitarViaje,
     aceptarViaje,
+    iniciarViaje,
     completarViaje,
     cancelarViaje,
     obtenerViajes,
+    obtenerHistorialViajes,
     obtenerViajePorId,
+    obtenerDetalleViaje,
     recibirAlertaWompiLocal,
     despacharViajeAtomico
 };

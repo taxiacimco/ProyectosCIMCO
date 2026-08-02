@@ -1,4 +1,4 @@
-// Versión Arquitectura: V17.0 - Enrutador Protegido, Alias REST y Billetera para Pasajeros
+// Versión Arquitectura: V18.1 - Enrutador Protegido y Deduplicado de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.routes.js
  * Misión: Exposición de endpoints para perfil, direcciones favoritas, historial y billetera virtual de pasajeros.
@@ -19,7 +19,7 @@ import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
 
 const router = Router();
 
-// 📋 LECTURA GLOBAL (ADMINISTRATIVA)
+// 📋 LECTURA GLOBAL DEDUPLICADA (ADMINISTRATIVA)
 router.get('/', verificarToken, esAdmin, obtenerPasajeros);
 
 // 💰 RUTAS DE SALDO Y BILLETERA (Definidas antes de parámetros dinámicos)

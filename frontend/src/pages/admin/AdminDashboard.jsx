@@ -1,13 +1,12 @@
-// Versión Arquitectura: V11.2 - Blindaje de Privilegios y Optimización de Ciclo de Vida Extruído
+// Versión Arquitectura: V12.0 - Integración Módulo Directorio Global de Personal CIMCO NEXUS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
  * Misión: Orquestar submódulos tácticos de administración mediante una barra de navegación superior integrada.
- * Ajuste V11.2: Extrusión de matriz estática de navegación, sanitización del ciclo de renderizado y sincronización reflexiva de seguridad.
  */
 
 import React, { useState, useEffect } from 'react';
 import { 
-    ShieldAlert, Wallet, Map, UserCheck, QrCode, LayoutDashboard, LogOut, Activity
+    ShieldAlert, Wallet, Map, UserCheck, QrCode, LayoutDashboard, LogOut, Activity, Users
 } from 'lucide-react';
 
 // 🚀 GOBERNANZA DE RUTAS: Importaciones mediante alias absolutos estructurados
@@ -17,11 +16,13 @@ import MapaOperativo from '@/components/admin/MapaOperativo';
 import QrGenerator from '@/pages/admin/QrGenerator';
 import ListaOperadores from '@/components/admin/ListaOperadores'; 
 import GestionBilleteras from '@/components/admin/GestionBilleteras';
+import DirectorioGlobal from '@/components/admin/DirectorioGlobal'; // 👈 IMPORTACIÓN DIRECTORIO GLOBAL
 
 // 🛡️ OPTIMIZACIÓN DE MEMORIA: Matriz simétrica de navegación extraída fuera del render cycle
 const TABS_CONFIG = [
     { id: 'dashboard', label: 'Consola', icon: LayoutDashboard, restricted: false },
     { id: 'radar', label: 'Mapa Radar', icon: Map, restricted: false },
+    { id: 'directorio', label: 'Directorio', icon: Users, restricted: false }, // 👈 NUEVA PESTAÑA UNIFICADA
     { id: 'operadores', label: 'Operadores', icon: UserCheck, restricted: false },
     { id: 'qr', label: 'Matriz QR', icon: QrCode, restricted: true },
     { id: 'billeteras', label: 'Billeteras', icon: Wallet, restricted: true },
@@ -121,6 +122,13 @@ const AdminDashboard = () => {
                 {pestanaActiva === 'radar' && (
                     <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-full min-h-[75vh] border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
                         <MapaOperativo />
+                    </div>
+                )}
+
+                {/* 👈 RENDERIZADO DE LA VISTA DEL DIRECTORIO GLOBAL */}
+                {pestanaActiva === 'directorio' && (
+                    <div className="animate-in fade-in duration-300">
+                        <DirectorioGlobal />
                     </div>
                 )}
                 

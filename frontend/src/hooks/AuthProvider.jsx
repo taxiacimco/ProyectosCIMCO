@@ -1,8 +1,9 @@
-// Versión Arquitectura: V22.0 - Despliegue Directo de Instancia Auth y Desacoplamiento de getAuth
+// Versión Arquitectura: V22.1 - Gobernanza Estricta de Tokens y Desacoplamiento de Identidad
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
  * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO.
- * Ajuste V22.0: Consumo directo del singleton `auth` importado desde @/config/firebase.
+ * Ajuste V22.1: Limpieza quirúrgica de tokens asignada únicamente a la acción de logout
+ *              preservando claves de terceros durante la inicialización.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -21,10 +22,7 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         const initializeSession = async () => {
             try {
-                // Purgamos posibles tokens residuales antiguos para evitar interferencias
-                localStorage.removeItem('token');
-                localStorage.removeItem('taxia_token');
-
+                // 🛡️ Búsqueda aislada usando exclusivamente la clave oficial del sistema
                 const token = localStorage.getItem('cimco_token');
                 
                 if (token && token !== 'undefined' && token !== 'null') {
@@ -34,7 +32,7 @@ export const AuthProvider = ({ children }) => {
                     if (savedUser && savedUser !== 'undefined' && savedUser !== 'null') {
                         const parsedUser = JSON.parse(savedUser);
                         
-                        // Guardas de Seguridad (Anti-Undefined): Sincronizar de forma atómica uid con el _id nativo de MongoDB Atlas
+                        // Guardas de Seguridad (Anti-Undefined): Sincronizar de forma atómica uid con el _id nativo
                         if (parsedUser) {
                             parsedUser.uid = parsedUser.uid || parsedUser._id || parsedUser.id || parsedUser.conductorId;
                             parsedUser._id = parsedUser._id || parsedUser.uid || parsedUser.id || parsedUser.conductorId;
@@ -49,7 +47,7 @@ export const AuthProvider = ({ children }) => {
                             console.log("📡 [CIMCO-AUTH] Canal anónimo de telemetría desplegado con éxito.");
                         }
                     } catch (fbError) {
-                        console.warn("⚠️ [CIMCO-AUTH-FALLBACK] No se pudo levantar el canal anónimo de Firebase de inmediato. Operando en modo local desconectado:", fbError.message);
+                        console.warn("⚠️ [CIMCO-AUTH-FALLBACK] Canal anónimo de Firebase no disponible. Operando en modo local:", fbError.message);
                     }
                 }
             } catch (error) {
@@ -65,13 +63,12 @@ export const AuthProvider = ({ children }) => {
         initializeSession();
     }, []);
 
-    // ⚡ Mutador Local Inyectado al árbol de contexto para evitar bucles infinitos en useWallet
+    // ⚡ Mutador Local Inyectado al árbol de contexto para evitar bucles infinitos
     const actualizarEstadoLocal = (nuevosDatos) => {
         setUser(prevUser => {
             if (!prevUser) return null;
             const usuarioActualizado = { ...prevUser, ...nuevosDatos };
             
-            // Blindaje de identidad en mutaciones reactivas en caliente
             usuarioActualizado.uid = usuarioActualizado.uid || usuarioActualizado._id || usuarioActualizado.id || usuarioActualizado.conductorId;
             usuarioActualizado._id = usuarioActualizado._id || usuarioActualizado.uid || usuarioActualizado.id || usuarioActualizado.conductorId;
             
@@ -84,7 +81,6 @@ export const AuthProvider = ({ children }) => {
         try {
             setLoading(true);
             
-            // ⚡ CORE FIX: Se envía 'identifier' para cumplir con los requerimientos estrictos del validador de backend
             const respuesta = await api.post('/auth/login', { 
                 identifier: email, 
                 password: password 
@@ -93,7 +89,6 @@ export const AuthProvider = ({ children }) => {
             if (respuesta.data && respuesta.data.success) {
                 const { token, user: userData } = respuesta.data;
                 
-                // Guardas de Seguridad (Anti-Undefined): Sincronizar de forma atómica uid con el _id nativo de MongoDB Atlas
                 if (userData) {
                     userData.uid = userData._id || userData.id || userData.uid || userData.conductorId;
                     userData._id = userData._id || userData.uid || userData.id || userData.conductorId;
@@ -108,14 +103,13 @@ export const AuthProvider = ({ children }) => {
                 api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
                 setUser(userData);
 
-                // 🛡️ Autenticación paralela en Firebase protegida contra fallos
                 try {
                     if (auth && !auth.currentUser) {
                         await signInAnonymously(auth);
                         console.log("📡 [CIMCO-AUTH-FIREBASE] Enlace satelital anónimo acoplado con éxito.");
                     }
                 } catch (fbError) {
-                    console.warn("⚠️ [CIMCO-AUTH-WARNING] El puente satelital Firebase falló de forma no fatal. Operando en modo degradado local:", fbError.message);
+                    console.warn("⚠️ [CIMCO-AUTH-WARNING] El puente satelital Firebase falló de forma no fatal:", fbError.message);
                 }
 
                 return { success: true, user: userData, data: respuesta.data };
@@ -164,6 +158,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     const logout = async () => {
+        // 🧹 Purga de seguridad completa de la aplicación durante el Logout explícito
         localStorage.removeItem('cimco_token');
         localStorage.removeItem('cimco_user');
         localStorage.removeItem('token');
@@ -175,7 +170,7 @@ export const AuthProvider = ({ children }) => {
         try {
             if (auth && auth.currentUser) {
                 await signOut(auth);
-                console.log("🧹 [CIMCO-AUTH] Canal satelital Firebase cerrado y purgado de forma segura.");
+                console.log("🧹 [CIMCO-AUTH] Canal satelital Firebase cerrado de forma segura.");
             }
         } catch (error) {
             console.error("Error al cerrar sesión en Firebase:", error);
@@ -190,7 +185,7 @@ export const AuthProvider = ({ children }) => {
             loading, 
             initialized, 
             loginLocal, 
-            login: loginLocal, // Alias de compatibilidad unificado
+            login: loginLocal, 
             logout, 
             registerCentral, 
             resetPasswordCentral 

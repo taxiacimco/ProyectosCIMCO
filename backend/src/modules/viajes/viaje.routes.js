@@ -1,23 +1,27 @@
-// Versión Arquitectura: V16.10 - Rutas Operativas y de Monitoreo
+// Versión Arquitectura: V18.2 - Enrutador Centralizado de Viajes y Despacho Operativo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.routes.js
- * Misión: Enrutador centralizado con interceptación de payloads e inyección de aduana perimetral.
+ * Misión: Enrutador centralizado con interceptación de payloads, inyección de aduana perimetral
+ * y securización del ciclo de vida operacional del viaje (solicitud, aceptación, inicio, cancelación, despacho y consultas).
  */
 
 import express from 'express';
 import { 
     solicitarViaje, 
     aceptarViaje, 
+    iniciarViaje,
     completarViaje,
     cancelarViaje,
     obtenerViajes,
     obtenerViajePorId,
+    obtenerHistorialViajes,
+    obtenerDetalleViaje,
     recibirAlertaWompiLocal,
     despacharViajeAtomico,
     crearYDespacharViajeAtomico
 } from './viaje.controller.js';
 
-import { verificarToken } from '../../middleware/auth.middleware.js';
+import { verificarToken, esAdminCentral } from '../../middleware/auth.middleware.js';
 import { validarDespacho } from '../../middleware/validate.middleware.js';
 
 const router = express.Router();
@@ -35,43 +39,52 @@ const verificarPayloadViaje = (req, res, next) => {
     next();
 };
 
-// Logger en entorno de desarrollo
+// Logger local de trazabilidad y monitoreo en entorno de desarrollo
 router.use((req, res, next) => {
     if (process.env.NODE_ENV !== 'production') {
-        console.log(`📡 [CIMCO-TRAFICO] Interceptada petición: ${req?.method} ${req?.originalUrl}`);
+        console.log(`📡 [CIMCO-ROUTER-VIAJES] Interceptada petición: ${req?.method} ${req?.originalUrl}`);
     }
     next();
 });
 
+// Guardián global para el módulo de viajes: Requiere autenticación JWT
+router.use(verificarToken);
+
 // ==================================================================
-// CORREDORES OPERATIVOS Y RUTAS BLINDADAS DE PRODUCCIÓN
+// 🚀 ENDPOINTS OPERACIONALES DE VIAJES (CLIENTES & CONDUCTORES)
 // ==================================================================
 
 // 1. Lecturas y Monitoreo General
-router.get('/', verificarToken, obtenerViajes);
+router.get('/', obtenerViajes);
+router.get('/historial', obtenerHistorialViajes);
 
-// 2. Solicitar servicio (Pasajero radial)
-router.post('/solicitar', verificarToken, verificarPayloadViaje, solicitarViaje);
+// 2. Solicitud y Asignación de Servicio
+router.post('/solicitar', verificarPayloadViaje, solicitarViaje);
+router.post('/aceptar', verificarPayloadViaje, aceptarViaje);
 
-// 3. Aceptar viaje (Conductor autónomo)
-router.post('/aceptar', verificarToken, verificarPayloadViaje, aceptarViaje);
+// 3. Transición de Estado Operativo y Cierre Contable (Liquidación de comisión 10%)
+router.post('/iniciar', verificarPayloadViaje, iniciarViaje);
+router.post('/completar', verificarPayloadViaje, completarViaje);
+router.post('/cancelar', verificarPayloadViaje, cancelarViaje);
 
-// 4. Cierre contable del servicio (Liquidación de comisión 10%)
-router.post('/completar', verificarToken, verificarPayloadViaje, completarViaje);
+// ==================================================================
+// 🏢 RUTAS DE DESPACHO Y PASARELA EXTERNA
+// ==================================================================
 
-// 5. Cancelación de Viaje
-router.post('/cancelar', verificarToken, verificarPayloadViaje, cancelarViaje);
-
-// 6. Webhook de confirmación Wompi
+// 4. Webhook de confirmación Wompi (Pasarela)
 router.post('/wompi-webhook', recibirAlertaWompiLocal);
 
-// 7. RUTA DE DESPACHO INTERMUNICIPAL (Viaje Solicitado Preexistente)
-router.post('/despachar', verificarToken, validarDespacho, despacharViajeAtomico);
+// 5. Despacho Atómico y Flujos Intermunicipales / Taquilla
+router.post('/despachar', validarDespacho, despacharViajeAtomico);
+router.post('/despachar-atomico', validarDespacho, despacharViajeAtomico);
+router.post('/despachar-inmediato', verificarPayloadViaje, crearYDespacharViajeAtomico);
 
-// 8. RUTA MAESTRA DE CREACIÓN Y DESPACHO INMEDIATO (Andén / Taquilla)
-router.post('/despachar-inmediato', verificarToken, verificarPayloadViaje, crearYDespacharViajeAtomico);
+// ==================================================================
+// 📊 CONSULTAS ESPECÍFICAS DE VIAJE
+// ==================================================================
 
-// 9. Lectura Individual de Viaje (Al final por orden dinámico de Express)
-router.get('/:id', verificarToken, obtenerViajePorId);
+// 6. Lectura Individual de Viaje (Al final por jerarquía de parámetros dinámicos de Express)
+router.get('/detalle/:id', obtenerDetalleViaje);
+router.get('/:id', obtenerViajePorId);
 
 export default router;

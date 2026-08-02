@@ -1,11 +1,12 @@
-// Versión Arquitectura: V18.0 - Módulo Conductores: Atómico, Auditable, Multi-Subrol y Control de Aprobación
+// Versión Arquitectura: V19.0 - Módulo Conductores: Atómico, Deduplicado, Multi-Subrol y Auditado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión unificada de operarios, aprobación administrativa, telemetría GPS, recargas atómicas y sincronización Firestore.
+ * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, telemetría GPS y recargas atómicas.
  */
 
 import mongoose from 'mongoose';
 import Conductor from '../../models/Conductor.js';
+import Usuario from '../../models/Usuario.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
 import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js'; 
 import { FieldValue } from 'firebase-admin/firestore'; 
@@ -45,7 +46,7 @@ const registrarTransaccionFirestore = async ({
 };
 
 // ==================================================================
-// 🛡️ GUARDAS DE ARQUITECTURA Y SANITIZACIÓN
+// 🛡️ GUARDAS DE ARQUITECTURA, SANITIZACIÓN Y ANTI-DUPLICADOS
 // ==================================================================
 
 export const sanitizarPayloadConductor = (data) => {
@@ -73,13 +74,45 @@ export const verificarBypassDesarrollo = (req, res, next) => {
     next();
 };
 
+/**
+ * 🛡️ Middleware/Función para prevenir duplicidad de conductores por Email, Teléfono o Documento
+ */
+export const validarConductorUnico = async (req, res, next) => {
+    try {
+        const { email, telefono, telefonoMovil, cedula, documentoIdentidad } = req.body;
+        const telContacto = telefono || telefonoMovil;
+        const docId = cedula || documentoIdentidad;
+
+        const condiciones = [];
+        if (email) condiciones.push({ email: email.toLowerCase().trim() });
+        if (telContacto) condiciones.push({ telefonoMovil: telContacto }, { telefono: telContacto });
+        if (docId) condiciones.push({ cedula: docId }, { documentoIdentidad: docId });
+
+        if (condiciones.length > 0) {
+            const [existeEnConductores, existeEnUsuarios] = await Promise.all([
+                Conductor.findOne({ $or: condiciones }).lean(),
+                Usuario.findOne({ $or: condiciones }).lean()
+            ]);
+
+            if (existeEnConductores || existeEnUsuarios) {
+                return res.status(400).json({
+                    success: false,
+                    message: "⚠️ El correo, teléfono o número de documento ya está registrado para otro operario o usuario."
+                });
+            }
+        }
+        next();
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 // ==================================================================
 // 1. GESTIÓN ADMINISTRATIVA Y REGISTRO (APROBACIÓN Y ESTADOS)
 // ==================================================================
 
 /**
  * 🟢/🔴 CAMBIAR ESTADO DEL CONDUCTOR (Secretaría / Administración)
- * Permite cambiar el estado a 'APROBADO', 'SUSPENDIDO', 'RECHAZADO' o 'PENDIENTE'.
  */
 export const cambiarEstadoConductor = async (req, res) => {
     try {
@@ -102,6 +135,24 @@ export const cambiarEstadoConductor = async (req, res) => {
 
         const estaAprobado = estadoFinal === 'APROBADO';
 
+        // Estructura de actualización con reseteo explícito seguro para Mongoose strict: true
+        const updateData = {
+            $set: { 
+                estado: estadoFinal,
+                estadoAdministrativo: estadoFinal,
+                isActive: estaAprobado
+            }
+        };
+
+        if (estadoFinal !== 'APROBADO') {
+            updateData.$set = {
+                ...updateData.$set,
+                saldoWallet: 0,
+                estadoOperativo: 'NO_DISPONIBLE',
+                isOnline: false
+            };
+        }
+
         const conductor = await Conductor.findOneAndUpdate(
             {
                 $or: [
@@ -110,16 +161,7 @@ export const cambiarEstadoConductor = async (req, res) => {
                     { conductorId: targetId }
                 ]
             },
-            { 
-                $set: { 
-                    estado: estadoFinal,
-                    estadoAdministrativo: estadoFinal,
-                    isActive: estaAprobado,
-                    // Si se suspende o rechaza, se apaga de la malla automáticamente
-                    ...(!estaAprobado && { isOnline: false, estadoOperativo: 'NO_DISPONIBLE' })
-                },
-                $unset: { saldoWallet: "" }
-            },
+            updateData,
             { new: true, runValidators: true }
         ).lean();
 
@@ -129,7 +171,6 @@ export const cambiarEstadoConductor = async (req, res) => {
 
         delete conductor.saldoWallet;
 
-        // Sincronización en tiempo real hacia Firestore
         if (dbFirestore) {
             try {
                 const docFirestoreId = conductor.uid || conductor._id.toString();
@@ -160,19 +201,33 @@ export const cambiarEstadoConductor = async (req, res) => {
 };
 
 /**
- * 📋 OBTENER TODOS LOS CONDUCTORES (Consola de Administración / Secretaría)
+ * 📋 OBTENER TODOS LOS CONDUCTORES DEDUPLICADOS
  */
 export const obtenerTodosConductores = async (req, res) => {
     try {
-        const conductores = await Conductor.find().sort({ createdAt: -1 }).lean();
-        const conductoresSanitizados = conductores.map(c => {
+        const conductoresBrutos = await Conductor.find().sort({ createdAt: -1 }).lean();
+
+        const mapaUnico = new Map();
+
+        conductoresBrutos.forEach((c) => {
             delete c.saldoWallet;
-            return c;
+            const key = c._id ? c._id.toString() : (c.uid || c.cedula || c.email || c.telefonoMovil || c.telefono);
+            if (key && !mapaUnico.has(key)) {
+                mapaUnico.set(key, {
+                    ...c,
+                    id: c._id ? c._id.toString() : c.uid,
+                    telefono: c.telefonoMovil || c.telefono || '',
+                    subrol: c.subrol || c.tipoVehiculo || 'mototaxi'
+                });
+            }
         });
+
+        const conductoresSanitizados = Array.from(mapaUnico.values());
 
         return res.status(200).json({ 
             success: true, 
             total: conductoresSanitizados.length,
+            contador: conductoresSanitizados.length,
             data: conductoresSanitizados 
         });
     } catch (error) {
@@ -191,7 +246,6 @@ export const registrarConductor = async (req, res) => {
         
         const payloadSanitizado = sanitizarPayloadConductor(req.body);
         
-        // Forzar estado PENDIENTE en el registro manual directo si no se especifica
         if (!payloadSanitizado.estado) {
             payloadSanitizado.estado = 'PENDIENTE';
             payloadSanitizado.estadoAdministrativo = 'PENDIENTE';
@@ -209,7 +263,7 @@ export const registrarConductor = async (req, res) => {
                 uid: docFirestoreId,
                 nombre: nuevoConductor.nombre,
                 email: nuevoConductor.email,
-                telefono: nuevoConductor.telefonoMovil,
+                telefono: nuevoConductor.telefonoMovil || nuevoConductor.telefono,
                 estado: nuevoConductor.estado,
                 estadoAdministrativo: nuevoConductor.estadoAdministrativo || nuevoConductor.estado,
                 subrol: nuevoConductor.subrol || nuevoConductor.tipoVehiculo || 'mototaxi',
@@ -304,7 +358,9 @@ export const actualizarConductor = async (req, res) => {
             
             const firestoreUpdate = {};
             if (conductorActualizado.nombre) firestoreUpdate.nombre = conductorActualizado.nombre;
-            if (conductorActualizado.telefonoMovil) firestoreUpdate.telefono = conductorActualizado.telefonoMovil;
+            if (conductorActualizado.telefonoMovil || conductorActualizado.telefono) {
+                firestoreUpdate.telefono = conductorActualizado.telefonoMovil || conductorActualizado.telefono;
+            }
             if (conductorActualizado.estado) firestoreUpdate.estado = conductorActualizado.estado;
             if (conductorActualizado.subrol || conductorActualizado.tipoVehiculo) {
                 firestoreUpdate.subrol = conductorActualizado.subrol || conductorActualizado.tipoVehiculo;
@@ -690,10 +746,6 @@ export const obtenerHistorialConductor = obtenerHistorialSaldos;
 // 3. CONTROL DE ESTADO OPERATIVO (ENCENDIDO DE MALLA) Y RADAR
 // ==================================================================
 
-/**
- * 🔒 ACTUALIZAR ESTADO OPERATIVO / ENCENDER MALLA
- * Restringe el paso a 'ONLINE', 'active' o 'disponible' únicamente a conductores con estado 'APROBADO' e 'isActive: true'.
- */
 export const actualizarEstadoConductor = async (req, res) => {
     try {
         if (!req || !req.body) {
@@ -707,7 +759,6 @@ export const actualizarEstadoConductor = async (req, res) => {
             return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
 
-        // Búsqueda previa del conductor para verificar acreditación
         const conductorExistente = await Conductor.findOne({
             $or: [
                 { _id: mongoose.Types.ObjectId.isValid(id) ? id : null },
@@ -723,9 +774,8 @@ export const actualizarEstadoConductor = async (req, res) => {
         const estadoActual = String(conductorExistente.estado || conductorExistente.estadoAdministrativo || '').toUpperCase();
         const estaAprobado = (estadoActual === 'APROBADO' || estadoActual === 'ACTIVO') && conductorExistente.isActive === true;
 
-        const intentaEncender = isOnline === true || ['active', 'disponible', 'active', 'ONLINE'].includes(estado);
+        const intentaEncender = isOnline === true || ['active', 'disponible', 'ONLINE'].includes(estado);
 
-        // 🛑 COMPUERTA DE SEGURIDAD: Bloquear encendido si no está APROBADO
         if (intentaEncender && !estaAprobado) {
             return res.status(403).json({
                 success: false,
@@ -784,7 +834,6 @@ export const obtenerConductoresCercanos = async (req, res) => {
                     near: { type: "Point", coordinates: [longitud, latitud] },
                     distanceField: "distanciaMetros",
                     maxDistance: radioMetros,
-                    // Solo proyectar en el radar conductores APROBADOS e isActive: true
                     query: { 
                         estado: { $in: ["active", "disponible", "APROBADO"] },
                         isActive: true
@@ -825,7 +874,6 @@ export const actualizarRadarUbicacion = async (conductorId, lat, lng) => {
             return false;
         }
 
-        // Verificar acreditación antes de actualizar ubicación en vivo
         const conductor = await Conductor.findOne({
             $or: [
                 { _id: mongoose.Types.ObjectId.isValid(conductorId) ? conductorId : null },

@@ -1,13 +1,16 @@
-// Versión Arquitectura: V2.1 - Expansión de Telemetría Financiera y Malla CEO Blindada con Límite Atómico
+// Versión Arquitectura: V2.2 - Expansión de Telemetría Financiera, Deduplicación Táctica de Conductores y Malla CEO
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useAdminMonitor.js
  * Misión: Abstraer suscripciones en tiempo real a los nodos críticos de Firestore, añadiendo el flujo contable.
+ * Ajuste V2.2: Inyección de helper deduplicarEntidades para depurar duplicados en la lista de conductores en tiempo real.
  * Integridad: Fusión Atómica. Preserva suscripciones previas e inyecta limit(50) en consultas de viajes y transacciones para proteger RAM.
  */
 
 import { useState, useEffect } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
+// 🛡️ IMPORTANTE: Importación del helper de deduplicación de entidades
+import { deduplicarEntidades } from '../utils/deduplicar';
 
 export const useAdminMonitor = () => {
     const [conductores, setConductores] = useState([]);
@@ -27,11 +30,18 @@ export const useAdminMonitor = () => {
                 throw new Error("Gobernanza de Rutas Violada: FIRESTORE_PATHS no está definido en el archivo de configuración.");
             }
 
-            // 1. 🛡️ Suscripción a Conductores (Flota completa activa)
+            // 1. 🛡️ Suscripción a Conductores (Flota completa activa con filtrado de deduplicación)
             const pathConductores = FIRESTORE_PATHS.conductores || 'conductores';
             const qConductores = query(collection(db, pathConductores), orderBy('createdAt', 'desc'));
             unsubCond = onSnapshot(qConductores, (snap) => {
-                setConductores(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                const listaRaw = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                
+                // 🧹 APLICAMOS DEDUPLICACIÓN TÁCTICA SOBRE LA LISTA ACUMULADA
+                const listaDepurada = typeof deduplicarEntidades === 'function' 
+                    ? deduplicarEntidades(listaRaw) 
+                    : listaRaw;
+
+                setConductores(listaDepurada);
             }, (err) => {
                 console.error("🚨 [CIMCO-MONITOR-ERR] Falla en Malla de Operadores:", err);
                 setError(err.message);

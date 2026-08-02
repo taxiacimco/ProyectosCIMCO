@@ -1,8 +1,8 @@
-// Versión Arquitectura: V14.8 - Integración de Moderación Directa y Estado Badge
+// Versión Arquitectura: V15.1 - Integración Híbrida MongoDB REST (Puerto 3000) + Fallback Firestore + Deduplicación Anti-Duplicados
 /**
  * Ubicación: frontend\src\components\admin\ListaOperadores.jsx
- * Misión: Renderizar la malla de operadores aplicando normalización canónica de variables,
- *         gestión de aprobación de licencias/cuentas y acciones de control de estado.
+ * Misión: Renderizar la malla de operadores recuperando registros desde el backend (MongoDB)
+ *         a través del puerto 3000 con fallback a Firestore para garantizar la presencia de operadores registrados.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -10,6 +10,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, doc, updateDoc, query } from 'firebase/firestore';
 import { Shield, ShieldAlert, UserCheck, UserX, Search, Loader, Database, CheckCircle, Hourglass } from 'lucide-react';
+// 🛡️ IMPORTANTE: Importación del helper de deduplicación
+import { deduplicarEntidades } from '../../utils/deduplicar';
 
 const normalizarEntidadUsuario = (idDoc, rawData = {}) => {
     const rolEstandar = (rawData?.rol || rawData?.role || rawData?.subrol || 'operador').toString().toLowerCase().trim();
@@ -22,8 +24,8 @@ const normalizarEntidadUsuario = (idDoc, rawData = {}) => {
     }
 
     return {
-        id: idDoc,
-        _id: idDoc,
+        id: idDoc || rawData?._id,
+        _id: rawData?._id || idDoc,
         ...rawData,
         rol: rolEstandar,
         role: rolEstandar,
@@ -39,8 +41,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
     const [errorFirestore, setErrorFirestore] = useState(null);
     const isMounted = useRef(true);
 
-    // Escucha en tiempo real si no se proporcionan conductores vía props
-    useEffect(() => {
+    const cargarOperadores = async () => {
         if (conductoresProp) {
             setLoading(false);
             return;
@@ -48,6 +49,31 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
 
         isMounted.current = true;
         setLoading(true);
+
+        try {
+            // Petición directa al Backend Express en el Puerto 3000
+            const response = await fetch('http://localhost:3000/api/conductores');
+            if (response.ok) {
+                const data = await response.json();
+                const listaMongo = Array.isArray(data) ? data : (data.conductores || data.data || []);
+                
+                if (isMounted.current) {
+                    const normalizados = listaMongo.map(u => normalizarEntidadUsuario(u._id || u.id, u));
+                    
+                    // 🛡️ APLICAMOS FILTRO ANTI-DUPLICADOS ANTES DE GUARDAR EN EL ESTADO
+                    const listaLimpia = deduplicarEntidades(normalizados);
+
+                    setUsuariosLocal(listaLimpia);
+                    setLoading(false);
+                    setErrorFirestore(null);
+                    return; // ¡Carga exitosa desde MongoDB!
+                }
+            }
+        } catch (err) {
+            console.warn("⚠️ [CIMCO-REST]: Fallo al consultar backend en puerto 3000, recurriendo a Firestore...", err);
+        }
+
+        // Fallback a Firestore si la API no responde
         const pathColeccion = FIRESTORE_PATHS?.users || 'usuarios'; 
         const q = query(collection(db, pathColeccion));
         
@@ -58,7 +84,10 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                     normalizarEntidadUsuario(docSnap.id, docSnap.data())
                 );
                 
-                setUsuariosLocal(lista);
+                // 🛡️ APLICAMOS FILTRO ANTI-DUPLICADOS TAMBIÉN EN EL FALLBACK DE FIRESTORE
+                const listaLimpia = deduplicarEntidades(lista);
+
+                setUsuariosLocal(listaLimpia);
                 setLoading(false);
                 setErrorFirestore(null);
             }, 
@@ -73,16 +102,38 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
 
         return () => {
             isMounted.current = false;
-            unsubscribe();
+            if (typeof unsubscribe === 'function') unsubscribe();
         };
+    };
+
+    useEffect(() => {
+        cargarOperadores();
     }, [conductoresProp]);
 
-    const listaMapeada = conductoresProp || usuariosLocal;
+    // 🛡️ En caso de que conductoresProp venga desde un componente padre, aplicamos deduplicación
+    const listaBruta = conductoresProp || usuariosLocal;
+    const listaMapeada = deduplicarEntidades(listaBruta);
 
     const handleAprobar = async (id, nuevoEstado = 'APROBADO') => {
         if (onAprobarConductor) {
             onAprobarConductor(id, nuevoEstado);
             return;
+        }
+
+        try {
+            // Intentar aprobar vía API REST (Puerto 3000)
+            const res = await fetch(`http://localhost:3000/api/conductores/${id}/aprobar`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ estado: nuevoEstado, isActive: true })
+            });
+
+            if (res.ok) {
+                cargarOperadores();
+                return;
+            }
+        } catch (e) {
+            console.warn("⚠️ Fallo actualización REST, intentando en Firestore...", e);
         }
 
         try {
@@ -98,9 +149,26 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
     };
 
     const toggleEstado = async (id, currentActive) => {
+        const nuevoEstadoBool = !currentActive;
+        const nuevoEstadoString = nuevoEstadoBool ? 'APROBADO' : 'INACTIVO';
+
         try {
-            const nuevoEstadoBool = !currentActive;
-            const nuevoEstadoString = nuevoEstadoBool ? 'APROBADO' : 'INACTIVO';
+            // Intentar alterar estado vía API REST (Puerto 3000)
+            const res = await fetch(`http://localhost:3000/api/conductores/${id}/estado`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ isActive: nuevoEstadoBool, estado: nuevoEstadoString })
+            });
+
+            if (res.ok) {
+                cargarOperadores();
+                return;
+            }
+        } catch (e) {
+            console.warn("⚠️ Fallo cambio estado REST, intentando Firestore...", e);
+        }
+
+        try {
             const pathColeccion = FIRESTORE_PATHS?.users || 'usuarios';
             const docRef = doc(db, pathColeccion, id);
 
@@ -130,11 +198,13 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         const email = (u?.email || '').toLowerCase();
         const rol = (u?.rol || u?.role || u?.subrol || '').toLowerCase();
         const id = (u?.id || u?._id || '').toLowerCase();
+        const telefono = (u?.telefono || u?.telefonoMovil || '').toLowerCase();
 
         return nombre.includes(queryNormalize) || 
                email.includes(queryNormalize) || 
                rol.includes(queryNormalize) ||
-               id.includes(queryNormalize);
+               id.includes(queryNormalize) ||
+               telefono.includes(queryNormalize);
     });
 
     return (

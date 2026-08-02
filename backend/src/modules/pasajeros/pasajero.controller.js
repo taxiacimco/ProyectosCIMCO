@@ -1,11 +1,13 @@
-// Versión Arquitectura: V17.0 - Módulo Pasajeros (Gestión de Perfil, Direcciones Favoritas y Billetera Virtual)
+// Versión Arquitectura: V18.1 - Módulo Pasajeros (Deduplicación de Registros, Semántica de Historial y Mapeo Seguro)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
- * Misión: Gestión integral de perfiles de pasajeros, direcciones favoritas, historial de trayectos y operaciones de saldo/billetera.
+ * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos y operaciones de saldo/billetera.
+ * Ajuste V18.1: Corrección de asignación semántica en HistorialSaldo (usuario/pasajero en lugar de conductor) al recargar saldo.
  */
 
 import mongoose from 'mongoose';
 import Pasajero from '../../models/Pasajero.js';
+import Usuario from '../../models/Usuario.js';
 import Viaje from '../../models/Viaje.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
 import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
@@ -46,16 +48,72 @@ const registrarTransaccionFirestore = async ({
 };
 
 // ==================================================================
-// 1. GESTIÓN GENERAL DE PASAJEROS Y PERFIL
+// 1. GESTIÓN GENERAL DE PASAJEROS Y PERFIL (DEDUPLICADO)
 // ==================================================================
 
 /**
- * 📋 Obtener listado de pasajeros (Uso administrativo)
+ * 📋 Obtener listado de pasajeros deduplicado (Uso administrativo)
  */
 export const obtenerPasajeros = async (req, res) => {
     try {
-        const pasajeros = await Pasajero.find().select('-password').lean();
-        return res.status(200).json({ success: true, contador: pasajeros.length, data: pasajeros });
+        const pasajerosBrutos = await Pasajero.find().select('-password').lean();
+
+        // Aplicar filtrado defensivo anti-duplicados por _id, email o teléfono
+        const mapaUnico = new Map();
+
+        pasajerosBrutos.forEach((p) => {
+            const key = p._id ? p._id.toString() : (p.uid || p.email || p.telefonoMovil || p.telefono);
+            if (key && !mapaUnico.has(key)) {
+                mapaUnico.set(key, {
+                    ...p,
+                    id: p._id ? p._id.toString() : p.uid,
+                    telefono: p.telefonoMovil || p.telefono || '',
+                    rol: p.rol || p.role || 'pasajero',
+                    origenColeccion: 'PASAJEROS'
+                });
+            }
+        });
+
+        const listaLimpia = Array.from(mapaUnico.values());
+
+        return res.status(200).json({ 
+            success: true, 
+            contador: listaLimpia.length, 
+            data: listaLimpia,
+            pasajeros: listaLimpia 
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * 🛡️ Middleware/Validación de Registro Único para Pasajeros
+ */
+export const validarPasajeroUnico = async (req, res, next) => {
+    try {
+        const { email, telefono, telefonoMovil } = req.body;
+        const telContacto = telefono || telefonoMovil;
+
+        const condicionesPasajero = [];
+        if (email) condicionesPasajero.push({ email: email.toLowerCase().trim() });
+        if (telContacto) condicionesPasajero.push({ telefonoMovil: telContacto }, { telefono: telContacto });
+
+        if (condicionesPasajero.length > 0) {
+            // Validar en ambas colecciones para prevenir duplicados entre Pasajero y Usuario
+            const [existeEnPasajeros, existeEnUsuarios] = await Promise.all([
+                Pasajero.findOne({ $or: condicionesPasajero }).lean(),
+                Usuario.findOne({ $or: condicionesPasajero }).lean()
+            ]);
+
+            if (existeEnPasajeros || existeEnUsuarios) {
+                return res.status(400).json({
+                    success: false,
+                    message: "⚠️ El número de teléfono o correo ya pertenece a un usuario/pasajero registrado."
+                });
+            }
+        }
+        next();
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -126,9 +184,10 @@ export const actualizarPerfilPasajero = async (req, res) => {
                 payloadFs.nombre = pasajero.nombre;
                 payloadFs.fullName = pasajero.nombre;
             }
-            if (pasajero.telefonoMovil) {
-                payloadFs.telefono = pasajero.telefonoMovil;
-                payloadFs.telefonoMovil = pasajero.telefonoMovil;
+            if (pasajero.telefonoMovil || pasajero.telefono) {
+                const tel = pasajero.telefonoMovil || pasajero.telefono;
+                payloadFs.telefono = tel;
+                payloadFs.telefonoMovil = tel;
             }
 
             await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set(payloadFs, { merge: true });
@@ -347,15 +406,18 @@ export const recargarSaldoPasajero = async (req, res) => {
         const saldoAnterior = Number(pasajero.saldo || 0);
         const saldoNuevo = saldoAnterior + montoNum;
 
-        // Historial en MongoDB
+        // ✅ Historial en MongoDB con mapeo semántico limpio (usuario / pasajero)
         const nuevoHistorial = new HistorialSaldo({
-            conductor: pasajero._id, // Mantenemos compatibilidad con el esquema
-            tipo: 'recarga_pasajero',
+            usuario: pasajero._id,
+            pasajero: pasajero._id,
             monto: montoNum,
+            tipo: 'RECARGA',
+            rolTarget: 'pasajero',
             saldoAnterior,
             saldoNuevo,
+            realizadoPor: adminId,
             referencia: referencia || `PAS-${Date.now()}`,
-            descripcion: nota || 'Recarga de saldo a pasajero'
+            descripcion: nota || 'Recarga de saldo a pasajero realizada por central/admin'
         });
         await nuevoHistorial.save({ session });
 
