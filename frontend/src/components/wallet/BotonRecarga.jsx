@@ -1,4 +1,4 @@
-// Versión Arquitectura: V15.5 - Módulo Compartido de Recargas (Consistencia Transaccional)
+// Versión Arquitectura: V15.6 - Parametrización Dinámica de Central WhatsApp y Fallback de Entorno
 /**
  * Ubicación: frontend\src\components\wallet\BotonRecarga.jsx
  * Misión: Orquestar solicitudes de recarga enviando data estructurada al Admin vía WhatsApp sin alertas de navegador.
@@ -8,7 +8,7 @@
 import React, { useState } from 'react';
 import { MessageCircle, DollarSign, AlertCircle } from 'lucide-react';
 
-const BotonRecarga = ({ usuarioId = "Desconocido", rol = "usuario", emailConductor = "" }) => {
+const BotonRecarga = ({ usuarioId = "Desconocido", rol = "usuario", emailConductor = "", adminPhoneProp }) => {
     const [monto, setMonto] = useState('');
     const [errorValidacion, setErrorValidacion] = useState('');
 
@@ -29,8 +29,8 @@ const BotonRecarga = ({ usuarioId = "Desconocido", rol = "usuario", emailConduct
         }
 
         setErrorValidacion('');
-        // 📱 NÚMERO DE LA CENTRAL ADMINISTRATIVA TAXIA CIMCO
-        const adminPhone = "573000000000"; 
+        // 📱 NÚMERO DE LA CENTRAL ADMINISTRATIVA TAXIA CIMCO (Parametrización dinámica por Prop/Env con Fallback seguro)
+        const adminPhone = adminPhoneProp || import.meta.env.VITE_ADMIN_WHATSAPP || "573000000000"; 
         
         // 🏗️ CORRECCIÓN V15.5: Reemplazo de \\n por saltos de línea reales (\n) válidos para URI Encode
         const mensaje = `Hola Central TAXIA CIMCO. Soy el *${rol.toUpperCase()}* con ID: *${usuarioId}* ${emailConductor ? `(${emailConductor})` : ''}.\n\nSolicito una recarga a mi billetera por valor de: *$${parseFloat(monto).toLocaleString('es-CO')} COP*.\n\nAdjunto el comprobante de transferencia correspondiente.`;

@@ -1,5 +1,4 @@
-// Versión Arquitectura: V2.1 - Implementación de Sanitización y Validación Regex de Teléfono Móvil (Colombia 10 Dígitos)
-
+// Versión Arquitectura: V2.2 - Sincronización Transaccional Doble y Blindaje de Alias
 import React, { useState, useEffect } from "react";
 import { X, Save, Phone, User, Landmark, Loader2 } from "lucide-react";
 import api from "@/config/api";
@@ -35,7 +34,7 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
     
     // Sanitización en vivo para el campo teléfono (solo dígitos)
     if (name === "telefonoMovil") {
-      const sanitizedValue = value.replace(/\D/g, "").slice(0, 10);
+      const sanitizedValue = (value || "").replace(/\D/g, "").slice(0, 10);
       setFormData((prev) => ({ ...prev, [name]: sanitizedValue }));
       return;
     }
@@ -66,12 +65,16 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
       return;
     }
 
+    // Determinar rol activo para propagar contexto de sincronización doble (Usuarios vs. Conductores)
+    const rolActual = user?.rol || user?.role || "usuario";
+
     const payloadFormat = {
       ...formData,
       nombre: nombreSanitizado,
       telefonoMovil: telefonoLimpio,
       cooperativa: (formData.cooperativa || "").trim(),
       empresa: (formData.empresa || "").trim(),
+      rol: rolActual,
     };
 
     try {

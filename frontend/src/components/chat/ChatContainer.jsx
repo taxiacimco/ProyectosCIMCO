@@ -1,9 +1,43 @@
-// Versión Arquitectura: V12.0 - PROD READY: Corrección de Regla de Hooks, Latencia Estimada y Control Anti-Spam
+// Versión Arquitectura: V13.0 - Resiliencia de Formateo Temporal Multi-Origen y Blindaje Anti-Crash
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; // 🚀 Fusión Atómica: Paths Inyectados
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { Send, Loader2 } from 'lucide-react';
+
+// 🛡️ Helper Polimórfico de Resiliencia Temporal para prevenir TypeError: .toDate is not a function
+const formatFechaSegura = (fechaRaw) => {
+  if (!fechaRaw) return '';
+
+  try {
+    let fechaObj = null;
+
+    // 1. Instancia de Timestamp de Firestore (.toDate)
+    if (typeof fechaRaw.toDate === 'function') {
+      fechaObj = fechaRaw.toDate();
+    }
+    // 2. Instancia Nativa de JavaScript Date
+    else if (fechaRaw instanceof Date) {
+      fechaObj = fechaRaw;
+    }
+    // 3. Cadena ISO, timestamp numérico o string parseable
+    else if (typeof fechaRaw === 'string' || typeof fechaRaw === 'number') {
+      fechaObj = new Date(fechaRaw);
+    }
+    // 4. Objeto plano estructurado { seconds, nanoseconds }
+    else if (typeof fechaRaw === 'object' && typeof fechaRaw.seconds === 'number') {
+      fechaObj = new Date(fechaRaw.seconds * 1000);
+    }
+
+    if (fechaObj && !isNaN(fechaObj.getTime())) {
+      return fechaObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  } catch (error) {
+    console.warn('⚠️ [ChatContainer] Error al formatear fecha de mensaje:', error);
+  }
+
+  return '';
+};
 
 const ChatContainer = ({ tripId }) => {
   const { user } = useAuth();
@@ -84,6 +118,8 @@ const ChatContainer = ({ tripId }) => {
       <div className="flex-grow overflow-y-auto p-4 space-y-3 scrollbar-none">
         {messages.map((msg) => {
           const isMe = msg.senderId === user?.uid;
+          const horaFormatted = formatFechaSegura(msg.createdAt);
+
           return (
             <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs transition-all ${
@@ -92,9 +128,9 @@ const ChatContainer = ({ tripId }) => {
                   : 'bg-white/5 text-zinc-100 border border-white/5 rounded-tl-none'
               }`}>
                 <p className="leading-relaxed break-words">{msg.text}</p>
-                {msg.createdAt && (
+                {horaFormatted && (
                   <span className="block text-[8px] text-right mt-1 opacity-40 font-mono">
-                    {msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {horaFormatted}
                   </span>
                 )}
               </div>

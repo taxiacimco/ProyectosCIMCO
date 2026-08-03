@@ -1,13 +1,13 @@
-// Versión Arquitectura: V15.5 - Firma Polimórfica y Unificación Estética de Auditoría
+// Versión Arquitectura: V15.6 - Manejo Táctico de Errores de Índices Compuestos Firestore y Captura de Enlace Directo
 /**
  * Ubicación: frontend\src\components\wallet\TransactionHistory.jsx
- * Misión: Auditar y renderizar la trazabilidad financiera del usuario mitigando nulos por desincronización.
+ * Misión: Auditar y renderizar la trazabilidad financiera del usuario mitigando nulos por desincronización y extrayendo enlaces de índices compuestos de Firestore.
  */
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
-import { Clock, ArrowUpRight, ArrowDownLeft, Loader2, ServerOff } from 'lucide-react';
+import { Clock, ArrowUpRight, ArrowDownLeft, Loader2, ServerOff, ExternalLink } from 'lucide-react';
 import { formatFechaColombia } from '@/utils/dateFormatter';
 
 const TransactionHistory = ({ targetUid = null }) => {
@@ -15,6 +15,7 @@ const TransactionHistory = ({ targetUid = null }) => {
     const [transactions, setTransactions] = useState([]);
     const [loadingTx, setLoadingTx] = useState(true);
     const [errorFirebase, setErrorFirebase] = useState(null);
+    const [indexUrl, setIndexUrl] = useState(null);
 
     useEffect(() => {
         // 🛡️ Guarda Avanzada: Selección y resolución del UID operativo
@@ -26,6 +27,7 @@ const TransactionHistory = ({ targetUid = null }) => {
         }
 
         setErrorFirebase(null);
+        setIndexUrl(null);
         const pathColeccion = FIRESTORE_PATHS.transacciones || 'transacciones';
         
         try {
@@ -51,7 +53,16 @@ const TransactionHistory = ({ targetUid = null }) => {
                 },
                 (error) => {
                     console.error("❌ [CIMCO-WALLET-CORE] Error en streaming de transacciones:", error);
-                    setErrorFirebase(error.message);
+                    
+                    // 🛡️ Extracción táctica de URL de generación de índices en consola de Firebase
+                    const mensajeError = error?.message || "";
+                    const matchUrl = mensajeError.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
+                    
+                    if (matchUrl) {
+                        setIndexUrl(matchUrl[0]);
+                    }
+                    
+                    setErrorFirebase(mensajeError || "Error al obtener historial de transacciones.");
                     setLoadingTx(false);
                 }
             );
@@ -59,7 +70,15 @@ const TransactionHistory = ({ targetUid = null }) => {
             return () => unsubscribe();
         } catch (err) {
             console.error("❌ [CIMCO-WALLET-CORE] Fallo crítico al instanciar consulta NoSQL:", err);
-            setErrorFirebase(err.message);
+            
+            const mensajeErr = err?.message || "";
+            const matchUrl = mensajeErr.match(/https:\/\/console\.firebase\.google\.com[^\s]*/);
+            
+            if (matchUrl) {
+                setIndexUrl(matchUrl[0]);
+            }
+            
+            setErrorFirebase(mensajeErr || "Error de inicialización de consulta.");
             setLoadingTx(false);
         }
     }, [user?.uid, targetUid]);
@@ -75,9 +94,26 @@ const TransactionHistory = ({ targetUid = null }) => {
 
     if (errorFirebase) {
         return (
-            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-red-400 font-mono text-[10px] uppercase tracking-wider">
-                <ServerOff size={14} className="shrink-0" />
-                <span>Error de comunicación perimetral con base de datos.</span>
+            <div className="flex flex-col gap-2 bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-red-400 font-mono text-[10px] uppercase tracking-wider">
+                <div className="flex items-center gap-2">
+                    <ServerOff size={14} className="shrink-0" />
+                    <span>Error de comunicación perimetral con base de datos.</span>
+                </div>
+                
+                {indexUrl && (
+                    <div className="mt-1 pt-2 border-t border-red-500/20 flex flex-col gap-1">
+                        <span className="text-[9px] text-zinc-400">⚠️ Se requiere un índice compuesto en Firestore:</span>
+                        <a 
+                            href={indexUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-orange-400 hover:text-orange-300 font-bold underline text-[9px] transition-colors break-all"
+                        >
+                            <ExternalLink size={11} className="shrink-0" />
+                            Crear índice en Firebase Console
+                        </a>
+                    </div>
+                )}
             </div>
         );
     }
