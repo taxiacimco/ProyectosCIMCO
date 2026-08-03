@@ -1,7 +1,7 @@
-// Versión Arquitectura: V19.0 - Enrutamiento Jerarquizado de Directorio Global y Usuarios Multi-Rol
+// Versión Arquitectura: V19.1 - Mapeo Expreso y Alias Dinámicos de Saldo Gerencial Anti-404
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.routes.js
- * Misión: Enrutamiento seguro y jerarquizado de directorio global unificado, gestión de usuarios, asignación de terminales y recargas/ajustes gerenciales.
+ * Misión: Exponer alias explícitos para el endpoint de ajuste de saldo (`/:id/saldo`) resolviendo el error [CIMCO-ROUTE-MISS].
  */
 
 import { Router } from 'express';
@@ -37,6 +37,9 @@ router.get('/despachador/saldo/:id', verificarToken, obtenerSaldoDespachador);
 router.post('/despachador/recargar', verificarToken, esAdmin, recargarSaldoDespachador);
 
 // 💳 ENDPOINTS PARA AJUSTE DE SALDO (ABONO / DÉBITO) POR EL ADMIN
+// ✅ CORRECCIÓN QUIRÚRGICA V19.1: Mapeo explícito de `/:id/saldo` para absorber peticiones PUT/POST del cliente
+router.put('/:id/saldo', verificarToken, esAdmin, recargarSaldo);
+router.post('/:id/saldo', verificarToken, esAdmin, recargarSaldo);
 router.put('/:id/recargar', verificarToken, esAdmin, recargarSaldo);
 router.post('/:id/recargar', verificarToken, esAdmin, recargarSaldo);
 
