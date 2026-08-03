@@ -1,7 +1,7 @@
-// Versión Arquitectura: V19.0 - Definición de Rutas de Conductores y Administración (Deduplicado)
+// Versión Arquitectura: V19.1 - Definición de Rutas de Conductores y Administración (Deduplicado Unificado)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
- * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría y recargas auditadas.
+ * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría y recargas auditadas sin provocar CIMCO-ROUTE-MISS.
  */
 
 import express from 'express';
@@ -17,6 +17,7 @@ import {
     obtenerConductoresDisponibles,
     obtenerConductoresCercanos, 
     obtenerCapitalCirculante,
+    recargarSaldoAdmin,
     recargarBilleteraPorAdmin,
     descontarComisionViaje,
     ajustarSaldo,
@@ -60,19 +61,24 @@ const validarTelemetriaRadar = (req, res, next) => {
 };
 
 // ==================================================================
-// 📡 RUTAS DE ADMINISTRACIÓN Y CONSULTA GENERAL
+// 🟢 RUTAS DE CONSULTA Y LECTURA
 // ==================================================================
-router.post('/registrar', validarConductorUnico, registrarConductor);
-router.post('/', validarConductorUnico, registrarConductor);
 router.get('/', obtenerTodosConductores);
 router.get('/disponibles', obtenerConductoresDisponibles);
+router.get('/capital-circulante', verificarToken, esAdmin, obtenerCapitalCirculante);
 
 /**
  * 🏢 APROBACIÓN Y CAMBIO DE ESTADO (Secretaría / Admin)
  */
 router.put('/cambiar-estado/:id', verificarToken, esAdmin, cambiarEstadoConductor);
 router.patch('/cambiar-estado/:id', verificarToken, esAdmin, cambiarEstadoConductor);
+router.patch('/:id/estado', verificarToken, esAdmin, cambiarEstadoConductor);
+router.put('/:id/estado', verificarToken, esAdmin, cambiarEstadoConductor);
 router.put('/:id/estado-admin', verificarToken, esAdmin, cambiarEstadoConductor);
+router.patch('/:id/aprobar', verificarToken, esAdmin, (req, res) => {
+    req.body.nuevoEstado = 'APROBADO';
+    return cambiarEstadoConductor(req, res);
+});
 
 /**
  * 📊 MÉTRICAS ADMINISTRATIVAS
@@ -95,23 +101,36 @@ router.post('/actualizar-ubicacion', actualizarUbicacionGPS);
 router.put('/estado', actualizarEstadoConductor);
 
 // ==================================================================
-// 🛡️ RUTAS BLINDADAS DE FINANZAS Y CRÍTICAS
+// 🟡 RUTAS DE CREACIÓN Y EDICIÓN (CON VALIDACIÓN ANTI-DUPLICADOS)
 // ==================================================================
-router.get('/:conductorId/historial', verificarToken, obtenerHistorialConductor);
-router.post('/descuento-comision', verificarToken, descontarComisionViaje);
-router.put('/ajustar-saldo/:uid', verificarToken, esAdmin, ajustarSaldo);
+router.post('/registrar', validarConductorUnico, registrarConductor);
+router.post('/', validarConductorUnico, registrarConductor);
 
-/**
- * 💰 RUTA CRÍTICA: Recargas por Administración
- */
-router.post('/saldos/admin/recargar', verificarToken, esAdmin, recargarBilleteraPorAdmin);
+// ==================================================================
+// 💳 BILLETERA Y RECARGAS ATÓMICAS (UNIFICACIÓN DE RUTAS Y ALIAS ANTI CIMCO-ROUTE-MISS)
+// ==================================================================
+router.post('/saldos/admin/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
+router.put('/:id/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
+router.post('/:id/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
+router.put('/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
+router.post('/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
+
+router.put('/ajustar-saldo/:uid', verificarToken, esAdmin, ajustarSaldo);
+router.put('/:id/ajuste', verificarToken, esAdmin, ajustarSaldo);
+router.post('/:id/ajuste', verificarToken, esAdmin, ajustarSaldo);
+
+router.post('/descuento-comision', verificarToken, descontarComisionViaje);
+router.post('/descontar-comision', verificarToken, descontarComisionViaje);
+
+router.get('/:conductorId/historial', verificarToken, obtenerHistorialConductor);
 
 // ==================================================================
 // 🔍 CONSULTAS Y MODIFICACIONES POR ID (RUTAS DINÁMICAS AL FINAL)
 // ==================================================================
 router.get('/:id', obtenerConductorPorId);
 router.put('/:id', actualizarConductor);
-router.delete('/:id', eliminarConductor);
+router.patch('/:id', actualizarConductor);
+router.delete('/:id', verificarToken, esAdmin, eliminarConductor);
 
 // ==================================================================
 // 🛠️ RUTA DE DEPURACIÓN EN DESARROLLO

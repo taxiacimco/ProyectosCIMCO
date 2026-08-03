@@ -1,4 +1,4 @@
-// Versión Arquitectura: V19.0 - Módulo Conductores: Atómico, Deduplicado, Multi-Subrol y Auditado
+// Versión Arquitectura: V19.1 - Módulo Conductores: Atómico, Deduplicado, Multi-Subrol y Auditado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
  * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, telemetría GPS y recargas atómicas.
@@ -465,8 +465,8 @@ export const recargarSaldoAdmin = async (req, res) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-        const { conductorId, id, uid, monto, referencia, nota } = req.body;
-        const targetId = conductorId || id || uid;
+        const targetId = req.params.id || req.params.uid || req.body.conductorId || req.body.id || req.body.uid;
+        const { monto, referencia, nota } = req.body;
         const montoNum = parseFloat(monto);
         const adminId = req.user?.id || req.user?._id || 'ADMIN_SYSTEM';
 
@@ -697,15 +697,22 @@ export const descontarComisionViaje = async (req, res) => {
             success: true, 
             message: "Comisión debitada correctamente.", 
             nuevoSaldo,
-            data: { nuevoSaldo } 
+            data: {
+                conductorId: conductor._id,
+                saldoAnterior,
+                nuevoSaldo,
+                montoDebitado: comisionNum,
+                viajeId: viajeId || null
+            } 
         });
 
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
+        console.error("❌ Error al descontar comisión de viaje:", error);
         return res.status(error.message.includes('insuficiente') ? 402 : 500).json({ 
             success: false, 
-            message: error.message 
+            message: error.message || "Error al procesar el débito de comisión." 
         });
     }
 };

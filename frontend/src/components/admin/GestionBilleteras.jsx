@@ -1,4 +1,4 @@
-// Versión Arquitectura: V14.1 - Consola de Ajuste Multirrol de Saldo (Abono / Débito Manual) CIMCO NEXUS
+// Versión Arquitectura: V14.2 - Consola de Ajuste Multirrol de Saldo CIMCO NEXUS (Universal Endpoint Integrated)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
  * Misión: Monitoreo global de saldos y ejecución de ajustes de capital (Abono / Débito Manual) para todos los actores:
@@ -271,16 +271,10 @@ export const GestionBilleteras = () => {
         setProcesandoRecarga(true);
         let transaccionExitosa = false;
 
-        // 🎯 DETERMINACIÓN DINÁMICA DEL ENDPOINT SEGÚN EL ROL/ORIGEN DEL ACTOR
-        const esConductor = ['MOTOTAXI', 'MOTOPARRILLERO', 'MONTACARGA', 'CONDUCTOR', 'INTERMUNICIPAL'].some(r => 
-            (cuentaSeleccionada.subrol || cuentaSeleccionada.rol || '').toUpperCase().includes(r)
-        );
+        // 🎯 RUTA UNIVERSAL DE SALDOS REST
+        const endpointDestino = `${API_BASE_URL}/api/usuarios/${cuentaSeleccionada.id}/saldo`;
 
-        const endpointDestino = esConductor 
-            ? `${API_BASE_URL}/api/conductores/${cuentaSeleccionada.id}/recargar`
-            : `${API_BASE_URL}/api/billeteras/${cuentaSeleccionada.id}/ajuste`;
-
-        // Intentar ejecución vía Endpoint Backend Express correspondiente
+        // Intentar ejecución vía Endpoint Backend Express Central
         try {
             const token = localStorage.getItem('cimco_token');
             const res = await fetch(endpointDestino, {
@@ -307,7 +301,7 @@ export const GestionBilleteras = () => {
             console.warn('⚠️ API REST inaccesible o endpoint no disponible, aplicando fallback directo en Firestore...', err);
         }
 
-        // Fallback / Respaldo directo en Firestore para garantizar la actualización inmediata del saldo
+        // Respaldo directo en Firestore para garantizar actualización inmediata del saldo
         try {
             const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
             const pathAuditoria = FIRESTORE_PATHS?.transactions || 'transacciones';
@@ -367,7 +361,7 @@ export const GestionBilleteras = () => {
             setMontoRecarga('');
             setCuentaSeleccionada(null);
             setProcesandoRecarga(false);
-            obtenerBovedasGlobales(); // Refrescar saldos de inmediato
+            obtenerBovedasGlobales(); // Refrescar saldos inmediatamente
         }
     };
 
