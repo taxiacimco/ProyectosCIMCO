@@ -1,4 +1,4 @@
-// C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\seedAdmin.js
+// Ubicación: backend/scripts/seedAdmin.js
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
@@ -10,12 +10,10 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const seedAdmin = async () => {
     try {
-        let URI = process.env.MONGODB_URI || process.env.MONGO_URI;
-        if (!URI) throw new Error("⚠️ MONGODB_URI/MONGO_URI no definida en el .env.");
-
+        let URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/taxia-cimco';
         URI = URI.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco');
 
-        console.log("📡 [CIMCO-SEED-ADMIN] Conectando a MongoDB Atlas...");
+        console.log("📡 [CIMCO-SEED-ADMIN] Conectando a MongoDB...");
         await mongoose.connect(URI);
         const db = mongoose.connection.db;
 
@@ -49,7 +47,7 @@ const seedAdmin = async () => {
         }
 
     } catch (error) {
-        console.error("🚨 Error al ejecutar poblamiento de administración:", error);
+        console.error("🚨 Error al ejecutar poblamiento de administración:", error.message);
     } finally {
         await mongoose.disconnect();
         process.exit(0);

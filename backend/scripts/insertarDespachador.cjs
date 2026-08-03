@@ -1,6 +1,6 @@
 // Versión Arquitectura: V2.1 - Asignación Nativa de Hash de Contraseña y Compatibilidad
 /**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarDespachador.cjs
+ * Ubicación: backend/scripts/insertarDespachador.cjs
  */
 
 const { MongoClient } = require('mongodb');
@@ -9,7 +9,7 @@ const bcrypt = require('bcryptjs');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
-let URI_ATLAS = process.env.MONGODB_URI || process.env.MONGO_URI;
+let URI_ATLAS = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/taxia-cimco';
 URI_ATLAS = URI_ATLAS.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco');
 
 const defaultPasswordHash = bcrypt.hashSync('123456', 10);
@@ -18,7 +18,7 @@ async function sembrarDespachador() {
     const client = new MongoClient(URI_ATLAS, { connectTimeoutMS: 10000 });
 
     try {
-        console.log('📡 [CIMCO-DESPACHADOR] Conectando de forma segura a Atlas...');
+        console.log('📡 [CIMCO-DESPACHADOR] Conectando de forma segura...');
         await client.connect();
         
         const db = client.db('taxia-cimco');
@@ -56,11 +56,10 @@ async function sembrarDespachador() {
         };
 
         if (existe) {
-            console.log('⚠️ [CIMCO-DESPACHADOR] El registro ya existe. Sincronizando...');
+            console.log('⚠️ [CIMCO-DESPACHADOR] Registro preexistente. Sincronizando datos...');
             await coleccion.updateOne({ email: emailObjetivo }, { $set: payload });
             console.log('🔄 Identidad operativa re-calibrada.');
         } else {
-            console.log('📦 Empaquetando payload del Despachador...');
             payload.fechaCreacion = new Date();
             await coleccion.insertOne(payload);
             console.log('🚀 [SÚPER ÉXITO] Nodo Despachador inyectado de forma atómica.');

@@ -1,6 +1,6 @@
 // Versión Arquitectura: V2.1 - Inyección Múltiple, Hash Encriptado y ObjectId Nativo
 /**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarConductor.cjs
+ * Ubicación: backend/scripts/insertarConductor.cjs
  */
 
 const { MongoClient } = require('mongodb');
@@ -9,7 +9,7 @@ const bcrypt = require('bcryptjs');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
-let URI_ATLAS = process.env.MONGODB_URI || process.env.MONGO_URI;
+let URI_ATLAS = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/taxia-cimco';
 URI_ATLAS = URI_ATLAS.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco');
 
 const defaultPasswordHash = bcrypt.hashSync('123456', 10);
@@ -65,7 +65,7 @@ async function sembrarEscuadron() {
     const client = new MongoClient(URI_ATLAS, { connectTimeoutMS: 10000 });
 
     try {
-        console.log('📡 [CIMCO-CONDUCTORES] Conectando de forma segura a Atlas...');
+        console.log('📡 [CIMCO-CONDUCTORES] Conectando de forma segura a la base de datos...');
         await client.connect();
         
         const db = client.db('taxia-cimco');
@@ -74,7 +74,6 @@ async function sembrarEscuadron() {
         for (const piloto of escuadronConductores) {
             console.log(`🔍 Verificando preexistencia del piloto: ${piloto.email}...`);
             const existe = await coleccion.findOne({ email: piloto.email });
-
             const passHash = piloto.clave ? bcrypt.hashSync(piloto.clave, 10) : defaultPasswordHash;
 
             const payload = {
@@ -96,7 +95,6 @@ async function sembrarEscuadron() {
                 isActive: true,
                 saldo: 20000,
                 saldoWallet: 20000,
-                fechaCreacion: new Date(),
                 updatedAt: new Date()
             };
 
@@ -104,6 +102,7 @@ async function sembrarEscuadron() {
                 console.log(`⚠️ Actualizando credenciales de ${piloto.nombre}...`);
                 await coleccion.updateOne({ email: piloto.email }, { $set: payload });
             } else {
+                payload.fechaCreacion = new Date();
                 await coleccion.insertOne(payload);
                 console.log(`🚀 [SÚPER ÉXITO] Piloto ${piloto.nombre} inyectado al nodo central.`);
             }

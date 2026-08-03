@@ -1,35 +1,29 @@
 // Versión Arquitectura: V13.7 - Inyección de Cabecera Perimetral 'x-stress-test' en Bucle de Retry-Loop Financiero
 /**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\stress_test_liquidacion.js
- * Misión: Probar el bucle de reintentos contables (Retry-Loop) ante WriteConflicts ejecutando liquidaciones 
- * paralelas consumiendo el endpoint unificado de despacho inmediato de andén.
- * Ajuste V13.7: Incorporación de la cabecera 'x-stress-test' dentro del payload de red de simulación para
- * saltear los bloqueos de firmas JWT y parseo JSON en el middleware de aduana de autenticación.
+ * Ubicación: backend/scripts/stress_test_liquidacion.js
+ * Misión: Probar el bucle de reintentos contables (Retry-Loop) ante WriteConflicts ejecutando liquidaciones paralelas.
  */
 
 const BASE_URL_VIAJES = "http://localhost:3000/api/viajes";
 const TOTAL_CONCURRENTE = 10; 
 const INTERVALO_MS = 50;
 
-// IDENTIDADES MAESTRAS ASIGNADAS (MATRIZ OPERATIVA LA JAGUA)
-const ID_CONDUCTOR_REAL = "6a29cbb9c8d7b14cd8f85882"; // Camilo Castro - Conductor Intermunicipal
+const ID_CONDUCTOR_REAL = "6a29cbb9c8d7b14cd8f85882"; // Camilo Castro
 const ID_PASAJERO_BASE = "6a29b491c8d7b14cd8f85871"; // milevis Pasajero Test
-const TARIFA_SERVICIO = 25000; // Comisión esperada del 10%: $2,500 COP
+const TARIFA_SERVICIO = 25000;
 
-// PAYLOAD JWT FIRMADO Y HOMOLOGADO CON ROL DE DESPACHADOR CENTRAL
 const LOCAL_JWT_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjZhMjlhMTIzYzhkN2IxNGNkOGY4NTg2MCIsIm5vbWJyZSI6IkRlc3BhY2hhZG9yIENlbnRyYWwiLCJyb2wiOiJkZXNwYWNoYWRvciIsImlhdCI6MTcxOTg3ODQwMCwiZXhwIjoxNzUxNDE0NDAwfQ.SignaturePlaceholder_TAXIA_CIMCO_2026";
 
 const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function simularViajeIndividual(index) {
     try {
-        // FASE 1: Inyección Contable Instantánea en Andén vía Despacho Inmediato
         const resDespacho = await fetch(`${BASE_URL_VIAJES}/despachar-inmediato`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${LOCAL_JWT_TOKEN}`,
-                "x-stress-test": "true" // 🛡️ Inyección de Guarda Electiva Perimetral para Bypass Local
+                "x-stress-test": "true"
             },
             body: JSON.stringify({
                 pasajeroId: ID_PASAJERO_BASE,
@@ -45,7 +39,6 @@ async function simularViajeIndividual(index) {
 
         const dataDespacho = await resDespacho.json();
 
-        // Capturamos el ID del viaje si el hilo fue el ganador del despacho para forzar el cierre contable.
         if (resDespacho.status !== 201 || !dataDespacho.success) {
             return { success: false, motivo: `Bloqueo de Despacho (Conductor ya Ocupado): ${dataDespacho.message || resDespacho.status}` };
         }
@@ -53,13 +46,12 @@ async function simularViajeIndividual(index) {
         const viajeId = dataDespacho.viajeId || dataDespacho.data?._id;
         if (!viajeId) return { success: false, motivo: "No se retornó ID de Viaje válido." };
 
-        // FASE 2: Forzar Cierre Contable Contundente (Liquidación del 10%)
         const resCompletar = await fetch(`${BASE_URL_VIAJES}/completar`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${LOCAL_JWT_TOKEN}`,
-                "x-stress-test": "true" // 🛡️ Inyección de Guarda Electiva Perimetral para Bypass Local
+                "x-stress-test": "true"
             },
             body: JSON.stringify({ viajeId })
         });

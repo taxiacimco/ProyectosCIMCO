@@ -1,4 +1,4 @@
-// Versión Arquitectura: V19.27 - Actualización Visual UI: Pill de Conexión Segura Agnóstico/Dinamizado por Rol
+// Versión Arquitectura: V19.28 - Corrección de MaxLength Dinámico en Identificador Operativo para Soporte de Correos Largos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
  * Misión: Componente de autenticación unificado con soporte híbrido (celular/correo), 
@@ -179,7 +179,7 @@ const Login = () => {
                 type="text"
                 placeholder="EJ: 3001234567 O OPERADOR@CORREO.COM"
                 disabled={loading}
-                maxLength={isEmailInput ? 100 : 15}
+                maxLength={80}
                 className="w-full bg-[#0f172a]/60 border border-white/10 rounded-xl py-3.5 px-4 text-slate-100 text-xs placeholder:text-slate-500 tracking-wider focus:outline-none focus:border-cyan-500/50 focus:bg-[#0f172a] transition-all disabled:opacity-50"
                 value={identifier}
                 onChange={handleIdentifierChange}

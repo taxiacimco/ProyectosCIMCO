@@ -1,11 +1,12 @@
-// C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\scripts\insertarPasajero.cjs
+// Ubicación: backend/scripts/insertarPasajero.cjs
 const mongoose = require('mongoose');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
-const mongoURI = process.env.MONGO_URI || process.env.MONGODB_URI;
+let mongoURI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://localhost:27017/taxia-cimco';
+mongoURI = mongoURI.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco');
 
 const PasajeroSchema = new mongoose.Schema({
     nombre: String,
@@ -24,7 +25,6 @@ const PasajeroSchema = new mongoose.Schema({
 }, { collection: 'usuarios', versionKey: false });
 
 const Pasajero = mongoose.models.PasajeroSeeder || mongoose.model('PasajeroSeeder', PasajeroSchema);
-
 const defaultPasswordHash = bcrypt.hashSync('123456', 10);
 
 const pasajerosDePrueba = [
@@ -64,15 +64,15 @@ const pasajerosDePrueba = [
 
 const ejecutarSeeder = async () => {
     try {
-        console.log("📡 Conectando a MongoDB Atlas...");
-        await mongoose.connect(mongoURI.replace(/\/TAXIA-CIMCO/i, '/taxia-cimco'));
+        console.log("📡 Conectando a MongoDB...");
+        await mongoose.connect(mongoURI);
 
         for (const p of pasajerosDePrueba) {
             await Pasajero.findByIdAndUpdate(p._id, { $set: p }, { upsert: true, new: true });
             console.log(`🚀 Pasajero sincronizado atómicamente: ${p.nombre} | Saldo: $${p.saldo} COP`);
         }
     } catch (error) {
-        console.error("❌ Error en seeder de pasajeros:", error);
+        console.error("❌ Error en seeder de pasajeros:", error.message);
     } finally {
         await mongoose.connection.close();
         process.exit(0);
