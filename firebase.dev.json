@@ -13,7 +13,8 @@
     }
   ],
   "firestore": {
-    "rules": "firestore.dev.rules"
+    "rules": "firestore.dev.rules",
+    "indexes": "firestore.indexes.json"
   },
   "hosting": {
     "public": "frontend/dist",

@@ -1,3 +1,4 @@
+// Versión Arquitectura: V2.0 - Endurecimiento Perimetral y Gobernanza Estrificada
 rules_version = '2';
 
 service cloud.firestore {
@@ -11,8 +12,8 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function esUsuarioAnonimo() {
-      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    function esPropietario(userId) {
+      return usuarioAutenticado() && request.auth.uid == userId;
     }
 
     function esAdmin() {
@@ -35,49 +36,68 @@ service cloud.firestore {
 
     // 👥 COLECCIÓN DE USUARIOS / OPERADORES
     match /users/{userId} {
-      allow read, write: if true;
-      match /{document=**} { allow read, write: if true; }
+      allow read: if usuarioAutenticado();
+      allow write: if esPropietario(userId) || esAdmin();
+      match /{document=**} { 
+        allow read: if usuarioAutenticado();
+        allow write: if esPropietario(userId) || esAdmin();
+      }
     }
 
     match /usuarios/{userId} {
-      allow read, write: if true;
-      match /{document=**} { allow read, write: if true; }
+      allow read: if usuarioAutenticado();
+      allow write: if esPropietario(userId) || esAdmin();
+      match /{document=**} { 
+        allow read: if usuarioAutenticado();
+        allow write: if esPropietario(userId) || esAdmin();
+      }
     }
 
     // 🛵 NODO DE CONFIGURACIÓN Y VIAJES DE ARTIFACTS
     match /artifacts/taxiacimco-app/public/data/{collection}/{document=**} {
-      allow read, write: if true;
+      allow read: if usuarioAutenticado();
+      allow write: if esAdmin();
     }
 
     // 💰 BILLETERAS Y FINANZAS
-    match /wallets/{walletId} { allow read, write: if true; }
-    match /historial_saldo/{id} { allow read, write: if true; }
+    match /wallets/{walletId} { 
+      allow read: if esPropietario(walletId) || esAdmin();
+      allow write: if esAdmin();
+    }
+    
+    match /historial_saldo/{id} { 
+      allow read: if usuarioAutenticado() && (resource.data.targetUid == request.auth.uid || esAdmin());
+      allow write: if esAdmin();
+    }
+
+    match /transacciones/{transaccionId} {
+      allow read: if usuarioAutenticado() && (resource.data.targetUid == request.auth.uid || esAdmin());
+      allow write: if esAdmin();
+    }
 
     // ==========================================================
-    // 🔥 ENTORNO DE SIMULACIÓN Y TELEMETRÍA (ABIERTO PARA EMULADOR LOCAL)
+    // 🔥 ENTORNO DE SIMULACIÓN, VIAJES Y TELEMETRÍA
     // ==========================================================
     
-    // El simulador escribe de forma directa en el nodo raíz de viajes
     match /viajes/{viajeId} {
-      allow read, write: if true;
+      allow read, write: if usuarioAutenticado();
     }
 
     match /viajes/{document=**} {
-      allow read, write: if true;
+      allow read, write: if usuarioAutenticado();
     }
 
-    // Compatibilidad secundaria para el radar dinámico de conductores activos
+    match /viajes_intermunicipales/{viajeId} {
+      allow read, write: if usuarioAutenticado();
+    }
+
+    // Radar dinámico de conductores activos y telemetría
     match /conductores_activos/{document=**} {
-      allow read, write: if true;
+      allow read, write: if usuarioAutenticado();
     }
 
     match /conductores/{document=**} {
-      allow read, write: if true;
-    }
-
-    // COMODÍN DE EMERGENCIA GLOBAL (Garantiza desacoplamiento completo en ambiente de desarrollo)
-    match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if usuarioAutenticado();
     }
   }
 }

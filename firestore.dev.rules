@@ -1,5 +1,6 @@
-// Versión Arquitectura: V1.3 - Reglas de Seguridad de Desarrollo Homologadas (Anti-Mismatched)
+// Versión Arquitectura: V2.0 - Entorno Parcialmente Permisivo para Emulador Local y Pruebas
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
     
@@ -12,7 +13,7 @@ service cloud.firestore {
       return esUsuarioAutenticado() && request.auth.uid == userId;
     }
 
-    // Regla Global Perimetral para Entorno de Desarrollo (Permisiva controlada)
+    // Regla Global Perimetral para Entorno de Desarrollo (Permisiva controlada para emuladores)
     match /{document=**} {
       allow read, write: if true; 
     }
@@ -25,6 +26,11 @@ service cloud.firestore {
 
     // Nodo de Colección de Viajes Intermunicipales e Historial
     match /viajes_intermunicipales/{viajeId} {
+      allow read, write: if esUsuarioAutenticado();
+    }
+
+    // Billeteras y Transacciones Locales
+    match /transacciones/{transaccionId} {
       allow read, write: if esUsuarioAutenticado();
     }
   }
