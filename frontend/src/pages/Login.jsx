@@ -1,10 +1,6 @@
-// Versión Arquitectura: V19.29 - Integración Quirúrgica con Propagación Contextual Extendida de QR y Normalización de QueryParams en Login
+// Versión Arquitectura: V19.30 - Parche de Autenticación Unificada y Manejo de Respuestas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Componente de autenticación unificado con soporte híbrido (celular/correo), 
- *         ampliación de maxLength={80} para correos largos, validación por máscara/Regex,
- *         visibilidad de contraseña interactiva, propagación exacta de Query Strings (?role=)
- *         hacia registros contextuales y UI Glassmorphism CIMCO V9.3.
  */
 
 import React, { useState } from 'react';
@@ -12,7 +8,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail } from 'lucide-react';
 
-// Expresión regular para validar celulares (Soporta formato celular CO de 10 dígitos o formato int. E.164 de 7-15 dígitos)
 const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -21,7 +16,6 @@ const Login = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
-  // 📥 Intercepción del parámetro del QR / Enlace invertido con sanitización estricta
   const roleParam = searchParams.get('role')?.trim()?.toLowerCase();
   
   const [identifier, setIdentifier] = useState('');
@@ -30,18 +24,13 @@ const Login = () => {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Discriminación lógica del tipo de identificador
   const isEmailInput = identifier.includes('@');
 
-  // Manejador del cambio de identificador con formateo/limpieza preventiva para celulares
   const handleIdentifierChange = (e) => {
     const rawVal = e.target.value;
-    
-    // Si contiene '@' o letras, asumimos correo; si son números/símbolo '+', aplicamos limpieza telefónica
     if (rawVal.includes('@') || /[a-zA-Z]/.test(rawVal)) {
       setIdentifier(rawVal);
     } else {
-      // Filtrar únicamente dígitos numéricos y el símbolo + al inicio
       const phoneOnly = rawVal.replace(/(?!^\+)[^\d]/g, '');
       setIdentifier(phoneOnly);
     }
@@ -53,13 +42,11 @@ const Login = () => {
 
     const valorLimpio = identifier?.trim() || '';
 
-    // 🛡️ GUARDA DE SEGURIDAD 1: Campos incompletos
     if (!valorLimpio || !password?.trim()) {
       setError("VARIABLES_CORE_INVALIDAS: Credenciales incompletas.");
       return;
     }
 
-    // 🛡️ GUARDA DE SEGURIDAD 2: Validación estricta por Regex según el tipo de entrada
     if (isEmailInput) {
       if (!EMAIL_REGEX.test(valorLimpio.toLowerCase())) {
         setError("FORMATO_CORREO_INVALIDO: Estructura de correo electrónico no válida.");
@@ -67,7 +54,7 @@ const Login = () => {
       }
     } else {
       if (!PHONE_REGEX.test(valorLimpio)) {
-        setError("FORMATO_CELULAR_INVALIDO: Debe ser un número celular válido (ej: 3001234567).");
+        setError("FORMATO_CELULAR_INVALIDO: Debe ser un número celular válido de 10 dígitos.");
         return;
       }
     }
@@ -75,20 +62,34 @@ const Login = () => {
     setLoading(true);
 
     try {
-      // Middleware centralizado de autenticación con soporte para teléfono/email
-      await loginLocal(valorLimpio, password);
+      // Petición al proveedor de autenticación
+      const res = await loginLocal(valorLimpio, password);
       
-      // Unificación de redireccionamiento post-login hacia la aduana central de AppRouter.jsx
-      navigate('/');
+      if (res && res.success) {
+        // Redirección inteligente basada en el rol recibido o el parámetro
+        const userRole = (res.user?.role || res.user?.rol || roleParam || '').toLowerCase();
+        
+        if (userRole.includes('moto')) {
+          navigate('/mototaxi/home');
+        } else if (userRole.includes('pasajero')) {
+          navigate('/pasajero/home');
+        } else if (userRole.includes('despachador')) {
+          navigate('/despachador/home');
+        } else {
+          navigate('/');
+        }
+      } else {
+        // Muestra el mensaje devuelto por el backend
+        setError(res?.message || "ERROR_AUTENTICACION: Credenciales no válidas o usuario no registrado.");
+      }
     } catch (err) {
       console.error("🚨 [CIMCO-AUTH-HANDSHAKE] Denegado:", err);
-      setError(err?.message || "ERROR_AUTENTICACION: Credenciales no registradas en el nodo central.");
+      setError(err?.message || "ERROR_CONEXION: No se pudo conectar con el servidor central.");
     } finally {
       setLoading(false);
     }
   };
 
-  // 🔄 MATRIZ OMNICANAL DE REDIRECCIÓN INTELIGENTE AL REGISTRO CON PROPAGACIÓN DE QUERY PARAMETER
   const handleRegisterRedirect = () => {
     switch (roleParam) {
       case 'intermunicipal':
@@ -117,15 +118,9 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-[#0F172A] flex flex-col items-center justify-center p-4 relative overflow-hidden select-none font-sans">
-      
-      {/* VECTOR ESTÉTICO DE FONDO */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-cyan-500/5 rounded-full blur-[120px] pointer-events-none z-0" />
-      <div className="absolute top-1/3 left-1/4 w-[300px] h-[300px] bg-yellow-500/[0.02] rounded-full blur-[100px] pointer-events-none z-0" />
-
-      {/* CONTENEDOR CENTRAL NEO-GLASSMORPHISM */}
-      <div className="w-full max-w-[420px] backdrop-blur-md bg-[#1E293B]/80 border border-white/10 rounded-3xl p-8 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.9)] relative z-10 transition-all duration-500">
+      <div className="w-full max-w-[420px] backdrop-blur-md bg-[#1E293B]/80 border border-white/10 rounded-3xl p-8 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.9)] relative z-10">
         
-        {/* ENCABEZADO DE CONSOLA */}
         <div className="text-center mb-8 relative">
           <div className="flex items-center justify-center gap-2 px-3 py-1 bg-cyan-950/40 border border-cyan-500/30 rounded-full w-fit mx-auto mb-4">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
@@ -141,17 +136,15 @@ const Login = () => {
           </p>
         </div>
 
-        {/* MONITOR DE ALERTAS DEL SISTEMA */}
         {error && (
-          <div className="mb-6 flex flex-col gap-2 bg-red-500/[0.04] border border-red-500/20 rounded-2xl p-4 transition-all duration-300">
+          <div className="mb-6 flex flex-col gap-2 bg-red-500/[0.08] border border-red-500/30 rounded-2xl p-4">
             <div className="flex items-start gap-3">
               <ShieldAlert size={16} className="text-red-500 shrink-0 mt-0.5" />
               <div className="font-mono text-[10px] uppercase font-bold tracking-wider text-red-400 leading-normal">
-                <span className="block font-black text-red-500 mb-0.5">🚨 CRITICAL_ALERT:</span>
+                <span className="block font-black text-red-500 mb-0.5">🚨 ACCESO DENEGADO:</span>
                 {error}
               </div>
             </div>
-            {/* SUGERENCIA VISUAL INTELIGENTE SI EL USUARIO NO EXISTE */}
             <div className="pt-2 border-t border-red-500/10 flex items-center justify-between">
               <span className="text-[10px] text-slate-400 font-medium">¿Aún no estás registrado?</span>
               <button
@@ -165,9 +158,8 @@ const Login = () => {
           </div>
         )}
 
-        {/* NOTIFICACIÓN VISUAL DE DETECCIÓN DE FLUJO INVERTIDO DESDE QR */}
         {roleParam && (
-          <div className="mb-6 flex items-center gap-3 bg-cyan-500/[0.04] border border-cyan-500/20 rounded-2xl p-3.5 transition-all duration-300">
+          <div className="mb-6 flex items-center gap-3 bg-cyan-500/[0.04] border border-cyan-500/20 rounded-2xl p-3.5">
             <UserPlus size={14} className="text-cyan-400 shrink-0" />
             <div className="font-mono text-[9px] uppercase font-black tracking-widest text-cyan-400">
               MODO INSCRIPCIÓN: [{roleParam.toUpperCase()}] HABILITADO
@@ -175,40 +167,28 @@ const Login = () => {
           </div>
         )}
 
-        {/* FORMULARIO DE ACCESO CORE */}
         <form onSubmit={handleSubmit} className="space-y-5">
-          
-          {/* CAMPO: IDENTIFICADOR TELEFÓNICO / CORREO CON DETECCIÓN DINÁMICA DE ICONO */}
           <div className="space-y-1.5">
             <label className="text-slate-400 text-xs font-medium pl-1 flex items-center gap-1.5">
-              {isEmailInput ? (
-                <Mail size={13} className="text-cyan-400" />
-              ) : (
-                <Phone size={13} className="text-cyan-400" />
-              )}
+              {isEmailInput ? <Mail size={13} className="text-cyan-400" /> : <Phone size={13} className="text-cyan-400" />}
               <span>Identificador Operativo (Celular o Correo)</span>
             </label>
-            <div className="relative group">
-              <input 
-                type="text"
-                placeholder="EJ: 3001234567 O OPERADOR@CORREO.COM"
-                disabled={loading}
-                maxLength={80}
-                className="w-full bg-[#0f172a]/60 border border-white/10 rounded-xl py-3.5 px-4 text-slate-100 text-xs placeholder:text-slate-500 tracking-wider focus:outline-none focus:border-cyan-500/50 focus:bg-[#0f172a] transition-all disabled:opacity-50"
-                value={identifier}
-                onChange={handleIdentifierChange}
-                required
-              />
-            </div>
+            <input 
+              type="text"
+              placeholder="EJ: 3001234567 O OPERADOR@CORREO.COM"
+              disabled={loading}
+              maxLength={80}
+              className="w-full bg-[#0f172a]/60 border border-white/10 rounded-xl py-3.5 px-4 text-slate-100 text-xs placeholder:text-slate-500 tracking-wider focus:outline-none focus:border-cyan-500/50 focus:bg-[#0f172a] transition-all disabled:opacity-50"
+              value={identifier}
+              onChange={handleIdentifierChange}
+              required
+            />
           </div>
 
-          {/* CAMPO: LLAVE DE ACCESO */}
           <div className="space-y-1.5">
-            <div className="flex justify-between items-center pl-1">
-              <label className="text-slate-400 text-xs font-medium block">
-                Clave de Acceso
-              </label>
-            </div>
+            <label className="text-slate-400 text-xs font-medium block pl-1">
+              Clave de Acceso
+            </label>
             <div className="relative group">
               <input 
                 type={showPassword ? "text" : "password"}
@@ -231,7 +211,6 @@ const Login = () => {
             </div>
           </div>
 
-          {/* DISPARADOR DE AUTENTICACIÓN */}
           <button
             type="submit"
             disabled={loading}
@@ -240,10 +219,8 @@ const Login = () => {
             <KeyRound size={14} className="text-white shrink-0" />
             <span>{loading ? "Sincronizando..." : "Iniciar sesión"}</span>
           </button>
-
         </form>
 
-        {/* PASARELA DE ENLACES PERIMETRALES */}
         <div className="mt-8 pt-6 border-t border-white/[0.08] grid grid-cols-2 gap-4 relative z-10">
           <button 
             type="button"

@@ -1,9 +1,9 @@
-// Versión Arquitectura: V22.1 - Gobernanza Estricta de Tokens y Desacoplamiento de Identidad
+// Versión Arquitectura: V22.2 - Normalización de Carga Útil en Login Local
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
  * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO.
- * Ajuste V22.1: Limpieza quirúrgica de tokens asignada únicamente a la acción de logout
- *              preservando claves de terceros durante la inicialización.
+ * Ajuste V22.2: Normalización de la carga útil (payload) en loginLocal enviando identifier, 
+ *              email, telefono y celular limpios para máxima compatibilidad con endpoints legados.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -77,17 +77,23 @@ export const AuthProvider = ({ children }) => {
         });
     };
 
-    const loginLocal = async (email, password) => {
+    const loginLocal = async (identifierInput, password) => {
         try {
             setLoading(true);
+            const limpio = identifierInput ? String(identifierInput).trim() : '';
             
+            // Envío con redundancia táctica para garantizar compatibilidad con cualquier controlador backend
             const respuesta = await api.post('/auth/login', { 
-                identifier: email, 
+                identifier: limpio,
+                email: limpio,
+                telefono: limpio,
+                celular: limpio,
                 password: password 
             });
             
-            if (respuesta.data && respuesta.data.success) {
-                const { token, user: userData } = respuesta.data;
+            if (respuesta.data && (respuesta.data.success || respuesta.data.token)) {
+                const token = respuesta.data.token || respuesta.data.data?.token;
+                const userData = respuesta.data.user || respuesta.data.data?.user;
                 
                 if (userData) {
                     userData.uid = userData._id || userData.id || userData.uid || userData.conductorId;
@@ -106,7 +112,6 @@ export const AuthProvider = ({ children }) => {
                 try {
                     if (auth && !auth.currentUser) {
                         await signInAnonymously(auth);
-                        console.log("📡 [CIMCO-AUTH-FIREBASE] Enlace satelital anónimo acoplado con éxito.");
                     }
                 } catch (fbError) {
                     console.warn("⚠️ [CIMCO-AUTH-WARNING] El puente satelital Firebase falló de forma no fatal:", fbError.message);
@@ -115,12 +120,15 @@ export const AuthProvider = ({ children }) => {
                 return { success: true, user: userData, data: respuesta.data };
             }
             
-            return { success: false, message: respuesta.data?.message || "Credenciales incorrectas." };
+            return { 
+                success: false, 
+                message: respuesta.data?.message || "Credenciales incorrectas o usuario no encontrado." 
+            };
         } catch (error) {
             console.error("❌ [CIMCO-AUTH] Error crítico en pasarela loginLocal:", error);
             return { 
                 success: false, 
-                message: error.response?.data?.message || "Error de comunicación con el nodo central de TAXIA CIMCO." 
+                message: error.response?.data?.message || "Usuario no registrado en producción o contraseña incorrecta." 
             };
         } finally {
             setLoading(false);
