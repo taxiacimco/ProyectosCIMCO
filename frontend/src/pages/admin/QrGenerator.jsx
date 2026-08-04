@@ -1,7 +1,8 @@
-// Versión Arquitectura: V23.5 - Selección Dinámica de Entorno Híbrido y Alineación de Rutas QR de Producción
+// Versión Arquitectura: V23.7 - Estandarización de Diccionario de Rutas Amigables QR para Integración con AppRouter
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
  * Misión: Generación de códigos QR de reclutamiento con conmutador dinámico entre Entorno de Túnel/Local y Producción (Vercel).
+ *         Estandarización de la constante RUTAS_AMIGABLES_ROL alineada 1:1 con el enrutador central AppRouter.jsx.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
  */
 
@@ -26,13 +27,19 @@ const QrGenerator = () => {
     // 🌐 DEFINICIÓN DE ENTORNOS
     const URL_PRODUCCION = "https://frontend-opal-eight-58.vercel.app";
     
-    // Obtiene dinámicamente la URL del Túnel de Cloudflare desde .env o detecta la del navegador
+    // Resolución dinámica priorizando variables de entorno y origen actual del navegador
     const getUrlLocal = () => {
+        // Prioridad 1: Variable VITE_FRONTEND_URL asignada en .env o .env.development
         if (import.meta.env.VITE_FRONTEND_URL) {
-            return import.meta.env.VITE_FRONTEND_URL;
+            return import.meta.env.VITE_FRONTEND_URL.replace(/\/$/, '');
         }
+        // Prioridad 2: Variable VITE_APP_BASE_URL
+        if (import.meta.env.VITE_APP_BASE_URL) {
+            return import.meta.env.VITE_APP_BASE_URL.replace(/\/$/, '');
+        }
+        // Prioridad 3: Origen dinámico desde donde el usuario escanea/accede
         if (typeof window !== 'undefined') {
-            return `${window.location.protocol}//${window.location.hostname}:5173`;
+            return window.location.origin;
         }
         return "http://localhost:5173";
     };
@@ -50,21 +57,22 @@ const QrGenerator = () => {
         pasajero: 'PASAJERO / USUARIO'
     };
 
-    // Mapeo directo a las rutas amigables declaradas en AppRouter.jsx
+    // 🎯 Mapeo directo y estandarizado a las rutas declaradas en AppRouter.jsx
     const RUTAS_AMIGABLES_ROL = {
         mototaxi: '/mototaxi',
-        motoparrillero: '/moto-parrillero',
+        motoparrillero: '/motoparrillero',
         motocarga: '/motocarga',
         despachador: '/despachador',
         intermunicipal: '/intermunicipal',
         pasajero: '/pasajero'
     };
 
-    // Construye la URL de enrutamiento directo según la matriz de AppRouter
+    // Construye la URL completa apuntando al entorno y rol correcto
     const getRutaDestinoRol = (role = rolSeleccionado, base = baseUrlActiva) => {
         const rolLimpio = (role || '').trim().toLowerCase();
         const subRuta = RUTAS_AMIGABLES_ROL[rolLimpio] || `/login?role=${rolLimpio}`;
-        return `${base}${subRuta}`;
+        const cleanBase = base.replace(/\/$/, '');
+        return `${cleanBase}${subRuta}`;
     };
 
     const targetUrlString = getRutaDestinoRol();

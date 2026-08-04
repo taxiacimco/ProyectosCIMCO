@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.7 - Code Splitting con Lazy Loading, Módulos Protegidos y Puentes QR Integrados
+// Versión Arquitectura: V21.8 - Alineación y Estandarización de Puentes QR Omnicanal por Rol Específico
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
  * Misión: Orquestar el direccionamiento centralizado, inyectar puentes QR, blindar con autenticación basada en roles 
@@ -132,8 +132,9 @@ const AppRouter = () => {
                     <Route path="/motoparrillero/home" element={<ProtectedRoute allowedRoles={['motoparrillero']}><HomeMotoparrillero /></ProtectedRoute>} />
                     
                     {/* 🚀 PUENTES DE ENTRADA DIRECTA PARA CÓDIGOS QR OMNICANAL */}
-                    <Route path="/mototaxi" element={<Navigate to="/login?role=moto" replace />} />
-                    <Route path="/moto-parrillero" element={<Navigate to="/login?role=moto" replace />} />
+                    <Route path="/mototaxi" element={<Navigate to="/login?role=mototaxi" replace />} />
+                    <Route path="/moto-parrillero" element={<Navigate to="/login?role=motoparrillero" replace />} />
+                    <Route path="/motoparrillero" element={<Navigate to="/login?role=motoparrillero" replace />} />
                     <Route path="/motocarga" element={<Navigate to="/login?role=motocarga" replace />} />
                     <Route path="/intermunicipal" element={<Navigate to="/login?role=intermunicipal" replace />} />
                     <Route path="/pasajero" element={<Navigate to="/login?role=pasajero" replace />} />

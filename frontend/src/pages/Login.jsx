@@ -1,9 +1,10 @@
-// Versión Arquitectura: V19.28 - Corrección de MaxLength Dinámico en Identificador Operativo para Soporte de Correos Largos
+// Versión Arquitectura: V19.29 - Integración Quirúrgica con Propagación Contextual Extendida de QR y Normalización de QueryParams en Login
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
  * Misión: Componente de autenticación unificado con soporte híbrido (celular/correo), 
- *         validación por máscara/Regex telefónica, visibilidad de contraseña interactiva,
- *         intercepción de Query Strings (?role=) y pill de conexión segura neutral/dinámico.
+ *         ampliación de maxLength={80} para correos largos, validación por máscara/Regex,
+ *         visibilidad de contraseña interactiva, propagación exacta de Query Strings (?role=)
+ *         hacia registros contextuales y UI Glassmorphism CIMCO V9.3.
  */
 
 import React, { useState } from 'react';
@@ -20,7 +21,7 @@ const Login = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
-  // 📥 Intercepción del parámetro del QR / Enlace invertido
+  // 📥 Intercepción del parámetro del QR / Enlace invertido con sanitización estricta
   const roleParam = searchParams.get('role')?.trim()?.toLowerCase();
   
   const [identifier, setIdentifier] = useState('');
@@ -87,26 +88,26 @@ const Login = () => {
     }
   };
 
-  // 🔄 MATRIZ OMNICANAL DE REDIRECCIÓN INTELIGENTE AL REGISTRO
+  // 🔄 MATRIZ OMNICANAL DE REDIRECCIÓN INTELIGENTE AL REGISTRO CON PROPAGACIÓN DE QUERY PARAMETER
   const handleRegisterRedirect = () => {
     switch (roleParam) {
       case 'intermunicipal':
-        navigate('/register-intermunicipal');
+        navigate('/register-intermunicipal?role=intermunicipal');
         break;
       case 'moto':
       case 'motocarga':
       case 'mototaxi':
       case 'motoparrillero':
-        navigate('/register-moto');
+        navigate(`/register-moto?role=${roleParam}`);
         break;
       case 'pasajero':
-        navigate('/register-pasajero');
+        navigate('/register-pasajero?role=pasajero');
         break;
       case 'despachador':
-        navigate('/register-despachador');
+        navigate('/register-despachador?role=despachador');
         break;
       case 'admin':
-        navigate('/register-admin');
+        navigate('/register-admin?role=admin');
         break;
       default:
         navigate('/register');
@@ -142,11 +143,24 @@ const Login = () => {
 
         {/* MONITOR DE ALERTAS DEL SISTEMA */}
         {error && (
-          <div className="mb-6 flex items-start gap-3 bg-red-500/[0.04] border border-red-500/20 rounded-2xl p-4 transition-all duration-300">
-            <ShieldAlert size={16} className="text-red-500 shrink-0 mt-0.5" />
-            <div className="font-mono text-[10px] uppercase font-bold tracking-wider text-red-400 leading-normal">
-              <span className="block font-black text-red-500 mb-0.5">🚨 CRITICAL_ALERT:</span>
-              {error}
+          <div className="mb-6 flex flex-col gap-2 bg-red-500/[0.04] border border-red-500/20 rounded-2xl p-4 transition-all duration-300">
+            <div className="flex items-start gap-3">
+              <ShieldAlert size={16} className="text-red-500 shrink-0 mt-0.5" />
+              <div className="font-mono text-[10px] uppercase font-bold tracking-wider text-red-400 leading-normal">
+                <span className="block font-black text-red-500 mb-0.5">🚨 CRITICAL_ALERT:</span>
+                {error}
+              </div>
+            </div>
+            {/* SUGERENCIA VISUAL INTELIGENTE SI EL USUARIO NO EXISTE */}
+            <div className="pt-2 border-t border-red-500/10 flex items-center justify-between">
+              <span className="text-[10px] text-slate-400 font-medium">¿Aún no estás registrado?</span>
+              <button
+                type="button"
+                onClick={handleRegisterRedirect}
+                className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 underline bg-transparent border-none cursor-pointer p-0"
+              >
+                Crear cuenta ahora &rarr;
+              </button>
             </div>
           </div>
         )}
