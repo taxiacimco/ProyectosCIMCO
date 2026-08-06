@@ -1,8 +1,9 @@
-// Versión Arquitectura: V18.2 - Integración Quirúrgica Transición 'EN_CURSO' y Resiliencia ESM
+// Versión Arquitectura: V18.3 - Sincronización Fuera de Transacción Mongo y Resiliencia Firestore
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
  * Misión: Procesar flujos operativos, liquidación contable (10% comisión), transición de estados, cancelación y sincronización Firestore.
- * Ajuste V18.2: Implementación atómica de iniciarViaje (transición a 'en_curso') con sincronización en espejo Firestore.
+ * Ajuste V18.3: Corrección crítica de sincronización en completarViaje. La ejecución de descuento en Firestore se realiza
+ * fuera del bucle de reintentos (WriteConflict), únicamente tras confirmarse el commitTransaction() de MongoDB.
  */
 
 import crypto from 'crypto';
@@ -523,6 +524,8 @@ export const completarViaje = async (req, res) => {
                 console.log(`📈 [CIMCO-PRODUCCION-AUDIT] Viaje ${viajeId} liquidado con éxito tras mitigar colisiones. Intentos: ${intento}. Latencia total: ${latenciaTotal}ms.`);
             }
 
+            // Sincronización diferida en Firestore: Ejecutada EXCLUSIVAMENTE fuera del bucle de reintentos
+            // únicamente tras confirmar el commitTransaction() de MongoDB
             if (dbFirestore) {
                 const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
                 const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';

@@ -1,7 +1,8 @@
-// Versión Arquitectura: V13.0 - Sincronización de Aduana de Autenticación, Puente Anti-Crash y Protección de Rutas de Cooperativas
+// Versión Arquitectura: V17.2 - Adaptación de Aduana para Payloads Multipart/Form-Data y Estructuras Extendidas por Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\auth.middleware.js
- * Misión: Securización estricta de JWT, inspección de tokens, bypass local y puente de retrocompatibilidad.
+ * Misión: Securización estricta de JWT, inspección de tokens, bypass local, compatibilidad multipart/form-data con Multer y protección de rutas.
+ * Integridad: Fusión Atómica. Permite payloads multipart/form-data extendidos, normaliza variables heterogéneas (fullName/nombre, correo/email) y preserva toda la lógica de seguridad previa.
  */
 
 import jwt from 'jsonwebtoken';
@@ -32,22 +33,54 @@ const ROLES_PERMITIDOS = [
 
 /**
  * Middleware: Aduana Perimetral de Registro
- * Valida la integridad estructural del payload antes de tocar la base de datos.
+ * Valida la integridad estructural del payload en peticiones JSON o Multipart/Form-Data (Multer)
+ * permitiendo atributos condicionales según el rol del usuario.
  */
 export const validateRegisterPayload = (req, res, next) => {
     // 🛡️ GUARDA DE SEGURIDAD GENERAL: Anti-Undefined de payload completo
     if (!req || !req.body) {
-        return res.status(400).json({ success: false, error: "⚠️ ALERTA DE ARQUITECTURA: Cuerpo de la petición (req.body) no detectado." });
+        return res.status(400).json({ 
+            success: false, 
+            error: "⚠️ ALERTA DE ARQUITECTURA: Cuerpo de la petición (req.body) no detectado." 
+        });
     }
 
-    const { email, password, nombre, rol, role } = req.body;
-    const rolEfectivo = (rol || role || '').toLowerCase().trim();
+    // Normalización anti-undefined para peticiones multipart/form-data y JSON
+    const body = req.body || {};
+    const email = (body.email || body.correo || '').toString().trim();
+    const password = body.password;
+    const nombre = (body.nombre || body.fullName || body.nombreCompleto || '').toString().trim();
+    const rolRaw = (body.rol || body.role || 'pasajero').toString().trim();
+    const rolEfectivo = rolRaw.toLowerCase();
 
-    // 1. Guardas de Presencia Obligatoria
-    if (!email) return res.status(400).json({ success: false, error: "El campo 'email' es obligatorio para el registro perimetral." });
-    if (!password) return res.status(400).json({ success: false, error: "El campo 'password' es obligatorio para la protección criptográfica." });
-    if (!nombre) return res.status(400).json({ success: false, error: "El campo 'nombre' es requerido para la trazabilidad de la cuenta." });
-    if (!rolEfectivo) return res.status(400).json({ success: false, error: "El campo 'rol' es obligatorio para la asignación de privilegios en el clúster." });
+    // 1. Guardas de Presencia Obligatoria Adaptativas (Compatibles con Multer y FormData)
+    if (!email) {
+        return res.status(400).json({ 
+            success: false, 
+            error: "El campo 'email' es obligatorio para el registro perimetral." 
+        });
+    }
+
+    if (!password) {
+        return res.status(400).json({ 
+            success: false, 
+            error: "El campo 'password' es obligatorio para la protección criptográfica." 
+        });
+    }
+
+    if (!nombre) {
+        return res.status(400).json({ 
+            success: false, 
+            error: "El campo 'nombre' (o 'fullName') es requerido para la trazabilidad de la cuenta." 
+        });
+    }
+
+    if (!rolEfectivo) {
+        return res.status(400).json({ 
+            success: false, 
+            error: "El campo 'rol' es obligatorio para la asignación de privilegios en el clúster." 
+        });
+    }
 
     // 2. Validación de Gobernanza de Roles de Negocio
     if (!ROLES_PERMITIDOS.includes(rolEfectivo)) {
@@ -56,6 +89,13 @@ export const validateRegisterPayload = (req, res, next) => {
             error: `El rol '${rolEfectivo}' viola las políticas de TAXIA CIMCO. Roles admitidos: ${ROLES_PERMITIDOS.join(', ')}`
         });
     }
+
+    // 🛡️ Sincronización In-Memory de Campos Equivalentes para evitar fallos aguas abajo
+    req.body.email = email;
+    req.body.nombre = nombre;
+    req.body.fullName = body.fullName || nombre;
+    req.body.rol = rolEfectivo;
+    req.body.role = rolEfectivo;
 
     next();
 };

@@ -1,9 +1,9 @@
-// Versión Arquitectura: V15.12 - Rutas de Autenticación y Perfil
+// Versión Arquitectura: V17.2 - Soporte de Intercepción Multidocumento Multipart/Form-Data
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
- * Misión: Enrutador perimetral de autenticación alineado con soporte multicamino para perfil.
- * Integridad: Preserva el interceptor híbrido multipart/form-data, middlewares de validación
- * de payload y ruteo a las funciones exportadas del auth.controller.js.
+ * Misión: Enrutador perimetral de autenticación alineado con soporte multicamino para perfil y carga documental.
+ * Integridad: Preserva el interceptor híbrido multipart/form-data expandido a múltiplos adjuntos (cédula, licencia, tarjeta, ID),
+ * middlewares de validación de payload y ruteo a las funciones exportadas del auth.controller.js.
  */
 
 import express from 'express'; 
@@ -46,7 +46,13 @@ const verificarPayloadLogin = (req, res, next) => {
 const interceptorCargaHibrida = (req, res, next) => {
     const contentType = req.headers['content-type'] || '';
     if (contentType.includes('multipart/form-data')) {
-        upload.single('foto_perfil')(req, res, (err) => {
+        upload.fields([
+            { name: 'foto_perfil', maxCount: 1 },
+            { name: 'documento_cedula', maxCount: 1 },
+            { name: 'documento_licencia', maxCount: 1 },
+            { name: 'doc_tarjeta', maxCount: 1 },
+            { name: 'doc_identificacion', maxCount: 1 }
+        ])(req, res, (err) => {
             if (err) return res.status(400).json({ success: false, message: `Error binario: ${err.message}` });
             next();
         });
@@ -75,9 +81,9 @@ router.post('/verificar-telefono', verificarTelefono);
 /**
  * 🔄 GESTIÓN DE PERFIL DE USUARIO (Rutas Protegidas con Alias de Compatibilidad)
  */
-router.put('/update-profile', verificarToken, updateProfile);
-router.put('/perfil', verificarToken, updateProfile);
-router.put('/profile', verificarToken, updateProfile);
-router.patch('/update-profile', verificarToken, updateProfile);
+router.put('/update-profile', verificarToken, interceptorCargaHibrida, updateProfile);
+router.put('/perfil', verificarToken, interceptorCargaHibrida, updateProfile);
+router.put('/profile', verificarToken, interceptorCargaHibrida, updateProfile);
+router.patch('/update-profile', verificarToken, interceptorCargaHibrida, updateProfile);
 
 export default router;

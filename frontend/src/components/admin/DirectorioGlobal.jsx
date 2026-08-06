@@ -1,23 +1,23 @@
-// Versión Arquitectura: V2.1.0 - Consola de Control de Directorio Global CIMCO NEXUS con Deduplicación
+// Versión Arquitectura: V2.3.0 - Consola de Control de Directorio Global CIMCO NEXUS con Exportación XLSX Centralizada vía Servidor
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\DirectorioGlobal.jsx
- * Misión: Monitoreo, filtrado y auditoría unificada de todo el personal (Pasajeros, Despachadores, Operadores, Admin).
+ * Misión: Monitoreo, filtrado, auditoría unificada y exportación centralizada a Excel (XLSX) con descarga desde API del Servidor Central.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Loader, RefreshCw, Users, Shield, UserCheck, Radio } from 'lucide-react';
-// 🛡️ IMPORTANTE: Importación del helper de deduplicación
-import { deduplicarEntidades } from '../../utils/deduplicar';
+import { Search, Loader, RefreshCw, Users, Shield, UserCheck, Radio, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
+// 🛡️ IMPORTANTE: Importación del helper de deduplicación mediante alias absoluto @
+import { deduplicarEntidades } from '@/utils/deduplicar';
 
 // Saneamiento de URL base para entornos locales y despliegues en Vercel
 const RAW_API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 const API_BASE_URL = RAW_API_URL.replace(/\/api\/?$/, '');
 
-// 🛡️ Helper global de deduplicación para el Frontend
+// 🛡️ Helper global de deduplicación para el Frontend (Blindaje anti-undefined)
 const deduplicarUsuarios = (lista) => {
     if (!Array.isArray(lista)) return [];
-    // Si la función importada existe la usamos; de lo contrario, evaluamos la lógica local en Map
     if (typeof deduplicarEntidades === 'function') {
         return deduplicarEntidades(lista);
     }
@@ -58,7 +58,7 @@ export const DirectorioGlobal = () => {
             if (res.ok) {
                 const data = await res.json();
                 // Extracción defensiva multiformato de lista de usuarios
-                const listaData = data.usuarios || data.data || (Array.isArray(data) ? data : []);
+                const listaData = data?.usuarios || data?.data || (Array.isArray(data) ? data : []);
 
                 // 🔒 APLICAMOS FILTRO ANTI-DUPLICADOS
                 const listaLimpia = deduplicarUsuarios(listaData);
@@ -90,12 +90,12 @@ export const DirectorioGlobal = () => {
     }, []);
 
     // Helper para normalizar y mostrar el nombre de entidad
-    const getNombre = (u) => u.nombre || u.fullName || u.nombreCompleto || u.nombreUsuario || u.displayName || 'SIN REGISTRO';
+    const getNombre = (u) => u?.nombre || u?.fullName || u?.nombreCompleto || u?.nombreUsuario || u?.displayName || 'SIN REGISTRO';
 
     // Helper para badge visual de Rol / Subrol bajo especificación CIMCO-UI V9.3
     const renderRolBadge = (u) => {
-        const rol = (u.rolNormalizado || u.rol || u.role || 'usuario').toLowerCase();
-        const subrol = (u.subrol || rol).toUpperCase();
+        const rol = (u?.rolNormalizado || u?.rol || u?.role || 'usuario').toLowerCase();
+        const subrol = (u?.subrol || rol).toUpperCase();
 
         if (rol === 'admin' || subrol === 'CEO') {
             return <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold">{subrol}</span>;
@@ -114,6 +114,7 @@ export const DirectorioGlobal = () => {
 
     // Filtrado en tiempo real con motor de búsqueda multicriterio
     const usuariosFiltrados = usuarios.filter((u) => {
+        if (!u) return false;
         const rol = (u.rolNormalizado || u.rol || u.role || '').toLowerCase();
         const subrol = (u.subrol || '').toLowerCase();
         
@@ -134,11 +135,66 @@ export const DirectorioGlobal = () => {
         return coincideRol && coincideBusqueda;
     });
 
+    // 🚀 CONEXIÓN DIRECTA AL ENDPOINT CENTRALIZADO DE EXPORTACIÓN EXCEL
+    const descargarExcelGlobal = () => {
+        try {
+            const token = localStorage.getItem('cimco_token');
+            const urlDescarga = `${API_BASE_URL}/api/excel/directorio${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+            window.open(urlDescarga, '_blank');
+        } catch (err) {
+            console.error("❌ Error al solicitar la descarga del Excel global al servidor:", err);
+        }
+    };
+
+    // 📊 EXPORTACIÓN LOCAL EN MEMORIA (FALLBACK DE SEGURIDAD MANTENIDO)
+    const exportarDirectorioExcel = () => {
+        if (!usuariosFiltrados || usuariosFiltrados.length === 0) return;
+
+        const datosMapeados = usuariosFiltrados.map((u) => {
+            const idUsuario = u?._id || u?.id || 'SIN_ID';
+            const nombreCompleto = getNombre(u);
+            const telefono = u?.telefono || u?.telefonoMovil || 'N/A';
+            const correo = u?.email || 'SIN EMAIL';
+            const rolRegistrado = (u?.subrol || u?.rolNormalizado || u?.rol || u?.role || 'DESCONOCIDO').toUpperCase();
+            const empresa = u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL';
+            const origen = u?.origenColeccion || u?.origen || 'DB';
+
+            return {
+                'ID USUARIO': idUsuario,
+                'NOMBRE COMPLETO': nombreCompleto,
+                'TELÉFONO': telefono,
+                'CORREO': correo,
+                'ROL REGISTRADO': rolRegistrado,
+                'ENTIDAD / EMPRESA': empresa,
+                'ORIGEN': origen
+            };
+        });
+
+        const worksheet = XLSX.utils.json_to_sheet(datosMapeados);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Directorio');
+
+        worksheet['!cols'] = [
+            { wch: 28 }, // ID USUARIO
+            { wch: 25 }, // NOMBRE COMPLETO
+            { wch: 20 }, // TELÉFONO
+            { wch: 25 }, // CORREO
+            { wch: 20 }, // ROL REGISTRADO
+            { wch: 30 }, // ENTIDAD / EMPRESA
+            { wch: 12 }  // ORIGEN
+        ];
+
+        const fechaActual = new Date().toISOString().split('T')[0];
+        const nombreArchivo = `CIMCO_Directorio_${filtroRol.toUpperCase()}_${fechaActual}.xlsx`;
+        
+        XLSX.writeFile(workbook, nombreArchivo);
+    };
+
     // Mantenimiento de métricas dinámicas
-    const totalPasajeros = usuarios.filter(u => (u.rolNormalizado || u.rol || '').toLowerCase() === 'pasajero').length;
-    const totalDespachadores = usuarios.filter(u => (u.rolNormalizado || u.rol || '').toLowerCase() === 'despachador' || (u.subrol || '').toLowerCase() === 'despacho').length;
-    const totalConductores = usuarios.filter(u => ['conductor', 'operador'].includes((u.rolNormalizado || u.rol || '').toLowerCase())).length;
-    const totalAdmin = usuarios.filter(u => ['admin', 'ceo', 'secretaria', 'auxiliar'].includes((u.rolNormalizado || u.rol || '').toLowerCase())).length;
+    const totalPasajeros = usuarios.filter(u => (u?.rolNormalizado || u?.rol || '').toLowerCase() === 'pasajero').length;
+    const totalDespachadores = usuarios.filter(u => (u?.rolNormalizado || u?.rol || '').toLowerCase() === 'despachador' || (u?.subrol || '').toLowerCase() === 'despacho').length;
+    const totalConductores = usuarios.filter(u => ['conductor', 'operador'].includes((u?.rolNormalizado || u?.rol || '').toLowerCase())).length;
+    const totalAdmin = usuarios.filter(u => ['admin', 'ceo', 'secretaria', 'auxiliar'].includes((u?.rolNormalizado || u?.rol || '').toLowerCase())).length;
 
     return (
         <div className="w-full flex flex-col gap-5 font-mono antialiased text-zinc-100">
@@ -210,9 +266,19 @@ export const DirectorioGlobal = () => {
 
                 <div className="flex items-center gap-3 w-full md:w-auto justify-end">
                     <button 
+                        onClick={descargarExcelGlobal}
+                        disabled={loading}
+                        className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-400 hover:text-emerald-300 transition-colors text-xs font-bold flex items-center gap-2 uppercase tracking-wider disabled:opacity-50 active:scale-95"
+                        title="Exportar Reporte Excel Completo desde Servidor"
+                    >
+                        <Download size={14} />
+                        <span>Exportar XLSX</span>
+                    </button>
+
+                    <button 
                         onClick={obtenerDirectorio} 
                         disabled={loading}
-                        className="p-2.5 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 rounded-xl text-zinc-400 hover:text-white transition-colors disabled:opacity-50"
+                        className="p-2.5 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 rounded-xl text-zinc-400 hover:text-white transition-colors disabled:opacity-50 active:scale-95"
                         title="Recargar directorio"
                     >
                         <RefreshCw size={14} className={loading ? 'animate-spin text-yellow-500' : ''} />
@@ -254,15 +320,15 @@ export const DirectorioGlobal = () => {
                             <tbody className="divide-y divide-white/5 text-xs">
                                 {usuariosFiltrados.map((u, idx) => {
                                     const nombre = getNombre(u);
-                                    const email = u.email || 'SIN EMAIL';
-                                    const tel = u.telefono || u.telefonoMovil || 'N/A';
-                                    const empresa = u.cooperativa_nombre || u.empresa || u.cooperativa || u.entidad || 'SISTEMA CENTRAL';
+                                    const email = u?.email || 'SIN EMAIL';
+                                    const tel = u?.telefono || u?.telefonoMovil || 'N/A';
+                                    const empresa = u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL';
 
                                     return (
-                                        <tr key={u._id || u.id || idx} className="hover:bg-white/[0.02] transition-colors">
+                                        <tr key={u?._id || u?.id || idx} className="hover:bg-white/[0.02] transition-colors">
                                             <td className="py-3 pl-2">
                                                 <div className="font-bold text-white uppercase">{nombre}</div>
-                                                <div className="text-[9px] text-zinc-500 font-mono">ID: {u._id || u.id}</div>
+                                                <div className="text-[9px] text-zinc-500 font-mono">ID: {u?._id || u?.id}</div>
                                             </td>
                                             <td className="py-3 font-mono text-[11px]">
                                                 <div className="text-zinc-300">{tel}</div>
@@ -276,7 +342,7 @@ export const DirectorioGlobal = () => {
                                             </td>
                                             <td className="py-3 pr-2 text-right">
                                                 <span className="text-[8px] font-mono px-2 py-0.5 rounded bg-zinc-950 text-zinc-500 border border-white/5 uppercase">
-                                                    {u.origenColeccion || u.origen || 'DB'}
+                                                    {u?.origenColeccion || u?.origen || 'DB'}
                                                 </span>
                                             </td>
                                         </tr>

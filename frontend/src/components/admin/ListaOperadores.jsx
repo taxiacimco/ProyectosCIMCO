@@ -1,9 +1,10 @@
-// Versión Arquitectura: V15.1 - Integración Híbrida MongoDB REST (Puerto 3000) + Fallback Firestore + Deduplicación Anti-Duplicados
+// Versión Arquitectura: V15.2 - Inyección de Encabezados de Autenticación Bearer JWT en Peticiones HTTP
 /**
  * Ubicación: frontend\src\components\admin\ListaOperadores.jsx
  * Misión: Renderizar la malla de operadores recuperando registros desde el backend (MongoDB)
  *         a través del puerto 3000 con fallback a Firestore para garantizar la presencia de operadores registrados.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
+ * Ajuste V15.2: Inyección del token Bearer de localStorage ('cimco_token') en cabeceras HTTP de handleAprobar y toggleEstado para evitar fallos 401 Unauthorized.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -11,7 +12,7 @@ import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, doc, updateDoc, query } from 'firebase/firestore';
 import { Shield, ShieldAlert, UserCheck, UserX, Search, Loader, Database, CheckCircle, Hourglass } from 'lucide-react';
 // 🛡️ IMPORTANTE: Importación del helper de deduplicación
-import { deduplicarEntidades } from '../../utils/deduplicar';
+import { deduplicarEntidades } from '@/utils/deduplicar';
 
 const normalizarEntidadUsuario = (idDoc, rawData = {}) => {
     const rolEstandar = (rawData?.rol || rawData?.role || rawData?.subrol || 'operador').toString().toLowerCase().trim();
@@ -51,8 +52,14 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         setLoading(true);
 
         try {
+            const token = localStorage.getItem('cimco_token');
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            };
+
             // Petición directa al Backend Express en el Puerto 3000
-            const response = await fetch('http://localhost:3000/api/conductores');
+            const response = await fetch('http://localhost:3000/api/conductores', { headers });
             if (response.ok) {
                 const data = await response.json();
                 const listaMongo = Array.isArray(data) ? data : (data.conductores || data.data || []);
@@ -121,10 +128,16 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         }
 
         try {
+            const token = localStorage.getItem('cimco_token');
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            };
+
             // Intentar aprobar vía API REST (Puerto 3000)
             const res = await fetch(`http://localhost:3000/api/conductores/${id}/aprobar`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({ estado: nuevoEstado, isActive: true })
             });
 
@@ -153,10 +166,16 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         const nuevoEstadoString = nuevoEstadoBool ? 'APROBADO' : 'INACTIVO';
 
         try {
+            const token = localStorage.getItem('cimco_token');
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            };
+
             // Intentar alterar estado vía API REST (Puerto 3000)
             const res = await fetch(`http://localhost:3000/api/conductores/${id}/estado`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({ isActive: nuevoEstadoBool, estado: nuevoEstadoString })
             });
 

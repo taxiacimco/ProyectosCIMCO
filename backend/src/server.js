@@ -1,8 +1,8 @@
-// Versión Arquitectura: V17.0 - Inyección de Endpoint Directorio Global CIMCO Nexus
+// Versión Arquitectura: V17.1 - Inyección de Enrutador Excel y Directorio Global CIMCO Nexus
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado, orquestación de sockets
- * e inyección del enrutador de Cooperativas (/api/cooperativas) junto con Pasajeros, Usuarios, Conductores y Viajes.
+ * e inyección del enrutador de Cooperativas (/api/cooperativas), Excel (/api/excel) junto con Pasajeros, Usuarios, Conductores y Viajes.
  */
 
 import 'dotenv/config';
@@ -19,6 +19,7 @@ import viajeRoutes from '#modules/viajes/viaje.routes.js';
 import usuarioRoutes from './modules/usuarios/usuario.routes.js';
 import pasajeroRoutes from './modules/pasajeros/pasajero.routes.js';
 import cooperativaRoutes from './modules/cooperativas/cooperativa.routes.js';
+import excelRoutes from './modules/excel/excel.routes.js';
 import { inicializarSockets } from '#modules/sockets/socket.manager.js';
 
 const app = express();
@@ -126,6 +127,7 @@ app.use('/api/viajes', viajeRoutes);
 app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/pasajeros', pasajeroRoutes);
 app.use('/api/cooperativas', cooperativaRoutes);
+app.use('/api/excel', excelRoutes);
 
 // Sincronización de CORS para WebSockets (Socket.IO)
 const io = new Server(httpServer, {

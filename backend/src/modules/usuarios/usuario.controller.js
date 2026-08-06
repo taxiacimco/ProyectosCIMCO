@@ -1,7 +1,7 @@
-// Versión Arquitectura: V19.0 - Integración Atómica de Recarga/Ajuste Gerencial Multi-Rol
+// Versión Arquitectura: V19.2 - Operación Atómica $inc Unificada para Eliminación de Duplicidad en Saldo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
- * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado y flujo financiero.
+ * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado y flujo financiero sin mutaciones dobles de saldo.
  */
 
 import mongoose from 'mongoose';
@@ -346,15 +346,18 @@ export const obtenerSaldoDespachador = async (req, res) => {
                 { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
                 { uid: targetId }
             ]
-        }).select('saldo nombre rol role').lean();
+        }).select('saldo saldoWallet nombre rol role').lean();
 
         if (!usuario) {
             return res.status(404).json({ success: false, message: 'Despachador no encontrado.' });
         }
 
+        const saldoFinal = usuario.saldoWallet ?? usuario.saldo ?? 0;
+
         return res.status(200).json({
             success: true,
-            saldo: usuario.saldo || 0,
+            saldo: saldoFinal,
+            saldoWallet: saldoFinal,
             data: usuario
         });
     } catch (error) {
@@ -376,11 +379,12 @@ export const recargarSaldoDespachador = async (req, res) => {
 
         if (!targetId || isNaN(montoNum) || montoNum <= 0) {
             await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ success: false, message: "Monto e ID de despachador válidos son requeridos." });
         }
 
-        // Incremento atómico ($inc)
-        const despachador = await Usuario.findOneAndUpdate(
+        // Incremento atómico ($inc) unificado sobre ambos campos para evitar doble mutación no sincronizada
+        const despachadorAnterior = await Usuario.findOneAndUpdate(
             { 
                 $or: [
                     { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
@@ -390,21 +394,22 @@ export const recargarSaldoDespachador = async (req, res) => {
                     { $or: [{ rol: 'despachador' }, { role: 'despachador' }] }
                 ]
             },
-            { $inc: { saldo: montoNum } },
-            { new: false, session } // Retorna estado anterior
+            { $inc: { saldo: montoNum, saldoWallet: montoNum } },
+            { new: false, session } // Retorna estado anterior para auditoría
         );
 
-        if (!despachador) {
+        if (!despachadorAnterior) {
             await session.abortTransaction();
+            session.endSession();
             return res.status(404).json({ success: false, message: "Despachador no encontrado o rol no válido." });
         }
 
-        const saldoAnterior = Number(despachador.saldo || 0);
+        const saldoAnterior = Number(despachadorAnterior.saldoWallet ?? despachadorAnterior.saldo ?? 0);
         const saldoNuevo = saldoAnterior + montoNum;
 
         // Registro de Historial en MongoDB
         const nuevoHistorial = new HistorialSaldo({
-            conductor: despachador._id,
+            conductor: despachadorAnterior._id,
             tipo: 'recarga_despachador',
             monto: montoNum,
             saldoAnterior,
@@ -417,15 +422,16 @@ export const recargarSaldoDespachador = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        const docFirestoreId = despachador.uid || despachador._id.toString();
+        const docFirestoreId = despachadorAnterior.uid || despachadorAnterior._id.toString();
 
         // Espejo de Billetera en Firestore
         try {
             const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
             await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
                 id: docFirestoreId,
-                nombreUsuario: despachador.nombre,
+                nombreUsuario: despachadorAnterior.nombre,
                 saldo: saldoNuevo,
+                saldoWallet: saldoNuevo,
                 balance: saldoNuevo,
                 ultimaActualizacion: new Date().toISOString()
             }, { merge: true });
@@ -450,6 +456,7 @@ export const recargarSaldoDespachador = async (req, res) => {
             success: true,
             message: `Saldo acreditado al despachador. Nuevo saldo: $${saldoNuevo} COP`,
             saldoNuevo,
+            saldoActual: saldoNuevo,
             data: { saldoNuevo }
         });
 
@@ -462,7 +469,7 @@ export const recargarSaldoDespachador = async (req, res) => {
 
 /**
  * 💰 Ajuste Manual de Saldo (Abono / Débito - CEO)
- * Permite abonar saldo o realizar devoluciones/débitos a cualquier usuario.
+ * Permite abonar saldo o realizar devoluciones/débitos a cualquier usuario mediante actualización atómica $inc de Mongoose.
  */
 export const recargarSaldo = async (req, res) => {
     const session = await mongoose.startSession();
@@ -475,33 +482,35 @@ export const recargarSaldo = async (req, res) => {
         const montoNumerico = parseFloat(monto);
         if (!targetId || isNaN(montoNumerico) || montoNumerico <= 0) {
             await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ 
                 success: false, 
                 message: "⚠️ Debe proporcionar un ID de usuario válido y un monto mayor a 0." 
             });
         }
 
-        // Buscar el usuario objetivo
-        const usuario = await Usuario.findOne({
+        // Evaluación de saldo previo para evitar inconsistencias o descubiertos en operaciones de débito
+        const usuarioExistente = await Usuario.findOne({
             $or: [
                 { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
                 { uid: targetId }
             ]
-        }).session(session);
+        }).session(session).lean();
 
-        if (!usuario) {
+        if (!usuarioExistente) {
             await session.abortTransaction();
+            session.endSession();
             return res.status(404).json({ success: false, message: "⚠️ Usuario no encontrado." });
         }
 
-        // Obtener saldo actual (soporta campo `saldoWallet` o `saldo`)
-        const saldoAnterior = Number(usuario.saldoWallet ?? usuario.saldo ?? 0);
+        const saldoAnterior = Number(usuarioExistente.saldoWallet ?? usuarioExistente.saldo ?? 0);
         let deltaSaldo = montoNumerico;
 
         // Validación estricta para Débito/Devolución
         if (tipoOperacion === 'DEBITO') {
             if (saldoAnterior < montoNumerico) {
                 await session.abortTransaction();
+                session.endSession();
                 return res.status(400).json({
                     success: false,
                     message: `⚠️ Saldo insuficiente para realizar la devolución. Saldo disponible: $${saldoAnterior.toLocaleString('es-CO')} COP.`
@@ -510,16 +519,19 @@ export const recargarSaldo = async (req, res) => {
             deltaSaldo = -montoNumerico;
         }
 
-        // Actualizar el saldo en el modelo
-        const saldoNuevo = saldoAnterior + deltaSaldo;
-        usuario.saldoWallet = saldoNuevo;
-        usuario.saldo = saldoNuevo; // Mantener sincronía de campos
-        await usuario.save({ session });
+        // Normalización mediante un único operador $inc en la consulta Mongoose (Sincronización atómica de saldoWallet y saldo)
+        const usuarioActualizado = await Usuario.findOneAndUpdate(
+            { _id: usuarioExistente._id },
+            { $inc: { saldoWallet: deltaSaldo, saldo: deltaSaldo } },
+            { new: true, session }
+        );
+
+        const saldoNuevo = Number(usuarioActualizado.saldoWallet ?? usuarioActualizado.saldo ?? (saldoAnterior + deltaSaldo));
 
         // Registrar Historial auditable en MongoDB
         const nuevoHistorial = new HistorialSaldo({
-            conductor: usuario._id,
-            usuarioId: usuario._id,
+            conductor: usuarioActualizado._id,
+            usuarioId: usuarioActualizado._id,
             tipo: tipoOperacion === 'DEBITO' ? 'debito_manual' : 'recarga_manual',
             monto: deltaSaldo,
             saldoAnterior,
@@ -534,14 +546,14 @@ export const recargarSaldo = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        const docFirestoreId = usuario.uid || usuario._id.toString();
+        const docFirestoreId = usuarioActualizado.uid || usuarioActualizado._id.toString();
 
         // Espejo de Billetera en Firebase Firestore
         try {
             const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
             await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
                 id: docFirestoreId,
-                nombreUsuario: usuario.nombre,
+                nombreUsuario: usuarioActualizado.nombre,
                 saldo: saldoNuevo,
                 saldoWallet: saldoNuevo,
                 balance: saldoNuevo,
@@ -554,8 +566,8 @@ export const recargarSaldo = async (req, res) => {
         // Auditoría centralizada en Firestore
         await registrarTransaccionFirestore({
             idUsuario: docFirestoreId,
-            rol: usuario.rol || usuario.role || 'usuario',
-            subrol: usuario.subrol || 'general',
+            rol: usuarioActualizado.rol || usuarioActualizado.role || 'usuario',
+            subrol: usuarioActualizado.subrol || 'general',
             monto: deltaSaldo,
             saldoAnterior,
             saldoNuevo,

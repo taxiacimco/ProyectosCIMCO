@@ -1,9 +1,9 @@
-// Versión Arquitectura: V16.9 - Homologación de Modelo Pasajero para Aprobación Automática e Ingreso Directo
+// Versión Arquitectura: V17.2 - Soporte de Foto de Perfil y Avatar Multimedia Pasajero
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva cifrado Bcrypt, esquema de direcciones favoritas, soporte
- * GeoJSON 2dsphere y garantiza aprobación automática inmediata (`isActive: true`, `estado: 'APROBADO'`).
+ * GeoJSON 2dsphere, aprobación automática inmediata e inyecta soporte para la URL de foto_perfil.
  */
 
 import mongoose from 'mongoose';
@@ -56,6 +56,11 @@ const pasajeroSchema = new mongoose.Schema({
     rol: {
         type: String,
         default: 'pasajero'
+    },
+    // 📷 MULTIMEDIA DE PERFIL (URL de avatar/fotografía)
+    foto_perfil: {
+        type: String,
+        default: null
     },
     // 🟢 APROBACIÓN AUTOMÁTICA: Nace APROBADO/activo por defecto para evitar fricciones de registro
     estado: {

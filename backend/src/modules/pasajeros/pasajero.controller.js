@@ -1,8 +1,8 @@
-// Versión Arquitectura: V18.1 - Módulo Pasajeros (Deduplicación de Registros, Semántica de Historial y Mapeo Seguro)
+// Versión Arquitectura: V18.2 - Optimización Pipeline Aggregation y Normalización BSON adminId
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
  * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos y operaciones de saldo/billetera.
- * Ajuste V18.1: Corrección de asignación semántica en HistorialSaldo (usuario/pasajero en lugar de conductor) al recargar saldo.
+ * Ajuste V18.2: Optimización de obtenerPasajeros mediante pipeline de agregación de Mongoose para prevenir desbordamiento de RAM, y sanitización/normalización de adminId en recargarSaldoPasajero.
  */
 
 import mongoose from 'mongoose';
@@ -29,6 +29,19 @@ const registrarTransaccionFirestore = async ({
 }) => {
     try {
         const pathTransacciones = FIRESTORE_PATHS?.transactions || 'transacciones';
+        
+        // Normalización y sanitización estricta de autorizadoPor
+        let adminIdSanitizado = 'SISTEMA';
+        if (autorizadoPor) {
+            if (typeof autorizadoPor === 'object' && autorizadoPor._id) {
+                adminIdSanitizado = autorizadoPor._id.toString();
+            } else if (typeof autorizadoPor === 'object' && autorizadoPor.id) {
+                adminIdSanitizado = autorizadoPor.id.toString();
+            } else {
+                adminIdSanitizado = String(autorizadoPor).trim();
+            }
+        }
+
         await dbFirestore.collection(pathTransacciones).add({
             idUsuario: idUsuario?.toString(),
             rol,
@@ -37,7 +50,7 @@ const registrarTransaccionFirestore = async ({
             saldoAnterior,
             saldoNuevo,
             tipoOperacion,
-            autorizadoPor: autorizadoPor || 'SISTEMA',
+            autorizadoPor: adminIdSanitizado,
             referencia: referencia || `TX-${Date.now()}`,
             timestamp: FieldValue.serverTimestamp(),
             fechaRegistro: new Date().toISOString()
@@ -48,33 +61,63 @@ const registrarTransaccionFirestore = async ({
 };
 
 // ==================================================================
-// 1. GESTIÓN GENERAL DE PASAJEROS Y PERFIL (DEDUPLICADO)
+// 1. GESTIÓN GENERAL DE PASAJEROS Y PERFIL (DEDUPLICADO POR AGGREGATION)
 // ==================================================================
 
 /**
- * 📋 Obtener listado de pasajeros deduplicado (Uso administrativo)
+ * 📋 Obtener listado de pasajeros deduplicado en DB mediante Pipeline de Agregación
  */
 export const obtenerPasajeros = async (req, res) => {
     try {
-        const pasajerosBrutos = await Pasajero.find().select('-password').lean();
-
-        // Aplicar filtrado defensivo anti-duplicados por _id, email o teléfono
-        const mapaUnico = new Map();
-
-        pasajerosBrutos.forEach((p) => {
-            const key = p._id ? p._id.toString() : (p.uid || p.email || p.telefonoMovil || p.telefono);
-            if (key && !mapaUnico.has(key)) {
-                mapaUnico.set(key, {
-                    ...p,
-                    id: p._id ? p._id.toString() : p.uid,
-                    telefono: p.telefonoMovil || p.telefono || '',
-                    rol: p.rol || p.role || 'pasajero',
-                    origenColeccion: 'PASAJEROS'
-                });
+        const listaLimpia = await Pasajero.aggregate([
+            {
+                $project: {
+                    password: 0
+                }
+            },
+            {
+                $addFields: {
+                    keyDeduplicacion: {
+                        $cond: {
+                            if: { $ne: ["$_id", null] },
+                            then: { $toString: "$_id" },
+                            else: {
+                                $ifNull: [
+                                    "$uid",
+                                    {
+                                        $ifNull: [
+                                            "$email",
+                                            { $ifNull: ["$telefonoMovil", "$telefono"] }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    id: { $toString: "$_id" },
+                    telefono: { $ifNull: ["$telefonoMovil", { $ifNull: ["$telefono", ""] }] },
+                    rol: { $ifNull: ["$rol", { $ifNull: ["$role", "pasajero"] }] },
+                    origenColeccion: "PASAJEROS"
+                }
+            },
+            {
+                $group: {
+                    _id: "$keyDeduplicacion",
+                    doc: { $first: "$$ROOT" }
+                }
+            },
+            {
+                $replaceRoot: { newRoot: "$doc" }
+            },
+            {
+                $project: {
+                    keyDeduplicacion: 0
+                }
+            },
+            {
+                $sort: { createdAt: -1 }
             }
-        });
-
-        const listaLimpia = Array.from(mapaUnico.values());
+        ]);
 
         return res.status(200).json({ 
             success: true, 
@@ -380,10 +423,20 @@ export const recargarSaldoPasajero = async (req, res) => {
         const { pasajeroId, id, uid, monto, referencia, nota } = req.body;
         const targetId = pasajeroId || id || uid;
         const montoNum = parseFloat(monto);
-        const adminId = req.user?.id || req.user?._id || 'SISTEMA_PASAJERO';
+        
+        // Normalización y sanitización estricta de adminId
+        const rawAdminId = req.user?.id || req.user?._id || 'SISTEMA_PASAJERO';
+        const adminIdSanitizado = (typeof rawAdminId === 'object' && rawAdminId !== null)
+            ? rawAdminId.toString()
+            : String(rawAdminId).trim();
+
+        const adminObjectId = mongoose.Types.ObjectId.isValid(adminIdSanitizado)
+            ? new mongoose.Types.ObjectId(adminIdSanitizado)
+            : null;
 
         if (!targetId || isNaN(montoNum) || montoNum <= 0) {
             await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({ success: false, message: "Parámetros de recarga inválidos." });
         }
 
@@ -400,13 +453,14 @@ export const recargarSaldoPasajero = async (req, res) => {
 
         if (!pasajero) {
             await session.abortTransaction();
+            session.endSession();
             return res.status(404).json({ success: false, message: "Pasajero no localizado." });
         }
 
         const saldoAnterior = Number(pasajero.saldo || 0);
         const saldoNuevo = saldoAnterior + montoNum;
 
-        // ✅ Historial en MongoDB con mapeo semántico limpio (usuario / pasajero)
+        // ✅ Historial en MongoDB con mapeo semántico limpio (usuario / pasajero) y ObjectId/String sanitizado
         const nuevoHistorial = new HistorialSaldo({
             usuario: pasajero._id,
             pasajero: pasajero._id,
@@ -415,7 +469,7 @@ export const recargarSaldoPasajero = async (req, res) => {
             rolTarget: 'pasajero',
             saldoAnterior,
             saldoNuevo,
-            realizadoPor: adminId,
+            realizadoPor: adminObjectId || adminIdSanitizado,
             referencia: referencia || `PAS-${Date.now()}`,
             descripcion: nota || 'Recarga de saldo a pasajero realizada por central/admin'
         });
@@ -449,7 +503,7 @@ export const recargarSaldoPasajero = async (req, res) => {
             saldoAnterior,
             saldoNuevo,
             tipoOperacion: 'RECARGA_PASAJERO',
-            autorizadoPor: adminId,
+            autorizadoPor: adminIdSanitizado,
             referencia: referencia || `PAS-${Date.now()}`
         });
 
@@ -461,8 +515,22 @@ export const recargarSaldoPasajero = async (req, res) => {
         });
 
     } catch (error) {
-        await session.abortTransaction();
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
         session.endSession();
         return res.status(500).json({ success: false, message: error.message });
     }
+};
+
+export default {
+    obtenerPasajeros,
+    validarPasajeroUnico,
+    obtenerPerfilPasajero,
+    actualizarPerfilPasajero,
+    agregarDireccionFavorita,
+    eliminarDireccionFavorita,
+    obtenerHistorialViajesPasajero,
+    obtenerSaldoPasajero,
+    recargarSaldoPasajero
 };

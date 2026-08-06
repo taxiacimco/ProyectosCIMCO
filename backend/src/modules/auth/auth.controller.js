@@ -1,7 +1,8 @@
-// Versión Arquitectura: V21.21 - Integración Atómica Onboarding Conductores (PENDIENTE) vs Pasajeros (APROBADO)
+// Versión Arquitectura: V21.23 - Integración Atómica Onboarding con Captura Extendida de Archivos (Req.Files) y Atributos por Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
- * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros)
+ * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
+ * extracción e integración de subdocumentos/archivos (req.files), atributos extendidos (terminal_sede, access_level)
  * e implementación del flujo diferido de activación (Conductores nacen PENDIENTES/Inactivos; Pasajeros nacen APROBADOS/Activos).
  */
 
@@ -39,23 +40,71 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 /**
- * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO (POLIMÓRFICO CON FLUJO DIFERIDO DE APROBACIÓN)
+ * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO (POLIMÓRFICO CON CAPTURA MULTIPART/FILES Y FLUJO DIFERIDO DE APROBACIÓN)
  */
 export const register = async (req, res) => {
     try {
-        const { email, password, nombre, telefonoMovil, telefono, rol, role, subrol, placa, numeroInterno, cooperativa, empresa } = req.body || {};
+        const body = req.body || {};
+        const { 
+            email, 
+            password, 
+            nombre, 
+            fullName, 
+            nombreCompleto, 
+            telefonoMovil, 
+            telefono, 
+            rol, 
+            role, 
+            subrol, 
+            placa, 
+            numeroInterno, 
+            cooperativa, 
+            empresa,
+            terminal_sede,
+            terminalSede,
+            access_level,
+            accessLevel
+        } = body;
 
-        const telFinal = telefonoMovil || telefono;
+        // Normalización anti-undefined de datos personales
+        const nombreFinal = (nombre || fullName || nombreCompleto || '').toString().trim();
+        const telFinal = (telefonoMovil || telefono || '').toString().trim();
         const rolSuministrado = rol || role;
 
-        if (!email || !password || !nombre || !telFinal || !rolSuministrado) {
+        if (!email || !password || !nombreFinal || !telFinal || !rolSuministrado) {
             return res.status(400).json({ success: false, message: "Todos los campos obligatorios deben ser suministrados." });
         }
 
         const emailLimpio = String(email).toLowerCase().trim();
         const rolNormalizado = String(rolSuministrado).toLowerCase().trim();
         const subrolFinal = subrol ? String(subrol).toLowerCase().trim() : (rolNormalizado === 'conductor' ? 'mototaxi' : rolNormalizado);
-        const terminalAsignada = cooperativa || empresa || (ROLES_OPERATIVOS.includes(rolNormalizado) ? 'Particular' : 'TAXIA');
+        
+        // Asignación extendida de sede / terminal
+        const terminalSedeFinal = (terminal_sede || terminalSede || cooperativa || empresa || (ROLES_OPERATIVOS.includes(rolNormalizado) ? 'Particular' : 'TAXIA')).toString().trim();
+
+        // Nivel de acceso sugerido/proporcionado
+        const parsedAccessLevel = access_level !== undefined ? Number(access_level) : (accessLevel !== undefined ? Number(accessLevel) : undefined);
+
+        // 📁 EXTRACCIÓN Y EXTRACTION SHIELDING DE ARCHIVOS MULTIPART/FORM-DATA (MULTER & REQ.FILES)
+        const getFilePath = (fieldName) => {
+            if (!req.files) return body[fieldName] || null;
+            
+            let fileObj = null;
+            if (Array.isArray(req.files)) {
+                fileObj = req.files.find(f => f.fieldname === fieldName);
+            } else if (typeof req.files === 'object' && req.files[fieldName]) {
+                fileObj = req.files[fieldName][0];
+            }
+
+            if (!fileObj) return body[fieldName] || null;
+            return fileObj.path || fileObj.location || fileObj.filename || fileObj.url || body[fieldName] || null;
+        };
+
+        const foto_perfil = getFilePath('foto_perfil');
+        const documento_cedula = getFilePath('documento_cedula');
+        const documento_licencia = getFilePath('documento_licencia');
+        const doc_tarjeta = getFilePath('doc_tarjeta');
+        const doc_identificacion = getFilePath('doc_identificacion');
 
         // 🛡️ VALIDACIÓN DE DUPLICADOS EN TODAS LAS COLECCIONES (CONCURRENTE)
         const [uExist, cExist, pExist] = await Promise.all([
@@ -88,8 +137,8 @@ export const register = async (req, res) => {
         // 🟢 ROL: PASAJERO (Aprobación e Ingreso Inmediato)
         if (rolNormalizado === 'pasajero') {
             nuevoUsuario = new Pasajero({
-                nombre,
-                fullName: nombre,
+                nombre: nombreFinal,
+                fullName: nombreFinal,
                 email: emailLimpio,
                 password: hashedPassword,
                 passwordHash: hashedPassword,
@@ -99,9 +148,14 @@ export const register = async (req, res) => {
                 role: 'pasajero',
                 isActive: true,
                 estado: 'APROBADO',
-                cooperativa: 'Particular',
-                empresa: 'Particular',
-                saldo: 0
+                cooperativa: terminalSedeFinal,
+                empresa: terminalSedeFinal,
+                terminal_sede: terminalSedeFinal,
+                saldo: 0,
+                foto_perfil,
+                doc_identificacion,
+                documento_cedula: documento_cedula || doc_identificacion,
+                access_level: parsedAccessLevel ?? 1
             });
             esPasajero = true;
         } 
@@ -115,7 +169,8 @@ export const register = async (req, res) => {
             }
 
             nuevoUsuario = new Conductor({
-                nombre,
+                nombre: nombreFinal,
+                fullName: nombreFinal,
                 email: emailLimpio,
                 password: hashedPassword,
                 passwordHash: hashedPassword,
@@ -126,10 +181,19 @@ export const register = async (req, res) => {
                 subrol: subrolFinal,
                 placa: String(placa).toUpperCase().trim(),
                 numeroInterno: String(numeroInterno).trim(),
-                cooperativa: terminalAsignada,
-                empresa: terminalAsignada,
+                cooperativa: terminalSedeFinal,
+                empresa: terminalSedeFinal,
+                terminal_sede: terminalSedeFinal,
                 flota_id: 'GENERAL',
                 
+                // Atributos y Archivos Adjuntos
+                foto_perfil,
+                documento_cedula,
+                documento_licencia,
+                doc_tarjeta,
+                doc_identificacion,
+                access_level: parsedAccessLevel ?? 10,
+
                 // 🔴 RETENCIÓN ADMINISTRATIVA: Nace PENDIENTE e INACTIVO hasta verificación manual
                 estadoAdministrativo: 'PENDIENTE',
                 estado: 'PENDIENTE',
@@ -140,11 +204,13 @@ export const register = async (req, res) => {
             });
             esConductor = true;
         } 
-        // 🏢 OTROS ROLES DEL SISTEMA (Admins, Secretarías, Despachadores)
+        // 🏢 OTROS ROLES DEL SISTEMA (Admins, Secretarías, Despachadores, Staff)
         else {
+            const nivelPredeterminado = (rolNormalizado === 'admin' || rolNormalizado === 'ceo') ? 99 : (rolNormalizado === 'staff' ? 50 : (rolNormalizado === 'despachador' ? 30 : 10));
+
             nuevoUsuario = new Usuario({
-                nombre,
-                fullName: nombre,
+                nombre: nombreFinal,
+                fullName: nombreFinal,
                 email: emailLimpio,
                 password: hashedPassword,
                 passwordHash: hashedPassword,
@@ -152,18 +218,23 @@ export const register = async (req, res) => {
                 telefono: telFinal,
                 rol: rolNormalizado,
                 role: rolNormalizado,
-                cooperativa: terminalAsignada,
-                empresa: terminalAsignada,
+                cooperativa: terminalSedeFinal,
+                empresa: terminalSedeFinal,
+                terminal_sede: terminalSedeFinal,
                 isActive: true,
                 estado: 'APROBADO',
                 saldo: 0,
-                balance: 0
+                balance: 0,
+                foto_perfil,
+                doc_identificacion,
+                documento_cedula: documento_cedula || doc_identificacion,
+                access_level: parsedAccessLevel ?? nivelPredeterminado
             });
         }
 
         await nuevoUsuario.save();
 
-        // Sincronización hacia Firebase Firestore con Denormalización Saneada de Billetera
+        // Sincronización hacia Firebase Firestore con Denormalización Saneada de Billetera y Archivos
         if (dbFirestore) {
             try {
                 const coleccionFirestore = esPasajero 
@@ -174,13 +245,17 @@ export const register = async (req, res) => {
                     uid: String(nuevoUsuario._id),
                     email: nuevoUsuario.email,
                     nombre: nuevoUsuario.nombre,
+                    fullName: nuevoUsuario.nombre,
                     telefono: nuevoUsuario.telefonoMovil,
                     rol: nuevoUsuario.rol,
-                    subrol: nuevoUsuario.subrol || null,
+                    subrol: nuevoUsuario.subrol || subrolFinal || null,
                     estado: nuevoUsuario.estado,
                     isActive: nuevoUsuario.isActive,
                     cooperativa: nuevoUsuario.cooperativa || 'Particular',
                     empresa: nuevoUsuario.empresa || 'Particular',
+                    terminal_sede: nuevoUsuario.terminal_sede || 'Particular',
+                    access_level: nuevoUsuario.access_level || 1,
+                    foto_perfil: foto_perfil || null,
                     createdAt: new Date().toISOString()
                 };
 
@@ -189,6 +264,10 @@ export const register = async (req, res) => {
                     payloadFirestore.placa = nuevoUsuario.placa;
                     payloadFirestore.numeroInterno = nuevoUsuario.numeroInterno;
                     payloadFirestore.estadoAdministrativo = nuevoUsuario.estadoAdministrativo;
+                    payloadFirestore.documento_cedula = documento_cedula || null;
+                    payloadFirestore.documento_licencia = documento_licencia || null;
+                    payloadFirestore.doc_tarjeta = doc_tarjeta || null;
+                    payloadFirestore.doc_identificacion = doc_identificacion || null;
                 }
 
                 await dbFirestore.collection(coleccionFirestore).doc(String(nuevoUsuario._id)).set(payloadFirestore);
@@ -220,7 +299,9 @@ export const register = async (req, res) => {
                     email: nuevoUsuario.email,
                     rol: nuevoUsuario.rol,
                     estado: nuevoUsuario.estado,
-                    isActive: nuevoUsuario.isActive
+                    isActive: nuevoUsuario.isActive,
+                    terminal_sede: nuevoUsuario.terminal_sede || nuevoUsuario.cooperativa,
+                    foto_perfil: nuevoUsuario.foto_perfil || null
                 }
             });
         }
@@ -234,7 +315,9 @@ export const register = async (req, res) => {
                 email: nuevoUsuario.email,
                 rol: nuevoUsuario.rol,
                 estado: nuevoUsuario.estado,
-                isActive: nuevoUsuario.isActive
+                isActive: nuevoUsuario.isActive,
+                terminal_sede: nuevoUsuario.terminal_sede || nuevoUsuario.cooperativa,
+                foto_perfil: nuevoUsuario.foto_perfil || null
             }
         });
 
@@ -340,7 +423,10 @@ export const login = async (req, res) => {
                 rol: cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero',
                 estado: cuentaEncontrada.estado,
                 telefonoMovil: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono || "",
-                cooperativa: cuentaEncontrada.cooperativa || cuentaEncontrada.empresa || ""
+                cooperativa: cuentaEncontrada.cooperativa || cuentaEncontrada.empresa || "",
+                terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa || "",
+                access_level: cuentaEncontrada.access_level || 1,
+                foto_perfil: cuentaEncontrada.foto_perfil || null
             }
         });
 
@@ -561,10 +647,10 @@ export const updateProfile = async (req, res) => {
             return res.status(400).json({ success: false, message: "No se encontró un identificador de sesión válido." });
         }
 
-        const { nombre, telefonoMovil, cooperativa, empresa } = req.body || {};
+        const { nombre, telefonoMovil, cooperativa, empresa, terminal_sede } = req.body || {};
         const nombreLimpio = nombre ? String(nombre).trim() : undefined;
         const telefonoLimpio = telefonoMovil ? String(telefonoMovil).trim() : undefined;
-        const terminalAsignada = cooperativa || empresa || undefined;
+        const terminalAsignada = terminal_sede || cooperativa || empresa || undefined;
 
         let modeloTarget;
         let esPasajero = false;
@@ -585,7 +671,10 @@ export const updateProfile = async (req, res) => {
         }
 
         const updateData = {};
-        if (nombreLimpio) updateData.nombre = nombreLimpio;
+        if (nombreLimpio) {
+            updateData.nombre = nombreLimpio;
+            updateData.fullName = nombreLimpio;
+        }
         if (telefonoLimpio) {
             updateData.telefonoMovil = telefonoLimpio;
             updateData.telefono = telefonoLimpio;
@@ -594,6 +683,32 @@ export const updateProfile = async (req, res) => {
         if (terminalAsignada) {
             updateData.cooperativa = terminalAsignada;
             updateData.empresa = terminalAsignada;
+            updateData.terminal_sede = terminalAsignada;
+        }
+
+        // Extracción de fotos o documentos si vienen en updateProfile vía multipart
+        if (req.files) {
+            const getFilePath = (fieldName) => {
+                let fileObj = null;
+                if (Array.isArray(req.files)) {
+                    fileObj = req.files.find(f => f.fieldname === fieldName);
+                } else if (typeof req.files === 'object' && req.files[fieldName]) {
+                    fileObj = req.files[fieldName][0];
+                }
+                return fileObj ? (fileObj.path || fileObj.location || fileObj.filename || fileObj.url) : null;
+            };
+
+            const foto = getFilePath('foto_perfil');
+            const cedula = getFilePath('documento_cedula');
+            const licencia = getFilePath('documento_licencia');
+            const tarjeta = getFilePath('doc_tarjeta');
+            const docId = getFilePath('doc_identificacion');
+
+            if (foto) updateData.foto_perfil = foto;
+            if (cedula) updateData.documento_cedula = cedula;
+            if (licencia) updateData.documento_licencia = licencia;
+            if (tarjeta) updateData.doc_tarjeta = tarjeta;
+            if (docId) updateData.doc_identificacion = docId;
         }
 
         let usuarioActualizado = await modeloTarget.findByIdAndUpdate(
@@ -646,6 +761,11 @@ export const updateProfile = async (req, res) => {
                 if (terminalAsignada) {
                     firestoreUpdate.cooperativa = terminalAsignada;
                     firestoreUpdate.empresa = terminalAsignada;
+                    firestoreUpdate.terminal_sede = terminalAsignada;
+                }
+
+                if (updateData.foto_perfil) {
+                    firestoreUpdate.foto_perfil = updateData.foto_perfil;
                 }
 
                 await dbFirestore.collection(coleccionTarget).doc(String(userId)).set(firestoreUpdate, { merge: true });
@@ -672,7 +792,9 @@ export const updateProfile = async (req, res) => {
                 email: usuarioActualizado.email,
                 rol: usuarioActualizado.rol || usuarioActualizado.role || rolNormalizado,
                 telefonoMovil: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono || "",
-                cooperativa: usuarioActualizado.cooperativa || usuarioActualizado.empresa || ""
+                cooperativa: usuarioActualizado.cooperativa || usuarioActualizado.empresa || "",
+                terminal_sede: usuarioActualizado.terminal_sede || usuarioActualizado.cooperativa || "",
+                foto_perfil: usuarioActualizado.foto_perfil || null
             }
         });
 

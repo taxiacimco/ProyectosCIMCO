@@ -1,4 +1,4 @@
-// Versión Arquitectura: V9.9.8 - Red Local LAN Activa (192.168.100.34)
+// Versión Arquitectura: V9.9.9 - Configuración Híbrida LAN / Cloudflare Tunnel
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -27,7 +27,14 @@ export default defineConfig({
       '.ngrok-free.dev'
     ],
     proxy: {
+      // Redirección de llamadas REST API hacia el backend local
       '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false,
+      },
+      // Redirección del canal WebSocket de Socket.IO hacia el backend local
+      '/socket.io': {
         target: 'http://localhost:3000',
         changeOrigin: true,
         secure: false,
@@ -37,9 +44,9 @@ export default defineConfig({
     watch: {
       usePolling: true,
     },
+    // Removido hmr.host fijo para permitir resolución automática por IP local o Túnel HTTPS
     hmr: {
       protocol: 'ws',
-      host: '192.168.100.34'
     }
   },
   build: {

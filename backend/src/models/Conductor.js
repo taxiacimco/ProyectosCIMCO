@@ -1,10 +1,10 @@
-// Versión Arquitectura: V16.9 - Integración Estado Administrativo PENDIENTE y Aprobación Manual
+// Versión Arquitectura: V17.2 - Inyección de Campos Documentales y Adjuntos Multimedia
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
- * unificación de billetera en 'saldo', índice 2dsphere) e integra el estado administrativo de aprobación
- * manual ('PENDIENTE', 'APROBADO', 'SUSPENDIDO', 'RECHAZADO') con 'PENDIENTE' e isActive: false por defecto.
+ * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo) e inyecta soporte
+ * persistente para URLs documentales (foto_perfil, documento_cedula, documento_licencia, doc_tarjeta).
  */
 
 import mongoose from 'mongoose';
@@ -90,6 +90,23 @@ const ConductorSchema = new mongoose.Schema({
         type: String,
         trim: true,
         default: 'Particular'
+    },
+    // 📷 DOCUMENTACIÓN Y ADJUNTOS MULTIMEDIA (URLs de almacenamiento)
+    foto_perfil: {
+        type: String,
+        default: null
+    },
+    documento_cedula: {
+        type: String,
+        default: null
+    },
+    documento_licencia: {
+        type: String,
+        default: null
+    },
+    doc_tarjeta: {
+        type: String,
+        default: null
     },
     // 🔴 SEGURIDAD Y APROBACIÓN ADMINISTRATIVA: Estado de auditoría manual
     estadoAdministrativo: {

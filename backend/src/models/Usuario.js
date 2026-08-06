@@ -1,9 +1,9 @@
-// Versión Arquitectura: V16.9 - Modelo Usuario con Soporte de Activación Directa y Aprobación de Pasajeros
+// Versión Arquitectura: V17.2 - Soporte de Acreditación Personal, Terminales y Perfil Multimedia
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva sincronización bidireccional (rol ↔ role, saldo ↔ balance), hashing bcrypt,
- * atributos para despachadores de terminales y asegura compatibilidad de estados activos inmediatos para usuarios no retenidos.
+ * atributos para despachadores de terminales e inyecta soporte para foto_perfil, doc_identificacion, terminal_sede y access_level.
  */
 
 import mongoose from 'mongoose';
@@ -97,8 +97,13 @@ const usuarioSchema = new mongoose.Schema({
         trim: true,
         default: 'Particular'
     },
-    // 🏢 ATRIBUTOS ESPECÍFICOS DE DESPACHADOR DE TERMINAL
+    // 🏢 ATRIBUTOS ESPECÍFICOS DE DESPACHADOR DE TERMINAL Y SEDE
     terminal_id: {
+        type: String,
+        trim: true,
+        default: null
+    },
+    terminal_sede: {
         type: String,
         trim: true,
         default: null
@@ -107,6 +112,15 @@ const usuarioSchema = new mongoose.Schema({
         type: String,
         trim: true,
         sparse: true
+    },
+    // 📷 ACREDITACIÓN Y MULTIMEDIA DE PERFIL (URLs de almacenamiento)
+    foto_perfil: {
+        type: String,
+        default: null
+    },
+    doc_identificacion: {
+        type: String,
+        default: null
     },
     // 🧭 FORMATO GEOJSON POINT NATIVO
     coordenadas: {
@@ -140,6 +154,13 @@ usuarioSchema.pre('save', async function (next) {
             usuario.fullName = usuario.nombre;
         } else if (!usuario.nombre && usuario.fullName) {
             usuario.nombre = usuario.fullName;
+        }
+
+        // Sincronización homóloga de Terminal y Sede
+        if (usuario.terminal_sede && !usuario.terminal_id) {
+            usuario.terminal_id = usuario.terminal_sede;
+        } else if (usuario.terminal_id && !usuario.terminal_sede) {
+            usuario.terminal_sede = usuario.terminal_id;
         }
 
         // Guardas de Seguridad y Normalización Homóloga de Roles

@@ -1,7 +1,8 @@
-// Versión Arquitectura: V19.1 - Módulo Conductores: Atómico, Deduplicado, Multi-Subrol y Auditado
+// Versión Arquitectura: V19.2 - Integración Quirúrgica: Finalización de Sintaxis en eliminarConductor
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
  * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, telemetría GPS y recargas atómicas.
+ * Ajuste V19.2: Corrección de truncamiento sintáctico en eliminarConductor, completando el flujo de borrado con respuesta HTTP adecuada y manejo de errores.
  */
 
 import mongoose from 'mongoose';
@@ -384,7 +385,7 @@ export const actualizarConductor = async (req, res) => {
 
 export const eliminarConductor = async (req, res) => {
     try {
-        const targetId = req.params.id || req.params.uid;
+        const targetId = req.params.id || req.params.uid || req.params.conductorId;
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
@@ -401,7 +402,16 @@ export const eliminarConductor = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Conductor no encontrado' });
         }
 
-        return res.status(200).json({ success: true, message: 'Conductor eliminado correctamente' });
+        // Réplica de eliminación o desactivación en Firestore si corresponde
+        try {
+            const docFirestoreId = conductorEliminado.uid || conductorEliminado._id.toString();
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+            await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).delete();
+        } catch (fsError) {
+            console.warn("⚠️ [SYNC-WARN] Error al eliminar conductor de Firestore:", fsError.message);
+        }
+
+        return res.status(200).json({ success: true, message: 'Conductor eliminado correctamente', data: conductorEliminado });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
@@ -663,7 +673,7 @@ export const descontarComisionViaje = async (req, res) => {
             tipo: 'debito',
             monto: comisionNum,
             saldoAnterior,
-            saldoNuevo: nuevoSaldo,
+            saldoNuevo,
             referencia: viajeId ? `VIAJE-${viajeId}` : `DEB-${Date.now()}`,
             descripcion: `Comisión por servicio de viaje ${viajeId || ''}`
         });
@@ -951,4 +961,30 @@ export const actualizarUbicacionGPS = async (req, res) => {
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
     }
+};
+
+export default {
+    sanitizarPayloadConductor,
+    verificarBypassDesarrollo,
+    validarConductorUnico,
+    cambiarEstadoConductor,
+    obtenerTodosConductores,
+    obtenerConductores,
+    registrarConductor,
+    obtenerConductorPorId,
+    obtenerPerfil,
+    actualizarConductor,
+    eliminarConductor,
+    obtenerConductoresDisponibles,
+    obtenerCapitalCirculante,
+    recargarSaldoAdmin,
+    recargarBilleteraPorAdmin,
+    ajustarSaldo,
+    descontarComisionViaje,
+    obtenerHistorialSaldos,
+    obtenerHistorialConductor,
+    actualizarEstadoConductor,
+    obtenerConductoresCercanos,
+    actualizarRadarUbicacion,
+    actualizarUbicacionGPS
 };

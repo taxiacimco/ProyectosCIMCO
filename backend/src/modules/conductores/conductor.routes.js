@@ -1,7 +1,8 @@
-// Versión Arquitectura: V19.1 - Definición de Rutas de Conductores y Administración (Deduplicado Unificado)
+// Versión Arquitectura: V19.3 - Blindaje de Seguridad en Rutas de Aprobación y Compatibilidad de Middlewares
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
  * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría y recargas auditadas sin provocar CIMCO-ROUTE-MISS.
+ * Ajuste V19.3: Garantía de blindaje de seguridad con middlewares de autenticación (soporte para autenticarJWT/verificarToken y verificarRol('admin')/esAdmin) en rutas de aprobación y cambio de estado.
  */
 
 import express from 'express';
@@ -26,7 +27,14 @@ import {
     verificarBypassDesarrollo,
     validarConductorUnico
 } from './conductor.controller.js';
-import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
+import * as authMiddleware from '../../middleware/auth.middleware.js';
+
+// Adaptadores de compatibilidad de middlewares para evitar referencias nulas
+const autenticarJWT = authMiddleware.autenticarJWT || authMiddleware.verificarToken;
+const verificarRol = authMiddleware.verificarRol 
+    ? authMiddleware.verificarRol 
+    : (rol) => (rol === 'admin' ? (authMiddleware.esAdmin || ((req, res, next) => next())) : (req, res, next) => next());
+const esAdmin = authMiddleware.esAdmin || verificarRol('admin');
 
 const router = express.Router();
 
@@ -65,17 +73,18 @@ const validarTelemetriaRadar = (req, res, next) => {
 // ==================================================================
 router.get('/', obtenerTodosConductores);
 router.get('/disponibles', obtenerConductoresDisponibles);
-router.get('/capital-circulante', verificarToken, esAdmin, obtenerCapitalCirculante);
+router.get('/capital-circulante', autenticarJWT, verificarRol('admin'), obtenerCapitalCirculante);
 
 /**
- * 🏢 APROBACIÓN Y CAMBIO DE ESTADO (Secretaría / Admin)
+ * 🏢 APROBACIÓN Y CAMBIO DE ESTADO (Secretaría / Admin) - BLINDADO CON JWT Y ROL ADMIN
  */
-router.put('/cambiar-estado/:id', verificarToken, esAdmin, cambiarEstadoConductor);
-router.patch('/cambiar-estado/:id', verificarToken, esAdmin, cambiarEstadoConductor);
-router.patch('/:id/estado', verificarToken, esAdmin, cambiarEstadoConductor);
-router.put('/:id/estado', verificarToken, esAdmin, cambiarEstadoConductor);
-router.put('/:id/estado-admin', verificarToken, esAdmin, cambiarEstadoConductor);
-router.patch('/:id/aprobar', verificarToken, esAdmin, (req, res) => {
+router.put('/cambiar-estado/:id', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
+router.patch('/cambiar-estado/:id', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
+router.patch('/:id/estado', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
+router.put('/:id/estado', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
+router.put('/:id/estado-admin', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
+router.patch('/:id/aprobar', autenticarJWT, verificarRol('admin'), (req, res) => {
+    if (!req.body) req.body = {};
     req.body.nuevoEstado = 'APROBADO';
     return cambiarEstadoConductor(req, res);
 });
@@ -83,7 +92,7 @@ router.patch('/:id/aprobar', verificarToken, esAdmin, (req, res) => {
 /**
  * 📊 MÉTRICAS ADMINISTRATIVAS
  */
-router.get('/metricas/capital-circulante', verificarToken, esAdmin, obtenerCapitalCirculante);
+router.get('/metricas/capital-circulante', autenticarJWT, verificarRol('admin'), obtenerCapitalCirculante);
 
 /**
  * 📍 RADAR GEOESPACIAL
@@ -109,20 +118,20 @@ router.post('/', validarConductorUnico, registrarConductor);
 // ==================================================================
 // 💳 BILLETERA Y RECARGAS ATÓMICAS (UNIFICACIÓN DE RUTAS Y ALIAS ANTI CIMCO-ROUTE-MISS)
 // ==================================================================
-router.post('/saldos/admin/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
-router.put('/:id/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
-router.post('/:id/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
-router.put('/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
-router.post('/recargar', verificarToken, esAdmin, recargarSaldoAdmin);
+router.post('/saldos/admin/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
+router.put('/:id/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
+router.post('/:id/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
+router.put('/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
+router.post('/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
 
-router.put('/ajustar-saldo/:uid', verificarToken, esAdmin, ajustarSaldo);
-router.put('/:id/ajuste', verificarToken, esAdmin, ajustarSaldo);
-router.post('/:id/ajuste', verificarToken, esAdmin, ajustarSaldo);
+router.put('/ajustar-saldo/:uid', autenticarJWT, verificarRol('admin'), ajustarSaldo);
+router.put('/:id/ajuste', autenticarJWT, verificarRol('admin'), ajustarSaldo);
+router.post('/:id/ajuste', autenticarJWT, verificarRol('admin'), ajustarSaldo);
 
-router.post('/descuento-comision', verificarToken, descontarComisionViaje);
-router.post('/descontar-comision', verificarToken, descontarComisionViaje);
+router.post('/descuento-comision', autenticarJWT, descontarComisionViaje);
+router.post('/descontar-comision', autenticarJWT, descontarComisionViaje);
 
-router.get('/:conductorId/historial', verificarToken, obtenerHistorialConductor);
+router.get('/:conductorId/historial', autenticarJWT, obtenerHistorialConductor);
 
 // ==================================================================
 // 🔍 CONSULTAS Y MODIFICACIONES POR ID (RUTAS DINÁMICAS AL FINAL)
@@ -130,7 +139,7 @@ router.get('/:conductorId/historial', verificarToken, obtenerHistorialConductor)
 router.get('/:id', obtenerConductorPorId);
 router.put('/:id', actualizarConductor);
 router.patch('/:id', actualizarConductor);
-router.delete('/:id', verificarToken, esAdmin, eliminarConductor);
+router.delete('/:id', autenticarJWT, verificarRol('admin'), eliminarConductor);
 
 // ==================================================================
 // 🛠️ RUTA DE DEPURACIÓN EN DESARROLLO
