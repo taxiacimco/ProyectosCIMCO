@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.15 - Integración de Gestión de Perfil y Vehículo Removible / Mutación Dinámica
+// Versión Arquitectura: V12.16 - Integración de Gestión de Perfil, Vehículo y Ajustes de Producción Parrillero
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
@@ -8,11 +8,11 @@ import { useWallet } from '@/hooks/useWallet';
 import api from '@/config/api'; 
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
-  MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
-  XCircle, CheckCircle, CircleDollarSign, Signal, LogOut, Loader, UserSquare2
+  MapPin, Navigation, Wallet, TrendingUp, AlertCircle, 
+  CircleDollarSign, Signal, LogOut, Loader, UserSquare2
 } from 'lucide-react';
 
-const BACKEND_URL = "https://globosely-appreciative-zander.ngrok-free.dev";
+const BACKEND_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_BACKEND_URL || window.location.origin;
 
 export default function HomeMotoparrillero() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
@@ -45,9 +45,16 @@ export default function HomeMotoparrillero() {
   const socketRef = useRef(null);
   const geoWatchRef = useRef(null);
 
-  const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId') || "MOCK_PARRILLERO_JAGUA_01"; 
+  const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
   const token = localStorage.getItem('token') || user?.token;
   const saldoVivo = walletData?.saldo || walletData?.balance || 0;
+
+  // Validation: Desconectar de red si no existe ID de conductor válido
+  useEffect(() => {
+    if (!conductorId) {
+      setIsOnline(false);
+    }
+  }, [conductorId]);
 
   // ==================================================================
   // 1. ESCUCHA REACTIVA DE IDENTIDAD EN FIRESTORE
@@ -118,6 +125,12 @@ export default function HomeMotoparrillero() {
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
+      if (!conductorId) {
+        alert("⚠️ No se identificó la sesión del conductor. Por favor inicie sesión de nuevo.");
+        setIsOnline(false);
+        return;
+      }
+
       if (Number(saldoVivo) < 2000) {
         alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en red.");
         setIsOnline(false);
@@ -160,7 +173,7 @@ export default function HomeMotoparrillero() {
     return () => {
       desconectarEcosistema();
     };
-  }, [isOnline, conductorId, token, saldoVivo]);
+  }, [isOnline, conductorId, token]); // ✅ 'saldoVivo' retirado para evitar desconexiones continuas en WebSocket
 
   // ==================================================================
   // 4. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
@@ -168,6 +181,7 @@ export default function HomeMotoparrillero() {
   const iniciarTrackingGPS = () => {
     if (!navigator.geolocation) {
       console.error("❌ [GPS-ERROR] Geolocalización no soportada.");
+      alert("⚠️ La geolocalización no está soportada en este dispositivo/navegador.");
       return;
     }
 
@@ -189,6 +203,10 @@ export default function HomeMotoparrillero() {
       },
       (error) => {
         console.error(`❌ [GPS-TRACKING-ERR] Código: ${error?.code} | ${error?.message}`);
+        if (error?.code === error?.PERMISSION_DENIED) {
+          alert("⚠️ Permiso de GPS denegado. Para recibir servicios, habilite la ubicación en su navegador/dispositivo.");
+          setIsOnline(false);
+        }
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
@@ -201,7 +219,9 @@ export default function HomeMotoparrillero() {
       console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
     }
     if (socketRef.current) {
-      socketRef.current.emit('desactivar_conductor', { conductorId });
+      if (conductorId) {
+        socketRef.current.emit('desactivar_conductor', { conductorId });
+      }
       socketRef.current.disconnect();
       socketRef.current = null;
       console.log("📡 [CIMCO-SOCKET] Conexión de red purgada.");
@@ -287,7 +307,7 @@ export default function HomeMotoparrillero() {
     try {
       console.log(`⚡ [ACID-DESPACHO] Aceptando servicio parrillero ID: ${solicitudViaje.viajeId}`);
       
-      const respuesta = await api.post(`/api/viajes/aceptar`, {
+      const respuesta = await api.post(`/viajes/aceptar`, {
         viajeId: solicitudViaje.viajeId,
         conductorId
       }, {
@@ -376,7 +396,6 @@ export default function HomeMotoparrillero() {
       {/* 🔝 ENCABEZADO DE CONTROL MAESTRO */}
       <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          {/* BOTÓN DE ACCESO AL PERFIL EN EL ICONO DE MOTO */}
           <button 
             onClick={() => setMostrarModalPerfil(true)}
             title="Editar Datos de Perfil / Vehículo"
@@ -513,6 +532,20 @@ export default function HomeMotoparrillero() {
                       className="w-full bg-yellow-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
                     >
                       Finalizar y Cobrar Servicio
+                    </button>
+                  )}
+
+                  {/* ✅ Mostrar solo en entorno de desarrollo */}
+                  {import.meta.env.DEV && (
+                    <button 
+                      onClick={() => {
+                        setDatosParaCalificar({ id: servicioActivo?.id || 'SIMULADO', clienteNombre: servicioActivo?.clienteNombre || 'Pasajero CIMCO' });
+                        setServicioActivo(null);
+                        setMostrarModalCalificacion(true);
+                      }}
+                      className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[9px] uppercase py-1.5 border-2 border-black rounded-none font-bold tracking-wider mt-2"
+                    >
+                      [DEV] Simular Cierre Forzado
                     </button>
                   )}
                 </div>
@@ -715,7 +748,6 @@ export default function HomeMotoparrillero() {
           <Navigation size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Radar</span>
         </button>
-        {/* Habilitamos el perfil en el menú también para redundancia y usabilidad */}
         <button 
           onClick={() => setMostrarModalPerfil(true)} 
           className="text-zinc-400 hover:text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95"
@@ -723,7 +755,10 @@ export default function HomeMotoparrillero() {
           <UserSquare2 size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Perfil</span>
         </button>
-        <button className="text-zinc-600 flex flex-col items-center gap-0.5 cursor-not-allowed opacity-50">
+        <button 
+          onClick={() => window.location.href = '/wallet'} 
+          className="text-zinc-400 hover:text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95 cursor-pointer"
+        >
           <CircleDollarSign size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Billetera</span>
         </button>

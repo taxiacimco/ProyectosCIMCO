@@ -1,8 +1,7 @@
-// Versión Arquitectura: V12.18 - Sincronización Unificada de Radar GPS e Integración de Mutación de Perfil/Vehículo
-// Refactorización Estética: Cyber-Neo-Brutalismo Industrial Puro (Bordes Macizos, Hard Shadows y Cero Curvas)
-import React, { useState, useEffect, useRef } from 'react';
+// Versión Arquitectura: V12.19 - Fusión Atómica de Motocarga, Normalización de API/Sockets, Fallback Híbrido de Historial y Desacoplamiento de Billetera
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
@@ -13,7 +12,7 @@ import {
   CircleDollarSign, Signal, LogOut, Package, Truck, Loader, UserSquare2
 } from 'lucide-react';
 
-const BACKEND_URL = "https://globosely-appreciative-zander.ngrok-free.dev";
+const BACKEND_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_BACKEND_URL || window.location.origin;
 
 export default function HomeMotocarga() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
@@ -43,12 +42,66 @@ export default function HomeMotocarga() {
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [datosParaCalificar, setDatosParaCalificar] = useState(null);
 
+  // 📜 HISTORIAL DE VIAJES
+  const [historial, setHistorial] = useState([]);
+
   const socketRef = useRef(null);
   const geoWatchRef = useRef(null);
 
-  const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId') || "MOCK_CARGA_JAGUA_01"; 
+  const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
   const token = localStorage.getItem('token') || user?.token;
   const saldoVivo = walletData?.saldo || walletData?.balance || 0;
+
+  // 🛡️ GUARDA DE SEGURIDAD PARA OPERADOR DESCONECTADO SIN IDENTIFICADOR
+  useEffect(() => {
+    if (!conductorId) {
+      setIsOnline(false);
+    }
+  }, [conductorId]);
+
+  // ==================================================================
+  // PATRÓN HÍBRIDO: HISTORIAL CON FALLBACK FIRESTORE
+  // ==================================================================
+  const fetchHistorial = useCallback(async () => {
+    const idOperador = user?.uid || user?.id || user?._id;
+
+    if (!idOperador) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+
+    // 1. Intento principal a la API REST de MongoDB
+    try {
+      const res = await api.get(`/viajes/historial?conductorId=${idOperador}`);
+      if (res.data?.success && Array.isArray(res.data?.viajes)) {
+        setHistorial(res.data.viajes);
+        setLoading(false);
+        return;
+      }
+    } catch (err) {
+      console.warn("⚠️ Fallo en API REST, ejecutando respaldo Firestore:", err);
+    }
+
+    // 2. Fallback secundario a Firestore NoSQL con ordenamiento local para evitar errores de índice
+    try {
+      const q = query(
+        collection(db, FIRESTORE_PATHS.rides || FIRESTORE_PATHS.viajes || 'viajes'),
+        where('conductorId', '==', idOperador),
+        where('estado', '==', 'COMPLETADO')
+      );
+      const snapshot = await getDocs(q);
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      // Ordenamiento en memoria del cliente
+      docs.sort((a, b) => (b.fechaCreacion?.seconds || 0) - (a.fechaCreacion?.seconds || 0));
+      setHistorial(docs);
+    } catch (noSqlErr) {
+      console.error("❌ Fallo en fallback NoSQL:", noSqlErr);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
 
   // ==================================================================
   // 1. ESCUCHA REACTIVA DE IDENTIDAD EN FIRESTORE
@@ -118,6 +171,11 @@ export default function HomeMotocarga() {
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
+      if (!conductorId) {
+        setIsOnline(false);
+        return;
+      }
+
       if (Number(saldoVivo) < 2000) {
         alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en la red de carga.");
         setIsOnline(false);
@@ -160,7 +218,7 @@ export default function HomeMotocarga() {
     return () => {
       desconectarEcosistema();
     };
-  }, [isOnline, conductorId, token, saldoVivo]);
+  }, [isOnline, conductorId, token]); // ❌ 'saldoVivo' retirado para estabilizar el socket
 
   // ==================================================================
   // 4. TRANSMISIÓN DE TELEMETRÍA GEOESPACIAL (COMPATIBLE 2DSPHERE [LNG, LAT])
@@ -189,6 +247,10 @@ export default function HomeMotocarga() {
       },
       (error) => {
         console.error(`❌ [GPS-TRACKING-ERR] Código: ${error?.code} | ${error?.message}`);
+        if (error?.code === error?.PERMISSION_DENIED) {
+          alert("⚠️ Permiso de GPS denegado. Para recibir servicios, habilite la ubicación en su navegador/dispositivo.");
+          setIsOnline(false);
+        }
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
@@ -288,7 +350,7 @@ export default function HomeMotocarga() {
     try {
       console.log(`⚡ [ACID-DESPACHO-CARGA] Reclamando Flete ID: ${solicitudViaje.viajeId}`);
       
-      const respuesta = await api.post(`/api/viajes/aceptar`, {
+      const respuesta = await api.post(`/viajes/aceptar`, {
         viajeId: solicitudViaje.viajeId,
         conductorId
       }, {
@@ -519,6 +581,20 @@ export default function HomeMotocarga() {
                       Finalizar Entrega y Cobrar
                     </button>
                   )}
+
+                  {/* ✅ Mostrar solo en entorno de desarrollo */}
+                  {import.meta.env.DEV && (
+                    <button 
+                      onClick={() => {
+                        setDatosParaCalificar({ id: servicioActivo?.id || 'SIMULADO', clienteNombre: servicioActivo?.clienteNombre || 'Pasajero CIMCO' });
+                        setServicioActivo(null);
+                        setMostrarModalCalificacion(true);
+                      }}
+                      className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[9px] uppercase py-1.5 border-2 border-black rounded-none font-bold tracking-wider mt-2"
+                    >
+                      [DEV] Simular Cierre Forzado
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
@@ -727,9 +803,12 @@ export default function HomeMotocarga() {
           <UserSquare2 size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Perfil</span>
         </button>
-        <button className="text-zinc-600 flex flex-col items-center gap-0.5 cursor-not-allowed opacity-50">
-          <Wallet size={18} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-wider">Cuentas</span>
+        <button 
+          onClick={() => window.location.href = '/wallet'} 
+          className="text-zinc-400 hover:text-amber-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95 cursor-pointer"
+        >
+          <CircleDollarSign size={18} strokeWidth={2.5} />
+          <span className="text-[9px] font-black uppercase tracking-wider">Billetera</span>
         </button>
       </footer>
 

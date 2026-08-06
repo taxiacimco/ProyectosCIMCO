@@ -1,8 +1,8 @@
-// Versión Arquitectura: V14.7 - Integración de Punto de Recogida GPS Editable y Dirección de Destino en Tarjeta Formulario Pasajero
+// Versión Arquitectura: V14.8 - Integración de Hook Unificado useWallet para Migración y Eliminación de Listeners Duplicados de Firestore
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Emisión activa de telemetría, solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS), edición de perfil, pasarela de billetera y selección avanzada de punto de recogida + destino.
- * Ajuste V14.7: Reestructuración de la tarjeta del formulario de la orden para incluir el campo de Punto de Recogida GPS editable y Dirección de Destino.
+ * Ajuste V14.8: Eliminación de listeners directos redundantes sobre el nodo de wallets en Firestore. Migración al hook unificado `useWallet` para centralizar la gestión de saldo y consumo de cuotas.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -11,6 +11,7 @@ import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, updateDoc,
 import { signInAnonymously } from 'firebase/auth';
 import { useAuth } from '@/hooks/useAuth';
 import { useGpsGuard } from '@/hooks/useGpsGuard';
+import { useWallet } from '@/hooks/useWallet';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, DollarSign, Send, MessageSquare, Activity, Wallet, QrCode, Banknote, ShieldAlert, User, Edit3, X, CreditCard, Crosshair } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -66,6 +67,13 @@ const HomePasajero = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
     
+    // 💳 Integración del Hook Unificado de Billetera (Sustituto de Listeners Firestore duplicados)
+    const walletContext = useWallet();
+    const saldoHook = typeof walletContext?.saldo === 'number' 
+        ? walletContext.saldo 
+        : (typeof walletContext?.balance === 'number' ? walletContext.balance : 0);
+    const recargarSaldoHook = walletContext?.recargarSaldo || walletContext?.recargar;
+
     // 🛡️ Integración Hook Perimetral de Monitoreo GPS y Guardas Anti-Undefined
     const { isGpsValid, showGpsModal, checkGpsStatus, coordenadasPasajero, reintentarGps } = useGpsGuard();
 
@@ -93,6 +101,11 @@ const HomePasajero = () => {
         telefono: '',
         saldoBilletera: 0
     });
+
+    // Consolidación atómica de saldo (Prioridad: Hook Unificado > Firestore Local > Fallback 0)
+    const saldoEfectivo = typeof saldoHook === 'number' && saldoHook > 0 
+        ? saldoHook 
+        : (typeof perfilFirestore.saldoBilletera === 'number' ? perfilFirestore.saldoBilletera : 0);
 
     // Inputs editables del perfil
     const [inputNombre, setInputNombre] = useState('');
@@ -122,7 +135,7 @@ const HomePasajero = () => {
         };
     }, []);
 
-    // 🔄 Streaming reactivo de datos de perfil y billetera del Pasajero en Firestore
+    // 🔄 Streaming reactivo de datos de perfil del Pasajero en Firestore (Optimizado sin duplicar wallet listeners)
     useEffect(() => {
         if (!uidUsuario || uidUsuario === 'ANÓNIMO') return;
         
@@ -153,29 +166,8 @@ const HomePasajero = () => {
             console.error("❌ [PERFIL-FIRESTORE] Error cargando perfil:", error);
         });
 
-        // 🏦 Subscripción en tiempo real al nodo unificado de Billeteras (FIRESTORE_PATHS.wallets)
-        const pathWallets = FIRESTORE_PATHS?.wallets || 'wallets';
-        const docRefWallet = doc(db, pathWallets, uidUsuario);
-
-        const unsubscribeWallet = onSnapshot(docRefWallet, (snapshotWallet) => {
-            if (snapshotWallet.exists()) {
-                const walletData = snapshotWallet.data();
-                const saldoReal = typeof walletData?.balance === 'number' 
-                    ? walletData.balance 
-                    : (typeof walletData?.saldo === 'number' ? walletData.saldo : 0);
-
-                setPerfilFirestore((prev) => ({
-                    ...prev,
-                    saldoBilletera: saldoReal
-                }));
-            }
-        }, (error) => {
-            console.warn("⚠️ [WALLET-FIRESTORE] Advertencia al suscribir canal de billetera:", error);
-        });
-
         return () => {
             unsubscribeUser();
-            unsubscribeWallet();
         };
     }, [uidUsuario, user]);
 
@@ -289,33 +281,37 @@ const HomePasajero = () => {
         }
     };
 
-    // 💰 Inyección de saldo simulando consola de administración CEO/Admin
+    // 💰 Inyección de saldo simulando consola de administración CEO/Admin a través de Hook / Firestore fallback
     const handleRecargaAdministrativaCEO = async (e) => {
         e.preventDefault();
         const montoNum = parseFloat(montoRecargaSimulada);
         if (isNaN(montoNum) || montoNum <= 0) return;
 
         try {
-            const pathWallets = FIRESTORE_PATHS?.wallets || 'wallets';
-            const docRefWallet = doc(db, pathWallets, uidUsuario);
-            const nuevoSaldo = perfilFirestore.saldoBilletera + montoNum;
+            if (typeof recargarSaldoHook === 'function') {
+                await recargarSaldoHook(montoNum);
+            } else {
+                const pathWallets = FIRESTORE_PATHS?.wallets || 'wallets';
+                const docRefWallet = doc(db, pathWallets, uidUsuario);
+                const nuevoSaldo = saldoEfectivo + montoNum;
 
-            await setDoc(docRefWallet, {
-                balance: nuevoSaldo,
-                saldo: nuevoSaldo,
-                usuarioId: uidUsuario,
-                ultimaRecargaCEO: serverTimestamp()
-            }, { merge: true });
+                await setDoc(docRefWallet, {
+                    balance: nuevoSaldo,
+                    saldo: nuevoSaldo,
+                    usuarioId: uidUsuario,
+                    ultimaRecargaCEO: serverTimestamp()
+                }, { merge: true });
 
-            // Retrocompatibilidad con nodo de usuario
-            const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
-            const docRefUser = doc(db, pathUsuarios, uidUsuario);
-            await setDoc(docRefUser, {
-                saldoBilletera: nuevoSaldo,
-                balance: nuevoSaldo
-            }, { merge: true });
+                // Retrocompatibilidad con nodo de usuario
+                const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
+                const docRefUser = doc(db, pathUsuarios, uidUsuario);
+                await setDoc(docRefUser, {
+                    saldoBilletera: nuevoSaldo,
+                    balance: nuevoSaldo
+                }, { merge: true });
+            }
 
-            console.log(`🏦 [CEO-WALLET-INJECTION] Recarga forzada exitosa. Nuevo saldo: $${nuevoSaldo}`);
+            console.log(`🏦 [CEO-WALLET-INJECTION] Recarga atómica realizada con éxito. Sumado: +$${montoNum}`);
         } catch (err) {
             console.error("❌ [WALLET-ERROR] Falla crítica en pasarela de simulación:", err);
             setErrorInterno("Error de red en el procesador de transacciones.");
@@ -416,7 +412,7 @@ const HomePasajero = () => {
                     </div>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.7</span>
+                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.8</span>
                         </h1>
                         <div className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
@@ -523,7 +519,7 @@ const HomePasajero = () => {
                                                     className="w-full bg-[#161619] border border-white/5 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/40 transition-all appearance-none cursor-pointer"
                                                 >
                                                     <option value="EFECTIVO">💵 EFECTIVO</option>
-                                                    <option value="BILLETERA">📱 BILLETERA (${perfilFirestore.saldoBilletera.toLocaleString()})</option>
+                                                    <option value="BILLETERA">📱 BILLETERA (${saldoEfectivo.toLocaleString()})</option>
                                                 </select>
                                             </div>
                                         </div>
@@ -637,7 +633,7 @@ const HomePasajero = () => {
                                 <div className="flex justify-between items-start">
                                     <div>
                                         <p className="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Saldo Disponible</p>
-                                        <h3 className="text-2xl font-black text-emerald-400 mt-1 font-mono">${perfilFirestore.saldoBilletera.toLocaleString()} COP</h3>
+                                        <h3 className="text-2xl font-black text-emerald-400 mt-1 font-mono">${saldoEfectivo.toLocaleString()} COP</h3>
                                     </div>
                                     <Wallet className="text-zinc-500" size={24} />
                                 </div>
