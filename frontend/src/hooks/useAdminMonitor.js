@@ -1,9 +1,8 @@
-// Versión Arquitectura: V2.2 - Expansión de Telemetría Financiera, Deduplicación Táctica de Conductores y Malla CEO
+// Versión Arquitectura: V2.3 - Resiliencia de Malla CEO, Fallback de Índices Firestore y Telemetría Contable
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useAdminMonitor.js
- * Misión: Abstraer suscripciones en tiempo real a los nodos críticos de Firestore, añadiendo el flujo contable.
- * Ajuste V2.2: Inyección de helper deduplicarEntidades para depurar duplicados en la lista de conductores en tiempo real.
- * Integridad: Fusión Atómica. Preserva suscripciones previas e inyecta limit(50) en consultas de viajes y transacciones para proteger RAM.
+ * Misión: Abstraer suscripciones en tiempo real a los nodos críticos de Firestore con tolerancia a fallos por falta de índices.
+ * Ajuste V2.3: Implementación de Fallback Atómico contra errores FAILED_PRECONDITION / missing index. Ordenación local en JS en caso de quiebre.
  */
 
 import { useState, useEffect } from 'react';
@@ -32,53 +31,111 @@ export const useAdminMonitor = () => {
 
             // 1. 🛡️ Suscripción a Conductores (Flota completa activa con filtrado de deduplicación)
             const pathConductores = FIRESTORE_PATHS.conductores || 'conductores';
-            const qConductores = query(collection(db, pathConductores), orderBy('createdAt', 'desc'));
-            unsubCond = onSnapshot(qConductores, (snap) => {
-                const listaRaw = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                
-                // 🧹 APLICAMOS DEDUPLICACIÓN TÁCTICA SOBRE LA LISTA ACUMULADA
-                const listaDepurada = typeof deduplicarEntidades === 'function' 
-                    ? deduplicarEntidades(listaRaw) 
-                    : listaRaw;
+            
+            const iniciarEscuchaConductores = (conOrdenamiento = true) => {
+                const colRef = collection(db, pathConductores);
+                const q = conOrdenamiento 
+                    ? query(colRef, orderBy('createdAt', 'desc'))
+                    : query(colRef, limit(100));
 
-                setConductores(listaDepurada);
-            }, (err) => {
-                console.error("🚨 [CIMCO-MONITOR-ERR] Falla en Malla de Operadores:", err);
-                setError(err.message);
-            });
+                return onSnapshot(q, (snap) => {
+                    let listaRaw = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    
+                    if (!conOrdenamiento) {
+                        listaRaw.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+                    }
 
-            // 2. 🛡️ Suscripción a Viajes Activos (Límite Atómico de 50 documentos para evitar desbordamiento de RAM)
+                    // 🧹 APLICAMOS DEDUPLICACIÓN TÁCTICA SOBRE LA LISTA ACUMULADA
+                    const listaDepurada = typeof deduplicarEntidades === 'function' 
+                        ? deduplicarEntidades(listaRaw) 
+                        : listaRaw;
+
+                    setConductores(listaDepurada);
+                }, (err) => {
+                    if (conOrdenamiento && (err.code === 'failed-precondition' || err.message?.includes('index'))) {
+                        console.warn("⚠️ [CIMCO-MONITOR-FALLBACK] Índice inexistente en 'conductores'. Conmutando a consulta sin ordenamiento.");
+                        unsubCond = iniciarEscuchaConductores(false);
+                    } else {
+                        console.error("🚨 [CIMCO-MONITOR-ERR] Falla en Malla de Operadores:", err);
+                        setError(err.message);
+                    }
+                });
+            };
+
+            unsubCond = iniciarEscuchaConductores(true);
+
+            // 2. 🛡️ Suscripción a Viajes Activos (Límite Atómico de 50 documentos con Fallback)
             const pathViajes = FIRESTORE_PATHS.viajes || 'viajes';
-            const qViajes = query(collection(db, pathViajes), orderBy('timestamp', 'desc'), limit(50));
-            unsubViajes = onSnapshot(qViajes, (snap) => {
-                setViajes(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            }, (err) => {
-                console.error("🚨 [CIMCO-MONITOR-ERR] Falla en Radar de Viajes:", err);
-                setError(err.message);
-            });
 
-            // 3. ⚡ Suscripción al Flujo de Bóveda Contable (Transacciones con Límite Atómico de 50 documentos)
+            const iniciarEscuchaViajes = (conOrdenamiento = true) => {
+                const colRef = collection(db, pathViajes);
+                const q = conOrdenamiento 
+                    ? query(colRef, orderBy('timestamp', 'desc'), limit(50))
+                    : query(colRef, limit(50));
+
+                return onSnapshot(q, (snap) => {
+                    let lista = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    
+                    if (!conOrdenamiento) {
+                        lista.sort((a, b) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
+                    }
+
+                    setViajes(lista);
+                }, (err) => {
+                    if (conOrdenamiento && (err.code === 'failed-precondition' || err.message?.includes('index'))) {
+                        console.warn("⚠️ [CIMCO-MONITOR-FALLBACK] Índice inexistente en 'viajes'. Conmutando a consulta sin ordenamiento.");
+                        unsubViajes = iniciarEscuchaViajes(false);
+                    } else {
+                        console.error("🚨 [CIMCO-MONITOR-ERR] Falla en Radar de Viajes:", err);
+                        setError(err.message);
+                    }
+                });
+            };
+
+            unsubViajes = iniciarEscuchaViajes(true);
+
+            // 3. ⚡ Suscripción al Flujo de Bóveda Contable (Transacciones con Fallback)
             const pathTransacciones = FIRESTORE_PATHS.transacciones || 'transacciones';
-            const qTransacciones = query(collection(db, pathTransacciones), orderBy('timestamp', 'desc'), limit(50));
-            unsubTrans = onSnapshot(qTransacciones, (snap) => {
-                // Inyección segura con protección Anti-Undefined en el mapeo de documentos de Firebase
-                setTransacciones(snap.docs.map(doc => {
-                    const data = doc.data();
-                    return {
-                        id: doc.id,
-                        conductorId: data?.conductorId || 'N/A',
-                        monto: data?.monto || 0,
-                        tipo: data?.tipo || 'RECARGA',
-                        referencia: data?.referencia || 'INTERNA_ADMIN',
-                        timestamp: data?.timestamp || null,
-                        ...data
-                    };
-                }));
-                setLoading(false);
-            }, (err) => {
-                console.error("🚨 [CIMCO-MONITOR-ERR] Falla en Stream contable:", err);
-                setError(err.message);
-            });
+
+            const iniciarEscuchaTransacciones = (conOrdenamiento = true) => {
+                const colRef = collection(db, pathTransacciones);
+                const q = conOrdenamiento 
+                    ? query(colRef, orderBy('timestamp', 'desc'), limit(50))
+                    : query(colRef, limit(50));
+
+                return onSnapshot(q, (snap) => {
+                    let lista = snap.docs.map(doc => {
+                        const data = doc.data();
+                        return {
+                            id: doc.id,
+                            conductorId: data?.conductorId || 'N/A',
+                            monto: data?.monto || 0,
+                            tipo: data?.tipo || 'RECARGA',
+                            referencia: data?.referencia || 'INTERNA_ADMIN',
+                            timestamp: data?.timestamp || null,
+                            ...data
+                        };
+                    });
+
+                    if (!conOrdenamiento) {
+                        lista.sort((a, b) => (b.timestamp?.toMillis?.() || 0) - (a.timestamp?.toMillis?.() || 0));
+                    }
+
+                    setTransacciones(lista);
+                    setLoading(false);
+                }, (err) => {
+                    if (conOrdenamiento && (err.code === 'failed-precondition' || err.message?.includes('index'))) {
+                        console.warn("⚠️ [CIMCO-MONITOR-FALLBACK] Índice inexistente en 'transacciones'. Conmutando a consulta sin ordenamiento.");
+                        unsubTrans = iniciarEscuchaTransacciones(false);
+                    } else {
+                        console.error("🚨 [CIMCO-MONITOR-ERR] Falla en Stream contable:", err);
+                        setError(err.message);
+                        setLoading(false);
+                    }
+                });
+            };
+
+            unsubTrans = iniciarEscuchaTransacciones(true);
 
         } catch (err) {
             console.error("⚠️ ALERTA DE ARQUITECTURA: Error crítico al inicializar escuchas indexadas:", err);
@@ -88,9 +145,9 @@ export const useAdminMonitor = () => {
 
         // Desacoplamiento limpio de los listeners para mitigar fugas de memoria (Memory Leaks)
         return () => {
-            unsubCond();
-            unsubViajes();
-            unsubTrans();
+            if (typeof unsubCond === 'function') unsubCond();
+            if (typeof unsubViajes === 'function') unsubViajes();
+            if (typeof unsubTrans === 'function') unsubTrans();
         };
     }, []);
 

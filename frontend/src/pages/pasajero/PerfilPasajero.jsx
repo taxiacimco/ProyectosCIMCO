@@ -1,13 +1,13 @@
-// Versión Arquitectura: V12.2 - Blindaje Transaccional de Perfil y Auditoría de Billetera
+// Versión Arquitectura: V12.4 - Depuración de Sintaxis JSX y Sincronización Axios Centralizada
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\PerfilPasajero.jsx
  * Misión: Despliegue de expediente de identidad del pasajero bajo la estética premium CIMCO-UI V9.3.
- * Ajuste V12.2: Normalización de esquemas multi-backend, guardas de seguridad anti-undefined e indicador visual de modo resiliencia.
+ * Ajuste V12.4: Saneamiento de sintaxis JSX, remoción de marcadores de versión inválidos y consumo mediante cliente Axios unificado.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { API_CORE_URL } from '@/config/api'; 
+import api from '@/config/api';
 import { User, Mail, Shield, ShieldCheck, Phone, Award, Loader, AlertCircle } from 'lucide-react';
 
 const PerfilPasajero = () => {
@@ -17,7 +17,7 @@ const PerfilPasajero = () => {
     const [esModoLocal, setEsModoLocal] = useState(false);
 
     useEffect(() => {
-        const uid = user?.uid || user?.id;
+        const uid = user?.uid || user?.id || user?._id;
         if (!uid) {
             setLoading(false);
             return;
@@ -28,19 +28,11 @@ const PerfilPasajero = () => {
                 setLoading(true);
                 setEsModoLocal(false);
 
-                // 📡 Consumo unificado mediante API_CORE_URL
-                const respuesta = await fetch(`${API_CORE_URL}/api/usuarios/perfil/${uid}`, {
-                    method: 'GET',
-                    headers: { 'Content-Type': 'application/json' }
-                });
+                // 📡 Consumo unificado mediante instancia Axios (sin duplicar /api y con inyección automática de JWT)
+                const respuesta = await api.get(`/usuarios/perfil/${uid}`);
 
-                if (!respuesta.ok) {
-                    throw new Error(`HTTP Error Status: ${respuesta.status}`);
-                }
-
-                const data = await respuesta.json();
-                if (data?.success && data?.perfil) {
-                    const payload = data.perfil;
+                if (respuesta.data?.success && respuesta.data?.perfil) {
+                    const payload = respuesta.data.perfil;
                     // Normalización de esquema de datos (Anti-Undefined)
                     setPerfil({
                         nombre: payload?.nombre || payload?.name || payload?.displayName || 'Pasajero CIMCO',
@@ -51,10 +43,10 @@ const PerfilPasajero = () => {
                         viajesTotales: Number(payload?.viajesTotales || payload?.totalRides || 0)
                     });
                 } else {
-                    throw new Error("Estructura no mapeada por el core.");
+                    throw new Error("Estructura de respuesta no válida o no mapeada por el core.");
                 }
             } catch (err) {
-                console.warn("💡 [CIMCO-RESILIENCIA] Modo local activo para:", uid, err);
+                console.warn("💡 [CIMCO-RESILIENCIA] Fallo al consultar API, activando modo local para:", uid, err);
                 setEsModoLocal(true);
                 // 🛡️ Guardas de Seguridad contra desbordamientos de UI (Fallback Resiliente)
                 setPerfil({
@@ -71,7 +63,7 @@ const PerfilPasajero = () => {
         };
 
         obtenerDatosPerfil();
-    }, [user?.uid, user?.id]);
+    }, [user]);
 
     if (loading) {
         return (
@@ -86,16 +78,16 @@ const PerfilPasajero = () => {
 
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 p-6 font-mono antialiased flex items-center justify-center relative overflow-hidden">
-            {/* Gradiente ambiental premium */}
+            {/* Gradiente ambiental premium CIMCO-UI V9.3 */}
             <div className="absolute top-[-20%] left-[-20%] w-[500px] h-[500px] bg-yellow-500/5 rounded-full blur-[120px] pointer-events-none" />
             
             <div className="w-full max-w-md backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-6 shadow-2xl relative z-10 transition-all duration-300 hover:border-white/10">
                 
-                {/* Banner de Modo Resiliencia si falla el API */}
+                {/* Banner de Modo Resiliencia si falla la sincronización remota */}
                 {esModoLocal && (
                     <div className="mb-4 bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-center gap-2 text-amber-400 text-[9px] font-bold uppercase tracking-wider">
                         <AlertCircle size={14} className="shrink-0" />
-                        <span>Modo Resiliencia: Visualizando expediente sin sincronización activa</span>
+                        <span>Modo Resiliencia: Expediente local sin sincronización remota</span>
                     </div>
                 )}
 
@@ -109,7 +101,7 @@ const PerfilPasajero = () => {
                     
                     <h2 className="text-md font-black uppercase tracking-wider text-white mt-4">{perfil?.nombre}</h2>
                     <p className="text-[9px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 px-2.5 py-0.5 rounded font-bold uppercase tracking-widest mt-2">
-                        {perfil?.rol || 'Pasajero'}
+                        {perfil?.rol || 'pasajero'}
                     </p>
                 </div>
 

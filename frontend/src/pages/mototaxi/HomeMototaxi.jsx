@@ -1,14 +1,19 @@
-// Versión Arquitectura: V12.19 - Sincronización Unificada de Radar GPS y Autogestión de Perfil Operativo de Flota
-// Refactorización Estética: Cyber-Neo-Brutalismo Industrial Puro (Bordes Macizos, Hard Shadows y Cero Curvas)
+// Versión Arquitectura: V12.21 - Parche de Producción, Sockets Dinámicos y Desacoplamiento de Fallbacks
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Panel interactivo en tiempo real para el rol 'conductor' de Mototaxi con soporte multi-red, control transaccional e inyección de telemetría geoespacial.
- * Ajuste V12.19: Adición del módulo de edición de perfil táctico para cambio de datos y actualización dinámica de vehículos en malla radar.
+ * Ajustes V12.21:
+ * 1. Sustitución de URL Ngrok por variables de entorno de Vite (`import.meta.env.VITE_SOCKET_URL`).
+ * 2. Remoción del ID de conductor mock ("MOCK_CONDUCTOR_JAGUA_01") y adición de guarda de desconexión preventiva.
+ * 3. Normalización del endpoint API `/viajes/aceptar` eliminando prefijos duplicados.
+ * 4. Encapsulamiento del botón "Simular Cierre Forzado" para despliegue exclusivo en entorno de desarrollo (`import.meta.env.DEV`).
+ * 5. Captura y alerta interactiva de bloqueos/denegaciones de permisos GPS con apagado automático de red.
+ * 6. Habilitación y vinculación del botón "Billetera" en el footer de navegación.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, addDoc, orderBy } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
@@ -16,10 +21,11 @@ import api from '@/config/api';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
-  MessageSquare, Send, XCircle, CheckCircle, CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X, Bike
+  CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X
 } from 'lucide-react';
 
-const BACKEND_URL = "https://globosely-appreciative-zander.ngrok-free.dev";
+// 1. Configuración dinámicamente acoplada a variables de entorno de Vite
+const BACKEND_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_BACKEND_URL || window.location.origin;
 
 export default function HomeMototaxi() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
@@ -47,14 +53,26 @@ export default function HomeMototaxi() {
   const [inputTipoServicio, setInputTipoServicio] = useState('mototaxi');
   const [errorPerfil, setErrorPerfil] = useState('');
 
+  // 📜 Estados para Navegación e Historial Urbano Híbrido
+  const [tabActiva, setTabActiva] = useState('radar'); // 'radar' | 'historial'
+  const [historial, setHistorial] = useState([]);
+  const [cargandoHistorial, setCargandoHistorial] = useState(false);
+
   // Referencias para control perimetral de Sockets y Telemetría
   const socketRef = useRef(null);
   const geoWatchRef = useRef(null);
 
-  // Recuperamos los datos del conductor con guardas anti-undefined estrictas
-  const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId') || "MOCK_CONDUCTOR_JAGUA_01"; 
+  // 2. Recuperación estricta sin ID predeterminado MOCK
+  const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
   const token = localStorage.getItem('token') || user?.token;
   const saldoVivo = walletData?.saldo || walletData?.balance || 0;
+
+  // 🛡️ Guarda de seguridad: Desconecta el estado online si no existe ID de conductor válido
+  useEffect(() => {
+    if (!conductorId) {
+      setIsOnline(false);
+    }
+  }, [conductorId]);
 
   // ==================================================================
   // 1. ESCUCHA REACTIVA DE IDENTIDAD EN FIRESTORE
@@ -81,13 +99,19 @@ export default function HomeMototaxi() {
     });
 
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [user?.uid, nombreInicialFallback]);
 
   // ==================================================================
-  // 2. GOBERNANZA DEL CANAL WEBSOCKET (SOCKET.IO NGROK) Y TELEMETRÍA
+  // 2. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
+      if (!conductorId) {
+        alert("⚠️ AUTENTICACIÓN REQUERIDA: No se detectó un identificador de conductor válido.");
+        setIsOnline(false);
+        return;
+      }
+
       if (Number(saldoVivo) < 2000) {
         alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en red.");
         setIsOnline(false);
@@ -110,7 +134,6 @@ export default function HomeMototaxi() {
         });
       });
 
-      // ⚡ RECEPTOR CRÍTICO: Escucha instantánea de solicitudes de viaje por Sockets
       socketRef.current.on('nueva_solicitud_viaje', (data) => {
         console.log("🔥 [CIMCO-RADAR] ¡Alerta de viaje entrante detectada en el perímetro!", data);
         if (!servicioActivo && !solicitudViaje) {
@@ -131,18 +154,20 @@ export default function HomeMototaxi() {
     return () => {
       desconectarEcosistema();
     };
-  }, [isOnline, conductorId, token, saldoVivo, inputTipoServicio]);
+  }, [isOnline, conductorId, token, inputTipoServicio, saldoVivo]);
 
   // ==================================================================
-  // 3. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE UNIFICADO)
+  // 3. TRANSMISIÓN DE TELEMETRÍA CON MANEJO DE ERRORES DE PERMISO
   // ==================================================================
   const iniciarTrackingGPS = () => {
     if (!navigator.geolocation) {
       console.error("❌ [GPS-ERROR] Geolocalización no soportada por este navegador/dispositivo.");
+      alert("⚠️ El navegador o dispositivo actual no soporta geolocalización.");
+      setIsOnline(false);
       return;
     }
 
-    console.log("🛰️ [CIMCO-TELEMETRIA] Encending receptor de satélites GPS...");
+    console.log("🛰️ [CIMCO-TELEMETRIA] Encendiendo receptor de satélites GPS...");
     geoWatchRef.current = navigator.geolocation.watchPosition(
       (position) => {
         if (!position || !position.coords) return;
@@ -158,8 +183,13 @@ export default function HomeMototaxi() {
           console.log(`🎯 [RADAR-BURST] Coordenadas emitidas al ecosistema unificado: [${longitude}, ${latitude}]`);
         }
       },
+      // 5. Captura y respuesta inmediata ante denegación de permisos
       (error) => {
         console.error(`❌ [GPS-TRACKING-ERR] Código: ${error?.code} | ${error?.message}`);
+        if (error?.code === error?.PERMISSION_DENIED) {
+          alert("⚠️ Permiso de GPS denegado. Para recibir servicios, habilite la ubicación en su navegador/dispositivo.");
+          setIsOnline(false);
+        }
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
@@ -172,7 +202,9 @@ export default function HomeMototaxi() {
       console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
     }
     if (socketRef.current) {
-      socketRef.current.emit('desactivar_conductor', { conductorId });
+      if (conductorId) {
+        socketRef.current.emit('desactivar_conductor', { conductorId });
+      }
       socketRef.current.disconnect();
       socketRef.current = null;
       console.log("📡 [CIMCO-SOCKET] Conexión de red purgada.");
@@ -180,7 +212,62 @@ export default function HomeMototaxi() {
   };
 
   // ==================================================================
-  // 4. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
+  // 4. PATRÓN HÍBRIDO RESILIENTE PARA HISTORIALES URBANOS
+  // ==================================================================
+  const fetchHistorial = useCallback(async () => {
+    const conductorIdTarget = user?.uid || user?.id || user?._id || conductorId;
+
+    if (!conductorIdTarget) {
+      setCargandoHistorial(false);
+      return;
+    }
+
+    setCargandoHistorial(true);
+
+    try {
+      const res = await api.get(`/viajes/historial?conductorId=${conductorIdTarget}`);
+      if (res.data?.success && Array.isArray(res.data?.viajes)) {
+        setHistorial(res.data.viajes);
+        setCargandoHistorial(false);
+        return;
+      }
+    } catch (err) {
+      console.warn("⚠️ Fallo en API REST, ejecutando respaldo Firestore:", err);
+    }
+
+    try {
+      const pathViajes = FIRESTORE_PATHS?.rides || FIRESTORE_PATHS?.viajes || 'viajes';
+      const q = query(
+        collection(db, pathViajes),
+        where('conductorId', '==', conductorIdTarget),
+        where('estado', '==', 'COMPLETADO')
+      );
+
+      const snapshot = await getDocs(q);
+      const docs = snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+
+      docs.sort((a, b) => {
+        const timestampA = a.fechaCreacion?.seconds || a.fechacreacion?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() / 1000 : 0);
+        const timestampB = b.fechaCreacion?.seconds || b.fechacreacion?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() / 1000 : 0);
+        return timestampB - timestampA;
+      });
+
+      setHistorial(docs);
+    } catch (noSqlErr) {
+      console.error("❌ Fallo en fallback NoSQL:", noSqlErr);
+    } finally {
+      setCargandoHistorial(false);
+    }
+  }, [user, conductorId]);
+
+  useEffect(() => {
+    if (tabActiva === 'historial') {
+      fetchHistorial();
+    }
+  }, [tabActiva, fetchHistorial]);
+
+  // ==================================================================
+  // 5. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
   // ==================================================================
   useEffect(() => {
     if (!user?.uid || !isOnline) {
@@ -192,14 +279,13 @@ export default function HomeMototaxi() {
     const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
     const q = query(
       collection(db, pathViajes),
-      where('estado', '==', 'SOLICITADO'),
-      orderBy('fechacreacion', 'desc')
+      where('estado', '==', 'SOLICITADO')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ofertas = [];
-      snapshot.forEach((doc) => {
-        ofertas.push({ id: doc.id, ...doc.data() });
+      snapshot.forEach((docSnap) => {
+        ofertas.push({ id: docSnap.id, ...docSnap.data() });
       });
       setOfertasDisponibles(ofertas);
       setCargandoOfertas(false);
@@ -212,7 +298,7 @@ export default function HomeMototaxi() {
   }, [user?.uid, isOnline]);
 
   // ==================================================================
-  // 5. MONITOR DE VIAJE ACTIVO EN HILO DEL CONDUCTOR (FIRESTORE)
+  // 6. MONITOR DE VIAJE ACTIVO EN HILO DEL CONDUCTOR (FIRESTORE)
   // ==================================================================
   useEffect(() => {
     if (!user?.uid) return;
@@ -245,7 +331,7 @@ export default function HomeMototaxi() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 6. ACCIONES DE GESTIÓN DE DESPACHOS Y AJUSTES DE PERFIL
+  // 7. ACCIONES DE GESTIÓN DE DESPACHOS Y AJUSTES DE PERFIL
   // ==================================================================
   const handleActualizarPerfil = async (e) => {
     e.preventDefault();
@@ -268,7 +354,6 @@ export default function HomeMototaxi() {
         fechaActualizacion: serverTimestamp()
       });
 
-      // Si está en línea, reenviamos la actualización al gateway de Sockets
       if (socketRef.current && socketRef.current.connected) {
         socketRef.current.emit('registrar_conductor', { 
           conductorId, 
@@ -285,6 +370,7 @@ export default function HomeMototaxi() {
     }
   };
 
+  // 3. Normalización del endpoint API `/viajes/aceptar`
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
     if (Number(saldoVivo) < 2000) {
@@ -296,7 +382,7 @@ export default function HomeMototaxi() {
     try {
       console.log(`⚡ [ACID-DESPACHO] Intentando aceptar el viaje ID: ${solicitudViaje.viajeId}`);
       
-      const respuesta = await api.post(`/api/viajes/aceptar`, {
+      const respuesta = await api.post(`/viajes/aceptar`, {
         viajeId: solicitudViaje.viajeId,
         conductorId
       }, {
@@ -306,7 +392,7 @@ export default function HomeMototaxi() {
       if (respuesta?.data?.success) {
         setServicioActivo(respuesta.data.viaje);
         setSolicitudViaje(null);
-        console.log("✅ [ACID-DESPACHO] Viaje adjudicado y sincronizado en Atlas.");
+        console.log("✅ [ACID-DESPACHO] Viaje adjudicado y sincronizado.");
       }
     } catch (error) {
       console.error("🚨 [DESPACHO-ERR] Error al reclamar solicitud de servicio:", error?.response?.data?.message || error?.message);
@@ -332,7 +418,7 @@ export default function HomeMototaxi() {
 
         const datosViaje = viajeSnap.data();
         if (datosViaje?.estado !== 'SOLICITADO') {
-          throw new Error("Lo sentimos, este servicio ya fue capturado por otra unidad perimetral.");
+          throw new Error("Lo sentimos, este servicio ya fue capturado por otra unidad.");
         }
 
         transaction.update(viajeRef, {
@@ -387,7 +473,7 @@ export default function HomeMototaxi() {
   return (
     <div className="min-h-screen bg-[#0e0e11] text-zinc-100 font-mono antialiased pb-28 relative selection:bg-cyan-400 selection:text-black">
       
-      {/* 🔝 ENCABEZADO DE CONTROL MAESTRO (CIMCO-UI V12.18 NEO-BRUTALIST) */}
+      {/* 🔝 ENCABEZADO DE CONTROL MAESTRO (CIMCO-UI V12.21 NEO-BRUTALIST) */}
       <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button 
@@ -414,7 +500,7 @@ export default function HomeMototaxi() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0 ml-2">
-          {/* Switch de Estado Operativo Global Rígido */}
+          {/* Switch de Estado Operativo Global */}
           <button
             onClick={() => setIsOnline(!isOnline)}
             className={`px-3 py-1.5 rounded-none font-black text-[10px] uppercase tracking-wider border-2 border-black transition-all duration-150 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none shadow-[2px_2px_0px_0px_#000] ${
@@ -445,7 +531,7 @@ export default function HomeMototaxi() {
         </div>
       </header>
 
-      {/* BANNER DE ALERTA DE SALDO: IMPACTO INDUSTRIAL */}
+      {/* BANNER DE ALERTA DE SALDO */}
       {Number(saldoVivo) < 2000 && !walletLoading && (
         <div className="m-4 p-3 bg-red-500 text-black border-4 border-black rounded-none flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider shadow-[4px_4px_0px_0px_#000] relative z-10 animate-pulse">
           <AlertCircle size={16} strokeWidth={2.5} className="shrink-0" />
@@ -456,209 +542,272 @@ export default function HomeMototaxi() {
       {/* 🗺️ CONTENEDOR CENTRAL DE LOGÍSTICA CONTENIDA */}
       <main className="p-4 z-10 relative max-w-md mx-auto space-y-6">
         
-        {!isOnline && (
-          <div className="text-center p-6 bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none my-8">
-            <div className="w-12 h-12 bg-black border-2 border-black rounded-none flex items-center justify-center mx-auto mb-4 shadow-[2px_2px_0px_0px_#000]">
-              <AlertCircle className="text-zinc-500" size={20} strokeWidth={2.5} />
+        {/* PESTAÑA HISTORIAL URBANO HÍBRIDO */}
+        {tabActiva === 'historial' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between border-b-2 border-black pb-2">
+              <div className="flex items-center gap-2">
+                <Clock size={16} className="text-yellow-400" strokeWidth={2.5} />
+                <h2 className="text-xs uppercase font-black tracking-widest text-zinc-200">
+                  Historial Urbano ({historial.length})
+                </h2>
+              </div>
+              <button 
+                onClick={fetchHistorial} 
+                disabled={cargandoHistorial}
+                className="text-[9px] font-black uppercase tracking-wider bg-zinc-800 text-zinc-300 px-2 py-1 border border-black hover:bg-zinc-700 active:translate-x-[1px] active:translate-y-[1px]"
+              >
+                {cargandoHistorial ? 'Cargando...' : 'Recargar'}
+              </button>
             </div>
-            <p className="text-zinc-300 text-xs leading-relaxed uppercase font-bold tracking-wide">
-              Establezca el interruptor en <strong className="text-emerald-400 font-black">ONLINE</strong> para acoplar su posición al radar satelital de La Jagua de Ibirico.
-            </p>
+
+            {cargandoHistorial ? (
+              <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] flex items-center justify-center gap-3">
+                <Loader size={14} className="animate-spin text-yellow-400" /> Sincronizando historial urbano...
+              </div>
+            ) : historial.length === 0 ? (
+              <div className="bg-zinc-900 border-4 border-black rounded-none p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black shadow-[4px_4px_0px_0px_#000]">
+                Sin registros de viajes completados.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {historial.map((item) => (
+                  <div key={item.id || item._id} className="bg-zinc-900 border-2 border-black p-3.5 shadow-[3px_3px_0px_0px_#000] space-y-2">
+                    <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
+                      <span className="text-[9px] font-black uppercase bg-emerald-400 text-black px-1.5 py-0.5 border border-black">
+                        {item.estado || 'COMPLETADO'}
+                      </span>
+                      <span className="text-xs font-black text-emerald-400">
+                        ${Number(item.valor || item.tarifa || 0).toLocaleString('es-CO')}
+                      </span>
+                    </div>
+                    <div className="text-[10px] space-y-1 text-zinc-300">
+                      <p className="truncate flex items-center gap-1.5">
+                        <MapPin size={11} className="text-emerald-400 shrink-0" />
+                        <strong className="text-zinc-500 uppercase text-[8px]">Origen:</strong> {item.origenDireccion || item.origenTexto || "Punto de Inicio"}
+                      </p>
+                      <p className="truncate flex items-center gap-1.5">
+                        <Navigation size={11} className="text-cyan-400 shrink-0" />
+                        <strong className="text-zinc-500 uppercase text-[8px]">Destino:</strong> {item.destinoDireccion || item.destinoTexto || "Punto Final"}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        {isOnline && (
+        {/* PESTAÑA RADAR / PANELES OPERATIVOS PRINCIPALES */}
+        {tabActiva === 'radar' && (
           <>
-            {/* 🛡️ CASO 1: ADJUDICACIÓN DE ORDEN ACTIVA (FIRESTORE) */}
-            {servicioActivo ? (
-              <div className="bg-zinc-900 p-5 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none space-y-4">
-                <div className="flex justify-between items-center border-b-4 border-black pb-3">
-                  <div className="flex items-center gap-1.5">
-                    <TrendingUp className="text-emerald-400 animate-pulse" size={14} strokeWidth={3} />
-                    <span className="text-[9px] font-black tracking-widest bg-yellow-400 text-black border-2 border-black px-2 py-0.5 uppercase">
-                      ESTADO: {servicioActivo.estado}
-                    </span>
-                  </div>
-                  <span className="text-[9px] font-bold bg-black text-zinc-400 px-2 py-0.5 border border-zinc-800">
-                    ID: ...{String(servicioActivo?.id || "").slice(-6).toUpperCase()}
-                  </span>
+            {!isOnline && (
+              <div className="text-center p-6 bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none my-8">
+                <div className="w-12 h-12 bg-black border-2 border-black rounded-none flex items-center justify-center mx-auto mb-4 shadow-[2px_2px_0px_0px_#000]">
+                  <AlertCircle className="text-zinc-500" size={20} strokeWidth={2.5} />
                 </div>
-
-                <div className="space-y-3 text-xs bg-black/40 p-3 border-2 border-black">
-                  <div className="flex items-start gap-2.5">
-                    <MapPin size={14} className="text-emerald-400 mt-0.5 shrink-0" strokeWidth={2.5} />
-                    <div>
-                      <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-black">Origen / Recogida</p>
-                      <p className="text-zinc-200 font-bold text-[11px] mt-0.5 leading-tight">{servicioActivo.origenDireccion || "Ubicación Georreferenciada"}</p>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-dashed border-zinc-800 my-2"></div>
-
-                  <div className="flex items-start gap-2.5">
-                    <Navigation size={14} className="text-cyan-400 mt-0.5 shrink-0" strokeWidth={2.5} />
-                    <div>
-                      <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-black">Destino Final</p>
-                      <p className="text-zinc-200 font-bold text-[11px] mt-0.5 leading-tight">{servicioActivo.destinoDireccion || "Destino Georreferenciado"}</p>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-4 border-black pt-3 mt-2 flex justify-between items-center">
-                    <div className="flex items-center gap-1.5 text-zinc-400 text-[10px] uppercase font-black">
-                      <CircleDollarSign size={14} className="text-yellow-400" strokeWidth={2.5} />
-                      <span>Liquidación:</span>
-                    </div>
-                    <span className="text-xs font-black text-white bg-black border border-zinc-800 px-2.5 py-1">
-                      ${Number(servicioActivo.valor || 0).toLocaleString('es-CO')} COP
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-2 space-y-2">
-                  {servicioActivo.estado === 'ACEPTADO' && (
-                    <button 
-                      onClick={() => transicionarEstadoViaje('EN_SITIO')}
-                      className="w-full bg-cyan-400 hover:bg-cyan-500 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
-                    >
-                      Confirmar: Llegada al Sitio
-                    </button>
-                  )}
-                  {servicioActivo.estado === 'EN_SITIO' && (
-                    <button 
-                      onClick={() => transicionarEstadoViaje('EN_VIAJE')}
-                      className="w-full bg-emerald-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
-                    >
-                      Iniciar Ruta Transaccional
-                    </button>
-                  )}
-                  {servicioActivo.estado === 'EN_VIAJE' && (
-                    <button 
-                      onClick={() => transicionarEstadoViaje('FINALIZADO')}
-                      className="w-full bg-yellow-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
-                    >
-                      Finalizar y Cobrar Servicio
-                    </button>
-                  )}
-                  
-                  {/* Botón de contingencia estructural */}
-                  <button 
-                    onClick={() => {
-                      console.log("🏁 [CIMCO] Finalización forzada de viaje simulada.");
-                      setDatosParaCalificar({ id: servicioActivo?.id || 'SIMULADO', clienteNombre: servicioActivo?.clienteNombre || 'Pasajero CIMCO' });
-                      setServicioActivo(null);
-                      setMostrarModalCalificacion(true);
-                    }}
-                    className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[9px] uppercase py-1.5 border-2 border-black rounded-none font-bold tracking-wider"
-                  >
-                    Simular Cierre Forzado
-                  </button>
-                </div>
+                <p className="text-zinc-300 text-xs leading-relaxed uppercase font-bold tracking-wide">
+                  Establezca el interruptor en <strong className="text-emerald-400 font-black">ONLINE</strong> para acoplar su posición al radar satelital de La Jagua de Ibirico.
+                </p>
               </div>
-            ) : (
+            )}
+
+            {isOnline && (
               <>
-                {/* 🛡️ CASO 2: CARD FLOTANTE INTERACTIVO DE SOLICITUD SOCKET EN VIVO */}
-                {solicitudViaje && (
-                  <div className="w-full bg-zinc-900 border-4 border-yellow-400 p-5 rounded-none shadow-[6px_6px_0px_0px_#000] space-y-4 mb-6 animate-pulse">
-                    <div className="flex justify-between items-start border-b-2 border-black pb-3">
-                      <span className="bg-yellow-400 text-black text-[9px] font-black px-2 py-1 border border-black uppercase tracking-wider">
-                        VIAJE INBOUND (SOCKET)
+                {/* 🛡️ CASO 1: ADJUDICACIÓN DE ORDEN ACTIVA (FIRESTORE) */}
+                {servicioActivo ? (
+                  <div className="bg-zinc-900 p-5 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none space-y-4">
+                    <div className="flex justify-between items-center border-b-4 border-black pb-3">
+                      <div className="flex items-center gap-1.5">
+                        <TrendingUp className="text-emerald-400 animate-pulse" size={14} strokeWidth={3} />
+                        <span className="text-[9px] font-black tracking-widest bg-yellow-400 text-black border-2 border-black px-2 py-0.5 uppercase">
+                          ESTADO: {servicioActivo.estado}
+                        </span>
+                      </div>
+                      <span className="text-[9px] font-bold bg-black text-zinc-400 px-2 py-0.5 border border-zinc-800">
+                        ID: ...{String(servicioActivo?.id || "").slice(-6).toUpperCase()}
                       </span>
-                      <span className="text-sm font-black text-emerald-400 bg-black px-2.5 py-0.5 border border-zinc-800">
-                        ${Number(solicitudViaje?.tarifa || solicitudViaje?.valor || 0).toLocaleString('es-CO')}
-                      </span>
-                    </div>
-                    
-                    <div className="space-y-2 text-xs text-zinc-300 bg-black/40 p-3 border-2 border-black">
-                      <p className="flex items-start gap-1.5">
-                        <span className="text-emerald-400 font-black shrink-0">📍</span>
-                        <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Recogida:</strong> {solicitudViaje?.origenTexto || solicitudViaje?.origenDireccion || solicitudViaje?.origen?.direccion || "Ubicación Georeferenciada"}</span>
-                      </p>
-                      <div className="border-t border-dashed border-zinc-800 my-1.5"></div>
-                      <p className="flex items-start gap-1.5">
-                        <span className="text-cyan-400 font-black shrink-0">🏁</span>
-                        <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Destino:</strong> {solicitudViaje?.destinoTexto || solicitudViaje?.destinoDireccion || solicitudViaje?.destino?.direccion || "Por definir"}</span>
-                      </p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <button
-                        onClick={rechazarViaje}
-                        disabled={loading}
-                        className="bg-zinc-700 hover:bg-zinc-600 text-zinc-200 py-2 rounded-none font-bold text-xs uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
-                      >
-                        Ignorar
-                      </button>
-                      <button
-                        onClick={aceptarViaje}
-                        disabled={loading}
-                        className="bg-yellow-400 hover:bg-yellow-500 text-black py-2 rounded-none font-black text-xs uppercase tracking-widest border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
-                      >
-                        {loading ? 'ASIGNANDO...' : '¡ACEPTAR!'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* 🛡️ CASO 3: RADAR GENERAL DE MALLA DE RED FIRESTORE */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between px-1 border-b-2 border-black pb-2">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp size={14} className="text-cyan-400" strokeWidth={2.5} />
-                      <h2 className="text-[10px] uppercase font-black tracking-widest text-zinc-400">
-                        Malla Radar ({ofertasDisponibles.length})
-                      </h2>
-                    </div>
-                    <span className="text-[9px] text-zinc-400 bg-zinc-900 px-2 py-1 border-2 border-black flex items-center gap-1.5 font-bold shadow-[1px_1px_0px_0px_#000]">
-                      <MapPin size={11} className="text-red-400" strokeWidth={3} />
-                      GPS: {coordenadas?.lng?.toFixed(4) || "0.0000"}, {coordenadas?.lat?.toFixed(4) || "0.0000"}
-                    </span>
-                  </div>
-
-                  {cargandoOfertas ? (
-                    <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] flex items-center justify-center gap-3">
-                      <Loader size={14} className="animate-spin text-cyan-400" /> Sincronizando malla...
-                    </div>
-                  ) : ofertasDisponibles.length === 0 ? (
-                    <div className="bg-zinc-900 border-4 border-black rounded-none p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black shadow-[4px_4px_0px_0px_#000]">
-                      Escuchando solicitudes en La Jagua de Ibirico...
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {ofertasDisponibles.map((oferta) => (
-                        <div 
-                          key={oferta.id} 
-                          className="bg-zinc-900 p-4 border-4 border-black rounded-none flex flex-col gap-3 shadow-[4px_4px_0px_0px_#000] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#000] transition-all duration-150"
-                        >
-                          <div className="text-xs space-y-2">
-                            <div className="flex items-center justify-between border-b-2 border-black pb-2">
-                              <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest bg-black px-2 py-0.5 border border-zinc-800">
-                                {oferta.categoria || 'ESTÁNDAR'}
-                              </span>
-                              <span className="font-black text-emerald-400 text-sm">${Number(oferta.valor || 0).toLocaleString('es-CO')}</span>
-                            </div>
-                            <div className="space-y-1 bg-black/30 p-2 border border-zinc-800">
-                              <p className="text-zinc-300 font-bold text-[11px] truncate flex items-center gap-1.5">
-                                <MapPin size={12} className="text-emerald-400 shrink-0" strokeWidth={2.5} /> {oferta.origenDireccion || "Ubicación Base"}
-                              </p>
-                              <p className="text-zinc-400 text-[10px] truncate flex items-center gap-1.5">
-                                <Navigation size={12} className="text-cyan-400 shrink-0" strokeWidth={2.5} /> {oferta.destinoDireccion || "Destino Final"}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="pt-1">
-                            <button 
-                              onClick={() => capturarOferta(oferta.id)}
-                              disabled={Number(saldoVivo) < 2000}
-                              className="w-full bg-cyan-400 text-black disabled:bg-zinc-800 disabled:border-zinc-700 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-none uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
-                            >
-                              {Number(saldoVivo) < 2000 ? 'SALDO BLOQUEADO' : 'CAPTURAR OFERTA'}
-                            </button>
-                          </div>
+                    <div className="space-y-3 text-xs bg-black/40 p-3 border-2 border-black">
+                      <div className="flex items-start gap-2.5">
+                        <MapPin size={14} className="text-emerald-400 mt-0.5 shrink-0" strokeWidth={2.5} />
+                        <div>
+                          <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-black">Origen / Recogida</p>
+                          <p className="text-zinc-200 font-bold text-[11px] mt-0.5 leading-tight">{servicioActivo.origenDireccion || "Ubicación Georreferenciada"}</p>
                         </div>
-                      ))}
+                      </div>
+
+                      <div className="border-t border-dashed border-zinc-800 my-2"></div>
+
+                      <div className="flex items-start gap-2.5">
+                        <Navigation size={14} className="text-cyan-400 mt-0.5 shrink-0" strokeWidth={2.5} />
+                        <div>
+                          <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-black">Destino Final</p>
+                          <p className="text-zinc-200 font-bold text-[11px] mt-0.5 leading-tight">{servicioActivo.destinoDireccion || "Destino Georreferenciado"}</p>
+                        </div>
+                      </div>
+
+                      <div className="border-t border-4 border-black pt-3 mt-2 flex justify-between items-center">
+                        <div className="flex items-center gap-1.5 text-zinc-400 text-[10px] uppercase font-black">
+                          <CircleDollarSign size={14} className="text-yellow-400" strokeWidth={2.5} />
+                          <span>Liquidación:</span>
+                        </div>
+                        <span className="text-xs font-black text-white bg-black border border-zinc-800 px-2.5 py-1">
+                          ${Number(servicioActivo.valor || 0).toLocaleString('es-CO')} COP
+                        </span>
+                      </div>
                     </div>
-                  )}
-                </div>
+
+                    <div className="pt-2 space-y-2">
+                      {servicioActivo.estado === 'ACEPTADO' && (
+                        <button 
+                          onClick={() => transicionarEstadoViaje('EN_SITIO')}
+                          className="w-full bg-cyan-400 hover:bg-cyan-500 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                        >
+                          Confirmar: Llegada al Sitio
+                        </button>
+                      )}
+                      {servicioActivo.estado === 'EN_SITIO' && (
+                        <button 
+                          onClick={() => transicionarEstadoViaje('EN_VIAJE')}
+                          className="w-full bg-emerald-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                        >
+                          Iniciar Ruta Transaccional
+                        </button>
+                      )}
+                      {servicioActivo.estado === 'EN_VIAJE' && (
+                        <button 
+                          onClick={() => transicionarEstadoViaje('FINALIZADO')}
+                          className="w-full bg-yellow-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                        >
+                          Finalizar y Cobrar Servicio
+                        </button>
+                      )}
+                      
+                      {/* 4. Mostrar botón de contingencia únicamente en Entorno de Desarrollo (DEV) */}
+                      {import.meta.env.DEV && (
+                        <button 
+                          onClick={() => {
+                            console.log("🏁 [CIMCO] Finalización forzada de viaje simulada.");
+                            setDatosParaCalificar({ id: servicioActivo?.id || 'SIMULADO', clienteNombre: servicioActivo?.clienteNombre || 'Pasajero CIMCO' });
+                            setServicioActivo(null);
+                            setMostrarModalCalificacion(true);
+                          }}
+                          className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[9px] uppercase py-1.5 border-2 border-black rounded-none font-bold tracking-wider mt-2"
+                        >
+                          [DEV] Simular Cierre Forzado
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* 🛡️ CASO 2: CARD FLOTANTE INTERACTIVO DE SOLICITUD SOCKET EN VIVO */}
+                    {solicitudViaje && (
+                      <div className="w-full bg-zinc-900 border-4 border-yellow-400 p-5 rounded-none shadow-[6px_6px_0px_0px_#000] space-y-4 mb-6 animate-pulse">
+                        <div className="flex justify-between items-start border-b-2 border-black pb-3">
+                          <span className="bg-yellow-400 text-black text-[9px] font-black px-2 py-1 border border-black uppercase tracking-wider">
+                            VIAJE INBOUND (SOCKET)
+                          </span>
+                          <span className="text-sm font-black text-emerald-400 bg-black px-2.5 py-0.5 border border-zinc-800">
+                            ${Number(solicitudViaje?.tarifa || solicitudViaje?.valor || 0).toLocaleString('es-CO')}
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-2 text-xs text-zinc-300 bg-black/40 p-3 border-2 border-black">
+                          <p className="flex items-start gap-1.5">
+                            <span className="text-emerald-400 font-black shrink-0">📍</span>
+                            <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Recogida:</strong> {solicitudViaje?.origenTexto || solicitudViaje?.origenDireccion || solicitudViaje?.origen?.direccion || "Ubicación Georeferenciada"}</span>
+                          </p>
+                          <div className="border-t border-dashed border-zinc-800 my-1.5"></div>
+                          <p className="flex items-start gap-1.5">
+                            <span className="text-cyan-400 font-black shrink-0">🏁</span>
+                            <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Destino:</strong> {solicitudViaje?.destinoTexto || solicitudViaje?.destinoDireccion || solicitudViaje?.destino?.direccion || "Por definir"}</span>
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 pt-1">
+                          <button
+                            onClick={rechazarViaje}
+                            disabled={loading}
+                            className="bg-zinc-700 hover:bg-zinc-600 text-zinc-200 py-2 rounded-none font-bold text-xs uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                          >
+                            Ignorar
+                          </button>
+                          <button
+                            onClick={aceptarViaje}
+                            disabled={loading}
+                            className="bg-yellow-400 hover:bg-yellow-500 text-black py-2 rounded-none font-black text-xs uppercase tracking-widest border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                          >
+                            {loading ? 'ASIGNANDO...' : '¡ACEPTAR!'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 🛡️ CASO 3: RADAR GENERAL DE MALLA DE RED FIRESTORE */}
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between px-1 border-b-2 border-black pb-2">
+                        <div className="flex items-center gap-2">
+                          <TrendingUp size={14} className="text-cyan-400" strokeWidth={2.5} />
+                          <h2 className="text-[10px] uppercase font-black tracking-widest text-zinc-400">
+                            Malla Radar ({ofertasDisponibles.length})
+                          </h2>
+                        </div>
+                        <span className="text-[9px] text-zinc-400 bg-zinc-900 px-2 py-1 border-2 border-black flex items-center gap-1.5 font-bold shadow-[1px_1px_0px_0px_#000]">
+                          <MapPin size={11} className="text-red-400" strokeWidth={3} />
+                          GPS: {coordenadas?.lng?.toFixed(4) || "0.0000"}, {coordenadas?.lat?.toFixed(4) || "0.0000"}
+                        </span>
+                      </div>
+
+                      {cargandoOfertas ? (
+                        <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] flex items-center justify-center gap-3">
+                          <Loader size={14} className="animate-spin text-cyan-400" /> Sincronizando malla...
+                        </div>
+                      ) : ofertasDisponibles.length === 0 ? (
+                        <div className="bg-zinc-900 border-4 border-black rounded-none p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black shadow-[4px_4px_0px_0px_#000]">
+                          Escuchando solicitudes en La Jagua de Ibirico...
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {ofertasDisponibles.map((oferta) => (
+                            <div 
+                              key={oferta.id} 
+                              className="bg-zinc-900 p-4 border-4 border-black rounded-none flex flex-col gap-3 shadow-[4px_4px_0px_0px_#000] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#000] transition-all duration-150"
+                            >
+                              <div className="text-xs space-y-2">
+                                <div className="flex items-center justify-between border-b-2 border-black pb-2">
+                                  <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest bg-black px-2 py-0.5 border border-zinc-800">
+                                    {oferta.categoria || 'ESTÁNDAR'}
+                                  </span>
+                                  <span className="font-black text-emerald-400 text-sm">${Number(oferta.valor || 0).toLocaleString('es-CO')}</span>
+                                </div>
+                                <div className="space-y-1 bg-black/30 p-2 border border-zinc-800">
+                                  <p className="text-zinc-300 font-bold text-[11px] truncate flex items-center gap-1.5">
+                                    <MapPin size={12} className="text-emerald-400 shrink-0" strokeWidth={2.5} /> {oferta.origenDireccion || "Ubicación Base"}
+                                  </p>
+                                  <p className="text-zinc-400 text-[10px] truncate flex items-center gap-1.5">
+                                    <Navigation size={12} className="text-cyan-400 shrink-0" strokeWidth={2.5} /> {oferta.destinoDireccion || "Destino Final"}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="pt-1">
+                                <button 
+                                  onClick={() => capturarOferta(oferta.id)}
+                                  disabled={Number(saldoVivo) < 2000}
+                                  className="w-full bg-cyan-400 text-black disabled:bg-zinc-800 disabled:border-zinc-700 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-none uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                                >
+                                  {Number(saldoVivo) < 2000 ? 'SALDO BLOQUEADO' : 'CAPTURAR OFERTA'}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </>
             )}
           </>
@@ -746,17 +895,28 @@ export default function HomeMototaxi() {
         </div>
       )}
 
-      {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR (CIMCO-UI V12.18 NEO-BRUTALIST RIGID) */}
+      {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR (CIMCO-UI V12.21 NEO-BRUTALIST RIGID) */}
       <footer className="fixed bottom-0 left-0 w-full bg-zinc-900 border-t-4 border-black p-3 flex justify-around items-center z-50 shadow-[0_-4px_0px_0px_#000]">
-        <button className="text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95">
+        <button 
+          onClick={() => setTabActiva('radar')}
+          className={`${tabActiva === 'radar' ? 'text-cyan-400' : 'text-zinc-600 hover:text-zinc-300'} flex flex-col items-center gap-0.5 transition-transform active:scale-95`}
+        >
           <Navigation size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Radar</span>
         </button>
-        <button className="text-zinc-600 flex flex-col items-center gap-0.5 cursor-not-allowed opacity-50">
+        <button 
+          onClick={() => setTabActiva('historial')}
+          className={`${tabActiva === 'historial' ? 'text-yellow-400' : 'text-zinc-600 hover:text-zinc-300'} flex flex-col items-center gap-0.5 transition-transform active:scale-95`}
+        >
           <Clock size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Historial</span>
         </button>
-        <button className="text-zinc-600 flex flex-col items-center gap-0.5 cursor-not-allowed opacity-50">
+
+        {/* 6. Botón Billetera activo con navegación habilitada */}
+        <button 
+          onClick={() => window.location.href = '/wallet'}
+          className="text-zinc-400 hover:text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95 cursor-pointer"
+        >
           <CircleDollarSign size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Billetera</span>
         </button>

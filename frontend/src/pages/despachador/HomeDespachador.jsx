@@ -1,10 +1,10 @@
-// Versión Arquitectura: V16.0 - Ajuste Quirúrgico de Registro Intermunicipal y Sincronización Socket
+// Versión Arquitectura: V16.1 - Sustitución de Lecturas Firestore por Hook Unificado useWallet y Optimización de Listeners
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
- * Misión: Registro manual de solicitudes, inyección de asignaciones, calcomanía QR de autogestión
- * y despliegue del radar satelital en tiempo real para las unidades de la cooperativa autorizada.
- * Ajuste V16.0: Normalización del payload para backend Node.js (tipoViaje: 'intermunicipal'), 
- * soporte de token Bearer/JWT, emisión del evento 'nuevo_viaje' vía WebSockets y preservación de CIMCO-UI V9.3.
+ * Misión: Registro manual de solicitudes, inyección de asignaciones, calcomanía QR de autogestión,
+ * monitoreo de saldo operativo y despliegue del radar satelital en tiempo real para las unidades de la cooperativa autorizada.
+ * Ajuste V16.1: Integración del Hook Unificado `useWallet.js` para centralizar el flujo de datos financieros y de saldo,
+ * eliminando lecturas/listeners duplicados e independientes a Firestore para mitigar el consumo innecesario de memoria y cuotas NoSQL.
  */
 
 import React, { useEffect, useState } from "react";
@@ -12,8 +12,9 @@ import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db, FIRESTORE_PATHS } from "@/config/firebase"; 
 import { useAuth } from "@/hooks/useAuth";
 import { useSocket } from "@/hooks/SocketContext"; 
+import { useWallet } from "@/hooks/useWallet";
 import api, { VIAJES_ENDPOINTS } from "@/config/api"; 
-import { Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, QrCode, Download, Map, Settings } from "lucide-react";
+import { Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, QrCode, Download, Map, Settings, Wallet } from "lucide-react";
 import { formatHoraColombia } from '@/utils/dateFormatter';
 import { QRCodeSVG } from "qrcode.react"; 
 
@@ -29,6 +30,12 @@ const HomeDespachador = () => {
   const token = authContext?.token || localStorage.getItem("token") || user?.token || "";
   
   const { socket, isConnected } = useSocket();
+
+  // 💳 CONSUMO DEL HOOK UNIFICADO USEWALLET (Centraliza el estado financiero y previene listeners duplicados NoSQL)
+  const walletContext = useWallet ? useWallet() : {};
+  const wallet = walletContext?.wallet || null;
+  const saldo = walletContext?.saldo ?? walletContext?.balance ?? 0;
+  const loadingWallet = walletContext?.loading ?? walletContext?.loadingWallet ?? false;
 
   // 📝 ESTADOS DE CONTROL OPERATIVO
   const [conductores, setConductores] = useState([]);
@@ -59,7 +66,7 @@ const HomeDespachador = () => {
     setLoadingConductores(true);
     setErrorConductores(null);
 
-    const pathUsuarios = FIRESTORE_PATHS?.users || "usuarios";
+    const pathUsuarios = FIRESTORE_PATHS?.users || FIRESTORE_PATHS?.usuarios || "usuarios";
     
     // Consulta indexada segura basada en cooperativa y rol operativo
     const q = query(
@@ -211,17 +218,28 @@ const HomeDespachador = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+          <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
+            {/* 💳 BANDEROLA DE SALDO OPERATIVO UNIFICADO (Vía useWallet) */}
+            <div className="flex items-center gap-2 font-mono text-[10px] uppercase bg-zinc-950/50 border border-white/5 px-3 py-2 rounded-xl text-zinc-400">
+              <Wallet size={13} className="text-emerald-400 shrink-0" />
+              <span>
+                Saldo Operativo:{" "}
+                <strong className="text-emerald-400 font-bold">
+                  {loadingWallet ? "Cargando..." : `$${Number(saldo).toLocaleString('es-CO')} COP`}
+                </strong>
+              </span>
+            </div>
+
             {/* ⚙️ BOTÓN DE CONFIGURACIÓN DE CENTRAL */}
             <button
               onClick={() => setIsProfileModalOpen(true)}
-              className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-850 text-white border border-white/5 hover:border-orange-500/30 px-4 py-2.5 rounded-xl text-[10px] font-mono uppercase tracking-wider cursor-pointer active:scale-95 transition-all"
+              className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-850 text-white border border-white/5 hover:border-orange-500/30 px-4 py-2 rounded-xl text-[10px] font-mono uppercase tracking-wider cursor-pointer active:scale-95 transition-all"
             >
               <Settings size={14} className="text-orange-400" />
               Editar Perfil
             </button>
 
-            <div className="flex items-center gap-2 font-mono text-[10px] uppercase bg-zinc-950/50 border border-white/5 px-3 py-1.5 rounded-xl text-zinc-400">
+            <div className="flex items-center gap-2 font-mono text-[10px] uppercase bg-zinc-950/50 border border-white/5 px-3 py-2 rounded-xl text-zinc-400">
               <span className={`w-2 h-2 rounded-full ${isConnected ? "bg-emerald-500 animate-pulse" : "bg-red-500"}`}></span>
               {isConnected ? "Radar Radial Activo (WSS://)" : "Radar Desconectado"}
             </div>

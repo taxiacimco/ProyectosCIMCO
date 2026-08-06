@@ -1,8 +1,10 @@
-// Versión Arquitectura: V16.0 - Integración Quirúrgica con Backend Node.js/MongoDB y Resiliencia de UI
+// Versión Arquitectura: V16.1 - Saneamiento de Interceptores Axios y Rutas REST en Historial Intermunicipal
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HistorialIntermunicipal.jsx
  * Misión: Renderizar la bitácora de viajes intermunicipales del conductor conectándose
- *        con el backend REST (MongoDB) con fallback a Firestore y preservando CIMCO-UI V9.3.
+ *        con el backend REST (MongoDB) mediante el cliente API unificado, con fallback resiliente a Firestore.
+ * Ajuste V16.1: Eliminación de cabeceras de autorización manuales redundantes y saneamiento de endpoint
+ *               para evitar duplicación /api/api y consultas NoSQL innecesarias.
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
@@ -15,7 +17,6 @@ import { FileText, MapPin, Bus, Loader, AlertTriangle, RefreshCw } from 'lucide-
 const HistorialIntermunicipal = () => {
     const authContext = useAuth();
     const user = authContext?.user || null;
-    const token = authContext?.token || localStorage.getItem('token') || user?.token || "";
 
     const [historial, setHistorial] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -31,17 +32,14 @@ const HistorialIntermunicipal = () => {
         setLoading(true);
         setError(null);
 
-        const axiosConfig = token ? {
-            headers: { Authorization: `Bearer ${token}` }
-        } : {};
-
         try {
             // 📡 1. INTENTO DE CONSULTA EN REST API BACKEND (MongoDB Core)
-            const endpoint = VIAJES_ENDPOINTS?.historial 
-                ? `${VIAJES_ENDPOINTS.historial}?conductorId=${idConductor}&tipoViaje=intermunicipal`
-                : `/api/viajes/historial?conductorId=${idConductor}&tipoViaje=intermunicipal`;
+            // La instancia 'api' ya maneja baseURL '/api' y la inyección automática del token via interceptor.
+            const rawEndpoint = VIAJES_ENDPOINTS?.historial || '/viajes/historial';
+            const cleanEndpoint = rawEndpoint.replace(/^\/api/, '');
+            const endpoint = `${cleanEndpoint}?conductorId=${idConductor}&tipoViaje=intermunicipal`;
 
-            const response = await api.get(endpoint, axiosConfig);
+            const response = await api.get(endpoint);
 
             if (response?.data?.success && Array.isArray(response?.data?.viajes)) {
                 setHistorial(response.data.viajes);
@@ -55,7 +53,7 @@ const HistorialIntermunicipal = () => {
             
             throw new Error("Respuesta backend sin formato de lista.");
         } catch (err) {
-            console.warn("⚠️ [CIMCO-HISTORIAL-REST] Fallo en REST API, ejecutando respaldo NoSQL Firestore:", err);
+            console.warn("⚠️ [CIMCO-HISTORIAL-REST] Fallo en REST API Express, ejecutando respaldo NoSQL Firestore:", err?.message || err);
             
             // 🔄 2. FALLBACK SECUNDARIO A FIRESTORE
             try {
@@ -75,7 +73,7 @@ const HistorialIntermunicipal = () => {
         } finally {
             setLoading(false);
         }
-    }, [idConductor, token]);
+    }, [idConductor]);
 
     useEffect(() => {
         fetchHistorial();

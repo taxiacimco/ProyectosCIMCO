@@ -1,9 +1,10 @@
-// Versión Arquitectura: V16.0 - Integración Quirúrgica con SocketContext, REST API Backend y Radar de Despacho
+// Versión Arquitectura: V16.1 - Throttling de Telemetría Satelital GPS Exclusivo a Socket.io y Optimización de Escrituras NoSQL
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V16.0: Escucha de sockets unificada vía `useSocket`, consumo de endpoints REST MongoDB con Bearer Token,
- *               emisión de telemetría GPS y confirmación de salida en dársena alineada al despachador.
+ * Ajuste V16.1: Optimización del bucle de rastreo GPS en `watchPosition`. Se elimina la escritura periódica
+ *               en Firestore (evitando ráfagas masivas innecesarias NoSQL) delegando la telemetría en tiempo real
+ *               de forma exclusiva a WebSocket / Socket.io (`actualizar_radar_gps`).
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -11,7 +12,7 @@ import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/SocketContext';
-import api, { VIAJES_ENDPOINTS } from '@/config/api';
+import api from '@/config/api';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -66,14 +67,14 @@ const HomeIntermunicipal = () => {
     // 🔔 ESTADO PARA NOTIFICACIONES FLUIDAS
     const [notificacionUI, setNotificacionUI] = useState(null);
 
-    // 🛡️ REFERENCIAS MUTABLES Anti-Bucle
+    // 🛡️ REFERENCIAS MUTABLES Anti-Bucle y Throttling de Socket Telemetría
     const viajesAsignadosRef = useRef(viajesAsignados);
     useEffect(() => {
         viajesAsignadosRef.current = viajesAsignados;
     }, [viajesAsignados]);
 
     const ultimaActualizacionGpsRef = useRef(0);
-    const ENFRIAMIENTO_GPS_MS = 10000;
+    const ENFRIAMIENTO_SOCKET_GPS_MS = 5000; // Throttling controlado de 5s para emisión de sockets
 
     // ==================================================================
     // 1. ESCUCHA REACTIVA DE IDENTIDAD DEL CONDUCTOR EN FIRESTORE / REST
@@ -196,13 +197,13 @@ const HomeIntermunicipal = () => {
     }, [socket, idConductor, user?.uid]);
 
     // ==================================================================
-    // 4. MOTOR DE RASTREO SATELITAL (GPS & SOCKET TELEMETRÍA)
+    // 4. MOTOR DE RASTREO SATELITAL (SOCKET TELEMETRÍA EXCLUSIVO - CERO WRITES EN FIRESTORE)
     // ==================================================================
     useEffect(() => {
         if (!idConductor) return;
     
         const watchId = navigator.geolocation.watchPosition(
-            async (pos) => {
+            (pos) => {
                 const lat = pos.coords.latitude;
                 const lng = pos.coords.longitude;
                 
@@ -210,54 +211,31 @@ const HomeIntermunicipal = () => {
                 setGpsActivo(true);
     
                 const ahora = Date.now();
-                if (ahora - ultimaActualizacionGpsRef.current < ENFRIAMIENTO_GPS_MS) {
+                if (ahora - ultimaActualizacionGpsRef.current < ENFRIAMIENTO_SOCKET_GPS_MS) {
                     return;
                 }
                 
                 ultimaActualizacionGpsRef.current = ahora;
 
-                try {
-                    // Transmisión WebSocket en caliente hacia el despachador
-                    if (socket && isConnected) {
-                        socket.emit('actualizar_radar_gps', {
-                            conductorId: idConductor,
-                            latitude: lat,
-                            longitude: lng,
-                            estadoRadar: 'INTERMUNICIPAL_ACTIVE'
-                        });
-                    }
-
-                    // Sincronización NoSQL para preservación de mapa
-                    if (user?.uid) {
-                        const conductorRef = doc(db, FIRESTORE_PATHS?.usuarios || 'usuarios', user.uid);
-                        await updateDoc(conductorRef, {
-                            location: { latitude: lat, longitude: lng },
-                            ultimaConexion: serverTimestamp(),
-                            estadoRadar: 'INTERMUNICIPAL_ACTIVE'
-                        });
-
-                        const viajeActivo = viajesAsignadosRef.current?.[0];
-                        if (viajeActivo?.id) {
-                            const viajeRef = doc(db, FIRESTORE_PATHS?.viajesIntermunicipales || 'viajes_intermunicipales', viajeActivo.id);
-                            await updateDoc(viajeRef, {
-                                "conductorLocation.latitude": lat,
-                                "conductorLocation.longitude": lng
-                            });
-                        }
-                    }
-                } catch (err) {
-                    console.error("❌ Falla de sincronización telemetría intermunicipal:", err);
+                // Transmisión WebSocket en tiempo real hacia la central de despachos
+                if (socket && isConnected) {
+                    socket.emit('actualizar_radar_gps', {
+                        conductorId: idConductor,
+                        latitude: lat,
+                        longitude: lng,
+                        estadoRadar: 'INTERMUNICIPAL_ACTIVE'
+                    });
                 }
             },
             (err) => {
                 console.error("⚠️ Señal GPS perdida de antenas locales:", err);
                 setGpsActivo(false);
             },
-            { enableHighAccuracy: true, maximumAge: 10000, timeout: 7000 }
+            { enableHighAccuracy: true, maximumAge: 5000, timeout: 7000 }
         );
 
         return () => navigator.geolocation.clearWatch(watchId);
-    }, [idConductor, user?.uid, socket, isConnected]);
+    }, [idConductor, socket, isConnected]);
 
     // ==================================================================
     // 5. SUSCRIPCIÓN REACTIVA A VIAJES ASIGNADOS EN RAMPA DE SALIDA

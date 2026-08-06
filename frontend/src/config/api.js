@@ -1,7 +1,7 @@
-// Versión Arquitectura: V15.8 - Resolución Dinámica Estricta de Axios Anti-Localhost y Blindaje JWT
+// Versión Arquitectura: V15.9 - Corrección de Encabezados Anti-Caché y Estandarización de Endpoints
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
- * Misión: Centralización de Axios e inyección inteligente de endpoints sin dependencias huérfanas.
+ * Misión: Centralización de Axios, inyección de cabeceras anti-caché e interceptores JWT con resiliencia.
  */
 
 import axios from 'axios';
@@ -30,7 +30,10 @@ export const api = axios.create({
     baseURL: API_CORE_URL,
     timeout: 15000,
     headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
     },
     withCredentials: true
 });
@@ -108,7 +111,8 @@ export const VIAJES_ENDPOINTS = {
     completar: '/viajes/completar',
     despachar: '/viajes/despachar',
     cancelar: '/viajes/cancelar',
-    historial: '/viajes/historial'
+    historial: '/viajes/historial',
+    despachador: '/viajes/despachador'
 };
 
 export default api;

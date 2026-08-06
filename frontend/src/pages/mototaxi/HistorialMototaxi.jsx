@@ -1,122 +1,218 @@
-// Versión Arquitectura: V11.2 - Patrón Unificado: FIRESTORE_PATHS.rides y Saneamiento Monetario
-// Refactorización Estética: Cyber-Neo-Brutalismo Puro (Alta Visibilidad y Estructura Rígida)
-import React, { useState, useEffect } from 'react';
+// Versión Arquitectura: V13.0 - Migración Híbrida REST API / Firestore con Resiliencia NoSQL y Rediseño CIMCO-UI Glassmorphism
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HistorialMototaxi.jsx
+ * Misión: Renderizar la bitácora de rutas completadas en la red de mototaxi consumiendo la API REST de Express/MongoDB
+ *        con fallback resiliente a Firestore y ordenamiento en memoria para mitigar ausencias de índices compuestos.
+ * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Acento Cían/Esmeralda).
+ * Ajuste V13.0: Implementación del patrón de carga híbrido REST/NoSQL, saneamiento de errores de índice y erradicación del estilo brutalista.
+ */
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import api, { VIAJES_ENDPOINTS } from '@/config/api';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
-import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
-import { FileText, MapPin, CheckCircle, Loader } from 'lucide-react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { FileText, MapPin, CheckCircle, Loader, AlertTriangle, RefreshCw, Bike } from 'lucide-react';
 
 const HistorialMototaxi = () => {
     const { user } = useAuth();
     const [historial, setHistorial] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [retryCount, setRetryCount] = useState(0);
 
-    // 🛡️ Blindaje Profesional: Normalización de visualización operativa
+    // 🛡️ Blindaje Profesional: Normalización de visualización operativa (Anti-Undefined)
     const formatDireccion = (data) => {
         if (!data) return "Ubicación no especificada";
         if (typeof data === 'string') return data;
-        return data.direccion || data.address || data.nombre || (data.lat && data.lng ? `${data.lat.toFixed(4)}, ${data.lng.toFixed(4)}` : "S/D");
+        return data.direccion || data.address || data.nombre || (data.lat && data.lng ? `${Number(data.lat).toFixed(4)}, ${Number(data.lng).toFixed(4)}` : "S/D");
     };
 
-    useEffect(() => {
-        const fetchHistorial = async () => {
-            if (!user?.uid) {
+    const formatFecha = (fecha) => {
+        if (!fecha) return null;
+        if (typeof fecha === 'object' && fecha?.seconds) {
+            return new Date(fecha.seconds * 1000).toLocaleDateString('es-CO');
+        }
+        const parsed = new Date(fecha);
+        return isNaN(parsed.getTime()) ? null : parsed.toLocaleDateString('es-CO');
+    };
+
+    const fetchHistorial = useCallback(async () => {
+        const conductorId = user?.uid || user?.id || user?._id;
+        if (!conductorId) {
+            setLoading(false);
+            return;
+        }
+
+        setLoading(true);
+        setError(null);
+
+        // 📡 1. INTENTO DE CONSULTA EN API REST DE MONGODB CORE
+        try {
+            const rawEndpoint = VIAJES_ENDPOINTS?.historial || '/viajes/historial';
+            const cleanEndpoint = rawEndpoint.replace(/^\/api/, '');
+            const endpoint = `${cleanEndpoint}?conductorId=${conductorId}&tipoServicio=mototaxi`;
+
+            const res = await api.get(endpoint);
+            const viajesRest = res?.data?.viajes || (Array.isArray(res?.data) ? res.data : null);
+
+            if (res?.data?.success && Array.isArray(res?.data?.viajes)) {
+                setHistorial(res.data.viajes);
+                setLoading(false);
+                return;
+            } else if (Array.isArray(viajesRest)) {
+                setHistorial(viajesRest);
                 setLoading(false);
                 return;
             }
-            try {
-                // Uso de FIRESTORE_PATHS para evitar Hardcoding de colecciones
-                const q = query(
-                    collection(db, FIRESTORE_PATHS.rides || 'rides'),
-                    where('conductorId', '==', user.uid),
-                    where('estado', '==', 'COMPLETADO'),
-                    orderBy('fechaCreacion', 'desc')
-                );
-                const snapshot = await getDocs(q);
-                setHistorial(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            } catch (error) {
-                console.error("❌ [CIMCO-LOG-ERROR] Fallo en la sincronización de historial:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
+        } catch (err) {
+            console.warn("⚠️ [CIMCO-HISTORIAL-REST] Fallo en API REST Express, ejecutando respaldo Firestore:", err?.message || err);
+        }
 
-        fetchHistorial();
+        // 🔄 2. FALLBACK SECUNDARIO NOSQL (FIRESTORE) CON ORDENAMIENTO EN MEMORIA
+        try {
+            const pathColeccion = FIRESTORE_PATHS?.rides || FIRESTORE_PATHS?.viajes || 'rides';
+            const q = query(
+                collection(db, pathColeccion),
+                where('conductorId', '==', conductorId),
+                where('estado', '==', 'COMPLETADO')
+            );
+
+            const snapshot = await getDocs(q);
+            const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            // Ordenamiento en memoria para evitar fallos por índices compuestos no provistos en la consola de Firebase
+            docs.sort((a, b) => {
+                const getTime = (val) => {
+                    if (!val) return 0;
+                    if (typeof val === 'object' && val?.seconds) return val.seconds * 1000;
+                    if (typeof val === 'number') return val;
+                    const t = new Date(val).getTime();
+                    return isNaN(t) ? 0 : t;
+                };
+                return getTime(b.fechaCreacion || b.createdAt) - getTime(a.fechaCreacion || a.createdAt);
+            });
+
+            setHistorial(docs);
+        } catch (noSqlErr) {
+            console.error("❌ [CIMCO-CRITICAL-HISTORIAL] Fallo en fallback NoSQL:", noSqlErr);
+            setError("No se pudo sincronizar la bitácora con el servidor central.");
+        } finally {
+            setLoading(false);
+        }
     }, [user]);
 
-    return (
-        <div className="min-h-screen bg-[#0e0e11] font-mono text-zinc-100 p-6 flex flex-col gap-6 selection:bg-cyan-400 selection:text-black">
-            
-            {/* 🔝 ENCABEZADO: Bloque Masivo Cyber-Brutalist */}
-            <header className="flex items-center gap-4 bg-zinc-900 border-4 border-black p-4 shadow-[4px_4px_0px_0px_#000] rounded-none">
-                <div className="p-2.5 bg-cyan-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_#000] shrink-0">
-                    <FileText size={24} strokeWidth={2.5} />
-                </div>
-                <div>
-                    <h1 className="text-xl font-black uppercase tracking-widest text-white leading-none">Historial de Rutas</h1>
-                    <p className="text-[10px] text-cyan-400 uppercase tracking-wider font-bold mt-1">Bitácora de servicios completados en red mototaxi</p>
-                </div>
-            </header>
+    useEffect(() => {
+        fetchHistorial();
+    }, [fetchHistorial, retryCount]);
 
-            {/* 📊 CONTENEDOR DE REGISTROS CRÍTICOS */}
-            <div className="space-y-6">
-                {loading ? (
-                    <div className="flex items-center justify-center gap-3 bg-zinc-900 border-4 border-black p-6 font-black text-xs uppercase tracking-widest text-zinc-400 shadow-[4px_4px_0px_0px_#000]">
-                        <Loader size={16} className="animate-spin text-cyan-400" /> Sincronizando registros perimetrales...
-                    </div>
-                ) : historial.length === 0 ? (
-                    <div className="bg-zinc-900 p-8 border-4 border-black text-center shadow-[4px_4px_0px_0px_#000] rounded-none">
-                        <p className="text-zinc-500 uppercase text-xs tracking-widest font-black">Sin registros operativos recientes.</p>
-                    </div>
-                ) : (
-                    historial.map(viaje => (
-                        <div 
-                            key={viaje.id} 
-                            className="bg-zinc-900 p-5 border-4 border-black flex flex-col gap-4 shadow-[4px_4px_0px_0px_#000] rounded-none hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#000] transition-all duration-150"
-                        >
-                            {/* Bloque superior financiero del servicio */}
-                            <div className="flex justify-between items-center border-b-4 border-black pb-4">
-                                <div>
-                                    <p className="text-[10px] text-zinc-400 uppercase tracking-widest font-black">Tarifa Recaudada</p>
-                                    <p className="text-lg font-black text-emerald-400 tracking-tight">
-                                        ${(parseFloat(viaje.tarifa || viaje.oferta) || 0).toLocaleString()} COP
-                                    </p>
-                                </div>
-                                <div className="flex items-center gap-1.5 text-black bg-emerald-400 border-2 border-black px-3 py-1 font-black uppercase tracking-wider text-[10px] shadow-[2px_2px_0px_0px_#000] select-none">
-                                    <CheckCircle size={12} strokeWidth={3} />
-                                    <span>Completado</span>
-                                </div>
-                            </div>
-                            
-                            {/* Panel Georreferenciado Rígido */}
-                            <div className="space-y-3 bg-black/40 p-3 border-2 border-black">
-                                <div className="flex items-start gap-2.5 text-xs text-zinc-200">
-                                    <MapPin size={14} className="text-zinc-500 shrink-0 mt-0.5" strokeWidth={2.5} />
-                                    <span className="text-[11px] leading-tight">
-                                        <strong className="text-zinc-500 uppercase text-[9px] block font-black tracking-wider mb-0.5">Origen / Base:</strong> 
-                                        {formatDireccion(viaje.origen)}
-                                    </span>
-                                </div>
-                                <div className="border-t border-dashed border-zinc-800 my-1"></div>
-                                <div className="flex items-start gap-2.5 text-xs text-zinc-200">
-                                    <MapPin size={14} className="text-cyan-400 shrink-0 mt-0.5" strokeWidth={2.5} />
-                                    <span className="text-[11px] leading-tight">
-                                        <strong className="text-cyan-400 uppercase text-[9px] block font-black tracking-wider mb-0.5">Destino Final:</strong> 
-                                        {formatDireccion(viaje.destino)}
-                                    </span>
-                                </div>
-                            </div>
-                            
-                            {/* Metadata Estructural del Documento */}
-                            <div className="flex justify-between items-center text-[9px] text-zinc-500 font-bold uppercase tracking-wider mt-1">
-                                <span>ID: TAXIA-...{String(viaje.id).slice(-6).toUpperCase()}</span>
-                                {viaje.fechaCreacion && (
-                                    <span>REG: {new Date(viaje.fechaCreacion.seconds * 1000).toLocaleDateString()}</span>
-                                )}
-                            </div>
+    const handleReintentar = () => {
+        setRetryCount(prev => prev + 1);
+    };
+
+    return (
+        <div className="min-h-screen bg-[#09090b] font-mono text-zinc-100 p-4 md:p-8 relative overflow-hidden selection:bg-cyan-500/20 selection:text-cyan-400">
+            {/* Gradiente ambiental premium */}
+            <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-cyan-500/5 rounded-full blur-[130px] pointer-events-none" />
+
+            <div className="w-full max-w-4xl mx-auto relative z-10 flex flex-col gap-6">
+                {/* 🔝 ENCABEZADO: Glassmorphic Premium UI */}
+                <header className="backdrop-blur-md bg-[#121214]/80 p-5 rounded-2xl border border-white/5 flex items-center justify-between gap-4 shadow-xl">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 shrink-0">
+                            <FileText size={20} />
                         </div>
-                    ))
-                )}
+                        <div>
+                            <h1 className="text-xl font-black uppercase tracking-widest text-white flex items-center gap-2">
+                                Historial Mototaxi
+                            </h1>
+                            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-bold mt-0.5">Bitácora de servicios completados en red urbana</p>
+                        </div>
+                    </div>
+                    <div className="hidden sm:flex items-center gap-2 bg-zinc-950/60 px-3 py-1.5 rounded-xl border border-white/5 text-[9px] text-zinc-400 uppercase font-bold tracking-widest">
+                        <Bike size={12} className="text-cyan-400" />
+                        <span>{historial?.length || 0} Rutas</span>
+                    </div>
+                </header>
+
+                {/* 📊 CONTENEDOR DE REGISTROS CRÍTICOS */}
+                <div className="space-y-4">
+                    {error ? (
+                        <div className="backdrop-blur-md bg-red-500/5 p-6 rounded-2xl border border-red-500/20 text-center flex flex-col items-center gap-3 shadow-xl">
+                            <AlertTriangle className="text-red-500" size={28} />
+                            <p className="text-zinc-300 text-xs uppercase tracking-wide max-w-xs">{error}</p>
+                            <button 
+                                onClick={handleReintentar}
+                                className="flex items-center gap-2 bg-zinc-900 border border-white/10 hover:border-cyan-500/40 text-[10px] text-zinc-400 hover:text-white uppercase font-bold py-2 px-4 rounded-xl transition-all active:scale-95 cursor-pointer"
+                            >
+                                <RefreshCw size={12} /> Reintentar Conexión
+                            </button>
+                        </div>
+                    ) : loading ? (
+                        <div className="h-64 backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl flex items-center justify-center gap-3 text-zinc-400 text-xs uppercase tracking-widest shadow-xl">
+                            <Loader size={18} className="animate-spin text-cyan-400" /> Sincronizando registros perimetrales...
+                        </div>
+                    ) : historial.length === 0 ? (
+                        <div className="h-64 backdrop-blur-md bg-[#121214]/40 border border-white/5 rounded-2xl flex flex-col items-center justify-center gap-2 text-center p-6 shadow-xl">
+                            <FileText className="text-zinc-600" size={32} />
+                            <p className="text-zinc-500 uppercase text-xs tracking-widest font-bold">Sin registros operativos recientes.</p>
+                            <p className="text-[10px] text-zinc-600 uppercase tracking-wider">No se detectan servicios completados asignados a tu nodo.</p>
+                        </div>
+                    ) : (
+                        historial.map(viaje => {
+                            const tarifaCalculada = parseFloat(viaje.tarifa || viaje.oferta || viaje.valor || viaje.precio || 0);
+                            const fechaFormat = formatFecha(viaje.fechaCreacion || viaje.createdAt);
+
+                            return (
+                                <div 
+                                    key={viaje.id || viaje._id} 
+                                    className="backdrop-blur-md bg-[#121214]/80 p-5 rounded-2xl border border-white/5 flex flex-col gap-4 shadow-lg hover:border-white/10 hover:bg-[#121214]/90 transition-all duration-200"
+                                >
+                                    {/* Bloque superior financiero del servicio */}
+                                    <div className="flex justify-between items-start border-b border-white/5 pb-3">
+                                        <div>
+                                            <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold">Tarifa Recaudada</p>
+                                            <p className="text-lg font-black text-emerald-400 tracking-tight mt-0.5">
+                                                ${tarifaCalculada.toLocaleString()} <span className="text-[10px] text-zinc-500 font-normal">COP</span>
+                                            </p>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider text-[10px] shadow-[0_0_10px_rgba(16,185,129,0.05)]">
+                                            <CheckCircle size={12} />
+                                            <span>Completado</span>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Panel Georreferenciado */}
+                                    <div className="space-y-2.5 bg-zinc-950/50 p-3 rounded-xl border border-white/5">
+                                        <div className="flex items-start gap-2 text-xs text-zinc-300">
+                                            <MapPin size={14} className="text-zinc-500 shrink-0 mt-0.5" />
+                                            <span className="text-[11px] leading-tight">
+                                                <strong className="text-zinc-500 uppercase text-[9px] block font-black tracking-wider mb-0.5">Origen / Base:</strong> 
+                                                {formatDireccion(viaje.origen)}
+                                            </span>
+                                        </div>
+                                        <div className="border-t border-dashed border-white/5 my-1"></div>
+                                        <div className="flex items-start gap-2 text-xs text-zinc-300">
+                                            <MapPin size={14} className="text-cyan-400 shrink-0 mt-0.5" />
+                                            <span className="text-[11px] leading-tight">
+                                                <strong className="text-cyan-400 uppercase text-[9px] block font-black tracking-wider mb-0.5">Destino Final:</strong> 
+                                                {formatDireccion(viaje.destino)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Metadata Estructural del Documento */}
+                                    <div className="flex justify-between items-center text-[9px] text-zinc-500 font-bold uppercase tracking-wider">
+                                        <span>ID: TAXIA-...{String(viaje.id || viaje._id || '').slice(-6).toUpperCase()}</span>
+                                        {fechaFormat && (
+                                            <span>REG: {fechaFormat}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
             </div>
         </div>
     );

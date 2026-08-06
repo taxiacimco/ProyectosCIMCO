@@ -1,9 +1,9 @@
-// Versión Arquitectura: V16.0 - Integración Dual Backend Node.js/MongoDB y Fallback Firestore para Historial de Despachos
+// Versión Arquitectura: V16.1 - Saneamiento de Ruta REST sin Duplicidad de Prefijo /api
 /**
  * Ubicación: frontend\src\pages\despachador\HistorialDespachador.jsx
  * Misión: Renderizar la bitácora de arqueos y manifiestos de salida del despachador en tiempo real.
- * Ajuste V16.0: Conexión preferente a la API REST de Express/MongoDB (/api/viajes/despachador)
- * con fallback resiliente a Firestore NoSQL, normalización atómica de atributos y sincronización por WebSockets.
+ * Ajuste V16.1: Normalización de endpoint REST a /viajes/despachador/${idDespachador} eliminando prefijo redundante /api,
+ * evitando errores 404 y garantizando la lectura directa en MongoDB antes de requerir fallback en Firestore.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -13,7 +13,7 @@ import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestor
 import { formatDireccion } from '@/utils/formatters'; 
 import { FileText, Users, MapPin, Loader, Clock, AlertTriangle, RefreshCw } from 'lucide-react';
 import { formatFechaColombia } from '@/utils/dateFormatter';
-import api, { VIAJES_ENDPOINTS } from '@/config/api';
+import api from '@/config/api';
 import { useSocket } from '@/hooks/SocketContext';
 
 const HistorialDespachador = () => {
@@ -57,14 +57,14 @@ const HistorialDespachador = () => {
         };
     }, []);
 
-    // 🚀 Petición al Backend de Express/MongoDB
+    // 🚀 Petición al Backend de Express/MongoDB (Consumo corregido sin duplicar /api)
     const cargarHistorialBackend = useCallback(async () => {
         const idDespachador = user?._id || user?.id || user?.uid;
         if (!idDespachador) return false;
 
         try {
-            const endpoint = VIAJES_ENDPOINTS?.despachador || '/api/viajes/despachador';
-            const response = await api.get(`${endpoint}/${idDespachador}`);
+            // Corrección de la URL: api (Axios) ya contiene la base /api
+            const response = await api.get(`/viajes/despachador/${idDespachador}`);
 
             if (response?.data?.success && Array.isArray(response?.data?.data)) {
                 const listaNormalizada = response.data.data.map(normalizarDespacho);
@@ -84,7 +84,7 @@ const HistorialDespachador = () => {
             console.warn("⚠️ [CIMCO-HISTORIAL-REST] Backend Express inaccesible. Activando fallback NoSQL Firestore:", err?.message);
             return false;
         }
-    }, [user?._id, user?.id, user?.uid, normalizarDespacho]);
+    }, [user, normalizarDespacho]);
 
     // 📡 Listener de Respaldo en Firestore si Express falla
     const suscribirFirestore = useCallback(() => {
