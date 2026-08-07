@@ -1,8 +1,9 @@
-// Versión Arquitectura: V17.2 - Ampliación Perimetral CORS, Cabeceras Preflight y Red Local CIMCO Nexus
+// Versión Arquitectura: V17.4 - Inclusión de Dominio Producción Vercel, CORS Dinámico Perimetral y Soporte Multitransporte Socket.IO
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
- * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado, orquestación de sockets
- * e inyección del enrutador de Cooperativas (/api/cooperativas), Excel (/api/excel) junto con Pasajeros, Usuarios, Conductores y Viajes.
+ * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte explícito
+ * para frontend-taxia-cimco.vercel.app, orquestación de sockets e inyección del enrutador de Cooperativas (/api/cooperativas),
+ * Excel (/api/excel) junto con Pasajeros, Usuarios, Conductores y Viajes.
  */
 
 import 'dotenv/config';
@@ -29,8 +30,9 @@ const logLocal = (msg) => {
     console.log(`[${new Date().toLocaleString('es-CO')}] ${msg}`);
 };
 
-// 🌐 ORIGENES PERMITIDOS PARA DESARROLLO LOCAL, RED LOCAL, NGROK Y PRODUCCIÓN
+// 🌐 ORIGENES PERMITIDOS PARA DESARROLLO LOCAL, RED LOCAL, NGROK, CLOUDFLARE TUNNEL Y PRODUCCIÓN VERCEL
 const allowedOrigins = [
+  'https://frontend-taxia-cimco.vercel.app',
   'http://localhost:5173',
   'http://localhost:4173',
   'http://localhost:3000',
@@ -40,18 +42,29 @@ const allowedOrigins = [
   'http://192.168.100.34:4173',
   'http://192.168.100.34:3000',
   'https://globosely-appreciative-zander.ngrok-free.dev',
-  process.env.CLIENT_URL
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL,
+  process.env.CLOUDFLARE_TUNNEL_URL
 ].filter(Boolean);
+
+// 📡 EVALUADOR DE ORIGEN DINÁMICO CON VALIDACIÓN DE REGEX PARA PREVIEWS Y PRODUCCIÓN DE VERCEL
+const isOriginAllowed = (origin, callback) => {
+    if (!origin) return callback(null, true);
+
+    const isAllowed = allowedOrigins.includes(origin) ||
+        /\.vercel\.app$/.test(origin) ||
+        process.env.NODE_ENV !== 'production';
+
+    if (isAllowed) {
+        callback(null, true);
+    } else {
+        callback(new Error(`Bloqueado por política de seguridad CORS CIMCO-Core: ${origin}`));
+    }
+};
 
 // 📡 CONFIGURACIÓN MAESTRA DE CORS CON VALIDACIÓN DINÁMICA DE ORIGEN, CABECERAS Y CREDENCIALES
 const corsOptions = {
-    origin: function (origin, callback) {
-        if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
-            callback(null, true);
-        } else {
-            callback(new Error('Bloqueado por política de seguridad CORS CIMCO-Core'));
-        }
-    },
+    origin: isOriginAllowed,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: [
@@ -112,7 +125,7 @@ app.get('/api/usuarios/directorio-global', async (req, res) => {
       ...usuarios.map(u => ({ 
         ...u, 
         origenColeccion: 'usuarios', 
-        rolNormalizado: (u.rol || u.role || 'usuario').toLowerCase() 
+        rolNormalizado: (u?.rol || u?.role || 'usuario')?.toLowerCase() 
       })),
       ...pasajeros.map(p => ({ 
         ...p, 
@@ -128,8 +141,8 @@ app.get('/api/usuarios/directorio-global', async (req, res) => {
 
     res.json({ success: true, total: directorio.length, data: directorio });
   } catch (error) {
-    logLocal(`🚨 [DIRECTORIO-GLOBAL-ERROR] ${error.message}`);
-    res.status(500).json({ success: false, error: error.message });
+    logLocal(`🚨 [DIRECTORIO-GLOBAL-ERROR] ${error?.message || error}`);
+    res.status(500).json({ success: false, error: error?.message || error });
   }
 });
 
@@ -144,9 +157,12 @@ app.use('/api/pasajeros', pasajeroRoutes);
 app.use('/api/cooperativas', cooperativaRoutes);
 app.use('/api/excel', excelRoutes);
 
-// Sincronización de CORS para WebSockets (Socket.IO)
+// ⚡ SINCRONIZACIÓN DE CORS Y TRANSPORTE PARA WEBSOCKETS (SOCKET.IO)
 const io = new Server(httpServer, {
-    cors: corsOptions
+    cors: corsOptions,
+    transports: ['websocket', 'polling'],
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 inicializarSockets(io);
