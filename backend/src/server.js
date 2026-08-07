@@ -1,9 +1,10 @@
-// Versión Arquitectura: V17.4 - Inclusión de Dominio Producción Vercel, CORS Dinámico Perimetral y Soporte Multitransporte Socket.IO
+// Versión Arquitectura: V17.5 - Desacoplamiento de Arranque HTTP y Resiliencia en Conexión MongoDB Atlas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte explícito
  * para frontend-taxia-cimco.vercel.app, orquestación de sockets e inyección del enrutador de Cooperativas (/api/cooperativas),
  * Excel (/api/excel) junto con Pasajeros, Usuarios, Conductores y Viajes.
+ * Optimización V17.5: Arranque inmediato del servidor HTTP para garantizar disponibilidad en el puerto dinámico de Railway.
  */
 
 import 'dotenv/config';
@@ -193,6 +194,17 @@ app.use((req, res) => {
     });
 });
 
+// ==================================================================\\
+// 🚀 INICIALIZACIÓN PERIMETRAL DE RED Y CONEXIÓN A BASE DE DATOS
+// ==================================================================\\
+const PORT = process.env.PORT || 8080;
+
+// 1. Iniciar el servidor HTTP inmediatamente para responder a Railway y Healthchecks
+httpServer.listen(PORT, '0.0.0.0', () => {
+    logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo exitosamente en el puerto dinámico: ${PORT}`);
+});
+
+// 2. Proceso independiente de conexión a MongoDB Atlas
 const URI = process.env.MONGODB_URI;
 const opcionesConexion = {
     serverSelectionTimeoutMS: 10000,
@@ -203,7 +215,7 @@ const opcionesConexion = {
     w: 'majority'     
 };
 
-async function conectar() {
+async function conectarDB() {
     logLocal('📡 [CIMCO-DATABASE] Iniciando conexión blindada...');
     if (!URI) {
         console.error('⚠️ ALERTA DE ARQUITECTURA: MONGODB_URI no está definida en el entorno.');
@@ -212,15 +224,9 @@ async function conectar() {
     try {
         await mongoose.connect(URI, opcionesConexion);
         logLocal('✅ [CIMCO-DATABASE] ¡CONEXIÓN ESTABLECIDA EXITOSAMENTE con MongoDB Atlas!');
-        
-        const PORT = process.env.PORT || 3000;
-        httpServer.listen(PORT, '0.0.0.0', () => {
-            logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo exitosamente en el puerto dinámico: ${PORT}`);
-        });
     } catch (error) {
-        logLocal(`🚨 [CIMCO-DATABASE-FATAL] Error crítico de enlace en la capa persistente: ${error?.message || error}`);
-        process.exit(1);
+        logLocal(`🚨 [CIMCO-DATABASE-FATAL] Error de enlace en la capa persistente: ${error?.message || error}`);
     }
 }
 
-conectar();
+conectarDB();
