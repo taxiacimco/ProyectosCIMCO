@@ -1,4 +1,4 @@
-// Versión Arquitectura: V16.0 - Normalización Híbrida Adaptativa Anti-Mixed Content (CIMCO-RADAR LINK)
+// Versión Arquitectura: V16.1 - Normalización Híbrida Adaptativa VITE_BACKEND_URL & WSS (CIMCO-RADAR LINK)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\socket.js
  * Misión: Orquestador central de WebSockets adaptativo. Detecta automáticamente HTTPS/HTTP,
@@ -6,16 +6,20 @@
  */
 
 import { io } from 'socket.io-client';
-import { HOST_IP } from './api.js';
+import { HOST_IP } from '@/config/api.js';
 
 /**
  * 🔌 RESOLUCIÓN DINÁMICA DE ENDPOINT PARA WEBSOCKETS
  * Determina inteligentemente si debe usar WSS/HTTPS o WS/HTTP para prevenir el bloqueo por Mixed Content.
  */
 const DETERMINAR_SOCKET_URL = () => {
-    // 1. Prioridad: Variable de entorno explícita (útil para Vercel -> Railway)
+    // 1. Prioridad: Variables de entorno explícitas (Vite / Vercel -> Railway)
     if (import.meta.env.VITE_SOCKET_URL) {
         return import.meta.env.VITE_SOCKET_URL;
+    }
+
+    if (import.meta.env.VITE_BACKEND_URL) {
+        return import.meta.env.VITE_BACKEND_URL;
     }
 
     // 2. Detección en entorno de ejecución del navegador
@@ -36,7 +40,7 @@ const DETERMINAR_SOCKET_URL = () => {
     }
 
     // 3. Fallback Estándar de Red Local
-    return `http://${HOST_IP}:3000`;
+    return `http://${HOST_IP || 'localhost'}:3000`;
 };
 
 const SOCKET_URL = DETERMINAR_SOCKET_URL();
@@ -45,7 +49,7 @@ const isSecureProtocol = typeof window !== 'undefined' && window.location.protoc
 console.log(`📡 [CIMCO-SOCKET] Inicializando canal radial adaptativo en: ${SOCKET_URL} | Seguro: ${isSecureProtocol}`);
 
 export const socket = io(SOCKET_URL, {
-    autoConnect: false, // Evita conexiones zombis antes de autenticar al usuario[cite: 18]
+    autoConnect: false, // Evita conexiones zombis antes de autenticar al usuario
     reconnection: true,
     reconnectionAttempts: 15,
     reconnectionDelay: 1000,
@@ -53,8 +57,9 @@ export const socket = io(SOCKET_URL, {
     transports: ['websocket', 'polling'], // Polling de respaldo en redes móviles restrictivas (4G/5G)
     secure: isSecureProtocol, // Forzado dinámico de seguridad cifrada TLS
     rejectUnauthorized: false,
+    withCredentials: true,
     auth: (cb) => {
-        // Inyección dinámica de credenciales seguras en el apretón de manos (handshake)[cite: 18]
+        // Inyección dinámica de credenciales seguras en el apretón de manos (handshake)
         const token = localStorage.getItem('cimco_token') || localStorage.getItem('token');
         cb({ token });
     }

@@ -1,14 +1,14 @@
-// Versión Arquitectura: V15.6 - Proveedor de Sockets con Dependencias Finas Anti-Flicker
+// Versión Arquitectura: V15.7 - Importaciones @ Alias, Guardas Anti-Undefined y Sincronización de Contexto Sockets
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\SocketContext.jsx
  * Misión: Proveedor de Contexto Reactivo acoplado a la instancia centralizada V15.2.
- * Ajuste V15.6: Optimización de dependencias del useEffect basadas estrictamente en la identidad (userId/rol)
- *               para evitar reconexiones innecesarias ante mutaciones de saldo o perfil.
+ * Ajuste V15.7: Normalización de importaciones con alias '@', guardas anti-undefined en mutaciones
+ *               de rol/usuario y compatibilidad con ciclo de vida del socket.
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { socket } from '../config/socket';
-import { useAuth } from './useAuth';
+import { socket } from '@/config/socket';
+import { useAuth } from '@/hooks/useAuth';
 
 const SocketContext = createContext(null);
 
@@ -18,12 +18,12 @@ export const SocketProvider = ({ children }) => {
 
     // Extraemos la identidad única para evitar que mutaciones de saldo recarguen el listener
     const userId = user?.uid || user?._id || user?.id || user?.conductorId;
-    const userRole = (user?.rol || user?.role || 'despachador').toLowerCase().trim();
+    const userRole = (user?.rol || user?.role || 'despachador')?.toString()?.toLowerCase()?.trim() || 'despachador';
 
     useEffect(() => {
         // 🔒 CONTROL DE CONEXIÓN BASADO EN LA SESIÓN OPERATIVA DEL USUARIO
         if (userId) {
-            const tokenSeguro = localStorage.getItem('cimco_token');
+            const tokenSeguro = localStorage.getItem('cimco_token') || localStorage.getItem('token');
 
             console.log(`⚡ [CIMCO-SOCKET] Identidad activa detectada [UID: ${userId}]. Calibrando túnel duplex...`);
             
@@ -71,7 +71,7 @@ export const SocketProvider = ({ children }) => {
         }
 
         function onConnectError(err) {
-            console.error("❌ [CIMCO-SOCKET] Falló el apretón de manos (Handshake):", err.message);
+            console.error("❌ [CIMCO-SOCKET] Falló el apretón de manos (Handshake):", err?.message || err);
         }
 
         socket.on('connect', onConnect);
