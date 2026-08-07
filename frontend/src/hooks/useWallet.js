@@ -1,7 +1,7 @@
-// Versión Arquitectura: V8.1 - Estabilización de Dependencias useCallback y Control de Listener Firestore
+// Versión Arquitectura: V8.3 - Control Anti-Ráfaga con Memorización de Dependencias
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
- * Misión: Sincronización exacta y resiliente de saldo consultando MongoDB via REST API con redundancia en tiempo real vía Firestore, libre de ráfagas e inestabilidades.
+ * Misión: Sincronización exacta de saldo por rol con detención de bucles de re-renderizado, redundancia en tiempo real vía Firestore y resiliencia transaccional.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -13,11 +13,17 @@ import api from '@/config/api';
 export const useWallet = () => {
     const { user, actualizarEstadoLocal } = useAuth();
     
-    // Referencia mutable estable para evitar la recreación de callbacks y la destrucción cíclica del listener de Firestore
+    // Referencia mutable estable para evitar la recreación de callbacks y la destrucción cíclica de listeners
     const actualizarEstadoLocalRef = useRef(actualizarEstadoLocal);
     useEffect(() => {
         actualizarEstadoLocalRef.current = actualizarEstadoLocal;
     }, [actualizarEstadoLocal]);
+
+    // Referencia mutable estable para el usuario actual para evitar re-evaluaciones innecesarias en callbacks
+    const userRef = useRef(user);
+    useEffect(() => {
+        userRef.current = user;
+    }, [user]);
 
     // Asignación inicial resiliente con fallback a propiedades conocidas del usuario
     const [saldo, setSaldo] = useState(() => {
@@ -27,23 +33,44 @@ export const useWallet = () => {
     const [error, setError] = useState(null);
     const [isMutating, setIsMutating] = useState(false);
 
-    const idCrudo = user ? (user.uid || user._id || user.id || user.conductorId) : null;
+    const idCrudo = user ? (user.uid || user._id || user.id || user.conductorId || user.pasajeroId) : null;
     const idDocumentoUnificado = idCrudo ? String(idCrudo).trim() : null;
 
-    const coleccionDestino = (FIRESTORE_PATHS && FIRESTORE_PATHS.wallets) 
-        ? FIRESTORE_PATHS.wallets 
-        : ((FIRESTORE_PATHS && FIRESTORE_PATHS.conductores) ? FIRESTORE_PATHS.conductores : 'wallets');
+    // Normalización polimórfica del rol del usuario
+    const rolNormalizado = String(user?.rol || user?.role || user?.tipo || 'usuario').toLowerCase();
+
+    // Determinación dinámica de la colección de Firestore basada en el rol
+    const coleccionDestino = (() => {
+        if (rolNormalizado === 'conductor' && FIRESTORE_PATHS?.conductores) {
+            return FIRESTORE_PATHS.conductores;
+        }
+        if (rolNormalizado === 'pasajero' && FIRESTORE_PATHS?.pasajeros) {
+            return FIRESTORE_PATHS.pasajeros;
+        }
+        if (FIRESTORE_PATHS?.wallets) {
+            return FIRESTORE_PATHS.wallets;
+        }
+        return (FIRESTORE_PATHS?.usuarios) ? FIRESTORE_PATHS.usuarios : 'wallets';
+    })();
 
     /**
-     * 🌐 Consulta SSOT directa a la API REST de Node/MongoDB
-     * Memorizada exclusivamente sobre idDocumentoUnificado para prevenir bucles de refresco.
+     * 🌐 Consulta SSOT directa a la API REST de Node/MongoDB con enrutamiento dinámico por rol
+     * Memorizada sin dependencia directa del objeto `user` para prevenir bucles infinitos de consultas.
      */
     const obtenerSaldoDesdeBackend = useCallback(async () => {
         if (!idDocumentoUnificado) return null;
+        
+        // Determinación de la ruta API REST según el rol del usuario
+        let endpoint = `/conductores/${idDocumentoUnificado}`;
+        if (rolNormalizado === 'pasajero') {
+            endpoint = `/pasajeros/${idDocumentoUnificado}`;
+        } else if (rolNormalizado === 'admin' || rolNormalizado === 'usuario') {
+            endpoint = `/usuarios/${idDocumentoUnificado}`;
+        }
+
         try {
-            // Intentar consultar endpoint dedicado o de perfil
-            const respuesta = await api.get(`/conductores/${idDocumentoUnificado}`);
-            const datosBackend = respuesta.data?.conductor || respuesta.data?.user || respuesta.data;
+            const respuesta = await api.get(endpoint);
+            const datosBackend = respuesta.data?.conductor || respuesta.data?.pasajero || respuesta.data?.usuario || respuesta.data?.user || respuesta.data;
             
             const saldoBackend = datosBackend?.saldoWallet ?? datosBackend?.saldo ?? datosBackend?.balance ?? datosBackend?.billetera?.saldo;
 
@@ -56,10 +83,17 @@ export const useWallet = () => {
                 return saldoNumerico;
             }
         } catch (apiErr) {
+            // Manejo controlado y silencioso de respuestas 404 (recurso no existente en la colección específica)
+            if (apiErr.response?.status === 404) {
+                const currentUser = userRef.current;
+                const saldoFallback = Number(currentUser?.saldoWallet ?? currentUser?.saldo ?? currentUser?.balance ?? 0);
+                setSaldo(saldoFallback);
+                return saldoFallback;
+            }
             console.warn("⚠️ [CIMCO-WALLET] No se pudo obtener saldo via REST API (MongoDB):", apiErr.message);
         }
         return null;
-    }, [idDocumentoUnificado]);
+    }, [idDocumentoUnificado, rolNormalizado]);
 
     useEffect(() => {
         if (!idDocumentoUnificado) {
@@ -91,7 +125,7 @@ export const useWallet = () => {
                             }
                         }
                     } else {
-                        console.warn(`⚠️ [CIMCO-SYNC] Documento Firestore [${coleccionDestino}/${idDocumentoUnificado}] inexistente. Conservando saldo de API REST.`);
+                        setLoading(false);
                     }
                     setLoading(false);
                 }, (err) => {
@@ -128,7 +162,8 @@ export const useWallet = () => {
             const respuestaBackend = await api.post('/wallet/debit', {
                 usuarioId: idDocumentoUnificado,
                 monto: montoDebito,
-                concepto: motivo
+                concepto: motivo,
+                rol: rolNormalizado
             });
 
             const nuevoSaldoApi = respuestaBackend.data?.nuevoSaldo ?? respuestaBackend.data?.saldo;
@@ -169,7 +204,7 @@ export const useWallet = () => {
                     }
                 });
             } catch (fsErr) {
-                console.warn("⚠️ [CIMCO-WALLET] Sync en Firestore falló o documento no existe, pero MongoDB actualizó correctamente:", fsErr.message);
+                console.warn("⚠️ [CIMCO-WALLET] Sync en Firestore falló o documento no existe:", fsErr.message);
             }
 
             setIsMutating(false);
