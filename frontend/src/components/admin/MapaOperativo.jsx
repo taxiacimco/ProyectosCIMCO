@@ -1,23 +1,22 @@
-// Versión Arquitectura: V17.4 - Escucha Multi-Evento, Movimiento Suave de Marcadores y Deduplicación Táctica
+// Versión Arquitectura: V17.6 - Estabilización Claves de Marcadores, Prevención Parpadeos Leaflet y Deduplicación Táctica
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
  * Misión: Despliegue táctico y renderizado de unidades mediante Leaflet.js enganchado a un amortiguador de alta frecuencia.
- * Ajuste V17.4: Integración del helper de deduplicación de entidades para filtrado estricto de marcadores.
+ * Ajuste V17.6: Sustitución de Math.random() por un identificador estable y unívoco (ID, Placa, Número Interno o Índice) para eliminar parpadeos de renderizado en Leaflet.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, query } from 'firebase/firestore';
-import { useSocket } from '@/hooks/SocketContext';
 import { useTelemetryThrottle } from '@/hooks/useTelemetryThrottle';
 import { Search, Signal, Activity, AlertCircle, Radio } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-// 🛡️ IMPORTANTE: Importación del helper de deduplicación
-import { deduplicarEntidades } from '../../utils/deduplicar';
+// 🛡️ Importación del helper de deduplicación
+import { deduplicarEntidades } from '@/utils/deduplicar';
 
-// 🛡️ Inicialización blindada y segura de marcadores para compatibilidad total en producción
+// 🛡️ Inicialización blindada de marcadores para Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -43,16 +42,15 @@ const createCustomIcon = (rol) => {
 };
 
 const MapaOperativo = ({ cooperativaFiltro = null }) => {
-    const { socket } = useSocket();
     const [busqueda, setBusqueda] = useState('');
     const [loading, setLoading] = useState(true);
     const [errorServicio, setErrorServicio] = useState(null);
     const isMounted = useRef(true);
 
-    // 🔥 Consola del Amortiguador Térmico (Delay óptimo de 2000ms para movimiento fluido y balance de CPU)
+    // 🔥 Amortiguador Térmico (Delay óptimo de 2000ms para movimiento fluido y balance de CPU)
     const [vehiculosSuaves, actualizarCoordenadas] = useTelemetryThrottle(2000);
     
-    // Guardamos la función en una referencia mutable para evitar re-suscripciones innecesarias en useEffect
+    // Guardamos la función en una referencia mutable para evitar re-suscripciones innecesarias
     const actualizarCoordenadasRef = useRef(actualizarCoordenadas);
     
     useEffect(() => {
@@ -66,7 +64,7 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         };
     }, []);
 
-    // CANAL 1: Sincronización en tiempo real desde Firestore (Persistencia y Estados Base)
+    // Sincronización en tiempo real desde Firestore (Persistencia y Telemetría Reactiva)
     useEffect(() => {
         setLoading(true);
         const pathUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
@@ -81,7 +79,7 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                     const lat = parseFloat(data?.latitud || data?.lat || data?.coords?.latitud || data?.position?.lat || data?.coordenadas?.lat);
                     const lng = parseFloat(data?.longitud || data?.lng || data?.coords?.longitud || data?.position?.lng || data?.coordenadas?.lng);
 
-                    // 🏢 REGLA MULTI-TENANT: Si hay un filtro de cooperativa activo, descartamos unidades de otras empresas
+                    // 🏢 REGLA MULTI-TENANT: Filtrado por cooperativa activa
                     if (cooperativaFiltro) {
                         const coopUnidad = data?.cooperativa || data?.empresa;
                         if (coopUnidad !== cooperativaFiltro) return;
@@ -117,53 +115,10 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         return () => unsubscribe();
     }, [cooperativaFiltro]);
 
-    // CANAL 2: Telemetría por WebSockets en caliente (Suscripción Multi-Evento)
-    useEffect(() => {
-        if (!socket) return;
-
-        const handleTelemetria = (data) => {
-            if (!isMounted.current || !data) return;
-            const conductorId = data?.vehiculoId || data?.conductorId || data?.id || data?.usuarioId;
-            const lat = parseFloat(data?.latitud || data?.lat || data?.position?.lat || data?.coordenadas?.lat);
-            const lng = parseFloat(data?.longitud || data?.lng || data?.position?.lng || data?.coordenadas?.lng);
-
-            if (!conductorId || isNaN(lat) || isNaN(lng)) return;
-
-            // 🏢 REGLA MULTI-TENANT OPTIMIZADA: Saneamiento estricto bajo contexto de cooperativa
-            const unidadExistente = vehiculosSuaves[conductorId];
-            const coopUnidad = data?.cooperativa || data?.empresa || unidadExistente?.cooperativa;
-
-            if (cooperativaFiltro && coopUnidad && coopUnidad !== cooperativaFiltro) {
-                return;
-            }
-
-            actualizarCoordenadasRef.current(conductorId, {
-                id: conductorId,
-                nombre: data?.nombre || data?.fullName || unidadExistente?.nombre || 'UNIDAD ACTIVA',
-                rol: (data?.rol || data?.role || unidadExistente?.rol || 'intermunicipal').toLowerCase().trim(),
-                placa: data?.placa || data?.vehiculo || unidadExistente?.placa || 'S/P',
-                numeroInterno: data?.numeroInterno || data?.interno || unidadExistente?.numeroInterno || 'S/I',
-                cooperativa: coopUnidad || cooperativaFiltro || 'S/C',
-                lat,
-                lng,
-                origenReporte: 'TELEMETRIA_WS'
-            });
-        };
-
-        // ⚡ REGISTRO DUAL DE EVENTOS: Soporta tanto el canal de radar central como el canal unificado de ubicación
-        socket.on('actualizar_ubicacion', handleTelemetria);
-        socket.on('telemetria_central_radar', handleTelemetria);
-
-        return () => {
-            socket.off('actualizar_ubicacion', handleTelemetria);
-            socket.off('telemetria_central_radar', handleTelemetria);
-        };
-    }, [socket, cooperativaFiltro, vehiculosSuaves]);
-
     // Conversión a matriz limpia y deduplicación táctica
     const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
     
-    // 🛡️ APLICAMOS DEDUPLICACIÓN ANTES DE FILTRAR Y RENDERIZAR
+    // 🛡️ Aplicamos deduplicación antes de filtrar y renderizar
     const marcadoresUnicos = typeof deduplicarEntidades === 'function' 
         ? deduplicarEntidades(listaMarcadoresSuaves)
         : listaMarcadoresSuaves;
@@ -220,8 +175,9 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                     />
 
-                    {filtrados.map((m) => {
-                        const keyMarker = m.id || `marker-throt-${Math.random()}`;
+                    {filtrados.map((m, index) => {
+                        // 🛡️ ESTABILIZACIÓN DE CLAVE: Fallback predecible evitan desmontado innecesario y parpadeos en Leaflet
+                        const keyMarker = m.id || m.placa || m.numeroInterno || `marker-throt-${index}`;
 
                         return (
                             <Marker 
@@ -248,7 +204,7 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                                             </div>
                                             <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
                                                 <span className="text-zinc-500">ORIGEN FEED:</span>
-                                                <span className={`font-bold ${m.origenReporte === 'TELEMETRIA_WS' ? 'text-emerald-400' : 'text-yellow-500'}`}>
+                                                <span className="text-emerald-400 font-bold">
                                                     {m.origenReporte}
                                                 </span>
                                             </div>
@@ -271,7 +227,7 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                     })}
                 </MapContainer>
 
-                {/* ANIMACIÓN DE ESCANEO DE RED COMPATIBLE CON MÁSCARA DEL MAPA */}
+                {/* ANIMACIÓN DE ESCANEO DE RED */}
                 {loading && (
                     <div className="absolute inset-0 z-[500] backdrop-blur-md bg-[#121214]/60 flex flex-col items-center justify-center gap-2">
                         <Activity className="text-orange-500 animate-spin" size={24} />
@@ -288,7 +244,6 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                 .custom-popup .leaflet-popup-tip-container { display: none; }
                 .custom-popup .leaflet-popup-content { margin: 0; width: auto !important; }
                 
-                /* Smooth Transition para desplazamiento fluido de marcadores en el mapa */
                 .smooth-marker-transition {
                     transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
                 }

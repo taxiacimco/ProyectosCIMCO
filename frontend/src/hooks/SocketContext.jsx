@@ -1,40 +1,34 @@
-// Versión Arquitectura: V15.7 - Importaciones @ Alias, Guardas Anti-Undefined y Sincronización de Contexto Sockets
+// Versión Arquitectura: V15.8 - Separación HMR Compliant de Contexto y Provider
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\SocketContext.jsx
- * Misión: Proveedor de Contexto Reactivo acoplado a la instancia centralizada V15.2.
- * Ajuste V15.7: Normalización de importaciones con alias '@', guardas anti-undefined en mutaciones
- *               de rol/usuario y compatibilidad con ciclo de vida del socket.
+ * Misión: Proveedor de Contexto Reactivo acoplado a la instancia centralizada.
  */
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useEffect, useState } from 'react';
 import { socket } from '@/config/socket';
 import { useAuth } from '@/hooks/useAuth';
 
-const SocketContext = createContext(null);
+export const SocketContext = createContext(null);
 
 export const SocketProvider = ({ children }) => {
     const { user } = useAuth();
     const [isConnected, setIsConnected] = useState(socket.connected);
 
-    // Extraemos la identidad única para evitar que mutaciones de saldo recarguen el listener
     const userId = user?.uid || user?._id || user?.id || user?.conductorId;
     const userRole = (user?.rol || user?.role || 'despachador')?.toString()?.toLowerCase()?.trim() || 'despachador';
 
     useEffect(() => {
-        // 🔒 CONTROL DE CONEXIÓN BASADO EN LA SESIÓN OPERATIVA DEL USUARIO
         if (userId) {
             const tokenSeguro = localStorage.getItem('cimco_token') || localStorage.getItem('token');
 
             console.log(`⚡ [CIMCO-SOCKET] Identidad activa detectada [UID: ${userId}]. Calibrando túnel duplex...`);
             
-            // 🔑 INYECCIÓN EN CALIENTE DE PARÁMETROS DE HANDSHAKE (Evita fugas de contexto)
             socket.io.opts.query = {
                 token: tokenSeguro,
                 uid: userId,
                 rol: userRole
             };
 
-            // Asegura que el backend reciba las credenciales en el objeto 'auth' del handshake
             socket.auth = {
                 token: tokenSeguro,
                 uid: userId
@@ -47,13 +41,11 @@ export const SocketProvider = ({ children }) => {
                 };
             }
 
-            // 🔄 FORCE HANDSHAKE: Forzar ciclo de reinicio de conexión solo al cambiar identidad
             if (socket.connected) {
                 socket.disconnect();
             }
             socket.connect();
         } else {
-            // 🧹 PURGA PREVENTIVA: Si no hay usuario en sesión, terminamos la conexión
             if (socket.connected) {
                 console.log("🧹 [CIMCO-SOCKET] Desconexión explícita forzada por ausencia de sesión.");
                 socket.disconnect();
@@ -83,19 +75,11 @@ export const SocketProvider = ({ children }) => {
             socket.off('disconnect', onDisconnect);
             socket.off('connect_error', onConnectError);
         };
-    }, [userId, userRole]); // ⚡ DEPENDENCIAS FINAS: Previene reconexiones por cambios de saldo/perfil
+    }, [userId, userRole]);
 
     return (
         <SocketContext.Provider value={{ socket, isConnected }}>
             {children}
         </SocketContext.Provider>
     );
-};
-
-export const useSocket = () => {
-    const context = useContext(SocketContext);
-    if (!context) {
-        throw new Error('🚨 [CIMCO-CONTEXT-ERR] useSocket debe ser utilizado strictly dentro de un SocketProvider.');
-    }
-    return context;
 };

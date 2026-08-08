@@ -1,21 +1,21 @@
-// Versión Arquitectura: V16.1 - Sustitución de Lecturas Firestore por Hook Unificado useWallet y Optimización de Listeners
+// Versión Arquitectura: V16.2 - Corrección de Importación Alias @/hooks/useSocket y Sincronización WSS Principal
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones, calcomanía QR de autogestión,
  * monitoreo de saldo operativo y despliegue del radar satelital en tiempo real para las unidades de la cooperativa autorizada.
- * Ajuste V16.1: Integración del Hook Unificado `useWallet.js` para centralizar el flujo de datos financieros y de saldo,
- * eliminando lecturas/listeners duplicados e independientes a Firestore para mitigar el consumo innecesario de memoria y cuotas NoSQL.
+ * Ajuste V16.2: Reemplazo de la importación relativa/inconsistente por el hook unificado `@/hooks/useSocket`,
+ * garantizando que las emisiones de despacho y monitoreo viajen centralizadas por la conexión WebSocket activa.
  */
 
 import React, { useEffect, useState } from "react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db, FIRESTORE_PATHS } from "@/config/firebase"; 
 import { useAuth } from "@/hooks/useAuth";
-import { useSocket } from "@/hooks/SocketContext"; 
+import { useSocket } from "@/hooks/useSocket"; 
 import { useWallet } from "@/hooks/useWallet";
 import api, { VIAJES_ENDPOINTS } from "@/config/api"; 
 import { Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, QrCode, Download, Map, Settings, Wallet } from "lucide-react";
-import { formatHoraColombia } from '@/utils/dateFormatter';
+import { formatHoraColombia } from "@/utils/dateFormatter";
 import { QRCodeSVG } from "qrcode.react"; 
 
 // 🗺️ IMPORTACIÓN DEL RADAR GPS OPERATIVO DE CONFLICTOS DE RENDIMIENTO
@@ -24,12 +24,15 @@ import ModalEditarPerfil from "@/components/shared/ModalEditarPerfil";
 
 const HomeDespachador = () => {
   // 🛡️ Guardas de Seguridad y Consumo del Contexto Centralizado
-  const authContext = useAuth();
+  const authContext = useAuth ? useAuth() : {};
   const user = authContext?.user || null;
   const setUser = authContext?.setUser || null;
   const token = authContext?.token || localStorage.getItem("token") || user?.token || "";
   
-  const { socket, isConnected } = useSocket();
+  // 📡 Consumo Resiliente del Socket Centralizado
+  const socketContext = useSocket ? useSocket() : {};
+  const socket = socketContext?.socket || null;
+  const isConnected = socketContext?.isConnected ?? Boolean(socket?.connected);
 
   // 💳 CONSUMO DEL HOOK UNIFICADO USEWALLET (Centraliza el estado financiero y previene listeners duplicados NoSQL)
   const walletContext = useWallet ? useWallet() : {};
@@ -143,13 +146,20 @@ const HomeDespachador = () => {
       if (response?.data?.success || response?.data?.viaje || response?.status === 200 || response?.status === 201) {
         const viajeCreado = response?.data?.viaje || response?.data?.data || response?.data;
 
-        // 📡 Emisión WebSocket para sincronización en caliente del radar operativo
+        // 📡 Emisión WebSocket para sincronización en caliente del radar operativo mediante el canal centralizado
         if (socket && isConnected) {
           socket.emit("nuevo_viaje", {
             viaje: viajeCreado,
             payload: payloadInyeccion,
             cooperativa: cooperativaDespachador,
             timestamp: new Date().toISOString()
+          });
+
+          // Notificación / Alerta global de despacho radial
+          socket.emit("alerta_despacho_central", {
+            mensaje: `Nueva ruta asignada a la unidad ${conductorSeleccionado?.placaVehiculo || ''}`,
+            cooperativa: cooperativaDespachador,
+            conductorId: conductorSeleccionado?.id
           });
         }
 

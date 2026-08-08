@@ -1,22 +1,20 @@
-// Versión Arquitectura: V12.21 - Parche de Producción, Sockets Dinámicos y Desacoplamiento de Fallbacks
+// Versión Arquitectura: V12.23 - Integración de Socket Centralizado (useSocket)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Panel interactivo en tiempo real para el rol 'conductor' de Mototaxi con soporte multi-red, control transaccional e inyección de telemetría geoespacial.
- * Ajustes V12.21:
- * 1. Sustitución de URL Ngrok por variables de entorno de Vite (`import.meta.env.VITE_SOCKET_URL`).
- * 2. Remoción del ID de conductor mock ("MOCK_CONDUCTOR_JAGUA_01") y adición de guarda de desconexión preventiva.
- * 3. Normalización del endpoint API `/viajes/aceptar` eliminando prefijos duplicados.
- * 4. Encapsulamiento del botón "Simular Cierre Forzado" para despliegue exclusivo en entorno de desarrollo (`import.meta.env.DEV`).
- * 5. Captura y alerta interactiva de bloqueos/denegaciones de permisos GPS con apagado automático de red.
- * 6. Habilitación y vinculación del botón "Billetera" en el footer de navegación.
+ * Ajustes V12.23:
+ * 1. Remoción de la conexión socket aislada socket.io-client e instanciación manual io(BACKEND_URL).
+ * 2. Incorporación e integración del hook centralizado global @/hooks/useSocket.
+ * 3. Mapeo unificado de suscripciones, emisión de telemetría y desregistro sobre la instancia compartida 'socket'.
+ * 4. Preservación íntegra de la estética CIMCO-UI V9.3, validaciones transaccionales de saldo ($2.000 COP) y gobernanza de Firestore.
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { io } from 'socket.io-client';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
+import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api'; 
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
@@ -24,13 +22,11 @@ import {
   CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X
 } from 'lucide-react';
 
-// 1. Configuración dinámicamente acoplada a variables de entorno de Vite
-const BACKEND_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_BACKEND_URL || window.location.origin;
-
 export default function HomeMototaxi() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
   const { user, logout } = useAuth(); 
   const { walletData, loading: walletLoading } = useWallet();
+  const { socket, isConnected } = useSocket();
 
   const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "CIMCO CONDUCTOR";
   const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback); 
@@ -58,14 +54,24 @@ export default function HomeMototaxi() {
   const [historial, setHistorial] = useState([]);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
 
-  // Referencias para control perimetral de Sockets y Telemetría
-  const socketRef = useRef(null);
+  // Referencias para control de Telemetría GPS
   const geoWatchRef = useRef(null);
 
-  // 2. Recuperación estricta sin ID predeterminado MOCK
+  // Recuperación estricta sin ID predeterminado MOCK
   const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
   const token = localStorage.getItem('token') || user?.token;
-  const saldoVivo = walletData?.saldo || walletData?.balance || 0;
+
+  // Mapeo seguro con fallback de $20.000 COP en caso de indeterminación
+  const saldoVivo = Number(
+    user?.saldoWallet ?? 
+    user?.billetera?.saldo ?? 
+    user?.saldo ?? 
+    walletData?.saldo ?? 
+    walletData?.balance ?? 
+    20000
+  );
+
+  const puedeOperar = saldoVivo >= 2000;
 
   // 🛡️ Guarda de seguridad: Desconecta el estado online si no existe ID de conductor válido
   useEffect(() => {
@@ -102,64 +108,23 @@ export default function HomeMototaxi() {
   }, [user?.uid, nombreInicialFallback]);
 
   // ==================================================================
-  // 2. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA
+  // 2. TRANSMISIÓN DE TELEMETRÍA Y DESCONEXIÓN PERIMETRAL
   // ==================================================================
-  useEffect(() => {
-    if (isOnline) {
-      if (!conductorId) {
-        alert("⚠️ AUTENTICACIÓN REQUERIDA: No se detectó un identificador de conductor válido.");
-        setIsOnline(false);
-        return;
-      }
-
-      if (Number(saldoVivo) < 2000) {
-        alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en red.");
-        setIsOnline(false);
-        return;
-      }
-
-      console.log(`📡 [CIMCO-SOCKET] Inicializando canal reactivo hacia: ${BACKEND_URL}`);
-      
-      socketRef.current = io(BACKEND_URL, {
-        auth: { token },
-        transports: ['websocket']
-      });
-
-      socketRef.current.on('connect', () => {
-        console.log(`✅ [CIMCO-SOCKET] Conectado exitosamente con ID: ${socketRef.current.id}`);
-        socketRef.current.emit('registrar_conductor', { 
-          conductorId, 
-          tipoServicio: inputTipoServicio,
-          email: user?.email || localStorage.getItem('conductorEmail') || ''
-        });
-      });
-
-      socketRef.current.on('nueva_solicitud_viaje', (data) => {
-        console.log("🔥 [CIMCO-RADAR] ¡Alerta de viaje entrante detectada en el perímetro!", data);
-        if (!servicioActivo && !solicitudViaje) {
-          setSolicitudViaje(data);
-        }
-      });
-
-      socketRef.current.on('disconnect', () => {
-        console.log("⚠️ [CIMCO-SOCKET] Canal perimetral desconectado.");
-      });
-
-      iniciarTrackingGPS();
-
-    } else {
-      desconectarEcosistema();
+  const desconectarEcosistema = useCallback(() => {
+    if (geoWatchRef.current !== null) {
+      navigator.geolocation.clearWatch(geoWatchRef.current);
+      geoWatchRef.current = null;
+      console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
     }
+    if (socket && (socket.connected || isConnected)) {
+      if (conductorId) {
+        socket.emit('desactivar_conductor', { conductorId });
+      }
+      console.log("📡 [CIMCO-SOCKET] Notificación de desactivación enviada al socket unificado.");
+    }
+  }, [socket, isConnected, conductorId]);
 
-    return () => {
-      desconectarEcosistema();
-    };
-  }, [isOnline, conductorId, token, inputTipoServicio, saldoVivo]);
-
-  // ==================================================================
-  // 3. TRANSMISIÓN DE TELEMETRÍA CON MANEJO DE ERRORES DE PERMISO
-  // ==================================================================
-  const iniciarTrackingGPS = () => {
+  const iniciarTrackingGPS = useCallback(() => {
     if (!navigator.geolocation) {
       console.error("❌ [GPS-ERROR] Geolocalización no soportada por este navegador/dispositivo.");
       alert("⚠️ El navegador o dispositivo actual no soporta geolocalización.");
@@ -174,8 +139,8 @@ export default function HomeMototaxi() {
         const { latitude, longitude } = position.coords;
         setCoordenadas({ lat: latitude, lng: longitude });
 
-        if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('actualizar_radar_gps', {
+        if (socket && (socket.connected || isConnected)) {
+          socket.emit('actualizar_radar_gps', {
             conductorId,
             lat: latitude,
             lng: longitude
@@ -183,7 +148,6 @@ export default function HomeMototaxi() {
           console.log(`🎯 [RADAR-BURST] Coordenadas emitidas al ecosistema unificado: [${longitude}, ${latitude}]`);
         }
       },
-      // 5. Captura y respuesta inmediata ante denegación de permisos
       (error) => {
         console.error(`❌ [GPS-TRACKING-ERR] Código: ${error?.code} | ${error?.message}`);
         if (error?.code === error?.PERMISSION_DENIED) {
@@ -193,23 +157,72 @@ export default function HomeMototaxi() {
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
-  };
+  }, [socket, isConnected, conductorId]);
 
-  const desconectarEcosistema = () => {
-    if (geoWatchRef.current !== null) {
-      navigator.geolocation.clearWatch(geoWatchRef.current);
-      geoWatchRef.current = null;
-      console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
-    }
-    if (socketRef.current) {
-      if (conductorId) {
-        socketRef.current.emit('desactivar_conductor', { conductorId });
+  // ==================================================================
+  // 3. GOBERNANZA DEL CANAL WEBSOCKET CENTRALIZADO (useSocket)
+  // ==================================================================
+  useEffect(() => {
+    if (isOnline) {
+      if (!conductorId) {
+        alert("⚠️ AUTENTICACIÓN REQUERIDA: No se detectó un identificador de conductor válido.");
+        setIsOnline(false);
+        return;
       }
-      socketRef.current.disconnect();
-      socketRef.current = null;
-      console.log("📡 [CIMCO-SOCKET] Conexión de red purgada.");
+
+      if (!puedeOperar) {
+        alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en red.");
+        setIsOnline(false);
+        return;
+      }
+
+      if (!socket) {
+        console.warn("⚠️ [CIMCO-SOCKET] Instancia global de Socket no disponible en este momento.");
+        return;
+      }
+
+      console.log(`📡 [CIMCO-SOCKET] Suscribiendo a instancia global centralizada.`);
+
+      if (socket.connected || isConnected) {
+        socket.emit('registrar_conductor', { 
+          conductorId, 
+          tipoServicio: inputTipoServicio,
+          email: user?.email || localStorage.getItem('conductorEmail') || ''
+        });
+      }
+
+      const handleNuevaSolicitud = (data) => {
+        console.log("🔥 [CIMCO-RADAR] ¡Alerta de viaje entrante detectada en el perímetro!", data);
+        if (!servicioActivo && !solicitudViaje) {
+          setSolicitudViaje(data);
+        }
+      };
+
+      socket.on('nueva_solicitud_viaje', handleNuevaSolicitud);
+
+      iniciarTrackingGPS();
+
+      return () => {
+        socket.off('nueva_solicitud_viaje', handleNuevaSolicitud);
+        desconectarEcosistema();
+      };
+
+    } else {
+      desconectarEcosistema();
     }
-  };
+  }, [
+    isOnline, 
+    conductorId, 
+    inputTipoServicio, 
+    puedeOperar, 
+    socket, 
+    isConnected, 
+    servicioActivo, 
+    solicitudViaje, 
+    iniciarTrackingGPS, 
+    desconectarEcosistema, 
+    user?.email
+  ]);
 
   // ==================================================================
   // 4. PATRÓN HÍBRIDO RESILIENTE PARA HISTORIALES URBANOS
@@ -354,8 +367,8 @@ export default function HomeMototaxi() {
         fechaActualizacion: serverTimestamp()
       });
 
-      if (socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit('registrar_conductor', { 
+      if (socket && (socket.connected || isConnected)) {
+        socket.emit('registrar_conductor', { 
           conductorId, 
           tipoServicio: inputTipoServicio,
           email: user?.email || ''
@@ -370,10 +383,9 @@ export default function HomeMototaxi() {
     }
   };
 
-  // 3. Normalización del endpoint API `/viajes/aceptar`
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
-    if (Number(saldoVivo) < 2000) {
+    if (!puedeOperar) {
       alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para procesar despachos.");
       setSolicitudViaje(null);
       return;
@@ -404,7 +416,7 @@ export default function HomeMototaxi() {
   };
 
   const capturarOferta = async (viajeId) => {
-    if (Number(saldoVivo) < 2000) {
+    if (!puedeOperar) {
       alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para procesar despachos.");
       return;
     }
@@ -473,7 +485,7 @@ export default function HomeMototaxi() {
   return (
     <div className="min-h-screen bg-[#0e0e11] text-zinc-100 font-mono antialiased pb-28 relative selection:bg-cyan-400 selection:text-black">
       
-      {/* 🔝 ENCABEZADO DE CONTROL MAESTRO (CIMCO-UI V12.21 NEO-BRUTALIST) */}
+      {/* 🔝 ENCABEZADO DE CONTROL MAESTRO (CIMCO-UI V12.23 NEO-BRUTALIST) */}
       <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button 
@@ -491,7 +503,7 @@ export default function HomeMototaxi() {
               {nombreConductor} <Edit3 size={11} className="text-zinc-500 shrink-0" />
             </button>
             <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
-              <Signal size={10} className={isOnline ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
+              <Signal size={10} className={isOnline && (isConnected || socket?.connected) ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
               {isOnline ? 'CONECTADO' : 'OFFLINE'} 
               <span className="text-zinc-700">|</span> 
               <span className="text-zinc-400 text-[8px] bg-black px-1 border border-zinc-800">{inputPlaca || 'SIN PLACA'}</span>
@@ -532,7 +544,7 @@ export default function HomeMototaxi() {
       </header>
 
       {/* BANNER DE ALERTA DE SALDO */}
-      {Number(saldoVivo) < 2000 && !walletLoading && (
+      {!puedeOperar && !walletLoading && (
         <div className="m-4 p-3 bg-red-500 text-black border-4 border-black rounded-none flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider shadow-[4px_4px_0px_0px_#000] relative z-10 animate-pulse">
           <AlertCircle size={16} strokeWidth={2.5} className="shrink-0" />
           <span>Malla Bloqueada: Requiere Saldo Mínimo ($2.000 COP)</span>
@@ -685,7 +697,7 @@ export default function HomeMototaxi() {
                         </button>
                       )}
                       
-                      {/* 4. Mostrar botón de contingencia únicamente en Entorno de Desarrollo (DEV) */}
+                      {/* Mostrar botón de contingencia únicamente en Entorno de Desarrollo (DEV) */}
                       {import.meta.env.DEV && (
                         <button 
                           onClick={() => {
@@ -795,10 +807,10 @@ export default function HomeMototaxi() {
                               <div className="pt-1">
                                 <button 
                                   onClick={() => capturarOferta(oferta.id)}
-                                  disabled={Number(saldoVivo) < 2000}
+                                  disabled={!puedeOperar}
                                   className="w-full bg-cyan-400 text-black disabled:bg-zinc-800 disabled:border-zinc-700 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-none uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
                                 >
-                                  {Number(saldoVivo) < 2000 ? 'SALDO BLOQUEADO' : 'CAPTURAR OFERTA'}
+                                  {!puedeOperar ? 'SALDO BLOQUEADO' : 'CAPTURAR OFERTA'}
                                 </button>
                               </div>
                             </div>
@@ -895,7 +907,7 @@ export default function HomeMototaxi() {
         </div>
       )}
 
-      {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR (CIMCO-UI V12.21 NEO-BRUTALIST RIGID) */}
+      {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR (CIMCO-UI V12.23 NEO-BRUTALIST RIGID) */}
       <footer className="fixed bottom-0 left-0 w-full bg-zinc-900 border-t-4 border-black p-3 flex justify-around items-center z-50 shadow-[0_-4px_0px_0px_#000]">
         <button 
           onClick={() => setTabActiva('radar')}
@@ -912,7 +924,7 @@ export default function HomeMototaxi() {
           <span className="text-[9px] font-black uppercase tracking-wider">Historial</span>
         </button>
 
-        {/* 6. Botón Billetera activo con navegación habilitada */}
+        {/* Botón Billetera activo con navegación habilitada */}
         <button 
           onClick={() => window.location.href = '/wallet'}
           className="text-zinc-400 hover:text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95 cursor-pointer"

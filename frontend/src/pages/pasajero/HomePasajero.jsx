@@ -1,26 +1,25 @@
-// Versión Arquitectura: V14.8 - Integración de Hook Unificado useWallet para Migración y Eliminación de Listeners Duplicados de Firestore
+// Versión Arquitectura: V14.9 - Refactorización de Sockets con Hook Unificado useSocket
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Emisión activa de telemetría, solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS), edición de perfil, pasarela de billetera y selección avanzada de punto de recogida + destino.
- * Ajuste V14.8: Eliminación de listeners directos redundantes sobre el nodo de wallets en Firestore. Migración al hook unificado `useWallet` para centralizar la gestión de saldo y consumo de cuotas.
+ * Ajuste V14.9: Eliminación de importación e instanciación directa de `socket.io-client`. Consumo centralizado mediante el hook `useSocket`.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db, auth as firebaseAuth, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { signInAnonymously } from 'firebase/auth';
 import { useAuth } from '@/hooks/useAuth';
 import { useGpsGuard } from '@/hooks/useGpsGuard';
 import { useWallet } from '@/hooks/useWallet';
+import { useSocket } from '@/hooks/useSocket';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, DollarSign, Send, MessageSquare, Activity, Wallet, QrCode, Banknote, ShieldAlert, User, Edit3, X, CreditCard, Crosshair } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import GpsRequiredModal from '@/components/shared/GpsRequiredModal';
-import { API_CORE_URL } from '@/config/api'; 
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { io } from 'socket.io-client';
 
 // 🛡️ Reparación de Assets de Leaflet para entornos empaquetados por Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -67,6 +66,9 @@ const HomePasajero = () => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
     
+    // 🔌 Canal de Telemetría Sockets Centralizado mediante Hook Unificado
+    const { socket, isConnected } = useSocket();
+
     // 💳 Integración del Hook Unificado de Billetera (Sustituto de Listeners Firestore duplicados)
     const walletContext = useWallet();
     const saldoHook = typeof walletContext?.saldo === 'number' 
@@ -111,29 +113,38 @@ const HomePasajero = () => {
     const [inputNombre, setInputNombre] = useState('');
     const [inputTelefono, setInputTelefono] = useState('');
     const [montoRecargaSimulada, setMontoRecargaSimulada] = useState('20000');
-
-    const socketRef = useRef(null);
     
     const uidUsuario = user?.uid || user?.id || user?._id || 'ANÓNIMO';
     const idPasajeroCorto = String(uidUsuario).slice(0, 8);
 
-    // Conexión Dinámica de Sockets mapeada al Gateway del Core API
+    // 📡 Gestión de Eventos del Hook Unificado de Socket
     useEffect(() => {
-        const socketUrl = API_CORE_URL ? API_CORE_URL.replace('/api', '') : 'http://192.168.100.34:3000';
-        socketRef.current = io(socketUrl, {
-            transports: ['websocket'],
-            reconnectionAttempts: 5
-        });
+        if (!socket || !isConnected) return;
 
-        console.log(`📡 [CIMCO-SOCKETS] Canal de telemetría enganchado a gateway: ${socketUrl}`);
+        console.log("📡 [CIMCO-SOCKETS] Canal de telemetría activo en HomePasajero.");
 
-        return () => {
-            if (socketRef.current) {
-                socketRef.current.disconnect();
-                console.log("🔌 [CIMCO-SOCKETS] Canal de telemetría desconectado de forma segura.");
+        const handleActualizacionUbicacion = (data) => {
+            if (data?.conductorId) {
+                setConductoresActivos((prev) => {
+                    const existe = prev.some((c) => c.id === data.conductorId);
+                    if (existe) {
+                        return prev.map((c) => 
+                            c.id === data.conductorId 
+                                ? { ...c, coordenadas: { lat: data.lat, lng: data.lng } } 
+                                : c
+                        );
+                    }
+                    return prev;
+                });
             }
         };
-    }, []);
+
+        socket.on('ubicacion_conductor_actualizada', handleActualizacionUbicacion);
+
+        return () => {
+            socket.off('ubicacion_conductor_actualizada', handleActualizacionUbicacion);
+        };
+    }, [socket, isConnected]);
 
     // 🔄 Streaming reactivo de datos de perfil del Pasajero en Firestore (Optimizado sin duplicar wallet listeners)
     useEffect(() => {
@@ -354,6 +365,14 @@ const HomePasajero = () => {
             const docRef = await addDoc(collection(db, pathViajes), payload);
             setRideId(docRef.id);
             setEstadoViaje('BUSCANDO');
+
+            if (socket && isConnected) {
+                socket.emit('solicitar_viaje', {
+                    viajeId: docRef.id,
+                    ...payload
+                });
+            }
+
             console.log(`🚀 [CIMCO-LOGISTICS] Viaje creado con ID atómico: ${docRef.id}`);
         } catch (err) {
             console.error("❌ [LOGISTICS-ERROR] Desbordamiento en inserción de orden:", err);
@@ -371,6 +390,11 @@ const HomePasajero = () => {
                 estado: 'CANCELADO',
                 fechaCancelacion: serverTimestamp()
             });
+
+            if (socket && isConnected) {
+                socket.emit('cancelar_viaje', { viajeId: rideId, pasajeroId: uidUsuario });
+            }
+
             setEstadoViaje('IDLE');
             setRideId(null);
             setDatosConductor(null);
@@ -412,7 +436,7 @@ const HomePasajero = () => {
                     </div>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.8</span>
+                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.9</span>
                         </h1>
                         <div className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>

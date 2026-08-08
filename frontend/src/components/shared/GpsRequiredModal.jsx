@@ -1,6 +1,6 @@
-// Versión Arquitectura: V10.1 - PROD READY: Monitoreo Proactivo de Permisos, Prevención de Fugas de Memoria y Accesibilidad ARIA
+// Versión Arquitectura: V16.2 - Verificación de Hardware GPS, Monitoreo de Permisos y Cero Dependencias de Red
 /**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\shared\GpsRequiredModal.jsx
+ * Ubicación: frontend/src/components/shared/GpsRequiredModal.jsx
  * Misión: Bloqueo de UI perimetral cuando el GPS está inactivo. Despierta de manera quirúrgica el prompt nativo,
  * gestiona excepciones de hardware, previene fugas de memoria y monitorea proactivamente el estado del permiso.
  * Estética: CIMCO-UI Dark Mode Premium Glassmorphism (backdrop-blur-md, bg-[#121214]/90, border-white/10).
@@ -34,7 +34,7 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
 
     const verificarPermisoExistente = async () => {
       // Validar si el navegador soporta las APIs modernas de permisos y geolocalización
-      if (navigator.permissions && navigator.geolocation) {
+      if (navigator?.permissions && navigator?.geolocation) {
         try {
           const resultado = await navigator.permissions.query({ name: 'geolocation' });
           
@@ -48,7 +48,7 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
               });
             } else if (resultado.state === 'granted') {
               setErrorHardware(null);
-              if (onRetry) onRetry();
+              if (typeof onRetry === 'function') onRetry();
             }
           };
 
@@ -76,7 +76,7 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
     setErrorHardware(null);
     console.log("📡 [CIMCO-GPS-BRIDGE] Solicitando inicialización de hardware de geolocalización...");
 
-    if (!navigator.geolocation) {
+    if (!navigator?.geolocation) {
       if (isMounted.current) {
         setErrorHardware({
           titulo: "Dispositivo No Compatible",
@@ -94,28 +94,28 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
         if (isMounted.current) {
           setVerificando(false);
         }
-        if (onRetry) onRetry(); // Callback para re-renderizar mapas e hilos de despacho
+        if (typeof onRetry === 'function') onRetry(); // Callback para re-renderizar mapas e hilos de despacho
       },
       (error) => {
-        console.warn(`❌ [CIMCO-GPS-BRIDGE] Error de hardware detectado. Código: ${error.code}`);
+        console.warn(`❌ [CIMCO-GPS-BRIDGE] Error de hardware detectado. Código: ${error?.code}`);
         if (!isMounted.current) return;
         setVerificando(false);
         
         // 🚨 Mapeo granular de fallos de hardware para evitar bucles ciegos de reintento
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
+        switch (error?.code) {
+          case error?.PERMISSION_DENIED:
             setErrorHardware({
               titulo: "Permiso Denegado",
               mensaje: "Bloqueaste el acceso al GPS. Debes ir a la configuración de tu navegador/celular y permitir los permisos de ubicación para esta aplicación."
             });
             break;
-          case error.POSITION_UNAVAILABLE:
+          case error?.POSITION_UNAVAILABLE:
             setErrorHardware({
               titulo: "Señal Satelital Débil",
               mensaje: "No se pudo determinar la ubicación física. Verifica si el GPS del celular está encendido en la barra de notificaciones o si estás bajo techo."
             });
             break;
-          case error.TIMEOUT:
+          case error?.TIMEOUT:
             setErrorHardware({
               titulo: "Tiempo de Espera Agotado",
               mensaje: "El satélite tardó demasiado en responder. Intenta de nuevo desde un espacio más despejado."
@@ -129,7 +129,7 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
         }
         
         // Ejecución preventiva para notificar al componente padre del estado actual
-        if (onRetry) onRetry(); 
+        if (typeof onRetry === 'function') onRetry(); 
       },
       {
         enableHighAccuracy: true,
@@ -197,7 +197,7 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
         <button
           onClick={handleActivarGpsInApp}
           disabled={verificando}
-          className={`w-full flex items-center justify-center gap-2 py-3.5 px-4 text-neutral-950 font-bold text-xs uppercase tracking-widest rounded-xl transition-all duration-300 transform active:scale-98 shadow-lg ${
+          className={`w-full flex items-center justify-center gap-2 py-3.5 px-4 text-neutral-950 font-bold text-xs uppercase tracking-widest rounded-xl transition-all duration-300 transform active:scale-98 shadow-lg cursor-pointer ${
             errorHardware 
               ? 'bg-rose-400 hover:bg-rose-500 shadow-rose-500/10 active:bg-rose-500' 
               : 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20 active:bg-amber-600'

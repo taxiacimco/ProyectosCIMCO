@@ -1,4 +1,4 @@
-// Versión Arquitectura: V2.2 - Sincronización Transaccional Doble y Blindaje de Alias
+// Versión Arquitectura: V16.2 - Consolidación de Gestión de Perfil y Blindaje CIMCO-UI V9.3
 import React, { useState, useEffect } from "react";
 import { X, Save, Phone, User, Landmark, Loader2 } from "lucide-react";
 import api from "@/config/api";
@@ -82,10 +82,12 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
       const response = await api.put("/auth/update-profile", payloadFormat);
       
       if (response?.data?.success) {
-        if (onUpdateSuccess) {
+        if (typeof onUpdateSuccess === 'function') {
           onUpdateSuccess(response.data.user);
         }
-        onClose();
+        if (typeof onClose === 'function') {
+          onClose();
+        }
       }
     } catch (err) {
       console.error("❌ Error actualizando perfil:", err);
@@ -96,20 +98,24 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-md backdrop-blur-md bg-[#121214]/95 border border-white/10 rounded-3xl p-6 shadow-2xl space-y-6 relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="w-full max-w-md backdrop-blur-xl bg-[#121214]/90 border border-white/10 rounded-3xl p-6 shadow-2xl space-y-6 relative overflow-hidden">
         
+        {/* Glow Decorativo CIMCO-UI */}
+        <div className="absolute -top-10 -left-10 w-32 h-32 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-amber-600/10 rounded-full blur-3xl pointer-events-none" />
+
         {/* Botón Cerrar */}
         <button 
           onClick={onClose}
           type="button"
-          className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors"
+          className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors cursor-pointer"
         >
           <X size={20} />
         </button>
 
         {/* Cabecera del Modal */}
-        <div className="space-y-1">
+        <div className="space-y-1 text-left">
           <h2 className="text-sm font-black uppercase tracking-widest text-white">
             Configuración del Perfil
           </h2>
@@ -121,7 +127,7 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
         <form onSubmit={handleSubmit} className="space-y-4">
           
           {/* Campo: Nombre */}
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 text-left">
             <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
               <User size={12} className="text-zinc-500" /> Nombre Completo
             </label>
@@ -132,12 +138,12 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
               onChange={handleChange}
               required
               placeholder="Ej: Carlos Fuentes"
-              className="w-full bg-[#0c0c0e] border border-white/5 rounded-xl px-3 py-3 text-xs text-white outline-none focus:border-orange-500/40 transition-all font-mono placeholder:text-zinc-700"
+              className="w-full bg-[#0c0c0e]/80 border border-white/5 rounded-xl px-3 py-3 text-xs text-white outline-none focus:border-amber-500/50 transition-all font-mono placeholder:text-zinc-700"
             />
           </div>
 
           {/* Campo: Teléfono */}
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 text-left">
             <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
               <Phone size={12} className="text-zinc-500" /> Teléfono Móvil de Contacto
             </label>
@@ -149,13 +155,13 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
               required
               maxLength={10}
               placeholder="Ej: 3101234567"
-              className="w-full bg-[#0c0c0e] border border-white/5 rounded-xl px-3 py-3 text-xs text-white outline-none focus:border-orange-500/40 transition-all font-mono placeholder:text-zinc-700"
+              className="w-full bg-[#0c0c0e]/80 border border-white/5 rounded-xl px-3 py-3 text-xs text-white outline-none focus:border-amber-500/50 transition-all font-mono placeholder:text-zinc-700"
             />
           </div>
 
           {/* Campos condicionales para despachadores o perfiles que tengan asignados cooperativas */}
           {(user?.rol === 'despachador' || user?.role === 'despachador' || formData.cooperativa || formData.empresa) && (
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 text-left">
               <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Landmark size={12} className="text-zinc-500" /> Nombre de la Terminal / Cooperativa
               </label>
@@ -172,13 +178,13 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
                   }));
                 }}
                 placeholder="Ej: Terminal La Jagua"
-                className="w-full bg-[#0c0c0e] border border-white/5 rounded-xl px-3 py-3 text-xs text-white outline-none focus:border-orange-500/40 transition-all font-mono placeholder:text-zinc-700"
+                className="w-full bg-[#0c0c0e]/80 border border-white/5 rounded-xl px-3 py-3 text-xs text-white outline-none focus:border-amber-500/50 transition-all font-mono placeholder:text-zinc-700"
               />
             </div>
           )}
 
           {error && (
-            <p className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/20 p-2.5 rounded-xl font-mono uppercase tracking-wide">
+            <p className="text-[10px] text-rose-400 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-xl font-mono uppercase tracking-wide text-left">
               {error}
             </p>
           )}
@@ -187,14 +193,14 @@ const ModalEditarPerfil = ({ isOpen, onClose, user, onUpdateSuccess }) => {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 h-10 bg-zinc-950 hover:bg-zinc-900 border border-white/5 text-zinc-400 hover:text-white text-[9px] font-mono uppercase tracking-widest rounded-xl transition-all duration-200"
+              className="flex-1 h-10 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 text-zinc-400 hover:text-white text-[9px] font-mono uppercase tracking-widest rounded-xl transition-all duration-200 cursor-pointer"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 h-10 bg-orange-500 hover:bg-orange-400 disabled:bg-orange-500/50 text-zinc-950 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5"
+              className="flex-1 h-10 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <>

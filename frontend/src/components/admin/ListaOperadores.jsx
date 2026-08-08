@@ -1,10 +1,13 @@
-// Versión Arquitectura: V15.2 - Inyección de Encabezados de Autenticación Bearer JWT en Peticiones HTTP
+// Versión Arquitectura: V15.3 - Desacoplamiento de URLs de Entorno Local, Sincronización Reactiva Limpia y Estabilización de Keys
 /**
  * Ubicación: frontend\src\components\admin\ListaOperadores.jsx
  * Misión: Renderizar la malla de operadores recuperando registros desde el backend (MongoDB)
- *         a través del puerto 3000 con fallback a Firestore para garantizar la presencia de operadores registrados.
+ *         a través de la API central con fallback a Firestore para garantizar la presencia de operadores registrados.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajuste V15.2: Inyección del token Bearer de localStorage ('cimco_token') en cabeceras HTTP de handleAprobar y toggleEstado para evitar fallos 401 Unauthorized.
+ * Ajuste V15.3:
+ *   1. Reemplazo de URLs hardcodeadas ('http://localhost:3000') por la constante compartida API_BASE_URL.
+ *   2. Extracción de onSnapshot fuera de cualquier contexto asíncrono y retorno de función de limpieza directo en useEffect.
+ *   3. Eliminación de Math.random() en las keys de renderizado usando identificadores predecibles y estables.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -13,6 +16,10 @@ import { collection, onSnapshot, doc, updateDoc, query } from 'firebase/firestor
 import { Shield, ShieldAlert, UserCheck, UserX, Search, Loader, Database, CheckCircle, Hourglass } from 'lucide-react';
 // 🛡️ IMPORTANTE: Importación del helper de deduplicación
 import { deduplicarEntidades } from '@/utils/deduplicar';
+
+// ✅ Normalización de API_BASE_URL para evitar sufijos '/api' duplicados
+const RAW_API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+const API_BASE_URL = RAW_API_URL.replace(/\/api\/?$/, '');
 
 const normalizarEntidadUsuario = (idDoc, rawData = {}) => {
     const rolEstandar = (rawData?.rol || rawData?.role || rawData?.subrol || 'operador').toString().toLowerCase().trim();
@@ -42,79 +49,85 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
     const [errorFirestore, setErrorFirestore] = useState(null);
     const isMounted = useRef(true);
 
-    const cargarOperadores = async () => {
+    useEffect(() => {
+        isMounted.current = true;
+
         if (conductoresProp) {
             setLoading(false);
             return;
         }
 
-        isMounted.current = true;
         setLoading(true);
+        let unsubscribeFirestore = null;
 
-        try {
-            const token = localStorage.getItem('cimco_token');
-            const headers = {
-                'Content-Type': 'application/json',
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-            };
+        const syncOperadores = async () => {
+            try {
+                const token = localStorage.getItem('cimco_token');
+                const headers = {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                };
 
-            // Petición directa al Backend Express en el Puerto 3000
-            const response = await fetch('http://localhost:3000/api/conductores', { headers });
-            if (response.ok) {
-                const data = await response.json();
-                const listaMongo = Array.isArray(data) ? data : (data.conductores || data.data || []);
-                
-                if (isMounted.current) {
-                    const normalizados = listaMongo.map(u => normalizarEntidadUsuario(u._id || u.id, u));
+                // Petición directa al Backend Express vía API_BASE_URL
+                const response = await fetch(`${API_BASE_URL}/api/conductores`, { headers });
+                if (response.ok) {
+                    const data = await response.json();
+                    const listaMongo = Array.isArray(data) ? data : (data.conductores || data.data || []);
                     
-                    // 🛡️ APLICAMOS FILTRO ANTI-DUPLICADOS ANTES DE GUARDAR EN EL ESTADO
-                    const listaLimpia = deduplicarEntidades(normalizados);
+                    if (isMounted.current) {
+                        const normalizados = listaMongo.map(u => normalizarEntidadUsuario(u._id || u.id, u));
+                        
+                        // 🛡️ APLICAMOS FILTRO ANTI-DUPLICADOS ANTES DE GUARDAR EN EL ESTADO
+                        const listaLimpia = deduplicarEntidades(normalizados);
+
+                        setUsuariosLocal(listaLimpia);
+                        setLoading(false);
+                        setErrorFirestore(null);
+                        return; // ¡Carga exitosa desde MongoDB!
+                    }
+                }
+            } catch (err) {
+                console.warn("⚠️ [CIMCO-REST]: Fallo al consultar backend, recurriendo a Firestore...", err);
+            }
+
+            if (!isMounted.current) return;
+
+            // Fallback a Firestore si la API no responde
+            const pathColeccion = FIRESTORE_PATHS?.users || 'usuarios'; 
+            const q = query(collection(db, pathColeccion));
+            
+            unsubscribeFirestore = onSnapshot(q, 
+                (snapshot) => {
+                    if (!isMounted.current) return;
+                    const lista = snapshot.docs.map(docSnap => 
+                        normalizarEntidadUsuario(docSnap.id, docSnap.data())
+                    );
+                    
+                    // 🛡️ APLICAMOS FILTRO ANTI-DUPLICADOS TAMBIÉN EN EL FALLBACK DE FIRESTORE
+                    const listaLimpia = deduplicarEntidades(lista);
 
                     setUsuariosLocal(listaLimpia);
                     setLoading(false);
                     setErrorFirestore(null);
-                    return; // ¡Carga exitosa desde MongoDB!
+                }, 
+                (err) => {
+                    console.error("❌ [CIMCO-FIRESTORE-OPERADORES]:", err);
+                    if (isMounted.current) {
+                        setErrorFirestore("Fallo en la comunicación con el canal de seguridad.");
+                        setLoading(false);
+                    }
                 }
-            }
-        } catch (err) {
-            console.warn("⚠️ [CIMCO-REST]: Fallo al consultar backend en puerto 3000, recurriendo a Firestore...", err);
-        }
+            );
+        };
 
-        // Fallback a Firestore si la API no responde
-        const pathColeccion = FIRESTORE_PATHS?.users || 'usuarios'; 
-        const q = query(collection(db, pathColeccion));
-        
-        const unsubscribe = onSnapshot(q, 
-            (snapshot) => {
-                if (!isMounted.current) return;
-                const lista = snapshot.docs.map(docSnap => 
-                    normalizarEntidadUsuario(docSnap.id, docSnap.data())
-                );
-                
-                // 🛡️ APLICAMOS FILTRO ANTI-DUPLICADOS TAMBIÉN EN EL FALLBACK DE FIRESTORE
-                const listaLimpia = deduplicarEntidades(lista);
-
-                setUsuariosLocal(listaLimpia);
-                setLoading(false);
-                setErrorFirestore(null);
-            }, 
-            (err) => {
-                console.error("❌ [CIMCO-FIRESTORE-OPERADORES]:", err);
-                if (isMounted.current) {
-                    setErrorFirestore("Fallo en la comunicación con el canal de seguridad.");
-                    setLoading(false);
-                }
-            }
-        );
+        syncOperadores();
 
         return () => {
             isMounted.current = false;
-            if (typeof unsubscribe === 'function') unsubscribe();
+            if (typeof unsubscribeFirestore === 'function') {
+                unsubscribeFirestore();
+            }
         };
-    };
-
-    useEffect(() => {
-        cargarOperadores();
     }, [conductoresProp]);
 
     // 🛡️ En caso de que conductoresProp venga desde un componente padre, aplicamos deduplicación
@@ -134,15 +147,14 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                 ...(token ? { 'Authorization': `Bearer ${token}` } : {})
             };
 
-            // Intentar aprobar vía API REST (Puerto 3000)
-            const res = await fetch(`http://localhost:3000/api/conductores/${id}/aprobar`, {
+            // Intentar aprobar vía API REST
+            const res = await fetch(`${API_BASE_URL}/api/conductores/${id}/aprobar`, {
                 method: 'PATCH',
                 headers,
                 body: JSON.stringify({ estado: nuevoEstado, isActive: true })
             });
 
             if (res.ok) {
-                cargarOperadores();
                 return;
             }
         } catch (e) {
@@ -172,15 +184,14 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                 ...(token ? { 'Authorization': `Bearer ${token}` } : {})
             };
 
-            // Intentar alterar estado vía API REST (Puerto 3000)
-            const res = await fetch(`http://localhost:3000/api/conductores/${id}/estado`, {
+            // Intentar alterar estado vía API REST
+            const res = await fetch(`${API_BASE_URL}/api/conductores/${id}/estado`, {
                 method: 'PATCH',
                 headers,
                 body: JSON.stringify({ isActive: nuevoEstadoBool, estado: nuevoEstadoString })
             });
 
             if (res.ok) {
-                cargarOperadores();
                 return;
             }
         } catch (e) {
@@ -277,9 +288,9 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/5 text-xs text-zinc-300">
-                                    {usuariosFiltrados.map((c) => {
+                                    {usuariosFiltrados.map((c, idx) => {
                                         const idValido = c.id || c._id;
-                                        const keyEstable = idValido || `op-node-${Math.random()}`;
+                                        const keyEstable = idValido || `${c.telefono || 'op'}-${idx}`;
                                         const subrolVisual = c.subrol || c.rol || c.role || 'Mototaxi';
                                         const estaAprobado = c.estado === 'APROBADO' || c.estado === 'active';
                                         const saldoNum = Number(c.saldoWallet || c.saldo || c.balance || 0);
@@ -290,7 +301,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                                                     <div className="font-bold text-zinc-200 uppercase truncate max-w-[180px]">
                                                         {obtenerNombreMostrar(c)}
                                                     </div>
-                                                    <div className="text-[9px] text-zinc-600 font-mono tracking-wide mt-0.5">ID: {idValido}</div>
+                                                    <div className="text-[9px] text-zinc-600 font-mono tracking-wide mt-0.5">ID: {idValido || 'S/I'}</div>
                                                 </td>
                                                 <td className="p-4 font-mono text-zinc-400">
                                                     {c.telefono || c.telefonoMovil || 'S/N'}

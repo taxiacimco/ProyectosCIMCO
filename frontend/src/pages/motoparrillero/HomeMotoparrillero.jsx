@@ -1,10 +1,10 @@
-// Versión Arquitectura: V12.16 - Integración de Gestión de Perfil, Vehículo y Ajustes de Producción Parrillero
+// Versión Arquitectura: V12.17 - Integración Hook Unificado useSocket para Motoparrillero y Control Global
 import React, { useState, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
+import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api'; 
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
@@ -12,12 +12,11 @@ import {
   CircleDollarSign, Signal, LogOut, Loader, UserSquare2
 } from 'lucide-react';
 
-const BACKEND_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_BACKEND_URL || window.location.origin;
-
 export default function HomeMotoparrillero() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
   const { user, logout } = useAuth(); 
   const { walletData, loading: walletLoading } = useWallet();
+  const { socket, isConnected: isSocketConnected } = useSocket();
 
   const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "CIMCO PARRILLERO";
   const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback); 
@@ -42,7 +41,6 @@ export default function HomeMotoparrillero() {
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [datosParaCalificar, setDatosParaCalificar] = useState(null);
 
-  const socketRef = useRef(null);
   const geoWatchRef = useRef(null);
 
   const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
@@ -137,43 +135,40 @@ export default function HomeMotoparrillero() {
         return;
       }
 
-      console.log(`📡 [CIMCO-SOCKET] Inicializando canal reactivo Parrillero hacia: ${BACKEND_URL}`);
-      
-      socketRef.current = io(BACKEND_URL, {
-        auth: { token },
-        transports: ['websocket']
-      });
-
-      socketRef.current.on('connect', () => {
-        console.log(`✅ [CIMCO-SOCKET] Conectado exitosamente con ID: ${socketRef.current.id}`);
-        socketRef.current.emit('registrar_conductor', { 
+      if (socket) {
+        console.log(`📡 [CIMCO-SOCKET] Registrando conductor parrillero en hook unificado`);
+        socket.emit('registrar_conductor', { 
           conductorId, 
           tipoServicio: 'motoparrillero',
           email: user?.email || localStorage.getItem('conductorEmail') || ''
         });
-      });
 
-      socketRef.current.on('nueva_solicitud_viaje', (data) => {
-        console.log("🔥 [CIMCO-RADAR] ¡Alerta de servicio parrillero inbound!", data);
-        if (!servicioActivo && !solicitudViaje) {
-          setSolicitudViaje(data);
-        }
-      });
+        const handleNuevaSolicitud = (data) => {
+          console.log("🔥 [CIMCO-RADAR] ¡Alerta de servicio parrillero inbound!", data);
+          if (!servicioActivo && !solicitudViaje) {
+            setSolicitudViaje(data);
+          }
+        };
 
-      socketRef.current.on('disconnect', () => {
-        console.log("⚠️ [CIMCO-SOCKET] Canal perimetral Parrillero desconectado.");
-      });
+        socket.on('nueva_solicitud_viaje', handleNuevaSolicitud);
 
-      iniciarTrackingGPS();
+        iniciarTrackingGPS();
 
+        return () => {
+          socket.off('nueva_solicitud_viaje', handleNuevaSolicitud);
+          detenerTrackingGPS();
+          if (conductorId) {
+            socket.emit('desactivar_conductor', { conductorId });
+          }
+        };
+      }
     } else {
-      desconectarEcosistema();
+      detenerTrackingGPS();
+      if (socket && conductorId) {
+        socket.emit('desactivar_conductor', { conductorId });
+      }
     }
-
-    return () => {
-      desconectarEcosistema();
-    };
-  }, [isOnline, conductorId, token]); // ✅ 'saldoVivo' retirado para evitar desconexiones continuas en WebSocket
+  }, [isOnline, conductorId, token, socket]);
 
   // ==================================================================
   // 4. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
@@ -192,8 +187,8 @@ export default function HomeMotoparrillero() {
         const { latitude, longitude } = position.coords;
         setCoordenadas({ lat: latitude, lng: longitude });
 
-        if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('actualizar_radar_gps', {
+        if (socket && isSocketConnected) {
+          socket.emit('actualizar_radar_gps', {
             conductorId,
             lat: latitude,
             lng: longitude
@@ -212,19 +207,18 @@ export default function HomeMotoparrillero() {
     );
   };
 
-  const desconectarEcosistema = () => {
+  const detenerTrackingGPS = () => {
     if (geoWatchRef.current !== null) {
       navigator.geolocation.clearWatch(geoWatchRef.current);
       geoWatchRef.current = null;
       console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
     }
-    if (socketRef.current) {
-      if (conductorId) {
-        socketRef.current.emit('desactivar_conductor', { conductorId });
-      }
-      socketRef.current.disconnect();
-      socketRef.current = null;
-      console.log("📡 [CIMCO-SOCKET] Conexión de red purgada.");
+  };
+
+  const desconectarEcosistema = () => {
+    detenerTrackingGPS();
+    if (socket && conductorId) {
+      socket.emit('desactivar_conductor', { conductorId });
     }
   };
 
@@ -408,8 +402,8 @@ export default function HomeMotoparrillero() {
               {nombreConductor} <span className="text-[9px] text-cyan-400 underline lowercase font-normal">(editar)</span>
             </h1>
             <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
-              <Signal size={10} className={isOnline ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
-              {isOnline ? 'CONECTADO A RED PARRILLERO' : 'NODO DESCONECTADO'}
+              <Signal size={10} className={isOnline && isSocketConnected ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
+              {isOnline && isSocketConnected ? 'CONECTADO A RED PARRILLERO' : 'NODO DESCONECTADO'}
             </p>
           </div>
         </div>

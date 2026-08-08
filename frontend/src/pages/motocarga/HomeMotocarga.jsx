@@ -1,10 +1,10 @@
-// Versión Arquitectura: V12.19 - Fusión Atómica de Motocarga, Normalización de API/Sockets, Fallback Híbrido de Historial y Desacoplamiento de Billetera
+// Versión Arquitectura: V12.20 - Fusión Atómica de Motocarga, Centralización de Sockets vía useSocket, Fallback Híbrido y Desacoplamiento de Billetera
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { io } from 'socket.io-client';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
+import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api'; 
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
@@ -12,12 +12,11 @@ import {
   CircleDollarSign, Signal, LogOut, Package, Truck, Loader, UserSquare2
 } from 'lucide-react';
 
-const BACKEND_URL = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_BACKEND_URL || window.location.origin;
-
 export default function HomeMotocarga() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
   const { user, logout } = useAuth(); 
   const { walletData, loading: walletLoading } = useWallet();
+  const { socket, isConnected } = useSocket();
 
   const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "CIMCO CARGA";
   const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback); 
@@ -45,7 +44,6 @@ export default function HomeMotocarga() {
   // 📜 HISTORIAL DE VIAJES
   const [historial, setHistorial] = useState([]);
 
-  const socketRef = useRef(null);
   const geoWatchRef = useRef(null);
 
   const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
@@ -169,61 +167,7 @@ export default function HomeMotocarga() {
   // ==================================================================
   // 3. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA (MOTOCARGA)
   // ==================================================================
-  useEffect(() => {
-    if (isOnline) {
-      if (!conductorId) {
-        setIsOnline(false);
-        return;
-      }
-
-      if (Number(saldoVivo) < 2000) {
-        alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en la red de carga.");
-        setIsOnline(false);
-        return;
-      }
-
-      console.log(`📡 [CIMCO-CARGA-SOCKET] Inicializando canal hacia: ${BACKEND_URL}`);
-      
-      socketRef.current = io(BACKEND_URL, {
-        auth: { token },
-        transports: ['websocket']
-      });
-
-      socketRef.current.on('connect', () => {
-        console.log(`✅ [CIMCO-CARGA-SOCKET] Conectado exitosamente con ID: ${socketRef.current.id}`);
-        socketRef.current.emit('registrar_conductor', { 
-          conductorId, 
-          tipoServicio: 'motocarga',
-          email: user?.email || localStorage.getItem('conductorEmail') || ''
-        });
-      });
-
-      socketRef.current.on('nueva_solicitud_viaje', (data) => {
-        console.log("🔥 [CIMCO-RADAR-CARGA] Flete detectado en el perímetro de asignación!", data);
-        if (!servicioActivo && !solicitudViaje) {
-          setSolicitudViaje(data);
-        }
-      });
-
-      socketRef.current.on('disconnect', () => {
-        console.log("⚠️ [CIMCO-CARGA-SOCKET] Canal perimetral desconectado.");
-      });
-
-      iniciarTrackingGPS();
-
-    } else {
-      desconectarEcosistema();
-    }
-
-    return () => {
-      desconectarEcosistema();
-    };
-  }, [isOnline, conductorId, token]); // ❌ 'saldoVivo' retirado para estabilizar el socket
-
-  // ==================================================================
-  // 4. TRANSMISIÓN DE TELEMETRÍA GEOESPACIAL (COMPATIBLE 2DSPHERE [LNG, LAT])
-  // ==================================================================
-  const iniciarTrackingGPS = () => {
+  const iniciarTrackingGPS = useCallback(() => {
     if (!navigator.geolocation) {
       console.error("❌ [GPS-ERROR] Geolocalización no admitida en este dispositivo.");
       return;
@@ -236,8 +180,8 @@ export default function HomeMotocarga() {
         const { latitude, longitude } = position.coords;
         setCoordenadas({ lat: latitude, lng: longitude });
 
-        if (socketRef.current && socketRef.current.connected) {
-          socketRef.current.emit('actualizar_radar_gps', {
+        if (socket && (socket.connected || isConnected)) {
+          socket.emit('actualizar_radar_gps', {
             conductorId,
             lat: latitude,
             lng: longitude
@@ -254,21 +198,61 @@ export default function HomeMotocarga() {
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
-  };
+  }, [socket, isConnected, conductorId]);
 
-  const desconectarEcosistema = () => {
+  const desconectarEcosistema = useCallback(() => {
     if (geoWatchRef.current !== null) {
       navigator.geolocation.clearWatch(geoWatchRef.current);
       geoWatchRef.current = null;
       console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS de carga apagado.");
     }
-    if (socketRef.current) {
-      socketRef.current.emit('desactivar_conductor', { conductorId });
-      socketRef.current.disconnect();
-      socketRef.current = null;
-      console.log("📡 [CIMCO-SOCKET] Canal de red purgado limpiamente.");
+    if (socket) {
+      socket.emit('desactivar_conductor', { conductorId });
+      console.log("📡 [CIMCO-SOCKET] Conductor desactivado en la red centralizada.");
     }
-  };
+  }, [socket, conductorId]);
+
+  useEffect(() => {
+    if (isOnline) {
+      if (!conductorId) {
+        setIsOnline(false);
+        return;
+      }
+
+      if (Number(saldoVivo) < 2000) {
+        alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en la red de carga.");
+        setIsOnline(false);
+        return;
+      }
+
+      if (socket) {
+        console.log(`📡 [CIMCO-CARGA-SOCKET] Sincronizando con socket centralizado...`);
+        
+        socket.emit('registrar_conductor', { 
+          conductorId, 
+          tipoServicio: 'motocarga',
+          email: user?.email || localStorage.getItem('conductorEmail') || ''
+        });
+
+        const handleNuevaSolicitud = (data) => {
+          console.log("🔥 [CIMCO-RADAR-CARGA] Flete detectado en el perímetro de asignación!", data);
+          if (!servicioActivo && !solicitudViaje) {
+            setSolicitudViaje(data);
+          }
+        };
+
+        socket.on('nueva_solicitud_viaje', handleNuevaSolicitud);
+        iniciarTrackingGPS();
+
+        return () => {
+          socket.off('nueva_solicitud_viaje', handleNuevaSolicitud);
+          desconectarEcosistema();
+        };
+      }
+    } else {
+      desconectarEcosistema();
+    }
+  }, [isOnline, conductorId, socket, iniciarTrackingGPS, desconectarEcosistema, user?.email]);
 
   // ==================================================================
   // 5. ESCUCHA ATÓMICA DE FLETES EN RADAR FIRESTORE
@@ -449,8 +433,8 @@ export default function HomeMotocarga() {
               {nombreConductor} <span className="text-[9px] text-amber-400 underline lowercase font-normal">(editar)</span>
             </h1>
             <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
-              <Signal size={10} className={isOnline ? "text-amber-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
-              {isOnline ? 'MALLA CARGA ACTIVA' : 'NODO DESCONECTADO'}
+              <Signal size={10} className={isOnline && isConnected ? "text-amber-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
+              {isOnline && isConnected ? 'MALLA CARGA ACTIVA' : 'NODO DESCONECTADO'}
             </p>
           </div>
         </div>

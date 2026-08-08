@@ -1,17 +1,16 @@
-// Versión Arquitectura: V16.1 - Throttling de Telemetría Satelital GPS Exclusivo a Socket.io y Optimización de Escrituras NoSQL
+// Versión Arquitectura: V16.2 - Migración de Sockets a Instancia Unificada (@/hooks/useSocket) y Gestión de Salas Intermunicipales
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V16.1: Optimización del bucle de rastreo GPS en `watchPosition`. Se elimina la escritura periódica
- *               en Firestore (evitando ráfagas masivas innecesarias NoSQL) delegando la telemetría en tiempo real
- *               de forma exclusiva a WebSocket / Socket.io (`actualizar_radar_gps`).
+ * Ajuste V16.2: Migración del hook `useSocket` desde `@/hooks/SocketContext` hacia `@/hooks/useSocket`.
+ *               Consolidación de la instancia unificada para suscripciones y gestión de salas intermunicipales sin reconexión.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
-import { useSocket } from '@/hooks/SocketContext';
+import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -74,7 +73,7 @@ const HomeIntermunicipal = () => {
     }, [viajesAsignados]);
 
     const ultimaActualizacionGpsRef = useRef(0);
-    const ENFRIAMIENTO_SOCKET_GPS_MS = 5000; // Throttling controlado de 5s para emisión de sockets
+    const ENFRIAMIENTO_SOCKET_GPS_MS = 5000; // Throttling controlled de 5s para emisión de sockets
 
     // ==================================================================
     // 1. ESCUCHA REACTIVA DE IDENTIDAD DEL CONDUCTOR EN FIRESTORE / REST
@@ -157,10 +156,18 @@ const HomeIntermunicipal = () => {
     };
 
     // ==================================================================
-    // 3. EVENTOS DE SOCKETS: Sincronización en Vivo con el Despachador
+    // 3. EVENTOS DE SOCKETS Y SUSCRIPCIÓN A SALAS (Instancia Unificada)
     // ==================================================================
     useEffect(() => {
         if (!socket) return;
+
+        // Suscripción a salas intermunicipales sin forzar reconexiones del cliente
+        if (isConnected) {
+            socket.emit('unirse_sala', 'intermunicipal');
+            if (idConductor) {
+                socket.emit('unirse_sala', `conductor_${idConductor}`);
+            }
+        }
 
         const handleNuevoViaje = (data) => {
             console.log("🔔 Despacho capturado en segmento Cooperativa:", data);
@@ -194,7 +201,7 @@ const HomeIntermunicipal = () => {
             socket.off('nuevo_viaje', handleNuevoViaje);
             socket.off('servidor:nueva_solicitud', handleNuevoViaje);
         };
-    }, [socket, idConductor, user?.uid]);
+    }, [socket, isConnected, idConductor, user?.uid]);
 
     // ==================================================================
     // 4. MOTOR DE RASTREO SATELITAL (SOCKET TELEMETRÍA EXCLUSIVO - CERO WRITES EN FIRESTORE)

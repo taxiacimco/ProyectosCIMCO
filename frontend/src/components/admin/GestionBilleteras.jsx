@@ -1,8 +1,11 @@
-// Versión Arquitectura: V14.2 - Consola de Ajuste Multirrol de Saldo CIMCO NEXUS (Universal Endpoint Integrated)
+// Versión Arquitectura: V14.3 - Prevención Duplicidad Transaccional y Control Riguroso de Listeners
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
  * Misión: Monitoreo global de saldos y ejecución de ajustes de capital (Abono / Débito Manual) para todos los actores:
  *         Pasajeros, Mototaxistas, Motoparrilleros, Montacargas, Despachadores y Conductores.
+ * Ajuste V14.3: 
+ *   1. Eliminación de doble procesamiento de saldo encapsulando el respaldo de Firestore sólo si la API REST falla.
+ *   2. Gestión de listeners mediante referencia mutable (unsubscribesRef) para evitar fugas de memoria en llamadas asíncronas.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -49,6 +52,15 @@ export const GestionBilleteras = () => {
     const [mensajeNotificacion, setMensajeNotificacion] = useState(null);
 
     const isMounted = useRef(true);
+    // 🛡️ Contenedor de funciones unsubscribe para prevensión de fugas de memoria
+    const unsubscribesRef = useRef([]);
+
+    const limpiarSuscripciones = () => {
+        unsubscribesRef.current.forEach(unsub => {
+            if (typeof unsub === 'function') unsub();
+        });
+        unsubscribesRef.current = [];
+    };
 
     const mostrarNotificacion = (texto, tipo = 'exito') => {
         if (!isMounted.current) return;
@@ -79,10 +91,11 @@ export const GestionBilleteras = () => {
         return `ACTOR ${(nodo.rol || nodo.role || nodo.subrol || 'USUARIO').toUpperCase()}`;
     };
 
-    // 🚀 OBTENER BÓVEDAS GLOBALMENTE (API REST + FALLBACK FIRESTORE REACTIVO)
+    // 🚀 OBTENER BÓVEDAS GLOBALMENTE (API REST + FALLBACK FIRESTORE REACTIVO SIN MEMORY LEAKS)
     const obtenerBovedasGlobales = async () => {
         isMounted.current = true;
         setCargando(true);
+        limpiarSuscripciones();
 
         try {
             const token = localStorage.getItem('cimco_token');
@@ -123,6 +136,8 @@ export const GestionBilleteras = () => {
         } catch (err) {
             console.warn('⚠️ [CIMCO-BILLETERAS] Fallo al consultar directorio-global REST, ejecutando sincronización reactiva Firestore...', err);
         }
+
+        if (!isMounted.current) return;
 
         // Fallback Firestore si API REST no responde
         const pathUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
@@ -184,17 +199,14 @@ export const GestionBilleteras = () => {
             }
         );
 
-        return () => {
-            isMounted.current = false;
-            if (typeof unsubscribeUsers === 'function') unsubscribeUsers();
-            if (typeof unsubscribeWallets === 'function') unsubscribeWallets();
-        };
+        unsubscribesRef.current.push(unsubscribeUsers, unsubscribeWallets);
     };
 
     useEffect(() => {
         obtenerBovedasGlobales();
         return () => {
             isMounted.current = false;
+            limpiarSuscripciones();
         };
     }, []);
 
@@ -250,7 +262,7 @@ export const GestionBilleteras = () => {
         setMontoRecarga(valRaw);
     };
 
-    // 💳 PROCESAR AJUSTE MULTIRROL DE SALDO (ABONO / DÉBITO MANUAL - REST + FIRESTORE FALLBACK)
+    // 💳 PROCESAR AJUSTE MULTIRROL DE SALDO (ABONO / DÉBITO MANUAL - PREVENCIÓN DUPLICADOS)
     const ejecutarRecarga = async (e) => {
         e.preventDefault();
         if (!cuentaSeleccionada || !montoRecarga) return;
@@ -301,50 +313,50 @@ export const GestionBilleteras = () => {
             console.warn('⚠️ API REST inaccesible o endpoint no disponible, aplicando fallback directo en Firestore...', err);
         }
 
-        // Respaldo directo en Firestore para garantizar actualización inmediata del saldo
-        try {
-            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-            const pathAuditoria = FIRESTORE_PATHS?.transactions || 'transacciones';
+        // 🛡️ Respaldo directo en Firestore ÚNICAMENTE si el Backend REST falló
+        if (!transaccionExitosa) {
+            try {
+                const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+                const pathAuditoria = FIRESTORE_PATHS?.transactions || 'transacciones';
 
-            const walletRef = doc(db, pathBilleteras, cuentaSeleccionada.id);
-            const auditRef = collection(db, pathAuditoria);
+                const walletRef = doc(db, pathBilleteras, cuentaSeleccionada.id);
+                const auditRef = collection(db, pathAuditoria);
 
-            const deltaMonto = tipoOperacion === 'DEBITO' ? -montoNumerico : montoNumerico;
+                const deltaMonto = tipoOperacion === 'DEBITO' ? -montoNumerico : montoNumerico;
 
-            if (cuentaSeleccionada.existeEnWallets) {
-                await updateDoc(walletRef, {
-                    balance: increment(deltaMonto),
-                    saldo: increment(deltaMonto),
-                    saldoWallet: increment(deltaMonto),
-                    ultimaActualizacion: serverTimestamp()
-                });
-            } else {
-                const nuevoSaldoBase = Math.max(0, saldoDisponible + deltaMonto);
-                await setDoc(walletRef, {
+                if (cuentaSeleccionada.existeEnWallets) {
+                    await updateDoc(walletRef, {
+                        balance: increment(deltaMonto),
+                        saldo: increment(deltaMonto),
+                        saldoWallet: increment(deltaMonto),
+                        ultimaActualizacion: serverTimestamp()
+                    });
+                } else {
+                    const nuevoSaldoBase = Math.max(0, saldoDisponible + deltaMonto);
+                    await setDoc(walletRef, {
+                        usuarioId: cuentaSeleccionada.id,
+                        nombreUsuario: cuentaSeleccionada.nombre,
+                        rolUsuario: (cuentaSeleccionada.subrol || cuentaSeleccionada.rol || 'USUARIO').toUpperCase(),
+                        balance: nuevoSaldoBase,
+                        saldo: nuevoSaldoBase,
+                        saldoWallet: nuevoSaldoBase,
+                        creadoEl: serverTimestamp(),
+                        ultimaActualizacion: serverTimestamp()
+                    });
+                }
+
+                await addDoc(auditRef, {
                     usuarioId: cuentaSeleccionada.id,
                     nombreUsuario: cuentaSeleccionada.nombre,
-                    rolUsuario: (cuentaSeleccionada.subrol || cuentaSeleccionada.rol || 'USUARIO').toUpperCase(),
-                    balance: nuevoSaldoBase,
-                    saldo: nuevoSaldoBase,
-                    saldoWallet: nuevoSaldoBase,
-                    creadoEl: serverTimestamp(),
-                    ultimaActualizacion: serverTimestamp()
+                    tipo: tipoOperacion === 'DEBITO' ? 'DEBITO_MANUAL' : 'RECARGA_MANUAL',
+                    monto: deltaMonto,
+                    timestamp: serverTimestamp(),
+                    referencia: `AJUSTE_MANUAL_ADMIN_${Date.now().toString().slice(-6)}`,
+                    ejecutor: 'ADMINISTRADOR_SISTEMA'
                 });
-            }
 
-            await addDoc(auditRef, {
-                usuarioId: cuentaSeleccionada.id,
-                nombreUsuario: cuentaSeleccionada.nombre,
-                tipo: tipoOperacion === 'DEBITO' ? 'DEBITO_MANUAL' : 'RECARGA_MANUAL',
-                monto: deltaMonto,
-                timestamp: serverTimestamp(),
-                referencia: `AJUSTE_MANUAL_ADMIN_${Date.now().toString().slice(-6)}`,
-                ejecutor: 'ADMINISTRADOR_SISTEMA'
-            });
-
-            transaccionExitosa = true;
-        } catch (err) {
-            if (!transaccionExitosa) {
+                transaccionExitosa = true;
+            } catch (err) {
                 console.error('❌ [CIMCO-RECARGA] Fallo transaccional:', err);
                 mostrarNotificacion('Error al procesar el ajuste de saldo en la red de bóvedas', 'error');
                 setProcesandoRecarga(false);

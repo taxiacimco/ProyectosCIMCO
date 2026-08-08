@@ -1,8 +1,9 @@
-// Versión Arquitectura: V13.0 - Resiliencia de Formateo Temporal Multi-Origen y Blindaje Anti-Crash
+// Versión Arquitectura: V16.2 - Migración y Vinculación Centralizada Socket.IO (useSocket V16.2) y Persistencia Dual
 import React, { useState, useEffect, useRef } from 'react';
-import { db, FIRESTORE_PATHS } from '@/config/firebase'; // 🚀 Fusión Atómica: Paths Inyectados
+import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
+import { useSocket } from '@/hooks/useSocket';
 import { Send, Loader2 } from 'lucide-react';
 
 // 🛡️ Helper Polimórfico de Resiliencia Temporal para prevenir TypeError: .toDate is not a function
@@ -41,12 +42,45 @@ const formatFechaSegura = (fechaRaw) => {
 
 const ChatContainer = ({ tripId }) => {
   const { user } = useAuth();
+  const { socket, isConnected } = useSocket();
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [isSending, setIsSending] = useState(false); // 🛡️ Control de Concurrencia Móvil
   const scrollRef = useRef();
 
-  // 🚀 Sincronización del Canal de Mensajería con Compensación de Latencia
+  // 🚀 Acciones 1 y 2: Suscripción a salas y eventos de chat bidireccional mediante instancia unificada `useSocket`
+  useEffect(() => {
+    if (!socket || !tripId) return;
+
+    // Conectarse a la sala específica del viaje
+    if (isConnected) {
+      socket.emit('join_room', { room: tripId, user: user?.uid });
+    }
+
+    // Oyente para recepcionar mensajes en tiempo real vía Socket.io
+    const handleReceiveMessage = (incomingMsg) => {
+      if (!incomingMsg) return;
+      
+      setMessages((prevMessages) => {
+        // Blindaje Anti-Duplicados: Comprobar presencia por id o contenido exacto + timestamp
+        const existe = prevMessages.some(m => 
+          (m.id && incomingMsg.id && m.id === incomingMsg.id) ||
+          (m.text === incomingMsg.text && m.senderId === incomingMsg.senderId && Math.abs(new Date(m.createdAt) - new Date(incomingMsg.createdAt)) < 1000)
+        );
+        if (existe) return prevMessages;
+        return [...prevMessages, incomingMsg];
+      });
+    };
+
+    socket.on('receive_message', handleReceiveMessage);
+
+    // 🚀 Acción 3: Limpieza Segura - Desregistrar únicamente el oyente específico sin desconectar el transporte de red
+    return () => {
+      socket.off('receive_message', handleReceiveMessage);
+    };
+  }, [socket, isConnected, tripId, user?.uid]);
+
+  // 🚀 Sincronización del Canal de Mensajería con Compensación de Latencia (Firestore Reactive Sync)
   useEffect(() => {
     if (!user?.uid || !tripId) return;
     
@@ -89,13 +123,28 @@ const ChatContainer = ({ tripId }) => {
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !user?.uid || isSending) return;
+    const textoLimpio = newMessage.trim();
+    if (!textoLimpio || !user?.uid || isSending) return;
 
     try {
       setIsSending(true); // Bloqueo preventivo en redes de baja cobertura
       
+      const payloadMensaje = {
+        tripId,
+        room: tripId,
+        text: textoLimpio,
+        senderId: user.uid,
+        createdAt: new Date().toISOString()
+      };
+
+      // 1. Emisión bidireccional vía Socket.IO unificado
+      if (socket && isConnected) {
+        socket.emit('send_message', payloadMensaje);
+      }
+
+      // 2. Persistencia duradera en Firestore
       await addDoc(collection(db, `${FIRESTORE_PATHS.chats}/${tripId}/messages`), {
-        text: newMessage.trim(),
+        text: textoLimpio,
         senderId: user.uid,
         createdAt: serverTimestamp()
       });
@@ -112,7 +161,7 @@ const ChatContainer = ({ tripId }) => {
     <div className="flex flex-col h-64 bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-2xl overflow-hidden shadow-2xl">
       <div className="px-4 py-3 border-b border-white/5 bg-white/5 flex items-center justify-between">
         <span className="text-[11px] font-black uppercase tracking-widest text-zinc-400">Canal de Soporte / Viaje</span>
-        <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+        <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
       </div>
 
       <div className="flex-grow overflow-y-auto p-4 space-y-3 scrollbar-none">
@@ -121,7 +170,7 @@ const ChatContainer = ({ tripId }) => {
           const horaFormatted = formatFechaSegura(msg.createdAt);
 
           return (
-            <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+            <div key={msg.id || `${msg.senderId}-${msg.createdAt}`} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs transition-all ${
                 isMe 
                   ? 'bg-amber-500/20 text-amber-200 border border-amber-500/30 rounded-tr-none' 

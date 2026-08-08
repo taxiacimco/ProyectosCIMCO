@@ -1,13 +1,15 @@
-// Versión Arquitectura: V2.3.0 - Consola de Control de Directorio Global CIMCO NEXUS con Exportación XLSX Centralizada vía Servidor
+// Versión Arquitectura: V2.4.0 - Depuración de Dependencias Muertas y Estabilización del Ciclo de Vida de Montaje
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\DirectorioGlobal.jsx
  * Misión: Monitoreo, filtrado, auditoría unificada y exportación centralizada a Excel (XLSX) con descarga desde API del Servidor Central.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
+ * Ajuste V2.4.0:
+ *   1. Eliminación de código muerto (`exportarDirectorioExcel` e importación en desuso de `xlsx`).
+ *   2. Reestructuración de `isMounted` para asegurar que `isMounted.current = true` ocurra exclusivamente dentro del `useEffect` de montaje.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Loader, RefreshCw, Users, Shield, UserCheck, Radio, Download } from 'lucide-react';
-import * as XLSX from 'xlsx';
 // 🛡️ IMPORTANTE: Importación del helper de deduplicación mediante alias absoluto @
 import { deduplicarEntidades } from '@/utils/deduplicar';
 
@@ -42,7 +44,6 @@ export const DirectorioGlobal = () => {
     const isMounted = useRef(true);
 
     const obtenerDirectorio = async () => {
-        isMounted.current = true;
         setLoading(true);
         setError(null);
 
@@ -83,6 +84,7 @@ export const DirectorioGlobal = () => {
     };
 
     useEffect(() => {
+        isMounted.current = true;
         obtenerDirectorio();
         return () => {
             isMounted.current = false;
@@ -144,50 +146,6 @@ export const DirectorioGlobal = () => {
         } catch (err) {
             console.error("❌ Error al solicitar la descarga del Excel global al servidor:", err);
         }
-    };
-
-    // 📊 EXPORTACIÓN LOCAL EN MEMORIA (FALLBACK DE SEGURIDAD MANTENIDO)
-    const exportarDirectorioExcel = () => {
-        if (!usuariosFiltrados || usuariosFiltrados.length === 0) return;
-
-        const datosMapeados = usuariosFiltrados.map((u) => {
-            const idUsuario = u?._id || u?.id || 'SIN_ID';
-            const nombreCompleto = getNombre(u);
-            const telefono = u?.telefono || u?.telefonoMovil || 'N/A';
-            const correo = u?.email || 'SIN EMAIL';
-            const rolRegistrado = (u?.subrol || u?.rolNormalizado || u?.rol || u?.role || 'DESCONOCIDO').toUpperCase();
-            const empresa = u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL';
-            const origen = u?.origenColeccion || u?.origen || 'DB';
-
-            return {
-                'ID USUARIO': idUsuario,
-                'NOMBRE COMPLETO': nombreCompleto,
-                'TELÉFONO': telefono,
-                'CORREO': correo,
-                'ROL REGISTRADO': rolRegistrado,
-                'ENTIDAD / EMPRESA': empresa,
-                'ORIGEN': origen
-            };
-        });
-
-        const worksheet = XLSX.utils.json_to_sheet(datosMapeados);
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'Directorio');
-
-        worksheet['!cols'] = [
-            { wch: 28 }, // ID USUARIO
-            { wch: 25 }, // NOMBRE COMPLETO
-            { wch: 20 }, // TELÉFONO
-            { wch: 25 }, // CORREO
-            { wch: 20 }, // ROL REGISTRADO
-            { wch: 30 }, // ENTIDAD / EMPRESA
-            { wch: 12 }  // ORIGEN
-        ];
-
-        const fechaActual = new Date().toISOString().split('T')[0];
-        const nombreArchivo = `CIMCO_Directorio_${filtroRol.toUpperCase()}_${fechaActual}.xlsx`;
-        
-        XLSX.writeFile(workbook, nombreArchivo);
     };
 
     // Mantenimiento de métricas dinámicas
