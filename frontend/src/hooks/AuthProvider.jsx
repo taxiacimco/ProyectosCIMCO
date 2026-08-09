@@ -1,9 +1,9 @@
-// Versión Arquitectura: V22.2 - Normalización de Carga Útil en Login Local
+// Versión Arquitectura: V22.3 - Propagación de Excepciones y Re-lanzamiento de Errores en Login Local
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
  * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO.
- * Ajuste V22.2: Normalización de la carga útil (payload) en loginLocal enviando identifier, 
- *              email, telefono y celular limpios para máxima compatibilidad con endpoints legados.
+ * Ajuste V22.3: Re-lanzamiento de excepciones (throw error) en loginLocal para permitir 
+ *              la captura centralizada de fallos desde componentes consumidores (ej. Login.jsx).
  */
 
 import React, { useState, useEffect } from 'react';
@@ -120,16 +120,17 @@ export const AuthProvider = ({ children }) => {
                 return { success: true, user: userData, data: respuesta.data };
             }
             
-            return { 
-                success: false, 
-                message: respuesta.data?.message || "Credenciales incorrectas o usuario no encontrado." 
-            };
+            // Si la respuesta HTTP fue 200 pero la carga útil no confirma éxito, instanciar y lanzar error explicito
+            const mensajeError = respuesta.data?.message || "Credenciales incorrectas o usuario no encontrado.";
+            const errorRespuesta = new Error(mensajeError);
+            errorRespuesta.response = respuesta;
+            errorRespuesta.data = respuesta.data;
+            throw errorRespuesta;
+
         } catch (error) {
             console.error("❌ [CIMCO-AUTH] Error crítico en pasarela loginLocal:", error);
-            return { 
-                success: false, 
-                message: error.response?.data?.message || "Usuario no registrado en producción o contraseña incorrecta." 
-            };
+            // Re-lanzamiento explícito de la excepción para permitir captura mediante try/catch en el frontend (ej. Login.jsx)
+            throw error;
         } finally {
             setLoading(false);
         }

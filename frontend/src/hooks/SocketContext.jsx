@@ -1,14 +1,13 @@
-// Versión Arquitectura: V15.8 - Separación HMR Compliant de Contexto y Provider
+// Versión Arquitectura: V15.9 - Separación HMR Compliant de Contexto y Provider
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\SocketContext.jsx
  * Misión: Proveedor de Contexto Reactivo acoplado a la instancia centralizada.
  */
 
-import React, { createContext, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { socket } from '@/config/socket';
 import { useAuth } from '@/hooks/useAuth';
-
-export const SocketContext = createContext(null);
+import { SocketContext } from '@/hooks/SocketContext';
 
 export const SocketProvider = ({ children }) => {
     const { user } = useAuth();
@@ -83,3 +82,5 @@ export const SocketProvider = ({ children }) => {
         </SocketContext.Provider>
     );
 };
+
+export default SocketProvider;

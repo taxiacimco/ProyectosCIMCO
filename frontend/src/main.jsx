@@ -1,4 +1,4 @@
-// Versión Arquitectura: V17.0 - PROD READY: Aseguramiento de la Jerarquía de Contextos y Prevención de Conexiones Duplicadas
+// Versión Arquitectura: V17.1 - Resolución de Importación Explícita para HMR y Prod Build
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\main.jsx
  * Misión: Nodo de montaje inicial de React y orquestador del árbol de contextos globales.
@@ -13,7 +13,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import AppRouter from '@/AppRouter';
 import { AuthProvider } from '@/hooks/AuthProvider'; 
-import { SocketProvider } from '@/hooks/SocketContext'; // 📡 Inyección del canal perimetral dúplex de telemetría
+import { SocketProvider } from '@/hooks/SocketContext.jsx'; // 📡 Extensión explícita para resolver SocketProvider y evitar colisión con SocketContext.js
 import '@/index.css'; // 🎨 Estilos core unificados V11.0
 
 ReactDOM.createRoot(document.getElementById('root')).render(
