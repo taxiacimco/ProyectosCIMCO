@@ -1,12 +1,14 @@
-// Versión Arquitectura: V19.31 - Persistencia de Identificador Operativo y Rediseño Glassmorphism CIMCO-UI
+// Versión Arquitectura: V21.25 - Captura y Renderizado Granular de Códigos de Error (USER_NOT_FOUND, WRONG_PASSWORD, ACCOUNT_PENDING_APPROVAL)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
+ * Misión: Manejo del flujo de inicio de sesión con captura de respuestas de error granuladas,
+ * persistencia de identificador operativo, ruteo polimórfico por rol y diseño Glassmorphism CIMCO-UI V9.3.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail, Shield, Lock, LogIn } from 'lucide-react';
+import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail, Shield, LogIn } from 'lucide-react';
 
 const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -44,6 +46,27 @@ const Login = () => {
     }
   };
 
+  /**
+   * Helper para interpretar y formatear mensajes de error según códigos de la API
+   */
+  const parseAuthError = (errObj) => {
+    const resData = errObj?.response?.data || errObj?.data || errObj;
+    const statusCode = errObj?.response?.status || errObj?.status;
+    const errorCode = resData?.code || errObj?.code;
+
+    if (statusCode === 404 || errorCode === 'USER_NOT_FOUND' || errorCode === 'auth/user-not-found') {
+      return '⚠️ El número de teléfono o correo no está registrado. Toca el botón "Crear Cuenta" para registrarte.';
+    } 
+    if (statusCode === 401 || errorCode === 'WRONG_PASSWORD' || errorCode === 'auth/wrong-password') {
+      return '❌ La clave de acceso es incorrecta. Verifícala e intenta nuevamente.';
+    } 
+    if (statusCode === 403 || errorCode === 'ACCOUNT_PENDING_APPROVAL') {
+      return resData?.message || '⏳ Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación.';
+    }
+
+    return resData?.message || errObj?.message || 'Error al iniciar sesión. Inténtelo más tarde.';
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -77,7 +100,7 @@ const Login = () => {
       const res = await loginLocal(valorLimpio, password);
       
       if (res && res.success) {
-        // Redirección inteligente basada en el rol recibido o el parámetro
+        // Redirección inteligente basada en el rol recibido o el parámetro de consulta
         const userRole = (res.user?.role || res.user?.rol || roleParam || '').toLowerCase();
         
         if (userRole.includes('moto')) {
@@ -90,12 +113,13 @@ const Login = () => {
           navigate('/');
         }
       } else {
-        // Muestra el mensaje devuelto por el backend
-        setError(res?.message || "ERROR_AUTENTICACION: Credenciales no válidas o usuario no registrado.");
+        // Procesar códigos de error devueltos en respuesta sin excepción lanzada
+        setError(parseAuthError(res));
       }
     } catch (err) {
       console.error("🚨 [CIMCO-AUTH-HANDSHAKE] Denegado:", err);
-      setError(err?.message || "ERROR_CONEXION: No se pudo conectar con el servidor central.");
+      // Captura y renderizado enriquecido de errores desde la excepción Axios/Fetch
+      setError(parseAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -152,13 +176,13 @@ const Login = () => {
           </p>
         </div>
 
-        {/* Banner de Error */}
+        {/* Banner de Error Granulado */}
         {error && (
           <div className="mb-6 flex flex-col gap-2 bg-red-500/[0.08] border border-red-500/30 rounded-2xl p-4">
             <div className="flex items-start gap-3">
               <ShieldAlert size={16} className="text-red-500 shrink-0 mt-0.5" />
-              <div className="font-mono text-[10px] uppercase font-bold tracking-wider text-red-400 leading-normal">
-                <span className="block font-black text-red-500 mb-0.5">🚨 ACCESO DENEGADO:</span>
+              <div className="font-mono text-[11px] uppercase font-bold tracking-wider text-red-300 leading-relaxed">
+                <span className="block font-black text-red-500 mb-0.5">🚨 NOTIFICACIÓN DEL SISTEMA:</span>
                 {error}
               </div>
             </div>
@@ -185,7 +209,7 @@ const Login = () => {
           </div>
         )}
 
-        {/* Formulario */}
+        {/* Formulario de Acceso */}
         <form onSubmit={handleSubmit} className="space-y-5">
           
           {/* Campo Identificador Operativo */}

@@ -1,9 +1,10 @@
-// Versión Arquitectura: V21.23 - Integración Atómica Onboarding con Captura Extendida de Archivos (Req.Files) y Atributos por Rol
+// Versión Arquitectura: V21.24 - Actualización Login Polimórfico con Códigos de Error Diferenciados (USER_NOT_FOUND, WRONG_PASSWORD)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
- * extracción e integración de subdocumentos/archivos (req.files), atributos extendidos (terminal_sede, access_level)
- * e implementación del flujo diferido de activación (Conductores nacen PENDIENTES/Inactivos; Pasajeros nacen APROBADOS/Activos).
+ * extracción e integración de subdocumentos/archivos (req.files), atributos extendidos (terminal_sede, access_level),
+ * respuestas de error granuladas para login (USER_NOT_FOUND, WRONG_PASSWORD, ACCOUNT_PENDING_APPROVAL)
+ * e implementación del flujo diferido de activación.
  */
 
 import jwt from 'jsonwebtoken';
@@ -363,8 +364,13 @@ export const login = async (req, res) => {
 
         const cuentaEncontrada = usuarioAdmin || usuarioConductor || usuarioPasajero;
 
+        // 1️⃣ VALIDACIÓN 1: El usuario NO existe en ninguna colección
         if (!cuentaEncontrada) {
-            return res.status(401).json({ success: false, message: "Credenciales de acceso incorrectas o inexistentes." });
+            return res.status(404).json({ 
+                success: false, 
+                code: 'USER_NOT_FOUND',
+                message: "El número de teléfono o correo no está registrado. Por favor presiona 'Crear Cuenta'." 
+            });
         }
 
         // 🔴 BLOQUEO POR REVISIÓN PENDIENTE / SUSPENSIÓN
@@ -395,10 +401,14 @@ export const login = async (req, res) => {
             });
         }
 
-        // Validación atómica de la clave mediante Bcrypt
+        // 2️⃣ VALIDACIÓN 2: Clave de acceso errada
         const passwordValido = await bcrypt.compare(password, hashAlmacenada);
         if (!passwordValido) {
-            return res.status(401).json({ success: false, message: "Credenciales de acceso incorrectas o inexistentes." });
+            return res.status(401).json({ 
+                success: false, 
+                code: 'WRONG_PASSWORD',
+                message: "La clave de acceso es incorrecta. Por favor verifícala e intenta de nuevo." 
+            });
         }
 
         // Generación del Token JWT Operativo de TAXIA CIMCO
