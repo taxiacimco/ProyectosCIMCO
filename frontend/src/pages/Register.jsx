@@ -1,27 +1,27 @@
-// Versión Arquitectura: V23.3 - Interceptor de QR con Fallback por Defecto y Saneamiento de Roles
+// Versión Arquitectura: V23.4 - Fusión de Interceptor de QR con Eliminación de Alta Gerencia y Estética CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Register.jsx
- * Misión: Enrutador maestro de roles con interceptor para QR institucionales, verificación de estado de sesión
- *         y fallback preventivo ante parámetros ?role= inválidos.
+ * Misión: Enrutador maestro de roles con interceptor para QR institucionales, protección de sesión activa,
+ *         fallback preventivo de roles y remoción definitiva del punto de acceso público a Alta Gerencia.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Híbrida).
  */
 
 import React, { useEffect } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { User, Bike, Bus, Terminal, Shield, ArrowLeft, Loader } from 'lucide-react';
-import { useAuth } from '@/hooks/useAuth'; // 🔐 Contexto global de autenticación
+import { User, Bike, Bus, Terminal, ArrowLeft, Loader } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
 
 const Register = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { user, loading } = useAuth(); // 🛡️ Evaluación del estado de sesión activo
+    const { user, loading } = useAuth();
     
     // Guardas de Seguridad para mitigar desbordamientos por tipos inválidos
     const targetRole = searchParams ? searchParams.get('role') : null;
 
     // 🛡️ INTERCEPTOR DOBLE: VERIFICA SESIÓN Y REDIRIGE SEGÚN CÓDIGO QR O ROL (CON FALLBACK)
     useEffect(() => {
-        if (loading) return; // Esperar a que la autenticación de Firebase resuelva el estado
+        if (loading) return;
 
         // 1️⃣ CASO A: EL USUARIO YA TIENE SESIÓN ABIERTA
         if (user) {
@@ -48,8 +48,6 @@ const Register = () => {
             } else if (isDespachador) {
                 navigate('/register-despachador', { replace: true });
             } else {
-                // ⚠️ CASO BORDE / FALLBACK DE SEGURIDAD:
-                // Si el parámetro ?role= no coincide con ningún rol reconocido, se redirige por defecto a pasajero.
                 console.warn(`⚠️ [CIMCO-QR] Parámetro ?role="${targetRole}" no válido. Aplicando fallback a registro de pasajero.`);
                 navigate('/register-pasajero', { replace: true });
             }
@@ -107,7 +105,7 @@ const Register = () => {
     }
 
     return (
-        <div className="min-h-screen bg-[#08080a] flex items-center justify-center p-4 selection:bg-cyan-500/30 relative overflow-hidden">
+        <div className="min-h-screen bg-[#08080a] flex items-center justify-center p-4 selection:bg-cyan-500/30 relative overflow-hidden font-sans">
             {/* FONDO ESTÉTICO CIMCO-UI HOMOLOGADO */}
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(6,182,212,0.03)_0%,transparent_70%)] pointer-events-none" />
             
@@ -140,18 +138,8 @@ const Register = () => {
                     ))}
                 </div>
 
-                {/* Acceso Administrativo Restringido */}
-                <div className="mt-6 flex justify-center">
-                    <Link 
-                        to="/register-admin"
-                        className="flex items-center gap-2 text-zinc-600 hover:text-cyan-400 text-[10px] font-mono uppercase tracking-[0.2em] transition-colors bg-black/20 px-4 py-3 rounded-xl border border-transparent hover:border-cyan-900/50"
-                    >
-                        <Shield size={12} /> Acceso Alta Gerencia
-                    </Link>
-                </div>
-
                 <div className="mt-8 pt-6 border-t border-white/[0.05] text-center">
-                    <Link to="/login" className="inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-white font-mono text-[10px] uppercase tracking-widest transition-colors">
+                    <Link to="/login" className="inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-white font-mono text-[10px] uppercase tracking-widest transition-colors text-decoration-none">
                         <ArrowLeft size={12} /> Abortar y volver al Login Central
                     </Link>
                 </div>
