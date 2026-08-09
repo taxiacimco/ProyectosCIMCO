@@ -1,16 +1,13 @@
-// Versión Arquitectura: V12.23 - Integración de Socket Centralizado (useSocket)
+// Versión Arquitectura: V18.0 - Rediseño CIMCO-UI V9.3 (Psicología del Color & Edición Dinámica de Vehículo)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
- * Misión: Panel interactivo en tiempo real para el rol 'conductor' de Mototaxi con soporte multi-red, control transaccional e inyección de telemetría geoespacial.
- * Ajustes V12.23:
- * 1. Remoción de la conexión socket aislada socket.io-client e instanciación manual io(BACKEND_URL).
- * 2. Incorporación e integración del hook centralizado global @/hooks/useSocket.
- * 3. Mapeo unificado de suscripciones, emisión de telemetría y desregistro sobre la instancia compartida 'socket'.
- * 4. Preservación íntegra de la estética CIMCO-UI V9.3, validaciones transaccionales de saldo ($2.000 COP) y gobernanza de Firestore.
+ * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
+ *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo) y gestión integral
+ *          de perfil y datos del vehículo para cambios de unidad.
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, updateDoc, setDoc, serverTimestamp, runTransaction, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
@@ -19,12 +16,13 @@ import api from '@/config/api';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
-  CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X
+  CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X,
+  Wifi, WifiOff, Settings, Bike, ShieldCheck, RefreshCw, Phone, FileText, CheckCircle2, Palette
 } from 'lucide-react';
 
 export default function HomeMototaxi() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
-  const { user, logout } = useAuth(); 
+  const { user, logout, updateUserProfile } = useAuth(); 
   const { walletData, loading: walletLoading } = useWallet();
   const { socket, isConnected } = useSocket();
 
@@ -37,20 +35,28 @@ export default function HomeMototaxi() {
   const [servicioActivo, setServicioActivo] = useState(null); // Documento activo en Firestore
   const [ofertasDisponibles, setOfertasDisponibles] = useState([]);
   const [cargandoOfertas, setCargandoOfertas] = useState(true);
-  const [coordenadas, setCoordenadas] = useState({ lat: 9.5661, lng: -73.3332 }); // Default: La Jagua de Ibirico
+  const [coords, setCoords] = useState({ lat: 9.5610, lng: -73.3332 }); // Default: La Jagua de Ibirico
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [datosParaCalificar, setDatosParaCalificar] = useState(null);
 
-  // 📝 Estados para la Modal del Perfil Brutalista
-  const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
-  const [inputNombre, setInputNombre] = useState('');
-  const [inputTelefono, setInputTelefono] = useState('');
-  const [inputPlaca, setInputPlaca] = useState('');
-  const [inputTipoServicio, setInputTipoServicio] = useState('mototaxi');
+  // 📝 Estados para la Modal y Sincronización de Perfil/Vehículo
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [syncSuccess, setSyncSuccess] = useState(false);
   const [errorPerfil, setErrorPerfil] = useState('');
 
-  // 📜 Estados para Navegación e Historial Urbano Híbrido
-  const [tabActiva, setTabActiva] = useState('radar'); // 'radar' | 'historial'
+  // Formulario de Datos Personales y del Vehículo
+  const [formData, setFormData] = useState({
+    nombre: '',
+    telefono: '',
+    placa: '',
+    vehiculoModelo: '',
+    vehiculoColor: '',
+    modalidad: 'Mototaxi'
+  });
+
+  // 📜 Estados para Navegación e Historial
+  const [activeTab, setActiveTab] = useState('radar'); // 'radar' | 'historial' | 'billetera'
   const [historial, setHistorial] = useState([]);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
 
@@ -58,7 +64,7 @@ export default function HomeMototaxi() {
   const geoWatchRef = useRef(null);
 
   // Recuperación estricta sin ID predeterminado MOCK
-  const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
+  const conductorId = user?.uid || user?.id || user?._id || localStorage.getItem('conductorId'); 
   const token = localStorage.getItem('token') || user?.token;
 
   // Mapeo seguro con fallback de $20.000 COP en caso de indeterminación
@@ -80,13 +86,29 @@ export default function HomeMototaxi() {
     }
   }, [conductorId]);
 
+  // Carga de datos iniciales del usuario
+  useEffect(() => {
+    if (user) {
+      const nombreCarga = user?.nombre || user?.displayName || user?.nombreCompleto || nombreInicialFallback;
+      setNombreConductor(nombreCarga.toUpperCase());
+      setFormData({
+        nombre: nombreCarga,
+        telefono: user?.telefono || user?.lineaContacto || user?.phoneNumber || '',
+        placa: user?.placa || 'SIN PLACA',
+        vehiculoModelo: user?.vehiculoModelo || user?.modelo || '',
+        vehiculoColor: user?.vehiculoColor || user?.color || '',
+        modalidad: user?.modalidad || user?.tipoServicio || 'Mototaxi'
+      });
+    }
+  }, [user, nombreInicialFallback]);
+
   // ==================================================================
   // 1. ESCUCHA REACTIVA DE IDENTIDAD EN FIRESTORE
   // ==================================================================
   useEffect(() => {
     if (!user?.uid) return;
     
-    const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+    const pathConductores = FIRESTORE_PATHS?.conductores || FIRESTORE_PATHS?.usuarios || 'usuarios';
     const conductorRef = doc(db, pathConductores, user.uid);
 
     const unsubscribe = onSnapshot(conductorRef, (docSnap) => {
@@ -95,10 +117,15 @@ export default function HomeMototaxi() {
         const nombreCompleto = data?.nombre || data?.displayName || data?.nombreCompleto || nombreInicialFallback;
         
         setNombreConductor(nombreCompleto.toUpperCase());
-        setInputNombre(nombreCompleto);
-        setInputTelefono(data?.telefono || '');
-        setInputPlaca(data?.placa || '');
-        setInputTipoServicio(data?.tipoServicio || 'mototaxi');
+        setFormData((prev) => ({
+          ...prev,
+          nombre: nombreCompleto,
+          telefono: data?.telefono || data?.lineaContacto || prev.telefono,
+          placa: data?.placa || prev.placa,
+          vehiculoModelo: data?.vehiculoModelo || data?.modelo || prev.vehiculoModelo,
+          vehiculoColor: data?.vehiculoColor || data?.color || prev.vehiculoColor,
+          modalidad: data?.modalidad || data?.tipoServicio || prev.modalidad
+        }));
       }
     }, (error) => {
       console.error("🚨 [CIMCO-IDENTITY-ERROR] Fallo en lectura de perfil:", error);
@@ -118,14 +145,19 @@ export default function HomeMototaxi() {
     }
     if (socket && (socket.connected || isConnected)) {
       if (conductorId) {
+        socket.emit('conductor:offline', { 
+          uid: conductorId,
+          nombre: formData.nombre,
+          placa: formData.placa
+        });
         socket.emit('desactivar_conductor', { conductorId });
       }
       console.log("📡 [CIMCO-SOCKET] Notificación de desactivación enviada al socket unificado.");
     }
-  }, [socket, isConnected, conductorId]);
+  }, [socket, isConnected, conductorId, formData.nombre, formData.placa]);
 
   const iniciarTrackingGPS = useCallback(() => {
-    if (!navigator.geolocation) {
+    if (!('geolocation' in navigator)) {
       console.error("❌ [GPS-ERROR] Geolocalización no soportada por este navegador/dispositivo.");
       alert("⚠️ El navegador o dispositivo actual no soporta geolocalización.");
       setIsOnline(false);
@@ -136,28 +168,37 @@ export default function HomeMototaxi() {
     geoWatchRef.current = navigator.geolocation.watchPosition(
       (position) => {
         if (!position || !position.coords) return;
-        const { latitude, longitude } = position.coords;
-        setCoordenadas({ lat: latitude, lng: longitude });
+        const newCoords = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+        setCoords(newCoords);
 
         if (socket && (socket.connected || isConnected)) {
+          socket.emit('telemetria:location', {
+            uid: conductorId,
+            coords: newCoords,
+            rol: 'mototaxi',
+            placa: formData.placa || 'SIN PLACA'
+          });
           socket.emit('actualizar_radar_gps', {
             conductorId,
-            lat: latitude,
-            lng: longitude
+            lat: newCoords.lat,
+            lng: newCoords.lng
           });
-          console.log(`🎯 [RADAR-BURST] Coordenadas emitidas al ecosistema unificado: [${longitude}, ${latitude}]`);
+          console.log(`🎯 [RADAR-BURST] Coordenadas emitidas al ecosistema unificado: [${newCoords.lng}, ${newCoords.lat}]`);
         }
       },
       (error) => {
-        console.error(`❌ [GPS-TRACKING-ERR] Código: ${error?.code} | ${error?.message}`);
+        console.warn("⚠️ [CIMCO-GPS] Alerta de cobertura satelital:", error?.message);
         if (error?.code === error?.PERMISSION_DENIED) {
           alert("⚠️ Permiso de GPS denegado. Para recibir servicios, habilite la ubicación en su navegador/dispositivo.");
           setIsOnline(false);
         }
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
-  }, [socket, isConnected, conductorId]);
+  }, [socket, isConnected, conductorId, formData.placa]);
 
   // ==================================================================
   // 3. GOBERNANZA DEL CANAL WEBSOCKET CENTRALIZADO (useSocket)
@@ -184,9 +225,14 @@ export default function HomeMototaxi() {
       console.log(`📡 [CIMCO-SOCKET] Suscribiendo a instancia global centralizada.`);
 
       if (socket.connected || isConnected) {
+        socket.emit('conductor:online', {
+          uid: conductorId,
+          nombre: formData.nombre,
+          placa: formData.placa
+        });
         socket.emit('registrar_conductor', { 
           conductorId, 
-          tipoServicio: inputTipoServicio,
+          tipoServicio: formData.modalidad,
           email: user?.email || localStorage.getItem('conductorEmail') || ''
         });
       }
@@ -213,7 +259,9 @@ export default function HomeMototaxi() {
   }, [
     isOnline, 
     conductorId, 
-    inputTipoServicio, 
+    formData.modalidad, 
+    formData.nombre,
+    formData.placa,
     puedeOperar, 
     socket, 
     isConnected, 
@@ -223,6 +271,21 @@ export default function HomeMototaxi() {
     desconectarEcosistema, 
     user?.email
   ]);
+
+  // Alternar Estado Conectado / Desconectado
+  const handleToggleState = () => {
+    const nextState = !isOnline;
+    setIsOnline(nextState);
+
+    if (socket && (socket.connected || isConnected)) {
+      const eventName = nextState ? 'conductor:online' : 'conductor:offline';
+      socket.emit(eventName, {
+        uid: conductorId,
+        nombre: formData.nombre,
+        placa: formData.placa
+      });
+    }
+  };
 
   // ==================================================================
   // 4. PATRÓN HÍBRIDO RESILIENTE PARA HISTORIALES URBANOS
@@ -274,10 +337,10 @@ export default function HomeMototaxi() {
   }, [user, conductorId]);
 
   useEffect(() => {
-    if (tabActiva === 'historial') {
+    if (activeTab === 'historial') {
       fetchHistorial();
     }
-  }, [tabActiva, fetchHistorial]);
+  }, [activeTab, fetchHistorial]);
 
   // ==================================================================
   // 5. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
@@ -344,42 +407,63 @@ export default function HomeMototaxi() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 7. ACCIONES DE GESTIÓN DE DESPACHOS Y AJUSTES DE PERFIL
+  // 7. ACCIONES DE GESTIÓN DE DESPACHOS Y AJUSTES DE PERFIL / VEHÍCULO
   // ==================================================================
-  const handleActualizarPerfil = async (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
+    setIsSubmitting(true);
+    setSyncSuccess(false);
     setErrorPerfil('');
 
-    if (!inputNombre.trim() || !inputPlaca.trim()) {
-      setErrorPerfil("⚠️ Nombre y Placa son obligatorios.");
-      return;
-    }
-
     try {
-      const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-      const conductorRef = doc(db, pathConductores, user.uid);
+      const uid = user?.uid || user?._id || conductorId;
+      if (!uid) throw new Error("Identificador de sesión no válido.");
 
-      await updateDoc(conductorRef, {
-        nombre: inputNombre.trim(),
-        telefono: inputTelefono.trim(),
-        placa: inputPlaca.trim().toUpperCase(),
-        tipoServicio: inputTipoServicio,
+      const updatedPayload = {
+        nombre: formData.nombre?.trim() || 'Conductor CIMCO',
+        displayName: formData.nombre?.trim() || 'Conductor CIMCO',
+        telefono: formData.telefono?.trim() || '',
+        lineaContacto: formData.telefono?.trim() || '',
+        placa: formData.placa?.toUpperCase()?.trim() || 'SIN PLACA',
+        vehiculoModelo: formData.vehiculoModelo?.trim() || '',
+        vehiculoColor: formData.vehiculoColor?.trim() || '',
+        modalidad: formData.modalidad || 'Mototaxi',
+        tipoServicio: formData.modalidad || 'Mototaxi',
+        updatedAt: new Date().toISOString(),
         fechaActualizacion: serverTimestamp()
+      };
+
+      // Persistir en Firestore
+      const collectionPath = FIRESTORE_PATHS?.usuarios || FIRESTORE_PATHS?.conductores || 'usuarios';
+      const userDocRef = doc(db, collectionPath, uid);
+
+      await updateDoc(userDocRef, updatedPayload).catch(async () => {
+        await setDoc(userDocRef, updatedPayload, { merge: true });
       });
+
+      // Actualizar contexto local si el AuthProvider lo expone
+      if (updateUserProfile) {
+        await updateUserProfile(updatedPayload);
+      }
 
       if (socket && (socket.connected || isConnected)) {
         socket.emit('registrar_conductor', { 
-          conductorId, 
-          tipoServicio: inputTipoServicio,
+          conductorId: uid, 
+          tipoServicio: formData.modalidad,
           email: user?.email || ''
         });
       }
 
-      setMostrarModalPerfil(false);
-      console.log("🔒 [PERFIL-CIMCO] Parámetros de la unidad modificados con éxito.");
+      setSyncSuccess(true);
+      setTimeout(() => {
+        setSyncSuccess(false);
+        setShowSettingsModal(false);
+      }, 1200);
     } catch (err) {
-      console.error("🚨 [PERFIL-FAIL] Error al escribir en nodo atómico:", err);
-      setErrorPerfil("Error interno al sincronizar el perfil.");
+      console.error("❌ [CIMCO-PROFILE] Error guardando unidad:", err?.message || err);
+      setErrorPerfil(err?.message || "Error al sincronizar datos de la unidad.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -437,8 +521,8 @@ export default function HomeMototaxi() {
           estado: 'ACEPTADO',
           conductorId: user?.uid,
           conductorNombre: nombreConductor,
-          conductorPlaca: inputPlaca,
-          conductorTipoServicio: inputTipoServicio,
+          conductorPlaca: formData.placa,
+          conductorTipoServicio: formData.modalidad,
           fechaAceptado: serverTimestamp()
         });
       });
@@ -482,471 +566,529 @@ export default function HomeMototaxi() {
     }
   };
 
+  const currentDriverName = formData.nombre || nombreConductor || 'CONDUCTOR';
+  const currentPlate = formData.placa || 'SIN PLACA';
+
   return (
-    <div className="min-h-screen bg-[#0e0e11] text-zinc-100 font-mono antialiased pb-28 relative selection:bg-cyan-400 selection:text-black">
-      
-      {/* 🔝 ENCABEZADO DE CONTROL MAESTRO (CIMCO-UI V12.23 NEO-BRUTALIST) */}
-      <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <button 
-            onClick={() => setMostrarModalPerfil(true)}
-            className="p-2 bg-yellow-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all shrink-0 rounded-none hover:bg-yellow-300"
+    <div className="min-h-screen bg-[#0d0e12] text-slate-100 flex flex-col justify-between font-sans relative overflow-x-hidden selection:bg-sky-500 selection:text-white">
+
+      {/* ════════════════ HEADER SUPERIOR TAQUÍMETRO Y NAVEGACIÓN ════════════════ */}
+      <header className="sticky top-0 z-40 bg-[#121214]/80 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between shadow-xl">
+        
+        {/* ID Conductor & Vehículo */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="relative group p-0.5 rounded-xl bg-gradient-to-tr from-sky-500/20 to-amber-500/20 border border-white/10 hover:border-white/30 transition-all duration-300 active:scale-95 text-left"
+            title="Configurar Perfil y Vehículo"
           >
-            🛺
+            <div className="bg-[#181920] px-3 py-1.5 rounded-[10px] flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 font-bold shadow-inner shrink-0">
+                <User className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-bold text-white tracking-wide uppercase max-w-[120px] sm:max-w-[180px] truncate">
+                  {currentDriverName}
+                </p>
+                <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
+                  <span className="text-sky-400 font-bold tracking-wider">{currentPlate}</span>
+                  <span>•</span>
+                  <span className="text-slate-300">{formData.modalidad}</span>
+                </div>
+              </div>
+              <Settings className="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-400 transition-colors ml-1 shrink-0" />
+            </div>
           </button>
-          <div className="min-w-0 flex-1">
-            <button 
-              onClick={() => setMostrarModalPerfil(true)}
-              className="text-xs font-black tracking-widest text-white uppercase truncate flex items-center gap-1.5 hover:text-cyan-400 text-left w-full focus:outline-none"
-              title="Click para editar parámetros de unidad"
-            >
-              {nombreConductor} <Edit3 size={11} className="text-zinc-500 shrink-0" />
-            </button>
-            <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
-              <Signal size={10} className={isOnline && (isConnected || socket?.connected) ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
-              {isOnline ? 'CONECTADO' : 'OFFLINE'} 
-              <span className="text-zinc-700">|</span> 
-              <span className="text-zinc-400 text-[8px] bg-black px-1 border border-zinc-800">{inputPlaca || 'SIN PLACA'}</span>
-            </p>
-          </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 ml-2">
-          {/* Switch de Estado Operativo Global */}
+        {/* Acciones de Estado (ONLINE / OFFLINE) y Billetera */}
+        <div className="flex items-center gap-2 sm:gap-3">
+
+          {/* BOTÓN CONMUTADOR CON PSICOLOGÍA DEL COLOR */}
+          {/* OFFLINE: Ámbar / Naranja (Alerta, Espera, Standby) */}
+          {/* ONLINE: Azul Suave / Sky Blue (Confianza, Serenidad, Operativo) */}
           <button
-            onClick={() => setIsOnline(!isOnline)}
-            className={`px-3 py-1.5 rounded-none font-black text-[10px] uppercase tracking-wider border-2 border-black transition-all duration-150 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none shadow-[2px_2px_0px_0px_#000] ${
-              isOnline 
-                ? 'bg-emerald-400 text-black font-black' 
-                : 'bg-zinc-800 text-zinc-400 border-black hover:bg-zinc-700'
+            onClick={handleToggleState}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black tracking-wider transition-all duration-300 active:scale-95 border ${
+              isOnline
+                ? 'bg-gradient-to-r from-sky-500/20 via-blue-500/15 to-sky-600/20 text-sky-300 border-sky-400/40 shadow-[0_0_20px_rgba(56,189,248,0.25)] hover:bg-sky-500/30'
+                : 'bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-amber-600/20 text-amber-300 border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.20)] hover:bg-amber-500/30'
             }`}
           >
-            {isOnline ? 'ONLINE' : 'OFFLINE'}
+            {isOnline ? (
+              <>
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-sky-400"></span>
+                </span>
+                <Wifi className="w-3.5 h-3.5 text-sky-400" />
+                <span>ONLINE</span>
+              </>
+            ) : (
+              <>
+                <span className="h-2.5 w-2.5 rounded-full bg-amber-500"></span>
+                <WifiOff className="w-3.5 h-3.5 text-amber-400" />
+                <span>OFFLINE</span>
+              </>
+            )}
           </button>
 
-          {/* BILLETERA DE OPERACIONES */}
-          <div className="flex items-center gap-2 bg-black border-2 border-black px-2.5 py-1.5 rounded-none shadow-[2px_2px_0px_0px_#000]">
-            <Wallet size={13} className="text-cyan-400" strokeWidth={2.5} />
-            <span className="text-[10px] font-black text-zinc-200">
-              {walletLoading ? '...' : `$${Number(saldoVivo).toLocaleString('es-CO')}`}
-            </span>
+          {/* Saldo de Billetera */}
+          <div className="bg-[#181920] border border-white/10 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-mono text-emerald-400 font-bold shadow-sm">
+            <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+            <span>${saldoVivo.toLocaleString('es-CO')}</span>
           </div>
 
-          {/* BOTÓN DE SALIDA BRUTALISTA */}
-          <button 
+          {/* Cerrar Sesión */}
+          <button
             onClick={handleCerrarSesion}
-            title="Cerrar sesión de Conductor"
-            className="p-2 bg-red-500 text-black border-2 border-black rounded-none hover:bg-red-600 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all flex items-center justify-center shadow-[2px_2px_0px_0px_#000] shrink-0 touch-manipulation"
+            className="p-2 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors"
+            title="Cerrar Sesión"
           >
-            <LogOut size={13} strokeWidth={3} />
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* BANNER DE ALERTA DE SALDO */}
-      {!puedeOperar && !walletLoading && (
-        <div className="m-4 p-3 bg-red-500 text-black border-4 border-black rounded-none flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider shadow-[4px_4px_0px_0px_#000] relative z-10 animate-pulse">
-          <AlertCircle size={16} strokeWidth={2.5} className="shrink-0" />
-          <span>Malla Bloqueada: Requiere Saldo Mínimo ($2.000 COP)</span>
-        </div>
-      )}
+      {/* ════════════════ ÁREA CENTRAL: RADAR / TELEMETRÍA ════════════════ */}
+      <main className="flex-1 flex flex-col items-center justify-center p-4 relative z-10 my-auto">
+        {activeTab === 'radar' && (
+          <div className="w-full max-w-lg mx-auto flex flex-col items-center">
+            
+            {/* Tarjeta de Servicio Activo */}
+            {servicioActivo ? (
+              <div className="w-full bg-[#121214]/90 backdrop-blur-md border border-emerald-500/40 rounded-2xl p-6 shadow-2xl relative overflow-hidden mb-6">
+                <div className="flex justify-between items-center pb-4 border-b border-white/10 mb-4">
+                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                    SERVICIO EN CURSO
+                  </span>
+                  <span className="text-xs font-mono font-bold text-white bg-emerald-500/20 px-2.5 py-1 rounded-lg border border-emerald-500/30">
+                    {servicioActivo.estado}
+                  </span>
+                </div>
+                <div className="space-y-3 mb-6 text-left">
+                  <p className="text-sm font-bold text-white flex items-center gap-2">
+                    <User className="w-4 h-4 text-sky-400" />
+                    {servicioActivo.clienteNombre || 'Pasajero CIMCO'}
+                  </p>
+                  <p className="text-xs text-slate-300 flex items-start gap-2">
+                    <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span><strong>Origen:</strong> {servicioActivo.origenDireccion || 'Ubicación seleccionada'}</span>
+                  </p>
+                  {servicioActivo.destinoDireccion && (
+                    <p className="text-xs text-slate-300 flex items-start gap-2">
+                      <Navigation className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                      <span><strong>Destino:</strong> {servicioActivo.destinoDireccion}</span>
+                    </p>
+                  )}
+                  <p className="text-lg font-mono font-bold text-emerald-400 pt-2">
+                    ${Number(servicioActivo.valor || 0).toLocaleString('es-CO')} COP
+                  </p>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  {servicioActivo.estado === 'ACEPTADO' && (
+                    <button
+                      onClick={() => transicionarEstadoViaje('EN_SITIO')}
+                      className="col-span-2 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold text-xs uppercase tracking-wider transition-all"
+                    >
+                      LLEGUÉ AL SITIO DE RECOGIDA
+                    </button>
+                  )}
+                  {servicioActivo.estado === 'EN_SITIO' && (
+                    <button
+                      onClick={() => transicionarEstadoViaje('EN_VIAJE')}
+                      className="col-span-2 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-xs uppercase tracking-wider transition-all"
+                    >
+                      INICIAR CARRERA CON PASAJERO
+                    </button>
+                  )}
+                  {servicioActivo.estado === 'EN_VIAJE' && (
+                    <button
+                      onClick={() => transicionarEstadoViaje('COMPLETADO')}
+                      className="col-span-2 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all"
+                    >
+                      FINALIZAR SERVICIO
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : solicitudViaje ? (
+              /* Alerta de Solicitud de Viaje Entrante por Socket */
+              <div className="w-full bg-[#121214]/95 backdrop-blur-md border border-amber-500/50 rounded-2xl p-6 shadow-2xl relative overflow-hidden animate-pulse mb-6">
+                <div className="flex justify-between items-center mb-4">
+                  <span className="text-xs font-black text-amber-400 uppercase tracking-widest flex items-center gap-2">
+                    ⚡ NUEVA SOLICITUD DE SERVICIO
+                  </span>
+                </div>
+                <div className="space-y-2 text-left mb-6">
+                  <p className="text-sm font-bold text-white">{solicitudViaje.origen || 'Origen solicitado'}</p>
+                  {solicitudViaje.destino && <p className="text-xs text-slate-300">Destino: {solicitudViaje.destino}</p>}
+                  <p className="text-xl font-mono font-bold text-emerald-400">${Number(solicitudViaje.valor || 0).toLocaleString('es-CO')} COP</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={rechazarViaje}
+                    className="py-2.5 rounded-xl bg-red-500/20 text-red-300 border border-red-500/30 font-bold text-xs hover:bg-red-500/30 transition-all"
+                  >
+                    IGNORAR
+                  </button>
+                  <button
+                    onClick={aceptarViaje}
+                    disabled={loading}
+                    className="py-2.5 rounded-xl bg-emerald-500 text-white font-bold text-xs hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+                  >
+                    {loading ? 'TOMANDO...' : 'ACEPTAR VIAJE'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
-      {/* 🗺️ CONTENEDOR CENTRAL DE LOGÍSTICA CONTENIDA */}
-      <main className="p-4 z-10 relative max-w-md mx-auto space-y-6">
-        
-        {/* PESTAÑA HISTORIAL URBANO HÍBRIDO */}
-        {tabActiva === 'historial' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between border-b-2 border-black pb-2">
-              <div className="flex items-center gap-2">
-                <Clock size={16} className="text-yellow-400" strokeWidth={2.5} />
-                <h2 className="text-xs uppercase font-black tracking-widest text-zinc-200">
-                  Historial Urbano ({historial.length})
+            {!isOnline ? (
+              /* ESTADO OFFLINE - Tono Ámbar Cálido / Seguridad en Pausa */
+              <div className="w-full bg-[#121214]/80 backdrop-blur-md border border-amber-500/20 rounded-2xl p-6 sm:p-8 text-center shadow-2xl relative overflow-hidden transition-all">
+                <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.15)]">
+                  <WifiOff className="w-8 h-8" />
+                </div>
+
+                <h2 className="text-base sm:text-lg font-black tracking-wider text-amber-200 uppercase mb-2">
+                  UNIDAD EN PAUSA OPERATIVA
                 </h2>
-              </div>
-              <button 
-                onClick={fetchHistorial} 
-                disabled={cargandoHistorial}
-                className="text-[9px] font-black uppercase tracking-wider bg-zinc-800 text-zinc-300 px-2 py-1 border border-black hover:bg-zinc-700 active:translate-x-[1px] active:translate-y-[1px]"
-              >
-                {cargandoHistorial ? 'Cargando...' : 'Recargar'}
-              </button>
-            </div>
 
-            {cargandoHistorial ? (
-              <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] flex items-center justify-center gap-3">
-                <Loader size={14} className="animate-spin text-yellow-400" /> Sincronizando historial urbano...
-              </div>
-            ) : historial.length === 0 ? (
-              <div className="bg-zinc-900 border-4 border-black rounded-none p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black shadow-[4px_4px_0px_0px_#000]">
-                Sin registros de viajes completados.
+                <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed mb-6 font-medium">
+                  ESTABLEZCA EL INTERRUPTOR EN <span className="text-sky-400 font-bold">ONLINE</span> PARA ACOPLAR SU POSICIÓN AL RADAR SATELITAL DE LA JAGUA DE IBIRICO.
+                </p>
+
+                <button
+                  onClick={handleToggleState}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 text-white font-black text-xs tracking-wider uppercase shadow-lg shadow-sky-500/20 hover:from-sky-400 hover:to-blue-500 transition-all active:scale-95"
+                >
+                  ACTIVAR RADAR Y RECIBIR VIAJES
+                </button>
               </div>
             ) : (
-              <div className="space-y-3">
+              /* ESTADO ONLINE - Tono Azul Suave / Conexión Activa y Ágil */
+              <div className="w-full bg-[#121214]/80 backdrop-blur-md border border-sky-500/30 rounded-2xl p-6 sm:p-8 text-center shadow-2xl relative overflow-hidden transition-all">
+                <div className="absolute -top-16 -left-16 w-40 h-40 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                {/* Banner Telemetría GPS */}
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/20 text-[11px] font-mono text-sky-300 mb-6">
+                  <Navigation className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                  <span>GPS: {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</span>
+                </div>
+
+                {/* Animación de Radar Pulsante */}
+                <div className="relative w-28 h-28 mx-auto mb-6 flex items-center justify-center">
+                  <div className="absolute inset-0 rounded-full border border-sky-500/20 animate-ping"></div>
+                  <div className="absolute inset-2 rounded-full border border-sky-400/30 animate-pulse"></div>
+                  <div className="w-20 h-20 rounded-full bg-sky-500/10 border border-sky-400/40 flex items-center justify-center text-sky-400 shadow-[0_0_30px_rgba(56,189,248,0.3)]">
+                    <Bike className="w-10 h-10 animate-bounce" />
+                  </div>
+                </div>
+
+                <h2 className="text-sm sm:text-base font-black tracking-widest text-sky-200 uppercase mb-2">
+                  ESCUCHANDO SOLICITUDES EN LA JAGUA DE IBIRICO...
+                </h2>
+
+                <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed font-medium mb-6">
+                  Túnel dúplex activo. El centro de despacho asignará las solicitudes más cercanas a su ubicación.
+                </p>
+
+                {/* Lista de Ofertas en Radar Firestore */}
+                {ofertasDisponibles.length > 0 && (
+                  <div className="mt-4 text-left border-t border-white/10 pt-4">
+                    <p className="text-[11px] font-bold text-amber-400 uppercase tracking-wider mb-2">
+                      Ofertas disponibles en zona ({ofertasDisponibles.length}):
+                    </p>
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {ofertasDisponibles.map((of) => (
+                        <div key={of.id} className="bg-[#181920] p-3 rounded-xl border border-white/5 flex justify-between items-center">
+                          <div className="text-xs">
+                            <p className="font-bold text-white">{of.origenDireccion || of.origen || 'Origen sin especificar'}</p>
+                            <p className="text-emerald-400 font-mono font-bold">${Number(of.valor || 0).toLocaleString('es-CO')} COP</p>
+                          </div>
+                          <button
+                            onClick={() => capturarOferta(of.id)}
+                            className="px-3 py-1.5 bg-sky-500 hover:bg-sky-400 text-white rounded-lg text-xs font-bold transition-all"
+                          >
+                            CAPTURAR
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+          </div>
+        )}
+
+        {activeTab === 'historial' && (
+          <div className="w-full max-w-lg bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-2xl p-6 text-center shadow-xl">
+            <Clock className="w-10 h-10 text-sky-400 mx-auto mb-3" />
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-3">Historial de Carreras</h3>
+            {cargandoHistorial ? (
+              <div className="flex justify-center items-center py-6">
+                <Loader className="w-6 h-6 text-sky-400 animate-spin" />
+              </div>
+            ) : historial.length > 0 ? (
+              <div className="space-y-2 max-h-80 overflow-y-auto text-left pr-1">
                 {historial.map((item) => (
-                  <div key={item.id || item._id} className="bg-zinc-900 border-2 border-black p-3.5 shadow-[3px_3px_0px_0px_#000] space-y-2">
-                    <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
-                      <span className="text-[9px] font-black uppercase bg-emerald-400 text-black px-1.5 py-0.5 border border-black">
-                        {item.estado || 'COMPLETADO'}
-                      </span>
-                      <span className="text-xs font-black text-emerald-400">
-                        ${Number(item.valor || item.tarifa || 0).toLocaleString('es-CO')}
-                      </span>
+                  <div key={item.id} className="bg-[#181920] p-3 rounded-xl border border-white/5 flex justify-between items-center">
+                    <div>
+                      <p className="text-xs font-bold text-white">{item.origenDireccion || item.origen || 'Carrera Local'}</p>
+                      <p className="text-[10px] text-slate-400">{item.fechaCreacion ? new Date(item.fechaCreacion.seconds * 1000).toLocaleDateString() : 'Fecha reciente'}</p>
                     </div>
-                    <div className="text-[10px] space-y-1 text-zinc-300">
-                      <p className="truncate flex items-center gap-1.5">
-                        <MapPin size={11} className="text-emerald-400 shrink-0" />
-                        <strong className="text-zinc-500 uppercase text-[8px]">Origen:</strong> {item.origenDireccion || item.origenTexto || "Punto de Inicio"}
-                      </p>
-                      <p className="truncate flex items-center gap-1.5">
-                        <Navigation size={11} className="text-cyan-400 shrink-0" />
-                        <strong className="text-zinc-500 uppercase text-[8px]">Destino:</strong> {item.destinoDireccion || item.destinoTexto || "Punto Final"}
-                      </p>
-                    </div>
+                    <span className="text-xs font-mono font-bold text-emerald-400">${Number(item.valor || item.precio || 0).toLocaleString('es-CO')}</span>
                   </div>
                 ))}
               </div>
+            ) : (
+              <p className="text-xs text-slate-400 mt-1">Sin servicios registrados en el turno actual.</p>
             )}
           </div>
         )}
 
-        {/* PESTAÑA RADAR / PANELES OPERATIVOS PRINCIPALES */}
-        {tabActiva === 'radar' && (
-          <>
-            {!isOnline && (
-              <div className="text-center p-6 bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none my-8">
-                <div className="w-12 h-12 bg-black border-2 border-black rounded-none flex items-center justify-center mx-auto mb-4 shadow-[2px_2px_0px_0px_#000]">
-                  <AlertCircle className="text-zinc-500" size={20} strokeWidth={2.5} />
-                </div>
-                <p className="text-zinc-300 text-xs leading-relaxed uppercase font-bold tracking-wide">
-                  Establezca el interruptor en <strong className="text-emerald-400 font-black">ONLINE</strong> para acoplar su posición al radar satelital de La Jagua de Ibirico.
-                </p>
-              </div>
-            )}
-
-            {isOnline && (
-              <>
-                {/* 🛡️ CASO 1: ADJUDICACIÓN DE ORDEN ACTIVA (FIRESTORE) */}
-                {servicioActivo ? (
-                  <div className="bg-zinc-900 p-5 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none space-y-4">
-                    <div className="flex justify-between items-center border-b-4 border-black pb-3">
-                      <div className="flex items-center gap-1.5">
-                        <TrendingUp className="text-emerald-400 animate-pulse" size={14} strokeWidth={3} />
-                        <span className="text-[9px] font-black tracking-widest bg-yellow-400 text-black border-2 border-black px-2 py-0.5 uppercase">
-                          ESTADO: {servicioActivo.estado}
-                        </span>
-                      </div>
-                      <span className="text-[9px] font-bold bg-black text-zinc-400 px-2 py-0.5 border border-zinc-800">
-                        ID: ...{String(servicioActivo?.id || "").slice(-6).toUpperCase()}
-                      </span>
-                    </div>
-
-                    <div className="space-y-3 text-xs bg-black/40 p-3 border-2 border-black">
-                      <div className="flex items-start gap-2.5">
-                        <MapPin size={14} className="text-emerald-400 mt-0.5 shrink-0" strokeWidth={2.5} />
-                        <div>
-                          <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-black">Origen / Recogida</p>
-                          <p className="text-zinc-200 font-bold text-[11px] mt-0.5 leading-tight">{servicioActivo.origenDireccion || "Ubicación Georreferenciada"}</p>
-                        </div>
-                      </div>
-
-                      <div className="border-t border-dashed border-zinc-800 my-2"></div>
-
-                      <div className="flex items-start gap-2.5">
-                        <Navigation size={14} className="text-cyan-400 mt-0.5 shrink-0" strokeWidth={2.5} />
-                        <div>
-                          <p className="text-[9px] text-zinc-500 uppercase tracking-wider font-black">Destino Final</p>
-                          <p className="text-zinc-200 font-bold text-[11px] mt-0.5 leading-tight">{servicioActivo.destinoDireccion || "Destino Georreferenciado"}</p>
-                        </div>
-                      </div>
-
-                      <div className="border-t border-4 border-black pt-3 mt-2 flex justify-between items-center">
-                        <div className="flex items-center gap-1.5 text-zinc-400 text-[10px] uppercase font-black">
-                          <CircleDollarSign size={14} className="text-yellow-400" strokeWidth={2.5} />
-                          <span>Liquidación:</span>
-                        </div>
-                        <span className="text-xs font-black text-white bg-black border border-zinc-800 px-2.5 py-1">
-                          ${Number(servicioActivo.valor || 0).toLocaleString('es-CO')} COP
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 space-y-2">
-                      {servicioActivo.estado === 'ACEPTADO' && (
-                        <button 
-                          onClick={() => transicionarEstadoViaje('EN_SITIO')}
-                          className="w-full bg-cyan-400 hover:bg-cyan-500 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
-                        >
-                          Confirmar: Llegada al Sitio
-                        </button>
-                      )}
-                      {servicioActivo.estado === 'EN_SITIO' && (
-                        <button 
-                          onClick={() => transicionarEstadoViaje('EN_VIAJE')}
-                          className="w-full bg-emerald-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
-                        >
-                          Iniciar Ruta Transaccional
-                        </button>
-                      )}
-                      {servicioActivo.estado === 'EN_VIAJE' && (
-                        <button 
-                          onClick={() => transicionarEstadoViaje('FINALIZADO')}
-                          className="w-full bg-yellow-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
-                        >
-                          Finalizar y Cobrar Servicio
-                        </button>
-                      )}
-                      
-                      {/* Mostrar botón de contingencia únicamente en Entorno de Desarrollo (DEV) */}
-                      {import.meta.env.DEV && (
-                        <button 
-                          onClick={() => {
-                            console.log("🏁 [CIMCO] Finalización forzada de viaje simulada.");
-                            setDatosParaCalificar({ id: servicioActivo?.id || 'SIMULADO', clienteNombre: servicioActivo?.clienteNombre || 'Pasajero CIMCO' });
-                            setServicioActivo(null);
-                            setMostrarModalCalificacion(true);
-                          }}
-                          className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[9px] uppercase py-1.5 border-2 border-black rounded-none font-bold tracking-wider mt-2"
-                        >
-                          [DEV] Simular Cierre Forzado
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {/* 🛡️ CASO 2: CARD FLOTANTE INTERACTIVO DE SOLICITUD SOCKET EN VIVO */}
-                    {solicitudViaje && (
-                      <div className="w-full bg-zinc-900 border-4 border-yellow-400 p-5 rounded-none shadow-[6px_6px_0px_0px_#000] space-y-4 mb-6 animate-pulse">
-                        <div className="flex justify-between items-start border-b-2 border-black pb-3">
-                          <span className="bg-yellow-400 text-black text-[9px] font-black px-2 py-1 border border-black uppercase tracking-wider">
-                            VIAJE INBOUND (SOCKET)
-                          </span>
-                          <span className="text-sm font-black text-emerald-400 bg-black px-2.5 py-0.5 border border-zinc-800">
-                            ${Number(solicitudViaje?.tarifa || solicitudViaje?.valor || 0).toLocaleString('es-CO')}
-                          </span>
-                        </div>
-                        
-                        <div className="space-y-2 text-xs text-zinc-300 bg-black/40 p-3 border-2 border-black">
-                          <p className="flex items-start gap-1.5">
-                            <span className="text-emerald-400 font-black shrink-0">📍</span>
-                            <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Recogida:</strong> {solicitudViaje?.origenTexto || solicitudViaje?.origenDireccion || solicitudViaje?.origen?.direccion || "Ubicación Georeferenciada"}</span>
-                          </p>
-                          <div className="border-t border-dashed border-zinc-800 my-1.5"></div>
-                          <p className="flex items-start gap-1.5">
-                            <span className="text-cyan-400 font-black shrink-0">🏁</span>
-                            <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Destino:</strong> {solicitudViaje?.destinoTexto || solicitudViaje?.destinoDireccion || solicitudViaje?.destino?.direccion || "Por definir"}</span>
-                          </p>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3 pt-1">
-                          <button
-                            onClick={rechazarViaje}
-                            disabled={loading}
-                            className="bg-zinc-700 hover:bg-zinc-600 text-zinc-200 py-2 rounded-none font-bold text-xs uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
-                          >
-                            Ignorar
-                          </button>
-                          <button
-                            onClick={aceptarViaje}
-                            disabled={loading}
-                            className="bg-yellow-400 hover:bg-yellow-500 text-black py-2 rounded-none font-black text-xs uppercase tracking-widest border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
-                          >
-                            {loading ? 'ASIGNANDO...' : '¡ACEPTAR!'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 🛡️ CASO 3: RADAR GENERAL DE MALLA DE RED FIRESTORE */}
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between px-1 border-b-2 border-black pb-2">
-                        <div className="flex items-center gap-2">
-                          <TrendingUp size={14} className="text-cyan-400" strokeWidth={2.5} />
-                          <h2 className="text-[10px] uppercase font-black tracking-widest text-zinc-400">
-                            Malla Radar ({ofertasDisponibles.length})
-                          </h2>
-                        </div>
-                        <span className="text-[9px] text-zinc-400 bg-zinc-900 px-2 py-1 border-2 border-black flex items-center gap-1.5 font-bold shadow-[1px_1px_0px_0px_#000]">
-                          <MapPin size={11} className="text-red-400" strokeWidth={3} />
-                          GPS: {coordenadas?.lng?.toFixed(4) || "0.0000"}, {coordenadas?.lat?.toFixed(4) || "0.0000"}
-                        </span>
-                      </div>
-
-                      {cargandoOfertas ? (
-                        <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] flex items-center justify-center gap-3">
-                          <Loader size={14} className="animate-spin text-cyan-400" /> Sincronizando malla...
-                        </div>
-                      ) : ofertasDisponibles.length === 0 ? (
-                        <div className="bg-zinc-900 border-4 border-black rounded-none p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black shadow-[4px_4px_0px_0px_#000]">
-                          Escuchando solicitudes en La Jagua de Ibirico...
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          {ofertasDisponibles.map((oferta) => (
-                            <div 
-                              key={oferta.id} 
-                              className="bg-zinc-900 p-4 border-4 border-black rounded-none flex flex-col gap-3 shadow-[4px_4px_0px_0px_#000] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#000] transition-all duration-150"
-                            >
-                              <div className="text-xs space-y-2">
-                                <div className="flex items-center justify-between border-b-2 border-black pb-2">
-                                  <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest bg-black px-2 py-0.5 border border-zinc-800">
-                                    {oferta.categoria || 'ESTÁNDAR'}
-                                  </span>
-                                  <span className="font-black text-emerald-400 text-sm">${Number(oferta.valor || 0).toLocaleString('es-CO')}</span>
-                                </div>
-                                <div className="space-y-1 bg-black/30 p-2 border border-zinc-800">
-                                  <p className="text-zinc-300 font-bold text-[11px] truncate flex items-center gap-1.5">
-                                    <MapPin size={12} className="text-emerald-400 shrink-0" strokeWidth={2.5} /> {oferta.origenDireccion || "Ubicación Base"}
-                                  </p>
-                                  <p className="text-zinc-400 text-[10px] truncate flex items-center gap-1.5">
-                                    <Navigation size={12} className="text-cyan-400 shrink-0" strokeWidth={2.5} /> {oferta.destinoDireccion || "Destino Final"}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="pt-1">
-                                <button 
-                                  onClick={() => capturarOferta(oferta.id)}
-                                  disabled={!puedeOperar}
-                                  className="w-full bg-cyan-400 text-black disabled:bg-zinc-800 disabled:border-zinc-700 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-none uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
-                                >
-                                  {!puedeOperar ? 'SALDO BLOQUEADO' : 'CAPTURAR OFERTA'}
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </>
+        {activeTab === 'billetera' && (
+          <div className="w-full max-w-lg bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-2xl p-6 text-center shadow-xl">
+            <Wallet className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider">Billetera Digital CIMCO</h3>
+            <p className="text-2xl font-mono font-bold text-emerald-400 mt-2">${saldoVivo.toLocaleString('es-CO')} COP</p>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              Saldo disponible para recarga y comisión de carreras. Recuerde mantener un saldo mínimo de $2.000 COP para operar en red.
+            </p>
+          </div>
         )}
       </main>
 
-      {/* MODAL NEO-BRUTALISTA DE AJUSTES DE CUENTA / VEHÍCULO */}
-      {mostrarModalPerfil && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[5000] p-4">
-          <div className="w-full max-w-sm bg-zinc-900 border-4 border-black rounded-none p-5 shadow-[6px_6px_0px_0px_#000] relative font-mono animate-scaleUp text-zinc-100">
-            <button 
-              onClick={() => setMostrarModalPerfil(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-white border-2 border-black p-1 bg-black shadow-[1px_1px_0px_0px_#000]"
-            >
-              <X size={14} />
-            </button>
-            <h3 className="text-xs font-black uppercase tracking-widest text-yellow-400 mb-4 flex items-center gap-2">
-              <User size={14} /> Ajustes de Unidad
-            </h3>
+      {/* ════════════════ BARRA DE NAVEGACIÓN INFERIOR ════════════════ */}
+      <nav className="sticky bottom-0 z-40 bg-[#121214]/90 backdrop-blur-lg border-t border-white/5 py-2.5 px-6 flex justify-around items-center">
+        <button
+          onClick={() => setActiveTab('radar')}
+          className={`flex flex-col items-center gap-1 text-[11px] font-bold tracking-wider transition-colors ${
+            activeTab === 'radar' ? 'text-sky-400' : 'text-slate-500 hover:text-slate-300'
+          }`}
+        >
+          <Navigation className="w-4 h-4" />
+          <span>RADAR</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('historial')}
+          className={`flex flex-col items-center gap-1 text-[11px] font-bold tracking-wider transition-colors ${
+            activeTab === 'historial' ? 'text-sky-400' : 'text-slate-500 hover:text-slate-300'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          <span>HISTORIAL</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('billetera')}
+          className={`flex flex-col items-center gap-1 text-[11px] font-bold tracking-wider transition-colors ${
+            activeTab === 'billetera' ? 'text-sky-400' : 'text-slate-500 hover:text-slate-300'
+          }`}
+        >
+          <Wallet className="w-4 h-4" />
+          <span>BILLETERA</span>
+        </button>
+      </nav>
+
+      {/* ════════════════ MODAL AJUSTES DE UNIDAD Y PERFIL (CAMBIO DE VEHÍCULO) ════════════════ */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-[#121214] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl relative overflow-hidden text-white">
+            
+            {/* Cabecera del Modal */}
+            <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-5">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                  <Settings className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <h3 className="text-sm font-black tracking-wide uppercase text-amber-400">
+                    AJUSTES DE UNIDAD Y PERFIL
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Actualice sus datos personales y de su vehículo actual.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
             {errorPerfil && (
-              <p className="p-2 mb-3 bg-red-500 text-black text-[10px] font-black uppercase tracking-wider border-2 border-black">
+              <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-medium">
                 {errorPerfil}
-              </p>
+              </div>
             )}
 
-            <form onSubmit={handleActualizarPerfil} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[9px] uppercase tracking-widest text-zinc-400 font-black">Nombre del Conductor</label>
-                <input 
-                  type="text"
-                  value={inputNombre}
-                  onChange={(e) => setInputNombre(e.target.value)}
-                  placeholder="Ej: CARLOS FUENTES"
-                  className="w-full bg-black border-2 border-black rounded-none p-2.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400 font-mono"
-                />
+            {syncSuccess && (
+              <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>¡Datos de unidad actualizados correctamente!</span>
               </div>
+            )}
 
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[9px] uppercase tracking-widest text-zinc-400 font-black">Línea de Contacto</label>
-                <input 
-                  type="tel"
-                  value={inputTelefono}
-                  onChange={(e) => setInputTelefono(e.target.value)}
-                  placeholder="Ej: 3001234567"
-                  className="w-full bg-black border-2 border-black rounded-none p-2.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400 font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[9px] uppercase tracking-widest text-zinc-400 font-black">Placa Vehículo</label>
-                  <input 
+            {/* Formulario */}
+            <form onSubmit={handleSaveProfile} className="space-y-4 text-left">
+              
+              {/* Nombre del Conductor */}
+              <div>
+                <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
+                  Nombre del Conductor
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
+                  <input
                     type="text"
-                    value={inputPlaca}
-                    onChange={(e) => setInputPlaca(e.target.value)}
-                    placeholder="Ej: ABC12D"
-                    className="w-full bg-black border-2 border-black rounded-none p-2.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400 font-mono uppercase"
+                    required
+                    value={formData.nombre}
+                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                    placeholder="Ej: CARLOS FUENTES"
+                    className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
                   />
                 </div>
+              </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[9px] uppercase tracking-widest text-zinc-400 font-black">Modalidad Flota</label>
-                  <select 
-                    value={inputTipoServicio}
-                    onChange={(e) => setInputTipoServicio(e.target.value)}
-                    className="w-full bg-black border-2 border-black rounded-none p-2.5 text-xs text-zinc-100 focus:outline-none focus:border-cyan-400 font-mono cursor-pointer"
+              {/* Línea de Contacto / Teléfono */}
+              <div>
+                <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
+                  Línea de Contacto
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
+                  <input
+                    type="tel"
+                    required
+                    value={formData.telefono}
+                    onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                    placeholder="Ej: 3001234567"
+                    className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Placa y Modalidad */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
+                    Placa Vehículo
+                  </label>
+                  <div className="relative">
+                    <Bike className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
+                    <input
+                      type="text"
+                      required
+                      value={formData.placa}
+                      onChange={(e) => setFormData({ ...formData, placa: e.target.value.toUpperCase() })}
+                      placeholder="Ej: ABC12D"
+                      className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white font-mono font-bold placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors uppercase"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
+                    Modalidad Flota
+                  </label>
+                  <select
+                    value={formData.modalidad}
+                    onChange={(e) => setFormData({ ...formData, modalidad: e.target.value })}
+                    className="w-full bg-[#181920] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
                   >
-                    <option value="mototaxi">🛺 Mototaxi</option>
-                    <option value="motoparrillero">🛵 Motoparrillero</option>
-                    <option value="motocarga">🚛 Motocarga</option>
-                    <option value="intermunicipal">🛣️ Intermunicipal</option>
+                    <option value="Mototaxi">Mototaxi</option>
+                    <option value="Motocarga">Motocarga</option>
+                    <option value="Motoparrillero">Motoparrillero</option>
+                    <option value="Intermunicipal">Intermunicipal</option>
                   </select>
                 </div>
               </div>
 
-              <button
-                type="submit"
-                className="w-full mt-2 bg-cyan-400 hover:bg-cyan-500 text-black text-xs font-black uppercase tracking-widest py-3 border-2 border-black rounded-none shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
-              >
-                Sincronizar Unidad
-              </button>
+              {/* Detalle adicional de vehículo (Marca, Modelo, Color) */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
+                    Modelo / Año
+                  </label>
+                  <div className="relative">
+                    <FileText className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
+                    <input
+                      type="text"
+                      value={formData.vehiculoModelo}
+                      onChange={(e) => setFormData({ ...formData, vehiculoModelo: e.target.value })}
+                      placeholder="Ej: Yamaha FZ 2024"
+                      className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
+                    Color Vehículo
+                  </label>
+                  <div className="relative">
+                    <Palette className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
+                    <input
+                      type="text"
+                      value={formData.vehiculoColor}
+                      onChange={(e) => setFormData({ ...formData, vehiculoColor: e.target.value })}
+                      placeholder="Ej: Negro / Rojo"
+                      className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(false)}
+                  className="w-1/2 py-2.5 rounded-xl bg-white/5 border border-white/10 text-xs font-bold text-slate-300 hover:bg-white/10 transition-colors"
+                >
+                  CANCELAR
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-1/2 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-xs font-bold text-white transition-all shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader className="w-4 h-4 animate-spin" />
+                      <span>GUARDANDO...</span>
+                    </>
+                  ) : (
+                    <span>GUARDAR CAMBIOS</span>
+                  )}
+                </button>
+              </div>
+
             </form>
           </div>
         </div>
       )}
 
-      {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR (CIMCO-UI V12.23 NEO-BRUTALIST RIGID) */}
-      <footer className="fixed bottom-0 left-0 w-full bg-zinc-900 border-t-4 border-black p-3 flex justify-around items-center z-50 shadow-[0_-4px_0px_0px_#000]">
-        <button 
-          onClick={() => setTabActiva('radar')}
-          className={`${tabActiva === 'radar' ? 'text-cyan-400' : 'text-zinc-600 hover:text-zinc-300'} flex flex-col items-center gap-0.5 transition-transform active:scale-95`}
-        >
-          <Navigation size={18} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-wider">Radar</span>
-        </button>
-        <button 
-          onClick={() => setTabActiva('historial')}
-          className={`${tabActiva === 'historial' ? 'text-yellow-400' : 'text-zinc-600 hover:text-zinc-300'} flex flex-col items-center gap-0.5 transition-transform active:scale-95`}
-        >
-          <Clock size={18} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-wider">Historial</span>
-        </button>
-
-        {/* Botón Billetera activo con navegación habilitada */}
-        <button 
-          onClick={() => window.location.href = '/wallet'}
-          className="text-zinc-400 hover:text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95 cursor-pointer"
-        >
-          <CircleDollarSign size={18} strokeWidth={2.5} />
-          <span className="text-[9px] font-black uppercase tracking-wider">Billetera</span>
-        </button>
-      </footer>
-
-      {/* MANEJO DE CALIFICACIÓN TRANSACCIONAL POST-VIAJE */}
+      {/* Modal de Calificación */}
       {mostrarModalCalificacion && datosParaCalificar && (
         <ModalCalificacion
           isOpen={mostrarModalCalificacion}
-          onClose={() => {
-            setMostrarModalCalificacion(false);
-            setDatosParaCalificar(null);
-          }}
-          viajeId={datosParaCalificar?.id || datosParaCalificar?.viajeId}
-          usuarioRol="conductor"
-          nombreContraparte={datosParaCalificar?.clienteNombre}
+          onClose={() => setMostrarModalCalificacion(false)}
+          viajeId={datosParaCalificar.id}
+          nombreEvaluado={datosParaCalificar.clienteNombre}
+          rolEvaluado="pasajero"
         />
       )}
+
     </div>
   );
 }
