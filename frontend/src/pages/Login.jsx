@@ -1,8 +1,8 @@
-// Versión Arquitectura: V21.25 - Captura y Renderizado Granular de Códigos de Error (USER_NOT_FOUND, WRONG_PASSWORD, ACCOUNT_PENDING_APPROVAL)
+// Versión Arquitectura: V21.26 - Normalización Integrada de Excepciones Axios/Fetch para Banner Visual CIMCO-UI
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Manejo del flujo de inicio de sesión con captura de respuestas de error granuladas,
- * persistencia de identificador operativo, ruteo polimórfico por rol y diseño Glassmorphism CIMCO-UI V9.3.
+ * Misión: Captura de errores de red/HTTP (404, 401, 403) con desempaquetado de payload Axios (`err.response.data`),
+ * renderizado automático en el Banner Visual Glassmorphism y persistencia de credenciales operativas.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -47,24 +47,27 @@ const Login = () => {
   };
 
   /**
-   * Helper para interpretar y formatear mensajes de error según códigos de la API
+   * Extrae de forma segura el código de estado, payload del backend y mensaje devuelto
    */
-  const parseAuthError = (errObj) => {
-    const resData = errObj?.response?.data || errObj?.data || errObj;
-    const statusCode = errObj?.response?.status || errObj?.status;
-    const errorCode = resData?.code || errObj?.code;
+  const extractErrorMessage = (err) => {
+    // Si Axios reasigna el error dentro de err.response.data
+    const resData = err?.response?.data || err?.data || err;
+    const status = err?.response?.status || err?.status;
+    const code = resData?.code || err?.code;
 
-    if (statusCode === 404 || errorCode === 'USER_NOT_FOUND' || errorCode === 'auth/user-not-found') {
+    if (status === 404 || code === 'USER_NOT_FOUND' || code === 'auth/user-not-found') {
       return '⚠️ El número de teléfono o correo no está registrado. Toca el botón "Crear Cuenta" para registrarte.';
-    } 
-    if (statusCode === 401 || errorCode === 'WRONG_PASSWORD' || errorCode === 'auth/wrong-password') {
+    }
+    
+    if (status === 401 || code === 'WRONG_PASSWORD' || code === 'auth/wrong-password') {
       return '❌ La clave de acceso es incorrecta. Verifícala e intenta nuevamente.';
-    } 
-    if (statusCode === 403 || errorCode === 'ACCOUNT_PENDING_APPROVAL') {
+    }
+
+    if (status === 403 || code === 'ACCOUNT_PENDING_APPROVAL') {
       return resData?.message || '⏳ Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación.';
     }
 
-    return resData?.message || errObj?.message || 'Error al iniciar sesión. Inténtelo más tarde.';
+    return resData?.message || err?.message || 'Error al iniciar sesión. Inténtelo más tarde.';
   };
 
   const handleSubmit = async (e) => {
@@ -100,7 +103,7 @@ const Login = () => {
       const res = await loginLocal(valorLimpio, password);
       
       if (res && res.success) {
-        // Redirección inteligente basada en el rol recibido o el parámetro de consulta
+        // Redirección inteligente basada en el rol recibido o el parámetro
         const userRole = (res.user?.role || res.user?.rol || roleParam || '').toLowerCase();
         
         if (userRole.includes('moto')) {
@@ -113,13 +116,13 @@ const Login = () => {
           navigate('/');
         }
       } else {
-        // Procesar códigos de error devueltos en respuesta sin excepción lanzada
-        setError(parseAuthError(res));
+        // En caso de que la promesa resuelva pero indique success: false
+        setError(extractErrorMessage(res));
       }
     } catch (err) {
       console.error("🚨 [CIMCO-AUTH-HANDSHAKE] Denegado:", err);
-      // Captura y renderizado enriquecido de errores desde la excepción Axios/Fetch
-      setError(parseAuthError(err));
+      // Captura y renderizado automático del error Axios/Fetch en el banner de pantalla
+      setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -176,17 +179,17 @@ const Login = () => {
           </p>
         </div>
 
-        {/* Banner de Error Granulado */}
+        {/* Banner de Error Visual Glassmorphism */}
         {error && (
-          <div className="mb-6 flex flex-col gap-2 bg-red-500/[0.08] border border-red-500/30 rounded-2xl p-4">
+          <div className="mb-6 flex flex-col gap-2 bg-red-500/[0.08] border border-red-500/30 rounded-2xl p-4 animate-fadeIn">
             <div className="flex items-start gap-3">
-              <ShieldAlert size={16} className="text-red-500 shrink-0 mt-0.5" />
-              <div className="font-mono text-[11px] uppercase font-bold tracking-wider text-red-300 leading-relaxed">
-                <span className="block font-black text-red-500 mb-0.5">🚨 NOTIFICACIÓN DEL SISTEMA:</span>
+              <ShieldAlert size={18} className="text-red-500 shrink-0 mt-0.5" />
+              <div className="font-sans text-xs font-semibold text-red-200 leading-relaxed">
+                <span className="block font-black text-red-400 uppercase tracking-wider text-[10px] mb-1">🚨 Notificación de Acceso:</span>
                 {error}
               </div>
             </div>
-            <div className="pt-2 border-t border-red-500/10 flex items-center justify-between">
+            <div className="pt-2.5 mt-1 border-t border-red-500/15 flex items-center justify-between">
               <span className="text-[10px] text-slate-400 font-medium">¿Aún no estás registrado?</span>
               <button
                 type="button"
