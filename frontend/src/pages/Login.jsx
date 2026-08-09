@@ -1,8 +1,8 @@
-// Versión Arquitectura: V21.26 - Normalización Integrada de Excepciones Axios/Fetch para Banner Visual CIMCO-UI
+// Versión Arquitectura: V21.28 - Corrección de Captura de Excepciones Axios/Fetch en el Hook useAuth y Mapeo Directo en Login
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Captura de errores de red/HTTP (404, 401, 403) con desempaquetado de payload Axios (`err.response.data`),
- * renderizado automático en el Banner Visual Glassmorphism y persistencia de credenciales operativas.
+ * Misión: Blindar la captura de excepciones HTTP (401, 404, 403) provenientes del backend, extraídas directamente de `err.response.data` 
+ * o `err.message`, garantizando que siempre se renderice el banner visual en la interfaz de usuario.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -47,27 +47,31 @@ const Login = () => {
   };
 
   /**
-   * Extrae de forma segura el código de estado, payload del backend y mensaje devuelto
+   * Extrae y mapea el mensaje de error procesando tanto respuestas de Axios como objetos de excepción de JS
    */
   const extractErrorMessage = (err) => {
-    // Si Axios reasigna el error dentro de err.response.data
-    const resData = err?.response?.data || err?.data || err;
-    const status = err?.response?.status || err?.status;
-    const code = resData?.code || err?.code;
+    if (!err) return 'Error al iniciar sesión. Inténtelo más tarde.';
 
-    if (status === 404 || code === 'USER_NOT_FOUND' || code === 'auth/user-not-found') {
+    // Extracción profunda del objeto de respuesta HTTP
+    const resData = err?.response?.data || err?.data || (typeof err === 'object' ? err : {});
+    const status = err?.response?.status || err?.status || resData?.status;
+    const code = resData?.code || err?.code;
+    const rawMessage = resData?.message || err?.message || String(err);
+
+    // Mapeo preciso según códigos de respuesta o textos clave devueltos por el backend
+    if (status === 404 || code === 'USER_NOT_FOUND' || code === 'auth/user-not-found' || rawMessage.includes('no está registrado')) {
       return '⚠️ El número de teléfono o correo no está registrado. Toca el botón "Crear Cuenta" para registrarte.';
     }
     
-    if (status === 401 || code === 'WRONG_PASSWORD' || code === 'auth/wrong-password') {
+    if (status === 401 || code === 'WRONG_PASSWORD' || code === 'auth/wrong-password' || rawMessage.includes('incorrecta')) {
       return '❌ La clave de acceso es incorrecta. Verifícala e intenta nuevamente.';
     }
 
-    if (status === 403 || code === 'ACCOUNT_PENDING_APPROVAL') {
-      return resData?.message || '⏳ Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación.';
+    if (status === 403 || code === 'ACCOUNT_PENDING_APPROVAL' || rawMessage.includes('proceso de revisión')) {
+      return rawMessage || '⏳ Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación.';
     }
 
-    return resData?.message || err?.message || 'Error al iniciar sesión. Inténtelo más tarde.';
+    return rawMessage || 'Error de conexión con el servidor central.';
   };
 
   const handleSubmit = async (e) => {
@@ -116,12 +120,12 @@ const Login = () => {
           navigate('/');
         }
       } else {
-        // En caso de que la promesa resuelva pero indique success: false
+        // En caso de que loginLocal devuelva success: false sin lanzar excepción
         setError(extractErrorMessage(res));
       }
     } catch (err) {
-      console.error("🚨 [CIMCO-AUTH-HANDSHAKE] Denegado:", err);
-      // Captura y renderizado automático del error Axios/Fetch en el banner de pantalla
+      console.error("🚨 [CIMCO-AUTH-HANDSHAKE] Captura de Excepción:", err);
+      // Extrae la causa real desde err.response.data y activa la visualización en pantalla
       setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
@@ -181,11 +185,11 @@ const Login = () => {
 
         {/* Banner de Error Visual Glassmorphism */}
         {error && (
-          <div className="mb-6 flex flex-col gap-2 bg-red-500/[0.08] border border-red-500/30 rounded-2xl p-4 animate-fadeIn">
+          <div className="mb-6 flex flex-col gap-2 bg-red-500/[0.08] border border-red-500/30 rounded-2xl p-4 transition-all duration-300">
             <div className="flex items-start gap-3">
               <ShieldAlert size={18} className="text-red-500 shrink-0 mt-0.5" />
               <div className="font-sans text-xs font-semibold text-red-200 leading-relaxed">
-                <span className="block font-black text-red-400 uppercase tracking-wider text-[10px] mb-1">🚨 Notificación de Acceso:</span>
+                <span className="block font-black text-red-400 uppercase tracking-wider text-[10px] mb-1">🚨 ACCESO DENEGADO:</span>
                 {error}
               </div>
             </div>
