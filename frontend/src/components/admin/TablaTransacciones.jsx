@@ -1,29 +1,135 @@
-// Versión Arquitectura: V1.5 - Desacoplamiento de Helper de Fechas hacia Módulo Global Compartido @/utils/dateUtils
+// Versión Arquitectura: V19.0 - Integración de Paginación por Servidor, Amortiguación Debounce y Formateador de Moneda Memorizado
 /**
- * Ubicación: frontend\src\components\admin\TablaTransacciones.jsx
- * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism CIMCO-UI V9.3.
- * Refactor V1.5: Migración de resolverFechaSegura desde lógica inline local hacia la utilidad compartida @/utils/dateUtils.
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\TablaTransacciones.jsx
+ * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism CIMCO-UI V9.3,
+ *         soportando paginación por servidor (server-side pagination), filtros amortiguados (debounce)
+ *         y optimización de formateo de moneda mediante memorización fuera de render.
+ * Ajuste V19.0:
+ *   1. Migración a Paginación por Servidor: Soporte para parámetros de control (page, limit, startDate, endDate, type, search),
+ *      sincronización opcional mediante fetch/prop callbacks y soporte para data segmentada con totalCount.
+ *   2. Amortiguación de Búsqueda (Debounce): Implementación de amortiguador de 400ms en el filtro de búsqueda/fecha.
+ *   3. Formateador de Moneda Memorizado: Instanciación singleton fuera del componente de Intl.NumberFormat para cero sobrecosto en re-renders.
  */
 
-import React from 'react';
-import { ArrowUpRight, ArrowDownLeft, Clock, CircleDollarSign, Database } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { 
+    ArrowUpRight, 
+    ArrowDownLeft, 
+    Clock, 
+    CircleDollarSign, 
+    Database, 
+    Search, 
+    ChevronLeft, 
+    ChevronRight, 
+    Calendar, 
+    Filter,
+    RefreshCw 
+} from 'lucide-react';
 import { formatFechaColombia } from '@/utils/dateFormatter';
 import { resolverFechaSegura } from '@/utils/dateUtils';
 
+// 🛡️ MEMORIZACIÓN FUERA DEL CICLO DE RENDER: Instancia re-utilizable de Intl.NumberFormat (Singleton)
+const currencyFormatterCOP = new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+});
+
 const formatearMoneda = (valor = 0) => {
     const montoNumerico = Number(valor) || 0;
-    return new Intl.NumberFormat('es-CO', {
-        style: 'currency',
-        currency: 'COP',
-        minimumFractionDigits: 0
-    }).format(montoNumerico);
+    return currencyFormatterCOP.format(montoNumerico);
 };
 
-const TablaTransacciones = ({ transacciones = [] }) => {
-    
+const TablaTransacciones = ({ 
+    transacciones: transaccionesProp = [], 
+    totalRegistros: totalRegistrosProp = 0,
+    page: pageProp = 1,
+    limit: limitProp = 10,
+    onParamsChange = null,
+    loading = false 
+}) => {
+    // 🛡️ ESTADOS PARA CONTROLES DE SERVIDOR
+    const [page, setPage] = useState(pageProp);
+    const [limit, setLimit] = useState(limitProp);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [tipoFiltro, setTipoFiltro] = useState('TODOS');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
+    // 🛡️ AMORTIGUACIÓN DE BÚSQUEDA (DEBOUNCE 400ms)
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            setDebouncedSearch(searchTerm);
+            setPage(1); // Reiniciar a la primera página ante un nuevo término
+        }, 400);
+
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [searchTerm]);
+
+    // 🛡️ NOTIFICAR CAMBIOS AL SERVIDOR / COMPONENTE PADRE
+    const notificarCambioParametros = useCallback((nuevosParametros) => {
+        if (typeof onParamsChange === 'function') {
+            onParamsChange({
+                page: nuevosParametros.page ?? page,
+                limit: nuevosParametros.limit ?? limit,
+                search: nuevosParametros.search ?? debouncedSearch,
+                type: nuevosParametros.type ?? tipoFiltro,
+                startDate: nuevosParametros.startDate ?? startDate,
+                endDate: nuevosParametros.endDate ?? endDate
+            });
+        }
+    }, [onParamsChange, page, limit, debouncedSearch, tipoFiltro, startDate, endDate]);
+
+    useEffect(() => {
+        notificarCambioParametros({ page, limit, search: debouncedSearch, type: tipoFiltro, startDate, endDate });
+    }, [page, limit, debouncedSearch, tipoFiltro, startDate, endDate, notificarCambioParametros]);
+
+    // 🛡️ PROCESAMIENTO MODO HYBRID / CLIENTE FALLBACK (Si no se provee servidor explícito)
+    const dataset = useMemo(() => {
+        return Array.isArray(transaccionesProp) ? transaccionesProp : [];
+    }, [transaccionesProp]);
+
+    const esModoServidor = typeof onParamsChange === 'function';
+
+    const transaccionesFiltradas = useMemo(() => {
+        if (esModoServidor) return dataset;
+
+        return dataset.filter(tx => {
+            const query = debouncedSearch.toLowerCase().trim();
+            const id = String(tx?.id || tx?._id || '').toLowerCase();
+            const ref = String(tx?.referencia || '').toLowerCase();
+            const user = String(tx?.usuarioId || tx?.userId || tx?.driverId || '').toLowerCase();
+            const tipo = String(tx?.tipo || tx?.type || '').toUpperCase();
+
+            const matchQuery = !query || id.includes(query) || ref.includes(query) || user.includes(query);
+            const matchTipo = tipoFiltro === 'TODOS' || tipo === tipoFiltro;
+
+            return matchQuery && matchTipo;
+        });
+    }, [dataset, debouncedSearch, tipoFiltro, esModoServidor]);
+
+    const totalRegistros = esModoServidor ? (totalRegistrosProp || dataset.length) : transaccionesFiltradas.length;
+    const totalPaginas = Math.max(1, Math.ceil(totalRegistros / limit));
+
+    const transaccionesPaginadas = useMemo(() => {
+        if (esModoServidor) return transaccionesFiltradas;
+        const inicio = (page - 1) * limit;
+        return transaccionesFiltradas.slice(inicio, inicio + limit);
+    }, [transaccionesFiltradas, page, limit, esModoServidor]);
+
+    const handleCambioPagina = (nuevaPagina) => {
+        if (nuevaPagina >= 1 && nuevaPagina <= totalPaginas) {
+            setPage(nuevaPagina);
+        }
+    };
+
     const renderBadgeTipo = (tipo = '') => {
         const t = String(tipo).toUpperCase().trim();
-        if (t === 'RECARGA' || t === 'CREDIT') {
+        if (t === 'RECARGA' || t === 'CREDIT' || t === 'INGRESO') {
             return (
                 <span className="flex items-center gap-1.5 w-fit text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md">
                     <ArrowDownLeft size={12} />
@@ -40,23 +146,88 @@ const TablaTransacciones = ({ transacciones = [] }) => {
     };
 
     return (
-        <div className="w-full backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl overflow-hidden shadow-xl">
-            <div className="p-4 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
+        <div className="w-full backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl overflow-hidden shadow-xl flex flex-col gap-0 font-mono antialiased text-zinc-100">
+            {/* ENCABEZADO Y CONTROLES DE FILTRADO AMORTIGUADO */}
+            <div className="p-4 border-b border-white/5 bg-white/[0.02] flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <CircleDollarSign className="text-yellow-500" size={18} />
-                    <h3 className="text-xs font-black tracking-widest uppercase text-zinc-200">
-                        Auditoría Global de Caja
-                    </h3>
+                    <CircleDollarSign className="text-yellow-500 shrink-0" size={18} />
+                    <div>
+                        <h3 className="text-xs font-black tracking-widest uppercase text-zinc-200">
+                            Auditoría Global de Caja
+                        </h3>
+                        <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">
+                            Paginación Servidor & Filtros Amortiguados
+                        </span>
+                    </div>
                 </div>
-                <div className="text-[9px] font-bold text-zinc-500 bg-zinc-950/60 border border-white/5 px-2 py-1 rounded uppercase tracking-wider font-mono">
-                    Registros: {Array.isArray(transacciones) ? transacciones.length : 0}
+
+                {/* BARRA DE FILTROS Y BÚSQUEDA */}
+                <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                    {/* BUSCADOR DEBOUCED */}
+                    <div className="relative flex-1 min-w-[200px] lg:w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+                        <input 
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="BUSCAR ID, REF, USUARIO..."
+                            className="w-full bg-[#0c0c0e] border border-white/5 rounded-xl pl-9 pr-3 py-1.5 text-[10px] font-bold text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-500/40 transition-colors uppercase tracking-wider"
+                        />
+                    </div>
+
+                    {/* SELECTOR DE TIPO */}
+                    <div className="relative">
+                        <select
+                            value={tipoFiltro}
+                            onChange={(e) => {
+                                setTipoFiltro(e.target.value);
+                                setPage(1);
+                            }}
+                            className="bg-[#0c0c0e] border border-white/5 rounded-xl px-3 py-1.5 text-[10px] font-bold text-zinc-300 focus:outline-none focus:border-yellow-500/40 uppercase tracking-wider appearance-none pr-8 cursor-pointer"
+                        >
+                            <option value="TODOS">TODOS LOS TIPOS</option>
+                            <option value="RECARGA">RECARGAS</option>
+                            <option value="DEBITO">DÉBITOS</option>
+                        </select>
+                        <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={12} />
+                    </div>
+
+                    {/* FILTROS DE FECHAS */}
+                    <div className="flex items-center gap-1 bg-[#0c0c0e] border border-white/5 rounded-xl px-2 py-1">
+                        <Calendar className="text-zinc-500 shrink-0" size={12} />
+                        <input 
+                            type="date"
+                            value={startDate}
+                            onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
+                            className="bg-transparent text-[9px] font-bold text-zinc-300 focus:outline-none uppercase"
+                        />
+                        <span className="text-zinc-600 text-[9px]">-</span>
+                        <input 
+                            type="date"
+                            value={endDate}
+                            onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
+                            className="bg-transparent text-[9px] font-bold text-zinc-300 focus:outline-none uppercase"
+                        />
+                    </div>
+
+                    <div className="text-[9px] font-bold text-zinc-400 bg-zinc-950/60 border border-white/5 px-2.5 py-1.5 rounded-xl uppercase tracking-wider shrink-0 flex items-center gap-1.5">
+                        {loading && <RefreshCw size={10} className="animate-spin text-yellow-500" />}
+                        Total: <span className="text-yellow-400">{totalRegistros}</span>
+                    </div>
                 </div>
             </div>
 
-            <div className="overflow-x-auto w-full">
-                {!Array.isArray(transacciones) || transacciones.length === 0 ? (
-                    <div className="p-8 flex flex-col items-center justify-center text-center gap-2">
-                        <Database className="text-zinc-600 animate-pulse" size={24} />
+            {/* TABLA DE AUDITORÍA */}
+            <div className="overflow-x-auto w-full min-h-[250px] relative">
+                {loading && (
+                    <div className="absolute inset-0 z-20 backdrop-blur-sm bg-[#121214]/60 flex items-center justify-center">
+                        <RefreshCw className="text-yellow-500 animate-spin" size={24} />
+                    </div>
+                )}
+
+                {!Array.isArray(transaccionesPaginadas) || transaccionesPaginadas.length === 0 ? (
+                    <div className="p-12 flex flex-col items-center justify-center text-center gap-2">
+                        <Database className="text-zinc-600 animate-pulse" size={28} />
                         <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-500">
                             Cero movimientos detectados en la matriz
                         </p>
@@ -72,7 +243,7 @@ const TablaTransacciones = ({ transacciones = [] }) => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5 text-xs text-zinc-300">
-                            {transacciones.map((tx, index) => {
+                            {transaccionesPaginadas.map((tx, index) => {
                                 const keyTransaccion = tx?.id || tx?._id || tx?.referencia || `tx-fallback-${index}`;
                                 const fechaObjetivo = resolverFechaSegura(tx?.fecha || tx?.createdAt || tx?.timestamp);
                                 const tipoString = String(tx?.tipo || tx?.type || '').toUpperCase();
@@ -81,7 +252,7 @@ const TablaTransacciones = ({ transacciones = [] }) => {
                                     <tr key={keyTransaccion} className="hover:bg-white/[0.02] transition-colors duration-150 group">
                                         <td className="p-4 pl-6">
                                             <div className="flex items-center gap-2 text-zinc-400 font-medium">
-                                                <Clock size={12} className="text-zinc-500" />
+                                                <Clock size={12} className="text-zinc-500 shrink-0" />
                                                 {fechaObjetivo ? (
                                                     formatFechaColombia(fechaObjetivo)
                                                 ) : (
@@ -105,7 +276,7 @@ const TablaTransacciones = ({ transacciones = [] }) => {
 
                                         <td className="p-4 text-right pr-6">
                                             <span className={`text-sm font-mono font-black ${
-                                                tipoString === 'RECARGA' || tipoString === 'CREDIT'
+                                                tipoString === 'RECARGA' || tipoString === 'CREDIT' || tipoString === 'INGRESO'
                                                 ? 'text-emerald-400' 
                                                 : 'text-cyan-400'
                                             }`}>
@@ -118,6 +289,49 @@ const TablaTransacciones = ({ transacciones = [] }) => {
                         </tbody>
                     </table>
                 )}
+            </div>
+
+            {/* CONTROLES DE PAGINACIÓN POR SERVIDOR */}
+            <div className="p-4 border-t border-white/5 bg-white/[0.01] flex flex-col sm:flex-row items-center justify-between gap-3 text-[10px]">
+                <div className="flex items-center gap-2">
+                    <span className="text-zinc-500 font-bold uppercase tracking-wider">Registros por página:</span>
+                    <select
+                        value={limit}
+                        onChange={(e) => {
+                            setLimit(Number(e.target.value));
+                            setPage(1);
+                        }}
+                        className="bg-[#0c0c0e] border border-white/5 rounded-lg px-2 py-1 text-zinc-300 font-bold focus:outline-none"
+                    >
+                        <option value={10}>10</option>
+                        <option value={25}>25</option>
+                        <option value={50}>50</option>
+                        <option value={100}>100</option>
+                    </select>
+                </div>
+
+                <div className="flex items-center gap-4">
+                    <span className="text-zinc-400 font-bold tracking-wider">
+                        Página <span className="text-white">{page}</span> de <span className="text-white">{totalPaginas}</span>
+                    </span>
+
+                    <div className="flex items-center gap-1">
+                        <button
+                            onClick={() => handleCambioPagina(page - 1)}
+                            disabled={page <= 1 || loading}
+                            className="p-1.5 rounded-lg border border-white/5 bg-zinc-900/80 text-zinc-300 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronLeft size={14} />
+                        </button>
+                        <button
+                            onClick={() => handleCambioPagina(page + 1)}
+                            disabled={page >= totalPaginas || loading}
+                            className="p-1.5 rounded-lg border border-white/5 bg-zinc-900/80 text-zinc-300 hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronRight size={14} />
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     );

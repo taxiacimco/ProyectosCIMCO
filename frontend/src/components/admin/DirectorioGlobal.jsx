@@ -1,15 +1,16 @@
-// Versión Arquitectura: V2.4.0 - Depuración de Dependencias Muertas y Estabilización del Ciclo de Vida de Montaje
+// Versión Arquitectura: V2.5.0 - Cancelación por AbortController, Dynamic Import XLSX y Manejo Explícito de HTTP 401
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\DirectorioGlobal.jsx
- * Misión: Monitoreo, filtrado, auditoría unificada y exportación centralizada a Excel (XLSX) con descarga desde API del Servidor Central.
+ * Misión: Monitoreo, filtrado, auditoría unificada y exportación centralizada a Excel (XLSX) con descarga API y Dynamic Import.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajuste V2.4.0:
- *   1. Eliminación de código muerto (`exportarDirectorioExcel` e importación en desuso de `xlsx`).
- *   2. Reestructuración de `isMounted` para asegurar que `isMounted.current = true` ocurra exclusivamente dentro del `useEffect` de montaje.
+ * Ajustes V2.5.0:
+ *   1. Sustitución de antipatrón `isMounted` por `AbortController` vinculado al ciclo de vida del `useEffect` para cancelar peticiones HTTP activas.
+ *   2. Implementación de Carga Diferida (Dynamic Import: `const XLSX = await import('xlsx')`) para optimizar el peso inicial del bundle.
+ *   3. Intercepción y manejo explícito de respuestas HTTP 401 Unauthorized con limpieza de sesión y notificación de expiración.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Loader, RefreshCw, Users, Shield, UserCheck, Radio, Download } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Loader, RefreshCw, Download, FileSpreadsheet } from 'lucide-react';
 // 🛡️ IMPORTANTE: Importación del helper de deduplicación mediante alias absoluto @
 import { deduplicarEntidades } from '@/utils/deduplicar';
 
@@ -39,22 +40,31 @@ export const DirectorioGlobal = () => {
     const [filtroRol, setFiltroRol] = useState('TODOS');
     const [busqueda, setBusqueda] = useState('');
     const [loading, setLoading] = useState(true);
+    const [exportingExcel, setExportingExcel] = useState(false);
     const [error, setError] = useState(null);
 
-    const isMounted = useRef(true);
-
-    const obtenerDirectorio = async () => {
+    const obtenerDirectorio = async (signal) => {
         setLoading(true);
         setError(null);
 
         try {
             const token = localStorage.getItem('cimco_token');
             const res = await fetch(`${API_BASE_URL}/api/usuarios/directorio-global`, {
+                signal,
                 headers: {
                     'Authorization': token ? `Bearer ${token}` : '',
                     'Content-Type': 'application/json'
                 }
             });
+
+            // 🔒 INTERCEPCIÓN EXPLÍCITA DE TOKEN EXPIRADO / NO AUTORIZADO (401)
+            if (res.status === 401) {
+                console.warn('⚠️ Sesión expirada o token no válido (401 Unauthorized). Interceptando...');
+                localStorage.removeItem('cimco_token');
+                setError('Sesión expirada o no autorizada. Por favor, vuelva a iniciar sesión.');
+                setLoading(false);
+                return;
+            }
 
             if (res.ok) {
                 const data = await res.json();
@@ -64,30 +74,30 @@ export const DirectorioGlobal = () => {
                 // 🔒 APLICAMOS FILTRO ANTI-DUPLICADOS
                 const listaLimpia = deduplicarUsuarios(listaData);
 
-                if (isMounted.current) {
-                    setUsuarios(listaLimpia);
-                    setLoading(false);
-                }
+                setUsuarios(listaLimpia);
+                setLoading(false);
             } else {
-                if (isMounted.current) {
-                    setError('Respuesta no válida del servidor central.');
-                    setLoading(false);
-                }
-            }
-        } catch (err) {
-            console.error('❌ Error al obtener el directorio global:', err);
-            if (isMounted.current) {
-                setError('Fallo de conexión con la API del servidor central.');
+                setError('Respuesta no válida del servidor central.');
                 setLoading(false);
             }
+        } catch (err) {
+            // Manejo limpio de abortos voluntarias al desmontar componente
+            if (err.name === 'AbortError') {
+                console.log('🛑 Petición de directorio cancelada por desmontaje de componente.');
+                return;
+            }
+            console.error('❌ Error al obtener el directorio global:', err);
+            setError('Fallo de conexión con la API del servidor central.');
+            setLoading(false);
         }
     };
 
     useEffect(() => {
-        isMounted.current = true;
-        obtenerDirectorio();
+        const controller = new AbortController();
+        obtenerDirectorio(controller.signal);
+
         return () => {
-            isMounted.current = false;
+            controller.abort();
         };
     }, []);
 
@@ -137,6 +147,41 @@ export const DirectorioGlobal = () => {
         return coincideRol && coincideBusqueda;
     });
 
+    // 🚀 BUNDLE SPLITTING - DYNAMIC IMPORT DE LIBRERÍA XLSX EN CLIENTE
+    const exportarExcelCliente = async () => {
+        if (!usuariosFiltrados || usuariosFiltrados.length === 0) return;
+        setExportingExcel(true);
+
+        try {
+            // Carga diferida dinámica de la librería heavy xlsx
+            const XLSX = await import('xlsx');
+
+            const datosMapeados = usuariosFiltrados.map((u) => ({
+                ID: u?._id || u?.id || 'N/A',
+                Nombre: getNombre(u),
+                Rol: (u?.rolNormalizado || u?.rol || u?.role || 'N/A').toUpperCase(),
+                Subrol: (u?.subrol || 'N/A').toUpperCase(),
+                Telefono: u?.telefono || u?.telefonoMovil || 'N/A',
+                Email: u?.email || 'N/A',
+                Empresa: u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL',
+                OrigenDB: u?.origenColeccion || u?.origen || 'DB'
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(datosMapeados);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Directorio Global");
+
+            const fechaNombre = new Date().toISOString().slice(0, 10);
+            XLSX.writeFile(workbook, `Directorio_CIMCO_${fechaNombre}.xlsx`);
+        } catch (err) {
+            console.error("❌ Error al procesar Dynamic Import de XLSX o generar archivo local:", err);
+            // Fallback directo a endpoint de backend en caso de fallo de importación dinámica
+            descargarExcelGlobal();
+        } finally {
+            setExportingExcel(false);
+        }
+    };
+
     // 🚀 CONEXIÓN DIRECTA AL ENDPOINT CENTRALIZADO DE EXPORTACIÓN EXCEL
     const descargarExcelGlobal = () => {
         try {
@@ -160,7 +205,7 @@ export const DirectorioGlobal = () => {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <button 
                     onClick={() => setFiltroRol('TODOS')} 
-                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
                         filtroRol === 'TODOS' ? 'bg-yellow-500/10 border-yellow-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
                 >
@@ -170,7 +215,7 @@ export const DirectorioGlobal = () => {
 
                 <button 
                     onClick={() => setFiltroRol('pasajero')} 
-                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
                         filtroRol === 'pasajero' ? 'bg-cyan-500/10 border-cyan-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
                 >
@@ -180,7 +225,7 @@ export const DirectorioGlobal = () => {
 
                 <button 
                     onClick={() => setFiltroRol('despachador')} 
-                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
                         filtroRol === 'despachador' ? 'bg-amber-500/10 border-amber-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
                 >
@@ -190,7 +235,7 @@ export const DirectorioGlobal = () => {
 
                 <button 
                     onClick={() => setFiltroRol('conductor')} 
-                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
                         filtroRol === 'conductor' ? 'bg-yellow-500/10 border-yellow-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
                 >
@@ -200,7 +245,7 @@ export const DirectorioGlobal = () => {
 
                 <button 
                     onClick={() => setFiltroRol('admin')} 
-                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between col-span-2 md:col-span-1 ${
+                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between col-span-2 md:col-span-1 cursor-pointer ${
                         filtroRol === 'admin' ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
                 >
@@ -224,19 +269,32 @@ export const DirectorioGlobal = () => {
 
                 <div className="flex items-center gap-3 w-full md:w-auto justify-end">
                     <button 
-                        onClick={descargarExcelGlobal}
-                        disabled={loading}
-                        className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-400 hover:text-emerald-300 transition-colors text-xs font-bold flex items-center gap-2 uppercase tracking-wider disabled:opacity-50 active:scale-95"
-                        title="Exportar Reporte Excel Completo desde Servidor"
+                        onClick={exportarExcelCliente}
+                        disabled={loading || exportingExcel || usuariosFiltrados.length === 0}
+                        className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-400 hover:text-emerald-300 transition-colors text-xs font-bold flex items-center gap-2 uppercase tracking-wider disabled:opacity-50 active:scale-95 cursor-pointer"
+                        title="Exportar Filtrados en Cliente con Dynamic Import XLSX"
                     >
-                        <Download size={14} />
+                        {exportingExcel ? <Loader size={14} className="animate-spin text-emerald-400" /> : <FileSpreadsheet size={14} />}
                         <span>Exportar XLSX</span>
                     </button>
 
                     <button 
-                        onClick={obtenerDirectorio} 
+                        onClick={descargarExcelGlobal}
                         disabled={loading}
-                        className="p-2.5 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 rounded-xl text-zinc-400 hover:text-white transition-colors disabled:opacity-50 active:scale-95"
+                        className="px-3 py-2 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 rounded-xl text-zinc-300 hover:text-white transition-colors text-xs font-bold flex items-center gap-2 uppercase tracking-wider disabled:opacity-50 active:scale-95 cursor-pointer"
+                        title="Descargar Reporte Completo vía API Servidor"
+                    >
+                        <Download size={14} />
+                        <span>API Server</span>
+                    </button>
+
+                    <button 
+                        onClick={() => {
+                            const controller = new AbortController();
+                            obtenerDirectorio(controller.signal);
+                        }} 
+                        disabled={loading}
+                        className="p-2.5 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 rounded-xl text-zinc-400 hover:text-white transition-colors disabled:opacity-50 active:scale-95 cursor-pointer"
                         title="Recargar directorio"
                     >
                         <RefreshCw size={14} className={loading ? 'animate-spin text-yellow-500' : ''} />
@@ -256,7 +314,7 @@ export const DirectorioGlobal = () => {
                         <span className="text-[9px] text-zinc-500 uppercase tracking-widest">Consolidando Base de Datos Global...</span>
                     </div>
                 ) : error ? (
-                    <div className="h-64 flex flex-col items-center justify-center gap-2 text-rose-400 text-xs uppercase font-bold">
+                    <div className="h-64 flex flex-col items-center justify-center gap-2 text-rose-400 text-xs uppercase font-bold text-center px-4">
                         <span>{error}</span>
                     </div>
                 ) : usuariosFiltrados.length === 0 ? (

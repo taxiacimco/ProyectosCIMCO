@@ -1,3 +1,13 @@
+// Versión Arquitectura: V15.3 - Mapeo Defensivo de Límites de Flota y Control de Retorno SPA
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\Cooperativas.jsx
+ * Misión: Control de Cooperativas y Flotas
+ * Ajuste V15.3:
+ *  1. Mapeo defensivo estricto para límite de vehículos / flota (limiteFlota, limiteVehiculos) contra undefined/null.
+ *  2. Preservación del estado de navegación mediante React Router navigate('/admin/dashboard').
+ *  3. Integración limpia con alias @ y guardas de seguridad en desestructuración/parseo de respuestas MongoDB.
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
@@ -35,13 +45,13 @@ const Cooperativas = () => {
     limiteVehiculos: 50
   });
 
-  // Token JWT para Express
+  // Helper para recuperar token JWT REST con guardas de seguridad
   const getAuthToken = async () => {
     let token = user?.token || localStorage.getItem('token') || localStorage.getItem('cimco_token');
     if (!token && auth?.currentUser) {
       token = await auth.currentUser.getIdToken();
     }
-    return token;
+    return token || '';
   };
 
   // 1. CARGAR COOPERATIVAS
@@ -56,13 +66,14 @@ const Cooperativas = () => {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token || ''}`
+          'Authorization': `Bearer ${token}`
         }
       });
 
       if (response.ok) {
         const result = await response.json();
-        setCooperativas(result.data || []);
+        const listaRaw = result?.data || result?.cooperativas || (Array.isArray(result) ? result : []);
+        setCooperativas(Array.isArray(listaRaw) ? listaRaw : []);
       } else {
         console.warn('⚠️ No se pudieron consultar las cooperativas del servidor.');
       }
@@ -82,7 +93,10 @@ const Cooperativas = () => {
     e.preventDefault();
     setErrorModal('');
 
-    if (!formData.nombre.trim() || !formData.nit.trim()) {
+    const nombreLimpio = formData.nombre?.trim() || '';
+    const nitLimpio = formData.nit?.trim() || '';
+
+    if (!nombreLimpio || !nitLimpio) {
       setErrorModal('El Nombre y el NIT son obligatorios.');
       return;
     }
@@ -97,19 +111,24 @@ const Cooperativas = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token || ''}`
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({
+          ...formData,
+          nombre: nombreLimpio,
+          nit: nitLimpio,
+          limiteVehiculos: Number(formData.limiteVehiculos) || 50
+        })
       });
 
       const result = await response.json();
 
-      if (response.ok && result.success) {
+      if (response.ok && (result?.success || result?.ok)) {
         await cargarCooperativas();
         setModalAbierto(false);
         setFormData({ nombre: '', nit: '', telefono: '', limiteVehiculos: 50 });
       } else {
-        setErrorModal(result.error || result.message || 'Error al guardar la cooperativa.');
+        setErrorModal(result?.error || result?.message || 'Error al guardar la cooperativa.');
       }
     } catch (err) {
       console.error('❌ Error de red:', err);
@@ -119,20 +138,23 @@ const Cooperativas = () => {
     }
   };
 
-  const cooperativasFiltradas = cooperativas.filter(coop => 
-    coop.nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
-    coop.nit?.toLowerCase().includes(busqueda.toLowerCase())
-  );
+  const cooperativasFiltradas = (cooperativas || []).filter(coop => {
+    const nombreStr = coop?.nombre?.toLowerCase() || '';
+    const nitStr = coop?.nit?.toLowerCase() || '';
+    const query = busqueda.toLowerCase().trim();
+    return nombreStr.includes(query) || nitStr.includes(query);
+  });
 
   return (
     <div className="min-h-screen bg-[#09090b] text-white p-4 md:p-8 font-sans selection:bg-amber-500 selection:text-black">
       
-      {/* HEADER */}
+      {/* HEADER CON BOTÓN DE REGRESO DE SEGURIDAD SPA */}
       <div className="max-w-7xl mx-auto backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl p-6 shadow-2xl mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center space-x-4">
           <button 
             onClick={() => navigate('/admin/dashboard')}
-            className="p-2.5 rounded-xl bg-zinc-900 border border-white/10 hover:border-amber-500/50 hover:bg-zinc-800 transition-all"
+            className="p-2.5 rounded-xl bg-zinc-900 border border-white/10 hover:border-amber-500/50 hover:bg-zinc-800 transition-all cursor-pointer"
+            title="Volver al Panel Principal"
           >
             <ArrowLeft className="w-5 h-5 text-zinc-400" />
           </button>
@@ -152,7 +174,7 @@ const Cooperativas = () => {
             setErrorModal('');
             setModalAbierto(true);
           }}
-          className="w-full md:w-auto px-5 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs tracking-wider uppercase rounded-xl shadow-lg shadow-amber-500/10 transition-all flex items-center justify-center gap-2"
+          className="w-full md:w-auto px-5 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs tracking-wider uppercase rounded-xl shadow-lg shadow-amber-500/10 transition-all flex items-center justify-center gap-2 cursor-pointer"
         >
           <Plus className="w-4 h-4 stroke-[3]" />
           Nueva Cooperativa
@@ -188,32 +210,38 @@ const Cooperativas = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {cooperativasFiltradas.map((coop) => (
-              <div 
-                key={coop._id || coop.id} 
-                className="backdrop-blur-md bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-2xl p-5 shadow-xl transition-all"
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <h3 className="font-black text-white text-base tracking-tight uppercase">{coop.nombre}</h3>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase">
-                    {coop.estado || 'Activa'}
-                  </span>
-                </div>
-                
-                <p className="text-zinc-400 font-mono text-xs mb-4">NIT: {coop.nit}</p>
+            {cooperativasFiltradas.map((coop) => {
+              // 🛡️ MAPEO DEFENSIVO INTERCAMBIABLE DE LÍMITE DE FLOTA
+              const limiteCalculado = coop?.limiteFlota ?? coop?.limiteVehiculos ?? coop?.limite_vehiculos ?? 50;
+              const targetId = coop?._id || coop?.id || Math.random();
 
-                <div className="space-y-2 pt-3 border-t border-white/5 text-xs text-zinc-400">
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-zinc-500" />
-                    <span>{coop.telefono || 'Sin teléfono'}</span>
+              return (
+                <div 
+                  key={targetId} 
+                  className="backdrop-blur-md bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-2xl p-5 shadow-xl transition-all"
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <h3 className="font-black text-white text-base tracking-tight uppercase truncate">{coop?.nombre || 'Sin nombre'}</h3>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 uppercase shrink-0">
+                      {coop?.estado || 'Activa'}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Truck className="w-3.5 h-3.5 text-zinc-500" />
-                    <span>Límite de Flota: <strong className="text-white">{coop.limiteFlota || coop.limiteVehiculos || 50}</strong> vehículos</span>
+                  
+                  <p className="text-zinc-400 font-mono text-xs mb-4">NIT: {coop?.nit || 'N/A'}</p>
+
+                  <div className="space-y-2 pt-3 border-t border-white/5 text-xs text-zinc-400">
+                    <div className="flex items-center gap-2">
+                      <Phone className="w-3.5 h-3.5 text-zinc-500" />
+                      <span>{coop?.telefono || 'Sin teléfono'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Truck className="w-3.5 h-3.5 text-zinc-500" />
+                      <span>Límite de Flota: <strong className="text-white">{limiteCalculado}</strong> vehículos</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -225,7 +253,7 @@ const Cooperativas = () => {
             
             <button 
               onClick={() => setModalAbierto(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors"
+              className="absolute top-4 right-4 text-zinc-500 hover:text-white transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -250,7 +278,8 @@ const Cooperativas = () => {
                   placeholder="Ej. Cootransjagua R.L."
                   value={formData.nombre}
                   onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                  className="w-full bg-[#0c0c0e] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition-all"
+                  disabled={guardando}
+                  className="w-full bg-[#0c0c0e] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition-all disabled:opacity-50"
                   required
                 />
               </div>
@@ -262,7 +291,8 @@ const Cooperativas = () => {
                   placeholder="Ej. 900.123.456-7"
                   value={formData.nit}
                   onChange={(e) => setFormData({ ...formData, nit: e.target.value })}
-                  className="w-full bg-[#0c0c0e] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition-all"
+                  disabled={guardando}
+                  className="w-full bg-[#0c0c0e] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition-all disabled:opacity-50"
                   required
                 />
               </div>
@@ -275,7 +305,8 @@ const Cooperativas = () => {
                     placeholder="300 000 0000"
                     value={formData.telefono}
                     onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                    className="w-full bg-[#0c0c0e] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition-all"
+                    disabled={guardando}
+                    className="w-full bg-[#0c0c0e] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition-all disabled:opacity-50"
                   />
                 </div>
 
@@ -286,7 +317,8 @@ const Cooperativas = () => {
                     placeholder="50"
                     value={formData.limiteVehiculos}
                     onChange={(e) => setFormData({ ...formData, limiteVehiculos: e.target.value })}
-                    className="w-full bg-[#0c0c0e] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition-all"
+                    disabled={guardando}
+                    className="w-full bg-[#0c0c0e] border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-amber-500 transition-all disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -295,7 +327,8 @@ const Cooperativas = () => {
                 <button
                   type="button"
                   onClick={() => setModalAbierto(false)}
-                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs uppercase rounded-xl transition-all"
+                  disabled={guardando}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs uppercase rounded-xl transition-all disabled:opacity-50 cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -303,7 +336,7 @@ const Cooperativas = () => {
                 <button
                   type="submit"
                   disabled={guardando}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-extrabold text-xs uppercase rounded-xl transition-all flex items-center gap-2"
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-extrabold text-xs uppercase rounded-xl transition-all flex items-center gap-2 cursor-pointer"
                 >
                   {guardando && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   {guardando ? 'Guardando...' : 'Crear Entidad'}

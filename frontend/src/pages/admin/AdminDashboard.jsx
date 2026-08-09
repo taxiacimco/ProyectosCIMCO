@@ -1,48 +1,81 @@
-// Versión Arquitectura: V12.0 - Integración Módulo Directorio Global de Personal CIMCO NEXUS
+// Versión Arquitectura: V13.6 - Corrección Import react-router-dom y Sincronización URL Query Params
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
- * Misión: Orquestar submódulos tácticos de administración mediante una barra de navegación superior integrada.
+ * Misión: Orquestar submódulos tácticos de administración con sincronización de URL query params, lazy loading y control de acceso restringido.
+ * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
-    ShieldAlert, Wallet, Map, UserCheck, QrCode, LayoutDashboard, LogOut, Activity, Users
+    ShieldAlert, Wallet, Map, UserCheck, QrCode, LayoutDashboard, LogOut, Activity, Users, KeyRound, Loader
 } from 'lucide-react';
 
-// 🚀 GOBERNANZA DE RUTAS: Importaciones mediante alias absolutos estructurados
+// 🚀 GOBERNANZA DE RUTAS: Hook de autenticación directo mediante alias absoluto
 import { useAuth } from '@/hooks/useAuth'; 
-import AdminPanel from '@/pages/admin/AdminPanel';
-import MapaOperativo from '@/components/admin/MapaOperativo';
-import QrGenerator from '@/pages/admin/QrGenerator';
-import ListaOperadores from '@/components/admin/ListaOperadores'; 
-import GestionBilleteras from '@/components/admin/GestionBilleteras';
-import DirectorioGlobal from '@/components/admin/DirectorioGlobal'; // 👈 IMPORTACIÓN DIRECTORIO GLOBAL
 
-// 🛡️ OPTIMIZACIÓN DE MEMORIA: Matriz simétrica de navegación extraída fuera del render cycle
+// ⚡ OPTIMIZACIÓN CODE-SPLITTING: Carga perezosa (React.lazy) para optimizar el bundle inicial de la consola
+const AdminPanel = lazy(() => import('@/pages/admin/AdminPanel'));
+const MapaOperativo = lazy(() => import('@/components/admin/MapaOperativo'));
+const QrGenerator = lazy(() => import('@/pages/admin/QrGenerator'));
+const ListaOperadores = lazy(() => import('@/components/admin/ListaOperadores'));
+const GestionBilleteras = lazy(() => import('@/components/admin/GestionBilleteras'));
+const DirectorioGlobal = lazy(() => import('@/components/admin/DirectorioGlobal'));
+const GestionAdmins = lazy(() => import('@/components/admin/GestionAdmins'));
+
+// 🛡️ MATRIZ DE NAVEGACIÓN CORPORATIVA (Módulos Tácticos)
 const TABS_CONFIG = [
     { id: 'dashboard', label: 'Consola', icon: LayoutDashboard, restricted: false },
     { id: 'radar', label: 'Mapa Radar', icon: Map, restricted: false },
-    { id: 'directorio', label: 'Directorio', icon: Users, restricted: false }, // 👈 NUEVA PESTAÑA UNIFICADA
+    { id: 'directorio', label: 'Directorio', icon: Users, restricted: false },
     { id: 'operadores', label: 'Operadores', icon: UserCheck, restricted: false },
+    { id: 'admins', label: 'Credenciales Oficina', icon: KeyRound, restricted: true },
     { id: 'qr', label: 'Matriz QR', icon: QrCode, restricted: true },
     { id: 'billeteras', label: 'Billeteras', icon: Wallet, restricted: true },
 ];
 
 const AdminDashboard = () => {
     const { user, logout } = useAuth();
-    const [pestanaActiva, setPestanaActiva] = useState('dashboard');
+    const [searchParams, setSearchParams] = useSearchParams();
 
     // 🔐 GOBERNANZA DE SEGURIDAD: Niveles corporativos exigidos
     const tieneAccesoFinanciero = user?.access_level >= 8 || user?.role === 'admin' || user?.role === 'ceo';
 
-    // 🛡️ SALVAGUARDA REFLEXIVA: Si la pestaña activa es restringida y se pierden los privilegios, resetea a la consola base
+    // 🚀 SINCRONIZACIÓN NATIVA CON REACT-ROUTER-DOM QUERY PARAMS (?tab=nombre)
+    const tabUrl = searchParams.get('tab');
+    const tabValida = TABS_CONFIG.some(t => t.id === tabUrl);
+    const configTab = TABS_CONFIG.find(t => t.id === tabUrl);
+    
+    // Evaluar la pestaña inicial verificando restricciones de seguridad
+    const tabInicial = (tabValida && (!configTab?.restricted || tieneAccesoFinanciero)) 
+        ? tabUrl 
+        : 'dashboard';
+
+    const [pestanaActiva, setPestanaActiva] = useState(tabInicial);
+
+    // Cambiar pestaña activa y sincronizar querystring
+    const cambiarPestana = (tabId) => {
+        setPestanaActiva(tabId);
+        setSearchParams({ tab: tabId }, { replace: true });
+    };
+
+    // 🛡️ SALVAGUARDA REFLEXIVA: Resetear a dashboard si la pestaña activa es restringida y el usuario no posee privilegios
     useEffect(() => {
         const tabActual = TABS_CONFIG.find(t => t.id === pestanaActiva);
         if (tabActual?.restricted && !tieneAccesoFinanciero) {
             console.warn(`⚠️ [CIMCO-SEGURIDAD] Intento de desborde de privilegios detectado para la pestaña: [${pestanaActiva}]. Reencaminando...`);
-            setPestanaActiva('dashboard');
+            cambiarPestana('dashboard');
         }
     }, [tieneAccesoFinanciero, pestanaActiva]);
+
+    // Sincronizar estado interno si la URL cambia dinámicamente
+    useEffect(() => {
+        if (tabUrl && tabUrl !== pestanaActiva) {
+            if (tabValida && (!configTab?.restricted || tieneAccesoFinanciero)) {
+                setPestanaActiva(tabUrl);
+            }
+        }
+    }, [tabUrl, tieneAccesoFinanciero]);
 
     // Filtrado de seguridad previo al mapeo de UI
     const pestañasPermitidas = TABS_CONFIG.filter(tab => !tab.restricted || tieneAccesoFinanciero);
@@ -50,7 +83,7 @@ const AdminDashboard = () => {
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-mono selection:bg-cyan-500 selection:text-black">
             
-            {/* 🌐 HEADWAY DE NAVEGACIÓN SUPERIOR (GLASSMORPHISM) */}
+            {/* 🌐 HEADER DE NAVEGACIÓN SUPERIOR (GLASSMORPHISM) */}
             <header className="sticky top-0 z-50 w-full backdrop-blur-md bg-[#121214]/80 border-b border-white/5 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
                 
                 {/* Branding Logístico */}
@@ -75,8 +108,8 @@ const AdminDashboard = () => {
                         return (
                             <button
                                 key={tab.id}
-                                onClick={() => setPestanaActiva(tab.id)}
-                                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 whitespace-nowrap ${
+                                onClick={() => cambiarPestana(tab.id)}
+                                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 whitespace-nowrap cursor-pointer ${
                                     esActiva 
                                         ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-md scale-[1.02]' 
                                         : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5 border border-transparent'
@@ -103,66 +136,86 @@ const AdminDashboard = () => {
                     <button
                         onClick={logout}
                         title="Cerrar sesión operativa"
-                        className="flex items-center justify-center p-2.5 rounded-xl text-red-500/80 hover:text-red-400 transition-colors bg-red-500/5 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 active:scale-95"
+                        className="flex items-center justify-center p-2.5 rounded-xl text-red-500/80 hover:text-red-400 transition-colors bg-red-500/5 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 active:scale-95 cursor-pointer"
                     >
                         <LogOut size={16} />
                     </button>
                 </div>
             </header>
 
-            {/* 🌐 ÁREA DINÁMICA DE RENDERIZADO DE MÓDULOS CON DEFENSA EN CAPAS */}
+            {/* 🌐 ÁREA DINÁMICA DE RENDERIZADO DE MÓDULOS CON LAZY LOADING Y SUSPENSE */}
             <main className="flex-1 p-6 overflow-y-auto relative container mx-auto">
-                
-                {pestanaActiva === 'dashboard' && (
-                    <div className="animate-in fade-in duration-300">
-                        <AdminPanel />
-                    </div>
-                )}
-                
-                {pestanaActiva === 'radar' && (
-                    <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-full min-h-[75vh] border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
-                        <MapaOperativo />
-                    </div>
-                )}
-
-                {/* 👈 RENDERIZADO DE LA VISTA DEL DIRECTORIO GLOBAL */}
-                {pestanaActiva === 'directorio' && (
-                    <div className="animate-in fade-in duration-300">
-                        <DirectorioGlobal />
-                    </div>
-                )}
-                
-                {pestanaActiva === 'operadores' && (
-                    <div className="animate-in fade-in duration-300">
-                        <ListaOperadores />
-                    </div>
-                )}
-
-                {pestanaActiva === 'qr' && (
-                    tieneAccesoFinanciero ? (
+                <Suspense fallback={<CargandoModulo />}>
+                    {pestanaActiva === 'dashboard' && (
                         <div className="animate-in fade-in duration-300">
-                            <QrGenerator />
+                            <AdminPanel />
                         </div>
-                    ) : (
-                        <BloqueoSeguridad modulo="Generador de Códigos QR" />
-                    )
-                )}
-                
-                {pestanaActiva === 'billeteras' && (
-                    tieneAccesoFinanciero ? (
-                        <div className="animate-in fade-in duration-300">
-                            <GestionBilleteras />
+                    )}
+                    
+                    {pestanaActiva === 'radar' && (
+                        <div className="animate-in fade-in slide-in-from-bottom-2 duration-400 h-full min-h-[75vh] border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
+                            <MapaOperativo />
                         </div>
-                    ) : (
-                        <BloqueoSeguridad modulo="Gestión de Billeteras Corporativas" />
-                    )
-                )}
+                    )}
 
+                    {pestanaActiva === 'directorio' && (
+                        <div className="animate-in fade-in duration-300">
+                            <DirectorioGlobal />
+                        </div>
+                    )}
+                    
+                    {pestanaActiva === 'operadores' && (
+                        <div className="animate-in fade-in duration-300">
+                            <ListaOperadores />
+                        </div>
+                    )}
+
+                    {pestanaActiva === 'admins' && (
+                        tieneAccesoFinanciero ? (
+                            <div className="animate-in fade-in duration-300">
+                                <GestionAdmins />
+                            </div>
+                        ) : (
+                            <BloqueoSeguridad modulo="Gestión de Credenciales de Oficina" />
+                        )
+                    )}
+
+                    {pestanaActiva === 'qr' && (
+                        tieneAccesoFinanciero ? (
+                            <div className="animate-in fade-in duration-300">
+                                <QrGenerator />
+                            </div>
+                        ) : (
+                            <BloqueoSeguridad modulo="Generador de Códigos QR" />
+                        )
+                    )}
+                    
+                    {pestanaActiva === 'billeteras' && (
+                        tieneAccesoFinanciero ? (
+                            <div className="animate-in fade-in duration-300">
+                                <GestionBilleteras />
+                            </div>
+                        ) : (
+                            <BloqueoSeguridad modulo="Gestión de Billeteras Corporativas" />
+                        )
+                    )}
+                </Suspense>
             </main>
         </div>
     );
 };
 
+// Componente Fallback para Suspense
+const CargandoModulo = () => (
+    <div className="h-64 flex flex-col items-center justify-center gap-3">
+        <Loader className="animate-spin text-cyan-500" size={28} />
+        <span className="text-xs text-zinc-400 font-bold uppercase tracking-widest animate-pulse">
+            Cargando Módulo de Control...
+        </span>
+    </div>
+);
+
+// Componente Bloqueo de Seguridad por Privilegios
 const BloqueoSeguridad = ({ modulo }) => (
     <div className="flex flex-col items-center justify-center py-20 text-red-500 animate-in zoom-in-95 duration-300">
         <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mb-6 border border-red-500/20 shadow-[0_0_20px_rgba(239,68,68,0.05)]">

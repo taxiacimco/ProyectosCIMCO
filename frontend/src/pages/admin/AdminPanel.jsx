@@ -1,8 +1,8 @@
-// Versión Arquitectura: V15.1 - Corrección de Firma JWT para API REST Express
+// Versión Arquitectura: V15.2 - Acceso Rápido y Métrica de Credenciales Administrativas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminPanel.jsx
  * Misión: Panel Central de Control Administrativo / CEO
- * Ajuste V15.1: Priorización del JWT de sesión emitido por el Backend REST para resolver error 403/jwt signature is required.
+ * Ajuste V15.2: Integración de tarjeta de acceso rápido y métrica en tiempo real para Gestión de Credenciales de Oficina / Admins.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -19,7 +19,9 @@ import {
   Crown, 
   DollarSign,
   Briefcase,
-  Wallet
+  Wallet,
+  KeyRound,
+  ShieldCheck
 } from 'lucide-react';
 
 const AdminPanel = () => {
@@ -32,7 +34,8 @@ const AdminPanel = () => {
     conductoresDisponibles: 0,
     viajesHoy: 0,
     comisionesAcumuladas: 0,
-    capitalCirculante: 0
+    capitalCirculante: 0,
+    credencialesAdmin: 0
   });
 
   const [loading, setLoading] = useState(true);
@@ -72,14 +75,15 @@ const AdminPanel = () => {
           }
         });
 
-        // 2. OBTENER CAPITAL CIRCULANTE DESDE BACKEND EXPRESS (MongoDB)
+        // 2. OBTENER CAPITAL CIRCULANTE Y CREDENCIALES DESDE BACKEND EXPRESS (MongoDB)
         let capitalTotalMongoDB = 0;
+        let totalCredencialesAdmin = 0;
+
         try {
           const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
           const cleanBaseUrl = rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
 
-          // 🔑 ESTRATEGIA DE RECUPEARCIÓN DE JWT COMPATIBLE CON EXPRESS
-          // Priorizamos el token nativo del servidor REST generado en /api/auth/login
+          // 🔑 ESTRATEGIA DE RECUPERACIÓN DE JWT COMPATIBLE CON EXPRESS
           let tokenActivo = user?.token || 
                             localStorage.getItem('token') || 
                             localStorage.getItem('cimco_token');
@@ -89,20 +93,32 @@ const AdminPanel = () => {
             tokenActivo = await auth.currentUser.getIdToken();
           }
 
-          const response = await fetch(`${cleanBaseUrl}/api/conductores/metricas/capital-circulante`, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${tokenActivo || ''}`
-            }
-          });
+          const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${tokenActivo || ''}`
+          };
+
+          // Consultas concurrentes al Backend REST
+          const [resCapital, resAdmins] = await Promise.all([
+            fetch(`${cleanBaseUrl}/api/conductores/metricas/capital-circulante`, { method: 'GET', headers }),
+            fetch(`${cleanBaseUrl}/api/admin/usuarios`, { method: 'GET', headers })
+          ]);
           
-          if (response.ok) {
-            const data = await response.json();
-            capitalTotalMongoDB = Number(data.totalCapital || data.data?.totalCapital || 0);
+          if (resCapital.ok) {
+            const dataCapital = await resCapital.json();
+            capitalTotalMongoDB = Number(dataCapital.totalCapital || dataCapital.data?.totalCapital || 0);
           } else {
-            console.warn(`⚠️ API REST respondió con estado HTTP ${response.status} al consultar capital circulante.`);
+            console.warn(`⚠️ API REST respondió HTTP ${resCapital.status} al consultar capital circulante.`);
           }
+
+          if (resAdmins.ok) {
+            const dataAdmins = await resAdmins.json();
+            const listaRaw = dataAdmins?.data || dataAdmins?.usuarios || (Array.isArray(dataAdmins) ? dataAdmins : []);
+            totalCredencialesAdmin = Array.isArray(listaRaw) ? listaRaw.length : 0;
+          } else {
+            console.warn(`⚠️ API REST respondió HTTP ${resAdmins.status} al consultar credenciales de admin.`);
+          }
+
         } catch (apiErr) {
           console.error("❌ Error de comunicación con la API REST (MongoDB):", apiErr);
         }
@@ -114,7 +130,8 @@ const AdminPanel = () => {
           conductoresDisponibles: snapConductores?.size || 0,
           viajesHoy: snapViajes?.size || 0,
           comisionesAcumuladas: comisionesTotales,
-          capitalCirculante: capitalTotalMongoDB
+          capitalCirculante: capitalTotalMongoDB,
+          credencialesAdmin: totalCredencialesAdmin
         });
 
       } catch (err) {
@@ -140,7 +157,7 @@ const AdminPanel = () => {
     return (
       <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center space-y-4">
         <div className="w-12 h-12 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin"></div>
-        <p className="text-zinc-500 font-mono text-xs uppercase tracking-widest animate-pulse">Consultando Métricas Financieras de MongoDB...</p>
+        <p className="text-zinc-500 font-mono text-xs uppercase tracking-widest animate-pulse">Consultando Métricas Financieras y Credenciales de MongoDB...</p>
       </div>
     );
   }
@@ -189,17 +206,17 @@ const AdminPanel = () => {
         </div>
       )}
 
-      {/* GRILLA TÁCTICA DE 5 COLUMNAS */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+      {/* GRILLA TÁCTICA DE METRICAS (6 COLUMNAS) */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         
         {/* 1. UNIVERSO USUARIOS */}
         <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl p-5 shadow-xl hover:border-zinc-700/50 transition-all duration-300 group">
           <div className="flex justify-between items-start mb-3">
-            <p className="text-[11px] text-zinc-400 font-black uppercase tracking-widest">Universo Usuarios</p>
+            <p className="text-[11px] text-zinc-400 font-black uppercase tracking-widest">Usuarios</p>
             <Users className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
           </div>
           <p className="text-white font-black text-2xl lg:text-3xl tracking-tight">{metricas.usuariosActivos}</p>
-          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Pasajeros y personal en base</p>
+          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Pasajeros base</p>
         </div>
 
         {/* 2. FLOTA ONLINE */}
@@ -215,35 +232,45 @@ const AdminPanel = () => {
         {/* 3. VIAJES GLOBALES */}
         <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl p-5 shadow-xl hover:border-zinc-700/50 transition-all duration-300 group">
           <div className="flex justify-between items-start mb-3">
-            <p className="text-[11px] text-zinc-400 font-black uppercase tracking-widest">Viajes Globales</p>
+            <p className="text-[11px] text-zinc-400 font-black uppercase tracking-widest">Viajes</p>
             <Briefcase className="w-4 h-4 text-zinc-500 group-hover:text-white transition-colors" />
           </div>
           <p className="text-white font-black text-2xl lg:text-3xl tracking-tight">{metricas.viajesHoy}</p>
-          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Historial total de rutas</p>
+          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Historial total</p>
         </div>
 
         {/* 4. CAJA COMISIONES */}
         <div className="backdrop-blur-md bg-[#121214]/80 border border-amber-500/10 rounded-2xl p-5 shadow-xl hover:border-amber-500/30 transition-all duration-300 group">
           <div className="flex justify-between items-start mb-3">
-            <p className="text-[11px] text-amber-400 font-black uppercase tracking-widest">Caja Comisiones</p>
+            <p className="text-[11px] text-amber-400 font-black uppercase tracking-widest">Comisiones</p>
             <DollarSign className="w-4 h-4 text-amber-400" />
           </div>
-          <p className="text-amber-400 font-black text-2xl lg:text-3xl tracking-tight">
+          <p className="text-amber-400 font-black text-xl lg:text-2xl tracking-tight truncate">
             ${metricas.comisionesAcumuladas.toLocaleString('es-CO')}
           </p>
-          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Retención 10% de la flota</p>
+          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Retención 10%</p>
         </div>
 
-        {/* 5. CAPITAL CIRCULANTE (DESDE MONGODB) */}
+        {/* 5. CAPITAL CIRCULANTE */}
         <div className="backdrop-blur-md bg-[#121214]/80 border border-emerald-500/20 rounded-2xl p-5 shadow-xl hover:border-emerald-500/40 transition-all duration-300 bg-emerald-500/[0.02] group">
           <div className="flex justify-between items-start mb-3">
-            <p className="text-[11px] text-emerald-400 font-black uppercase tracking-widest">Capital Circulante</p>
+            <p className="text-[11px] text-emerald-400 font-black uppercase tracking-widest">Capital Circ.</p>
             <Wallet className="w-4 h-4 text-emerald-400" />
           </div>
-          <p className="text-emerald-400 font-black text-xl lg:text-2xl tracking-tight truncate">
-            ${metricas.capitalCirculante.toLocaleString('es-CO')} COP
+          <p className="text-emerald-400 font-black text-lg lg:text-xl tracking-tight truncate">
+            ${metricas.capitalCirculante.toLocaleString('es-CO')}
           </p>
-          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Total Saldos MongoDB</p>
+          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Saldos MongoDB</p>
+        </div>
+
+        {/* 6. CREDENCIALES ADMINS / OFICINA */}
+        <div className="backdrop-blur-md bg-[#121214]/80 border border-amber-500/20 rounded-2xl p-5 shadow-xl hover:border-amber-500/40 transition-all duration-300 bg-amber-500/[0.02] group">
+          <div className="flex justify-between items-start mb-3">
+            <p className="text-[11px] text-amber-400 font-black uppercase tracking-widest">Credenciales</p>
+            <ShieldCheck className="w-4 h-4 text-amber-400" />
+          </div>
+          <p className="text-amber-400 font-black text-2xl lg:text-3xl tracking-tight">{metricas.credencialesAdmin}</p>
+          <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Admins / Oficinas</p>
         </div>
 
       </div>
@@ -257,6 +284,17 @@ const AdminPanel = () => {
           </div>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            
+            {/* TARJETA DE ACCESO RÁPIDO: GESTIÓN DE CREDENCIALES */}
+            <button 
+              onClick={() => navigate('/admin/dashboard', { state: { activeTab: 'admins' } })}
+              className="p-4 rounded-xl bg-[#0c0c0e] border border-amber-500/20 hover:border-amber-500/50 text-left transition-all duration-300 group hover:shadow-lg hover:shadow-amber-500/5"
+            >
+              <KeyRound className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform mb-2" />
+              <p className="font-bold text-xs text-white uppercase tracking-wider">Credenciales de Oficina & Admins</p>
+              <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Creación y revocación de accesos gerenciales</p>
+            </button>
+
             <button 
               onClick={() => navigate('/admin/cooperativas')}
               className="p-4 rounded-xl bg-[#0c0c0e] border border-white/[0.03] hover:border-amber-500/30 text-left transition-all duration-300 group"
@@ -275,14 +313,6 @@ const AdminPanel = () => {
               <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Aprobación de recargas manuales</p>
             </button>
 
-            <button 
-              className="p-4 rounded-xl bg-[#0c0c0e] border border-white/[0.03] opacity-50 cursor-not-allowed text-left"
-              disabled
-            >
-              <AlertTriangle className="w-5 h-5 text-amber-500 mb-2" />
-              <p className="font-bold text-xs text-white uppercase tracking-wider">Límites de Retiro Nequi / PSE</p>
-              <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Topes de contingencia financiera</p>
-            </button>
           </div>
         </div>
       )}
@@ -295,7 +325,7 @@ const AdminPanel = () => {
         <div className="font-mono text-[11px] text-zinc-500 bg-[#0c0c0e] p-4 rounded-xl border border-white/[0.02] space-y-1">
           <p><span className="text-cyan-500">[CIMCO-NUCLEO]</span> Bus de datos en escucha activa.</p>
           <p><span className="text-cyan-500">[CIMCO-AUTH]</span> Sesión autorizada polimórficamente.</p>
-          <p><span className="text-cyan-500">[CIMCO-REST-API]</span> Sincronización de Capital Circulante verificada con MongoDB Atlas.</p>
+          <p><span className="text-cyan-500">[CIMCO-REST-API]</span> Sincronización de Capital Circulante y Credenciales verificada con MongoDB Atlas.</p>
         </div>
       </div>
     </div>

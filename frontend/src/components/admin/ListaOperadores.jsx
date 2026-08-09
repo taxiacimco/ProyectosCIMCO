@@ -1,21 +1,22 @@
-// Versión Arquitectura: V15.3 - Desacoplamiento de URLs de Entorno Local, Sincronización Reactiva Limpia y Estabilización de Keys
+// Versión Arquitectura: V16.0 - Virtualización de Malla (@tanstack/react-virtual), Moderación Unificada REST y Modal de Causa Razonada
 /**
  * Ubicación: frontend\src\components\admin\ListaOperadores.jsx
- * Misión: Renderizar la malla de operadores recuperando registros desde el backend (MongoDB)
- *         a través de la API central con fallback a Firestore para garantizar la presencia de operadores registrados.
+ * Misión: Renderizar la malla virtualizada de operadores recuperando registros desde la API central 
+ *         con fallback de lectura reactiva a Firestore.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajuste V15.3:
- *   1. Reemplazo de URLs hardcodeadas ('http://localhost:3000') por la constante compartida API_BASE_URL.
- *   2. Extracción de onSnapshot fuera de cualquier contexto asíncrono y retorno de función de limpieza directo en useEffect.
- *   3. Eliminación de Math.random() en las keys de renderizado usando identificadores predecibles y estables.
+ * Ajuste V16.0:
+ *   1. Virtualización de Malla: Integración de @tanstack/react-virtual (useVirtualizer) para evitar sobrecarga del DOM.
+ *   2. Moderación Unificada REST: Eliminación de escrituras directas a Firestore para cambios de estado (APROBADO/INACTIVO).
+ *      Toda moderación se encamina exclusivamente por la API REST para auditoría centralizada.
+ *   3. Confirmación Modal con Causa Razonada: Captura obligatoria de justificación auditada antes de ejecutar mutaciones.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
-import { collection, onSnapshot, doc, updateDoc, query } from 'firebase/firestore';
-import { Shield, ShieldAlert, UserCheck, UserX, Search, Loader, Database, CheckCircle, Hourglass } from 'lucide-react';
-// 🛡️ IMPORTANTE: Importación del helper de deduplicación
+import { collection, onSnapshot, query } from 'firebase/firestore';
+import { Shield, ShieldAlert, UserCheck, UserX, Search, Loader, Database, CheckCircle, Hourglass, X, AlertTriangle } from 'lucide-react';
 import { deduplicarEntidades } from '@/utils/deduplicar';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 // ✅ Normalización de API_BASE_URL para evitar sufijos '/api' duplicados
 const RAW_API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
@@ -49,6 +50,21 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
     const [errorFirestore, setErrorFirestore] = useState(null);
     const isMounted = useRef(true);
 
+    // 🛡️ Estado del Modal de Moderación con Causa Razonada
+    const [modalModeracion, setModalModeracion] = useState({
+        isOpen: false,
+        operador: null,
+        accion: '', // 'APROBAR' | 'SUSPENDER' | 'ACTIVAR'
+        nuevoEstado: '',
+        nuevoActive: false
+    });
+    const [justificacion, setJustificacion] = useState('');
+    const [errorModal, setErrorModal] = useState(null);
+    const [procesandoModeracion, setProcesandoModeracion] = useState(false);
+
+    // 🛡️ Ref para el contenedor de Scroll de la Virtualización
+    const parentRef = useRef(null);
+
     useEffect(() => {
         isMounted.current = true;
 
@@ -77,13 +93,13 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                     if (isMounted.current) {
                         const normalizados = listaMongo.map(u => normalizarEntidadUsuario(u._id || u.id, u));
                         
-                        // 🛡️ APLICAMOS FILTRO ANTI-DUPLICADOS ANTES DE GUARDAR EN EL ESTADO
+                        // 🛡️ FILTRO ANTI-DUPLICADOS
                         const listaLimpia = deduplicarEntidades(normalizados);
 
                         setUsuariosLocal(listaLimpia);
                         setLoading(false);
                         setErrorFirestore(null);
-                        return; // ¡Carga exitosa desde MongoDB!
+                        return; // Carga exitosa desde MongoDB
                     }
                 }
             } catch (err) {
@@ -92,7 +108,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
 
             if (!isMounted.current) return;
 
-            // Fallback a Firestore si la API no responde
+            // Fallback de lectura a Firestore si la API no responde
             const pathColeccion = FIRESTORE_PATHS?.users || 'usuarios'; 
             const q = query(collection(db, pathColeccion));
             
@@ -103,7 +119,6 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                         normalizarEntidadUsuario(docSnap.id, docSnap.data())
                     );
                     
-                    // 🛡️ APLICAMOS FILTRO ANTI-DUPLICADOS TAMBIÉN EN EL FALLBACK DE FIRESTORE
                     const listaLimpia = deduplicarEntidades(lista);
 
                     setUsuariosLocal(listaLimpia);
@@ -130,86 +145,8 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         };
     }, [conductoresProp]);
 
-    // 🛡️ En caso de que conductoresProp venga desde un componente padre, aplicamos deduplicación
     const listaBruta = conductoresProp || usuariosLocal;
     const listaMapeada = deduplicarEntidades(listaBruta);
-
-    const handleAprobar = async (id, nuevoEstado = 'APROBADO') => {
-        if (onAprobarConductor) {
-            onAprobarConductor(id, nuevoEstado);
-            return;
-        }
-
-        try {
-            const token = localStorage.getItem('cimco_token');
-            const headers = {
-                'Content-Type': 'application/json',
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-            };
-
-            // Intentar aprobar vía API REST
-            const res = await fetch(`${API_BASE_URL}/api/conductores/${id}/aprobar`, {
-                method: 'PATCH',
-                headers,
-                body: JSON.stringify({ estado: nuevoEstado, isActive: true })
-            });
-
-            if (res.ok) {
-                return;
-            }
-        } catch (e) {
-            console.warn("⚠️ Fallo actualización REST, intentando en Firestore...", e);
-        }
-
-        try {
-            const pathColeccion = FIRESTORE_PATHS?.users || 'usuarios';
-            const docRef = doc(db, pathColeccion, id);
-            await updateDoc(docRef, {
-                estado: nuevoEstado,
-                isActive: true
-            });
-        } catch (err) {
-            console.error(`❌ [CIMCO-MUTATION-ERROR] No se pudo aprobar el operador ${id}:`, err);
-        }
-    };
-
-    const toggleEstado = async (id, currentActive) => {
-        const nuevoEstadoBool = !currentActive;
-        const nuevoEstadoString = nuevoEstadoBool ? 'APROBADO' : 'INACTIVO';
-
-        try {
-            const token = localStorage.getItem('cimco_token');
-            const headers = {
-                'Content-Type': 'application/json',
-                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-            };
-
-            // Intentar alterar estado vía API REST
-            const res = await fetch(`${API_BASE_URL}/api/conductores/${id}/estado`, {
-                method: 'PATCH',
-                headers,
-                body: JSON.stringify({ isActive: nuevoEstadoBool, estado: nuevoEstadoString })
-            });
-
-            if (res.ok) {
-                return;
-            }
-        } catch (e) {
-            console.warn("⚠️ Fallo cambio estado REST, intentando Firestore...", e);
-        }
-
-        try {
-            const pathColeccion = FIRESTORE_PATHS?.users || 'usuarios';
-            const docRef = doc(db, pathColeccion, id);
-
-            await updateDoc(docRef, {
-                isActive: nuevoEstadoBool,
-                estado: nuevoEstadoString 
-            });
-        } catch (err) {
-            console.error(`❌ [CIMCO-MUTATION-ERROR] No se pudo alterar el estado ${id}:`, err);
-        }
-    };
 
     const obtenerNombreMostrar = (u) => {
         const nombreDirecto = u?.nombre || u?.nombreCompleto || u?.displayName;
@@ -236,6 +173,122 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                id.includes(queryNormalize) ||
                telefono.includes(queryNormalize);
     });
+
+    // 🛡️ Virtualizador de Renderizado para Mallas Extensas
+    const rowVirtualizer = useVirtualizer({
+        count: usuariosFiltrados.length,
+        getScrollElement: () => parentRef.current,
+        estimateSize: () => 68,
+        overscan: 5,
+    });
+
+    // 🛡️ Control Modal de Moderación
+    const abrirModalModeracion = (operador, accion) => {
+        if (!operador) return;
+        const esAprobar = accion === 'APROBAR';
+        const esSuspender = accion === 'SUSPENDER';
+        
+        const nuevoActive = esAprobar ? true : (esSuspender ? false : true);
+        const nuevoEstado = esAprobar ? 'APROBADO' : (esSuspender ? 'INACTIVO' : 'APROBADO');
+
+        setModalModeracion({
+            isOpen: true,
+            operador,
+            accion,
+            nuevoEstado,
+            nuevoActive
+        });
+        setJustificacion('');
+        setErrorModal(null);
+    };
+
+    const cerrarModalModeracion = () => {
+        if (procesandoModeracion) return;
+        setModalModeracion({
+            isOpen: false,
+            operador: null,
+            accion: '',
+            nuevoEstado: '',
+            nuevoActive: false
+        });
+        setJustificacion('');
+        setErrorModal(null);
+    };
+
+    // 🛡️ Mutación de Estado Centralizada por API REST (Sin Direct Writes a DB)
+    const ejecutarModeracion = async () => {
+        const { operador, accion, nuevoEstado, nuevoActive } = modalModeracion;
+        if (!operador) return;
+
+        if (!justificacion || !justificacion.trim()) {
+            setErrorModal('Debe ingresar una causa o justificación obligatoria para continuar.');
+            return;
+        }
+
+        const idValido = operador.id || operador._id;
+        if (!idValido) {
+            setErrorModal('Identificador de operador no válido.');
+            return;
+        }
+
+        setProcesandoModeracion(true);
+        setErrorModal(null);
+
+        try {
+            const token = localStorage.getItem('cimco_token');
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            };
+
+            const endpoint = accion === 'APROBAR'
+                ? `${API_BASE_URL}/api/conductores/${idValido}/aprobar`
+                : `${API_BASE_URL}/api/conductores/${idValido}/estado`;
+
+            const bodyPayload = {
+                isActive: nuevoActive,
+                estado: nuevoEstado,
+                justificacion: justificacion.trim(),
+                motivo: justificacion.trim()
+            };
+
+            const res = await fetch(endpoint, {
+                method: 'PATCH',
+                headers,
+                body: JSON.stringify(bodyPayload)
+            });
+
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.message || errorData.error || `Error HTTP ${res.status} en el servidor central`);
+            }
+
+            if (accion === 'APROBAR' && onAprobarConductor) {
+                onAprobarConductor(idValido, nuevoEstado);
+            }
+
+            // Actualización optimista de la UI
+            setUsuariosLocal(prev => prev.map(u => {
+                const currentId = u.id || u._id;
+                if (currentId === idValido) {
+                    return {
+                        ...u,
+                        estado: nuevoEstado,
+                        isActive: nuevoActive,
+                        justificacionUltima: justificacion.trim()
+                    };
+                }
+                return u;
+            }));
+
+            cerrarModalModeracion();
+        } catch (err) {
+            console.error("❌ [CIMCO-MODERATION-REST-ERROR]:", err);
+            setErrorModal(err.message || "Fallo en la comunicación con la API central de moderación.");
+        } finally {
+            setProcesandoModeracion(false);
+        }
+    };
 
     return (
         <div className="w-full flex flex-col gap-4 font-mono antialiased text-zinc-100 relative">
@@ -268,90 +321,213 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                     <p className="text-[11px] text-zinc-500">{errorFirestore}</p>
                 </div>
             ) : (
-                <div className="w-full backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl overflow-hidden shadow-xl">
-                    <div className="overflow-x-auto w-full">
-                        {usuariosFiltrados.length === 0 ? (
-                            <div className="p-12 flex flex-col items-center justify-center text-center gap-2">
-                                <Database className="text-zinc-700 animate-pulse" size={28} />
-                                <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-500">No se localizan coincidencias</p>
-                            </div>
-                        ) : (
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="border-b border-white/5 bg-white/[0.01] text-[9px] uppercase tracking-widest text-zinc-500 font-black">
-                                        <th className="p-4 pl-6">Operador</th>
-                                        <th className="p-4">Teléfono</th>
-                                        <th className="p-4">Subrol</th>
-                                        <th className="p-4">Estado</th>
-                                        <th className="p-4">Saldo Wallet</th>
-                                        <th className="p-4 text-right pr-6">Acciones / Moderación</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-white/5 text-xs text-zinc-300">
-                                    {usuariosFiltrados.map((c, idx) => {
-                                        const idValido = c.id || c._id;
-                                        const keyEstable = idValido || `${c.telefono || 'op'}-${idx}`;
-                                        const subrolVisual = c.subrol || c.rol || c.role || 'Mototaxi';
-                                        const estaAprobado = c.estado === 'APROBADO' || c.estado === 'active';
-                                        const saldoNum = Number(c.saldoWallet || c.saldo || c.balance || 0);
+                <div className="w-full backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl overflow-hidden shadow-xl flex flex-col">
+                    {usuariosFiltrados.length === 0 ? (
+                        <div className="p-12 flex flex-col items-center justify-center text-center gap-2">
+                            <Database className="text-zinc-700 animate-pulse" size={28} />
+                            <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-500">No se localizan coincidencias</p>
+                        </div>
+                    ) : (
+                        <div className="w-full overflow-x-auto">
+                            <div className="min-w-[800px] w-full">
+                                {/* ENCABEZADO FIJO DE LA MALLA */}
+                                <div className="bg-white/[0.02] border-b border-white/5 text-[9px] uppercase tracking-widest text-zinc-500 font-black grid grid-cols-12 px-6 py-3.5 items-center">
+                                    <div className="col-span-3">Operador</div>
+                                    <div className="col-span-2">Teléfono</div>
+                                    <div className="col-span-2">Subrol</div>
+                                    <div className="col-span-2">Estado</div>
+                                    <div className="col-span-1 text-right">Saldo</div>
+                                    <div className="col-span-2 text-right">Acciones / Moderación</div>
+                                </div>
 
-                                        return (
-                                            <tr key={keyEstable} className="hover:bg-white/[0.01] transition-colors duration-150">
-                                                <td className="p-4 pl-6">
-                                                    <div className="font-bold text-zinc-200 uppercase truncate max-w-[180px]">
-                                                        {obtenerNombreMostrar(c)}
+                                {/* CONTENEDOR VIRTUALIZADO DE FILAS */}
+                                <div ref={parentRef} className="max-h-[520px] overflow-y-auto custom-scrollbar relative w-full">
+                                    <div
+                                        style={{
+                                            height: `${rowVirtualizer.getTotalSize()}px`,
+                                            width: '100%',
+                                            position: 'relative',
+                                        }}
+                                    >
+                                        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                                            const c = usuariosFiltrados[virtualRow.index];
+                                            if (!c) return null;
+                                            const idValido = c.id || c._id;
+                                            const keyEstable = idValido || `${c.telefono || 'op'}-${virtualRow.index}`;
+                                            const subrolVisual = c.subrol || c.rol || c.role || 'Mototaxi';
+                                            const estaAprobado = c.estado === 'APROBADO' || c.estado === 'active';
+                                            const saldoNum = Number(c.saldoWallet || c.saldo || c.balance || 0);
+
+                                            return (
+                                                <div
+                                                    key={keyEstable}
+                                                    data-index={virtualRow.index}
+                                                    ref={rowVirtualizer.measureElement}
+                                                    style={{
+                                                        position: 'absolute',
+                                                        top: 0,
+                                                        left: 0,
+                                                        width: '100%',
+                                                        transform: `translateY(${virtualRow.start}px)`,
+                                                    }}
+                                                    className="grid grid-cols-12 px-6 py-3.5 border-b border-white/5 text-xs text-zinc-300 hover:bg-white/[0.02] transition-colors duration-150 items-center"
+                                                >
+                                                    <div className="col-span-3 pr-2 truncate">
+                                                        <div className="font-bold text-zinc-200 uppercase truncate">
+                                                            {obtenerNombreMostrar(c)}
+                                                        </div>
+                                                        <div className="text-[9px] text-zinc-600 font-mono tracking-wide mt-0.5 truncate">
+                                                            ID: {idValido || 'S/I'}
+                                                        </div>
                                                     </div>
-                                                    <div className="text-[9px] text-zinc-600 font-mono tracking-wide mt-0.5">ID: {idValido || 'S/I'}</div>
-                                                </td>
-                                                <td className="p-4 font-mono text-zinc-400">
-                                                    {c.telefono || c.telefonoMovil || 'S/N'}
-                                                </td>
-                                                <td className="p-4">
-                                                    <span className="text-[9px] font-bold px-2 py-0.5 rounded border border-white/5 bg-zinc-800/40 text-zinc-400 uppercase tracking-wider inline-flex items-center gap-1">
-                                                        <Shield size={10} />
-                                                        {subrolVisual}
-                                                    </span>
-                                                </td>
-                                                <td className="p-4">
-                                                    {estaAprobado ? (
-                                                        <span className="inline-flex items-center gap-1 rounded bg-green-900/40 px-2.5 py-1 text-[10px] text-green-400 font-bold border border-green-500/40">
-                                                            <CheckCircle size={11} /> ✓ APROBADO
+                                                    <div className="col-span-2 font-mono text-zinc-400 truncate">
+                                                        {c.telefono || c.telefonoMovil || 'S/N'}
+                                                    </div>
+                                                    <div className="col-span-2">
+                                                        <span className="text-[9px] font-bold px-2 py-0.5 rounded border border-white/5 bg-zinc-800/40 text-zinc-400 uppercase tracking-wider inline-flex items-center gap-1 truncate max-w-full">
+                                                            <Shield size={10} className="shrink-0" />
+                                                            <span className="truncate">{subrolVisual}</span>
                                                         </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1 rounded bg-yellow-900/40 px-2.5 py-1 text-[10px] text-yellow-400 font-bold border border-yellow-500/40 animate-pulse">
-                                                            <Hourglass size={11} /> ⏳ PENDIENTE
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="p-4 font-mono font-bold text-emerald-400">
-                                                    ${saldoNum.toLocaleString('es-CO')} COP
-                                                </td>
-                                                <td className="p-4 text-right pr-6 flex items-center justify-end gap-2">
-                                                    {!estaAprobado && (
-                                                        <button
-                                                            onClick={() => handleAprobar(idValido, 'APROBADO')}
-                                                            className="rounded bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-[10px] text-white font-bold transition uppercase tracking-wider shadow-lg shadow-emerald-600/20 active:scale-95"
+                                                    </div>
+                                                    <div className="col-span-2">
+                                                        {estaAprobado ? (
+                                                            <span className="inline-flex items-center gap-1 rounded bg-green-900/40 px-2.5 py-1 text-[10px] text-green-400 font-bold border border-green-500/40">
+                                                                <CheckCircle size={11} className="shrink-0" /> APROBADO
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1 rounded bg-yellow-900/40 px-2.5 py-1 text-[10px] text-yellow-400 font-bold border border-yellow-500/40 animate-pulse">
+                                                                <Hourglass size={11} className="shrink-0" /> PENDIENTE
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="col-span-1 font-mono font-bold text-emerald-400 text-right truncate">
+                                                        ${saldoNum.toLocaleString('es-CO')}
+                                                    </div>
+                                                    <div className="col-span-2 text-right flex items-center justify-end gap-1.5">
+                                                        {!estaAprobado && (
+                                                            <button
+                                                                onClick={() => abrirModalModeracion(c, 'APROBAR')}
+                                                                className="rounded bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1 text-[10px] text-white font-bold transition uppercase tracking-wider shadow-lg shadow-emerald-600/20 active:scale-95"
+                                                            >
+                                                                Aprobar
+                                                            </button>
+                                                        )}
+                                                        <button 
+                                                            onClick={() => abrirModalModeracion(c, estaAprobado ? 'SUSPENDER' : 'ACTIVAR')} 
+                                                            className={`text-[9px] font-black tracking-widest uppercase transition-all duration-200 px-2 py-1 rounded-lg border active:scale-95 ${
+                                                                estaAprobado 
+                                                                    ? 'border-red-500/20 text-red-400 hover:bg-red-500/10' 
+                                                                    : 'border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10'
+                                                            }`}
                                                         >
-                                                            Aprobar Licencia
+                                                            {estaAprobado ? 'SUSPENDER' : 'ACTIVAR'}
                                                         </button>
-                                                    )}
-                                                    <button 
-                                                        onClick={() => toggleEstado(idValido, c.isActive ?? estaAprobado)} 
-                                                        className={`text-[9px] font-black tracking-widest uppercase transition-all duration-200 px-2.5 py-1.5 rounded-lg border active:scale-95 ${
-                                                            estaAprobado 
-                                                                ? 'border-red-500/20 text-red-400 hover:bg-red-500/10' 
-                                                                : 'border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10'
-                                                        }`}
-                                                    >
-                                                        {estaAprobado ? 'SUSPENDER' : 'ACTIVAR'}
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* MODAL DE MODERACIÓN CON CAUSA RAZONADA */}
+            {modalModeracion.isOpen && modalModeracion.operador && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+                    <div className="w-full max-w-md bg-[#121214] border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col gap-4 font-mono">
+                        {/* HEADER DEL MODAL */}
+                        <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                            <div className="flex items-center gap-2">
+                                {modalModeracion.accion === 'SUSPENDER' ? (
+                                    <UserX className="text-red-400" size={20} />
+                                ) : modalModeracion.accion === 'APROBAR' ? (
+                                    <UserCheck className="text-emerald-400" size={20} />
+                                ) : (
+                                    <Shield className="text-cyan-400" size={20} />
+                                )}
+                                <h3 className="text-xs font-black uppercase tracking-wider text-white">
+                                    Confirmación de Moderación
+                                </h3>
+                            </div>
+                            <button
+                                onClick={cerrarModalModeracion}
+                                disabled={procesandoModeracion}
+                                className="text-zinc-500 hover:text-white transition-colors p-1"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+
+                        {/* DETALLES DE LA ENTIDAD */}
+                        <div className="bg-zinc-950/60 border border-white/5 p-3 rounded-xl flex flex-col gap-1.5 text-xs">
+                            <div className="flex justify-between items-center">
+                                <span className="text-zinc-500 text-[10px] uppercase font-bold">Operador:</span>
+                                <span className="font-bold text-zinc-200 uppercase truncate max-w-[200px]">
+                                    {obtenerNombreMostrar(modalModeracion.operador)}
+                                </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-zinc-500 text-[10px] uppercase font-bold">Acción Requerida:</span>
+                                <span className={`font-extrabold text-[10px] uppercase px-2 py-0.5 rounded border ${
+                                    modalModeracion.accion === 'SUSPENDER'
+                                        ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                                        : modalModeracion.accion === 'APROBAR'
+                                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                        : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                                }`}>
+                                    {modalModeracion.accion} OPERADOR
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* CAPTURA DE CAUSA RAZONADA */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
+                                <AlertTriangle size={12} className="text-yellow-500" />
+                                Causa Razonada / Justificación Auditada (Obligatoria):
+                            </label>
+                            <textarea
+                                rows={3}
+                                value={justificacion}
+                                onChange={(e) => setJustificacion(e.target.value)}
+                                placeholder="Ingrese el motivo detallado de la moderación para el libro de auditoría central..."
+                                disabled={procesandoModeracion}
+                                className="w-full bg-zinc-950/80 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-500/40 transition-colors uppercase resize-none font-mono"
+                            />
+                        </div>
+
+                        {errorModal && (
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-2.5 text-[10px] text-red-400 font-bold flex items-center gap-2">
+                                <ShieldAlert size={14} className="shrink-0" />
+                                <span>{errorModal}</span>
+                            </div>
                         )}
+
+                        {/* BOTONES DE ACCIÓN */}
+                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/5">
+                            <button
+                                onClick={cerrarModalModeracion}
+                                disabled={procesandoModeracion}
+                                className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-white transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={ejecutarModeracion}
+                                disabled={procesandoModeracion}
+                                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider text-white shadow-lg transition active:scale-95 flex items-center gap-2 ${
+                                    modalModeracion.accion === 'SUSPENDER'
+                                        ? 'bg-red-600 hover:bg-red-500 shadow-red-600/20'
+                                        : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                                {procesandoModeracion && <Loader size={12} className="animate-spin" />}
+                                {procesandoModeracion ? 'Procesando...' : 'Confirmar y Auditar'}
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

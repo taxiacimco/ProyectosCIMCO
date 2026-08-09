@@ -1,8 +1,9 @@
-// Versión Arquitectura: V23.7 - Estandarización de Diccionario de Rutas Amigables QR para Integración con AppRouter
+// Versión Arquitectura: V23.8 - Validación Defensiva de Payloads QR y Enrutamiento por Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
  * Misión: Generación de códigos QR de reclutamiento con conmutador dinámico entre Entorno de Túnel/Local y Producción (Vercel).
  *         Estandarización de la constante RUTAS_AMIGABLES_ROL alineada 1:1 con el enrutador central AppRouter.jsx.
+ * Ajuste V23.8: Validación estricta de payloads URI para prevenir la generación de QR con URLs malformadas o parámetros corruptos.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
  */
 
@@ -29,17 +30,21 @@ const QrGenerator = () => {
     
     // Resolución dinámica priorizando variables de entorno y origen actual del navegador
     const getUrlLocal = () => {
-        // Prioridad 1: Variable VITE_FRONTEND_URL asignada en .env o .env.development
-        if (import.meta.env.VITE_FRONTEND_URL) {
-            return import.meta.env.VITE_FRONTEND_URL.replace(/\/$/, '');
-        }
-        // Prioridad 2: Variable VITE_APP_BASE_URL
-        if (import.meta.env.VITE_APP_BASE_URL) {
-            return import.meta.env.VITE_APP_BASE_URL.replace(/\/$/, '');
-        }
-        // Prioridad 3: Origen dinámico desde donde el usuario escanea/accede
-        if (typeof window !== 'undefined') {
-            return window.location.origin;
+        try {
+            // Prioridad 1: Variable VITE_FRONTEND_URL asignada en .env o .env.development
+            if (import.meta.env?.VITE_FRONTEND_URL) {
+                return import.meta.env.VITE_FRONTEND_URL.replace(/\/$/, '');
+            }
+            // Prioridad 2: Variable VITE_APP_BASE_URL
+            if (import.meta.env?.VITE_APP_BASE_URL) {
+                return import.meta.env.VITE_APP_BASE_URL.replace(/\/$/, '');
+            }
+            // Prioridad 3: Origen dinámico desde donde el usuario escanea/accede
+            if (typeof window !== 'undefined' && window.location?.origin) {
+                return window.location.origin;
+            }
+        } catch (err) {
+            console.warn("⚠️ No se pudo determinar origen dinámico de red local, usando fallback local.", err);
         }
         return "http://localhost:5173";
     };
@@ -67,12 +72,21 @@ const QrGenerator = () => {
         pasajero: '/pasajero'
     };
 
-    // Construye la URL completa apuntando al entorno y rol correcto
+    // 🛡️ Construye y valida estrictamente la URL completa del QR antes de renderizar
     const getRutaDestinoRol = (role = rolSeleccionado, base = baseUrlActiva) => {
-        const rolLimpio = (role || '').trim().toLowerCase();
-        const subRuta = RUTAS_AMIGABLES_ROL[rolLimpio] || `/login?role=${rolLimpio}`;
-        const cleanBase = base.replace(/\/$/, '');
-        return `${cleanBase}${subRuta}`;
+        const rolLimpio = (role || '').toString().trim().toLowerCase();
+        const subRuta = RUTAS_AMIGABLES_ROL[rolLimpio] || `/login?role=${encodeURIComponent(rolLimpio)}`;
+        const cleanBase = (base || '').toString().trim().replace(/\/$/, '');
+        const rawUrl = `${cleanBase}${subRuta}`;
+
+        try {
+            // Validación sintáctica rigurosa de URI antes de entregar payload al SVG
+            const parsedUrl = new URL(rawUrl);
+            return parsedUrl.toString();
+        } catch (err) {
+            console.error("❌ URL Malformada detectada en generador QR:", rawUrl, err);
+            return `${URL_PRODUCCION}/login`;
+        }
     };
 
     const targetUrlString = getRutaDestinoRol();
@@ -99,8 +113,15 @@ const QrGenerator = () => {
 
     const handleGenerarQrRol = async (e) => {
         e.preventDefault();
-        if (!rolSeleccionado) {
+        
+        if (!rolSeleccionado || !ROLES_CONTEXTO[rolSeleccionado]) {
             setError("Debe seleccionar un rol corporativo válido.");
+            return;
+        }
+
+        const urlValidada = getRutaDestinoRol(rolSeleccionado, baseUrlActiva);
+        if (!urlValidada || urlValidada.includes('undefined') || urlValidada.includes('null')) {
+            setError("La URL del payload QR es inválida o no pudo ser construida de forma segura.");
             return;
         }
 
@@ -110,12 +131,12 @@ const QrGenerator = () => {
         try {
             const pathColeccion = FIRESTORE_PATHS?.qrs || 'qrs';
             await addDoc(collection(db, pathColeccion), {
-                entidadId: rolSeleccionado.toUpperCase(),
+                entidadId: (rolSeleccionado || 'DESCONOCIDO').toUpperCase(),
                 tipo: 'REGISTRO_ROL',
-                entorno: entorno.toUpperCase(),
+                entorno: (entorno || 'PRODUCCION').toUpperCase(),
                 creadoPor: user?.email || 'CEO_ADMIN',
                 fechaCreacion: serverTimestamp(),
-                payloadUrl: targetUrlString
+                payloadUrl: urlValidada
             });
 
             setQrGenerado(true);
@@ -174,7 +195,7 @@ const QrGenerator = () => {
                     const pngURL = canvas.toDataURL('image/png');
                     const downloadLink = document.createElement('a');
                     downloadLink.href = pngURL;
-                    downloadLink.download = `CIMCO_QR_${entorno.toUpperCase()}_${(rolSeleccionado || '').toUpperCase()}.png`;
+                    downloadLink.download = `CIMCO_QR_${(entorno || 'PROD').toUpperCase()}_${(rolSeleccionado || 'ROL').toUpperCase()}.png`;
                     downloadLink.click();
                 }
                 urlContext.revokeObjectURL(blobURL);
@@ -200,7 +221,7 @@ const QrGenerator = () => {
     };
 
     return (
-        <div className="space-y-6 w-full max-w-7xl mx-auto animate-in fade-in duration-300">
+        <div className="space-y-6 w-full max-w-7xl mx-auto animate-in fade-in duration-300 font-sans selection:bg-amber-500 selection:text-black">
             <div className="flex flex-col lg:flex-row gap-6">
                 
                 {/* FORMULARIO DE CONTROL DE ROLES Y ENTORNO */}
@@ -218,7 +239,7 @@ const QrGenerator = () => {
 
                         {error && (
                             <div className="mb-4 bg-red-500/5 border border-red-500/20 rounded-xl p-3 flex items-center gap-2 text-red-400 text-[11px] font-bold">
-                                <AlertTriangle size={14} />
+                                <AlertTriangle size={14} className="shrink-0" />
                                 <span>{error}</span>
                             </div>
                         )}
@@ -234,7 +255,7 @@ const QrGenerator = () => {
                                     <button
                                         type="button"
                                         onClick={() => { setEntorno('produccion'); setQrGenerado(false); }}
-                                        className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all ${
+                                        className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
                                             entorno === 'produccion'
                                                 ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400 shadow-[0_0_10px_rgba(234,179,8,0.15)]'
                                                 : 'bg-zinc-950/60 border-white/5 text-zinc-500 hover:text-zinc-300'
@@ -246,7 +267,7 @@ const QrGenerator = () => {
                                     <button
                                         type="button"
                                         onClick={() => { setEntorno('local'); setQrGenerado(false); }}
-                                        className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all ${
+                                        className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl border text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
                                             entorno === 'local'
                                                 ? 'bg-blue-500/20 border-blue-500 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.15)]'
                                                 : 'bg-zinc-950/60 border-white/5 text-zinc-500 hover:text-zinc-300'
@@ -279,7 +300,7 @@ const QrGenerator = () => {
                                 </p>
                             </div>
 
-                            <button type="submit" disabled={loading} className="w-full bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/20 text-yellow-500 font-bold uppercase text-[10px] tracking-widest py-3.5 rounded-xl transition-all flex items-center justify-center gap-2">
+                            <button type="submit" disabled={loading} className="w-full bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/20 text-yellow-500 font-bold uppercase text-[10px] tracking-widest py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
                                 {loading ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                                 Compilar Matriz [{entorno.toUpperCase()}]
                             </button>
@@ -313,7 +334,7 @@ const QrGenerator = () => {
                                 <h4 className="text-xs font-black text-white uppercase tracking-widest">PERFIL DESTINO: {(rolSeleccionado || '').toUpperCase()}</h4>
                                 <p className="text-[8px] text-zinc-500 font-mono break-all mt-1 bg-black/40 p-2 rounded-lg border border-white/5">{targetUrlString}</p>
                             </div>
-                            <button onClick={handleDescargarQr} className="flex items-center gap-2 bg-zinc-950 border border-white/5 px-5 py-2 rounded-xl text-[10px] font-bold text-zinc-300 uppercase tracking-widest transition-all hover:text-white">
+                            <button onClick={handleDescargarQr} className="flex items-center gap-2 bg-zinc-950 border border-white/5 px-5 py-2 rounded-xl text-[10px] font-bold text-zinc-300 uppercase tracking-widest transition-all hover:text-white cursor-pointer">
                                 <Download size={12} className="text-yellow-500" /> Guardar Calcomanía QR (PNG)
                             </button>
                         </div>
@@ -345,29 +366,29 @@ const QrGenerator = () => {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
                         {historialQrs.map((item) => {
-                            const esProd = item.payloadUrl?.includes('vercel.app');
+                            const esProd = item?.payloadUrl?.includes('vercel.app');
                             return (
                                 <div key={item.id} className="bg-zinc-950/50 border border-white/5 p-3 rounded-xl flex items-center justify-between gap-3 hover:border-white/10 transition-colors">
                                     <div className="min-w-0 space-y-1">
                                         <div className="flex items-center gap-1.5 font-mono text-[9px]">
                                             <span className="px-1.5 py-0.5 rounded font-black uppercase bg-yellow-500/10 text-yellow-400">
-                                                {item.entidadId || 'N/A'}
+                                                {item?.entidadId || 'N/A'}
                                             </span>
                                             <span className={`px-1 py-0.2 rounded font-black uppercase text-[8px] ${esProd ? 'bg-yellow-500/20 text-yellow-300' : 'bg-blue-500/20 text-blue-300'}`}>
                                                 {esProd ? 'PROD' : 'LOCAL'}
                                             </span>
                                         </div>
-                                        <p className="text-[8px] text-zinc-500 font-mono truncate max-w-[200px]">{item.payloadUrl}</p>
+                                        <p className="text-[8px] text-zinc-500 font-mono truncate max-w-[200px]">{item?.payloadUrl || 'N/A'}</p>
                                         <div className="flex items-center gap-1 text-[8px] text-zinc-600">
-                                            <Calendar size={10} /> {item.fechaCreacion?.toDate ? item.fechaCreacion.toDate().toLocaleDateString('es-CO') : 'Reciente'}
+                                            <Calendar size={10} /> {item?.fechaCreacion?.toDate ? item.fechaCreacion.toDate().toLocaleDateString('es-CO') : 'Reciente'}
                                         </div>
                                     </div>
 
                                     <div className="flex items-center gap-1 shrink-0">
-                                        <button onClick={() => handleCargarDesdeHistorial(item)} title="Ver en Visor" className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors">
+                                        <button onClick={() => handleCargarDesdeHistorial(item)} title="Ver en Visor" className="p-2 rounded-lg bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer">
                                             <Eye size={12} />
                                         </button>
-                                        <button onClick={() => handleEliminarRegistro(item.id)} title="Dar de baja" className="p-2 rounded-lg bg-red-500/5 text-red-500/70 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                                        <button onClick={() => handleEliminarRegistro(item.id)} title="Dar de baja" className="p-2 rounded-lg bg-red-500/5 text-red-500/70 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer">
                                             <Trash2 size={12} />
                                         </button>
                                     </div>

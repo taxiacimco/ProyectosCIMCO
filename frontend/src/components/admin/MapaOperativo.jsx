@@ -1,19 +1,22 @@
-// Versión Arquitectura: V17.6 - Estabilización Claves de Marcadores, Prevención Parpadeos Leaflet y Deduplicación Táctica
+// Versión Arquitectura: V19.2 - Reemplazo de Import de Clustering a Paquete Canónico
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
- * Misión: Despliegue táctico y renderizado de unidades mediante Leaflet.js enganchado a un amortiguador de alta frecuencia.
- * Ajuste V17.6: Sustitución de Math.random() por un identificador estable y unívoco (ID, Placa, Número Interno o Índice) para eliminar parpadeos de renderizado en Leaflet.
+ * Misión: Despliegue táctico y renderizado de unidades mediante Leaflet.js con clustering reactivo, 
+ *         destrucción limpia de instancias del mapa y canvas preferente en alta densidad.
+ * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
+ * Refactor V19.2:
+ *   1. Corrección de import de clustering de '@tanstack/react-leaflet-cluster' a 'react-leaflet-cluster' para compatibilidad con Vite/NPM.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import MarkerClusterGroup from 'react-leaflet-cluster';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { useTelemetryThrottle } from '@/hooks/useTelemetryThrottle';
 import { Search, Signal, Activity, AlertCircle, Radio } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-// 🛡️ Importación del helper de deduplicación
 import { deduplicarEntidades } from '@/utils/deduplicar';
 
 // 🛡️ Inicialización blindada de marcadores para Leaflet
@@ -41,11 +44,45 @@ const createCustomIcon = (rol) => {
     });
 };
 
+// 🛡️ Icono para Clusters Personalizados con Estética Glassmorphism
+const createCustomClusterIcon = (cluster) => {
+    const count = cluster.getChildCount();
+    return L.divIcon({
+        html: `<div class="custom-cluster-marker"><span>${count}</span></div>`,
+        className: 'custom-cluster-wrapper',
+        iconSize: L.point(36, 36, true),
+    });
+};
+
+// 🛡️ Componente Interno para Destrucción Limpia y Asignación de Instancia
+const MapLifecycleHandler = ({ onMapCreated }) => {
+    const map = useMap();
+
+    useEffect(() => {
+        if (onMapCreated) {
+            onMapCreated(map);
+        }
+
+        return () => {
+            if (map) {
+                try {
+                    map.remove();
+                } catch (e) {
+                    console.warn("⚠️ [CIMCO-LEAFLET-CLEANUP]: El mapa ya fue removido o destruido.", e);
+                }
+            }
+        };
+    }, [map, onMapCreated]);
+
+    return null;
+};
+
 const MapaOperativo = ({ cooperativaFiltro = null }) => {
     const [busqueda, setBusqueda] = useState('');
     const [loading, setLoading] = useState(true);
     const [errorServicio, setErrorServicio] = useState(null);
     const isMounted = useRef(true);
+    const mapInstanceRef = useRef(null);
 
     // 🔥 Amortiguador Térmico (Delay óptimo de 2000ms para movimiento fluido y balance de CPU)
     const [vehiculosSuaves, actualizarCoordenadas] = useTelemetryThrottle(2000);
@@ -61,6 +98,15 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         isMounted.current = true;
         return () => {
             isMounted.current = false;
+            // 🛡️ Garantizar destrucción explícita del Mapa al desmontar el componente
+            if (mapInstanceRef.current) {
+                try {
+                    mapInstanceRef.current.remove();
+                    mapInstanceRef.current = null;
+                } catch (err) {
+                    console.warn("⚠️ [CIMCO-MAP-UNMOUNT]: Limpieza de instancia de Leaflet omitida.", err);
+                }
+            }
         };
     }, []);
 
@@ -133,6 +179,13 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         return nombre.includes(queryTerm) || id.includes(queryTerm) || rol.includes(queryTerm) || placa.includes(queryTerm) || numInterno.includes(queryTerm);
     });
 
+    // 🛡️ Umbral de densidad para conmutar a Renderizador Canvas
+    const usarCanvas = filtrados.length > 50;
+
+    const handleMapCreated = (mapInstance) => {
+        mapInstanceRef.current = mapInstance;
+    };
+
     return (
         <div className="w-full flex flex-col gap-4 font-mono antialiased text-zinc-100">
             {/* PANEL RECEPTOR TÁCTICO */}
@@ -151,6 +204,11 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                     <span className="text-[10px] bg-zinc-950/60 border border-white/5 px-3 py-1.5 rounded-lg text-zinc-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
                         <Signal className="text-orange-400 animate-pulse" size={12} />
                         Malla Activa: <span className="text-orange-400">{filtrados.length}</span> Unidades en Mapa
+                        {usarCanvas && (
+                            <span className="ml-1 text-[8px] bg-orange-500/20 text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded font-black">
+                                CANVAS HIGH-DENSITY
+                            </span>
+                        )}
                     </span>
                 </div>
             </div>
@@ -168,63 +226,74 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                     center={[9.715, -73.34]} 
                     zoom={13} 
                     zoomControl={false}
+                    preferCanvas={usarCanvas}
                     className="w-full h-full"
                 >
+                    <MapLifecycleHandler onMapCreated={handleMapCreated} />
+
                     <TileLayer
                         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                     />
 
-                    {filtrados.map((m, index) => {
-                        // 🛡️ ESTABILIZACIÓN DE CLAVE: Fallback predecible evitan desmontado innecesario y parpadeos en Leaflet
-                        const keyMarker = m.id || m.placa || m.numeroInterno || `marker-throt-${index}`;
+                    {/* 🛡️ AGRUPAMIENTO REACTIVO DE UNIDADES (MARKER CLUSTERING CANÓNICO) */}
+                    <MarkerClusterGroup
+                        chunkedLoading
+                        iconCreateFunction={createCustomClusterIcon}
+                        maxClusterRadius={45}
+                        spiderfyOnMaxZoom={true}
+                        showCoverageOnHover={false}
+                    >
+                        {filtrados.map((m, index) => {
+                            const keyMarker = m.id || m.placa || m.numeroInterno || `marker-throt-${index}`;
 
-                        return (
-                            <Marker 
-                                key={keyMarker}
-                                position={[m.lat, m.lng]} 
-                                icon={createCustomIcon(m.rol)}
-                            >
-                                <Popup className="custom-popup">
-                                    <div className="w-60 backdrop-blur-md bg-[#121214]/95 border border-white/10 rounded-2xl p-4 shadow-2xl font-mono text-zinc-100">
-                                        <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/5">
-                                            <Radio className="text-orange-400 animate-pulse" size={14} />
-                                            <span className="text-[9px] uppercase tracking-widest font-black text-orange-400">
-                                                TELEMETRÍA GPS ACTIVA
-                                            </span>
-                                        </div>
-
-                                        <p className="text-xs font-black text-white uppercase truncate">{m.nombre}</p>
-                                        <p className="text-[9px] text-zinc-500 mt-0.5 truncate font-mono">ID: {m.id}</p>
-
-                                        <div className="mt-3 space-y-1.5 text-[9px] uppercase tracking-tight">
-                                            <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
-                                                <span className="text-zinc-500">PLACA / INTERNO:</span>
-                                                <span className="text-white font-bold">{m.placa} / Int. {m.numeroInterno}</span>
-                                            </div>
-                                            <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
-                                                <span className="text-zinc-500">ORIGEN FEED:</span>
-                                                <span className="text-emerald-400 font-bold">
-                                                    {m.origenReporte}
+                            return (
+                                <Marker 
+                                    key={keyMarker}
+                                    position={[m.lat, m.lng]} 
+                                    icon={createCustomIcon(m.rol)}
+                                >
+                                    <Popup className="custom-popup">
+                                        <div className="w-60 backdrop-blur-md bg-[#121214]/95 border border-white/10 rounded-2xl p-4 shadow-2xl font-mono text-zinc-100">
+                                            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-white/5">
+                                                <Radio className="text-orange-400 animate-pulse" size={14} />
+                                                <span className="text-[9px] uppercase tracking-widest font-black text-orange-400">
+                                                    TELEMETRÍA GPS ACTIVA
                                                 </span>
                                             </div>
-                                            <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
-                                                <span className="text-zinc-500">COOPERATIVA:</span>
-                                                <span className="text-orange-400 font-bold">{m.cooperativa}</span>
+
+                                            <p className="text-xs font-black text-white uppercase truncate">{m.nombre}</p>
+                                            <p className="text-[9px] text-zinc-500 mt-0.5 truncate font-mono">ID: {m.id}</p>
+
+                                            <div className="mt-3 space-y-1.5 text-[9px] uppercase tracking-tight">
+                                                <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
+                                                    <span className="text-zinc-500">PLACA / INTERNO:</span>
+                                                    <span className="text-white font-bold">{m.placa} / Int. {m.numeroInterno}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
+                                                    <span className="text-zinc-500">ORIGEN FEED:</span>
+                                                    <span className="text-emerald-400 font-bold">
+                                                        {m.origenReporte}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
+                                                    <span className="text-zinc-500">COOPERATIVA:</span>
+                                                    <span className="text-orange-400 font-bold">{m.cooperativa}</span>
+                                                </div>
+                                            </div>
+
+                                            <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between">
+                                                <span className="text-[8px] text-zinc-500 uppercase">Coordenadas:</span>
+                                                <span className="text-[8px] text-zinc-400 font-mono font-bold">
+                                                    {m.lat.toFixed(5)}, {m.lng.toFixed(5)}
+                                                </span>
                                             </div>
                                         </div>
-
-                                        <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between">
-                                            <span className="text-[8px] text-zinc-500 uppercase">Coordenadas:</span>
-                                            <span className="text-[8px] text-zinc-400 font-mono font-bold">
-                                                {m.lat.toFixed(5)}, {m.lng.toFixed(5)}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </Popup>
-                            </Marker>
-                        );
-                    })}
+                                    </Popup>
+                                </Marker>
+                            );
+                        })}
+                    </MarkerClusterGroup>
                 </MapContainer>
 
                 {/* ANIMACIÓN DE ESCANEO DE RED */}
@@ -246,6 +315,34 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                 
                 .smooth-marker-transition {
                     transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+                }
+
+                /* ESTILOS CUSTOM GLASSMORPHISM PARA CLUSTERS */
+                .custom-cluster-wrapper {
+                    background: transparent;
+                }
+                .custom-cluster-marker {
+                    width: 36px;
+                    height: 36px;
+                    background: rgba(18, 18, 20, 0.85);
+                    backdrop-filter: blur(8px);
+                    border: 1.5px solid rgba(249, 115, 22, 0.6);
+                    box-shadow: 0 0 15px rgba(249, 115, 22, 0.3);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    color: #f97316;
+                    font-family: monospace;
+                    font-weight: 900;
+                    font-size: 11px;
+                    text-align: center;
+                    line-height: 34px;
+                }
+                .custom-cluster-marker:hover {
+                    border-color: #f97316;
+                    transform: scale(1.08);
+                    transition: transform 0.2s ease;
                 }
             `}</style>
         </div>
