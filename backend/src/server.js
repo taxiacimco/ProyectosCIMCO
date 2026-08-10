@@ -1,10 +1,9 @@
-// Versión Arquitectura: V17.5 - Desacoplamiento de Arranque HTTP y Resiliencia en Conexión MongoDB Atlas
+// Versión Arquitectura: V17.8 - Enrutador Administrativo Perimetral Inline y Resiliencia ESM
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte explícito
- * para frontend-taxia-cimco.vercel.app, orquestación de sockets e inyección del enrutador de Cooperativas (/api/cooperativas),
- * Excel (/api/excel) junto con Pasajeros, Usuarios, Conductores y Viajes.
- * Optimización V17.5: Arranque inmediato del servidor HTTP para garantizar disponibilidad en el puerto dinámico de Railway.
+ * para frontend-taxia-cimco.vercel.app, orquestación de sockets e inyección de enrutadores del sistema.
+ * Ajuste V17.8: Definición de enrutador administrativo inline en `/api/admin` para prevenir errores ESM (ERR_MODULE_NOT_FOUND) y resolver peticiones de administración.
  */
 
 import 'dotenv/config';
@@ -148,6 +147,25 @@ app.get('/api/usuarios/directorio-global', async (req, res) => {
 });
 
 // ==================================================================\\
+// 🛡️ ENRUTADOR ADMINISTRATIVO PERIMETRAL (INLINE REST API)
+// ==================================================================\\
+const adminRoutes = express.Router();
+
+adminRoutes.get('/usuarios', async (req, res) => {
+    try {
+        const db = mongoose.connection.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: "Base de datos no inicializada" });
+        }
+        const usuarios = await db.collection('usuarios').find({}).toArray();
+        res.json({ success: true, total: usuarios.length, data: usuarios, usuarios });
+    } catch (error) {
+        logLocal(`🚨 [ADMIN-ROUTER-ERROR] ${error?.message || error}`);
+        res.status(500).json({ success: false, error: error?.message || error });
+    }
+});
+
+// ==================================================================\\
 // 🚀 ENRUTADORES GENERALES DEL SISTEMA (PREFIJO BASE: /api)
 // ==================================================================\\
 app.use('/api/auth', authRoutes);
@@ -157,6 +175,7 @@ app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/pasajeros', pasajeroRoutes);
 app.use('/api/cooperativas', cooperativaRoutes);
 app.use('/api/excel', excelRoutes);
+app.use('/api/admin', adminRoutes);
 
 // ⚡ SINCRONIZACIÓN DE CORS Y TRANSPORTE PARA WEBSOCKETS (SOCKET.IO)
 const io = new Server(httpServer, {
