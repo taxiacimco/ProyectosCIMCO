@@ -1,8 +1,7 @@
-// Versión Arquitectura: V21.32 - Actualización de Label Identificador a Celular / Correo Electrónico
+// Versión Arquitectura: V21.33 - Guardián de Autenticación y Corrección de Rutas de Navegación
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Actualizar la etiqueta del campo de identificación para reflejar explícitamente "# CELULAR / CORREO ELECTRÓNICO",
- *         manteniendo toda la lógica de validación, persistencia y estética Glassmorphism CIMCO-UI V9.3.
+ * Misión: Integración de Guardián de Autenticación (Anti-Loop), corrección de rutas de navegación post-login y normalización de endpoints de registro.
  * Estilo: CIMCO-UI V9.3 Glassmorphism.
  */
 
@@ -15,7 +14,7 @@ const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const Login = () => {
-  const { loginLocal } = useAuth();
+  const { loginLocal, user, loading: authLoading } = useAuth() || {};
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
@@ -34,6 +33,24 @@ const Login = () => {
       setIdentifier(ultimoIdentificador);
     }
   }, []);
+
+  // Redireccionar si el usuario ya está autenticado al cargar el Login (Guardián Anti-Loop)
+  useEffect(() => {
+    if (!authLoading && user) {
+      const activeRole = (user.rol || user.tipoUsuario || '').toLowerCase();
+      if (activeRole.includes('moto')) {
+        navigate('/mototaxi', { replace: true });
+      } else if (activeRole.includes('pasajero')) {
+        navigate('/pasajero', { replace: true });
+      } else if (activeRole.includes('despachador')) {
+        navigate('/despachador', { replace: true });
+      } else if (activeRole.includes('admin')) {
+        navigate('/admin/dashboard', { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
+    }
+  }, [user, authLoading, navigate]);
 
   const isEmailInput = identifier?.includes('@') || false;
 
@@ -112,11 +129,13 @@ const Login = () => {
         const userRole = (res.user?.role || res.user?.rol || roleParam || '').toLowerCase();
         
         if (userRole.includes('moto')) {
-          navigate('/mototaxi/home');
+          navigate('/mototaxi');
         } else if (userRole.includes('pasajero')) {
-          navigate('/pasajero/home');
+          navigate('/pasajero');
         } else if (userRole.includes('despachador')) {
-          navigate('/despachador/home');
+          navigate('/despachador');
+        } else if (userRole.includes('admin')) {
+          navigate('/admin/dashboard');
         } else {
           navigate('/');
         }
@@ -136,22 +155,22 @@ const Login = () => {
   const handleRegisterRedirect = () => {
     switch (roleParam) {
       case 'intermunicipal':
-        navigate('/register-intermunicipal?role=intermunicipal');
+        navigate('/register/intermunicipal?role=intermunicipal');
         break;
       case 'moto':
       case 'motocarga':
       case 'mototaxi':
       case 'motoparrillero':
-        navigate(`/register-moto?role=${roleParam}`);
+        navigate(`/register/moto?role=${roleParam}`);
         break;
       case 'pasajero':
-        navigate('/register-pasajero?role=pasajero');
+        navigate('/register/pasajero?role=pasajero');
         break;
       case 'despachador':
-        navigate('/register-despachador?role=despachador');
+        navigate('/register/despachador?role=despachador');
         break;
       case 'admin':
-        navigate('/register-admin?role=admin');
+        navigate('/register/admin?role=admin');
         break;
       default:
         navigate('/register');

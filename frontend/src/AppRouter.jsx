@@ -1,4 +1,10 @@
-// Versión Arquitectura: V9.3 - Rutas Protegidas y Navegación Global TAXIA CIMCO
+// Versión Arquitectura: V9.4 - Confirmación y Verificación de Subrutas y Roles TAXIA CIMCO
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
+ * Misión: Verificación y aseguramiento de subrutas requeridas (/pasajero, /mototaxi, /despachador, y registros asociados).
+ * Estilo: CIMCO-UI V9.3 Glassmorphism.
+ */
+
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
@@ -119,7 +125,7 @@ const AppRouter = () => {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Rutas Públicas */}
+        {/* Rutas Públicas de Autenticación y Registro */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/register/pasajero" element={<RegisterPasajero />} />
@@ -139,7 +145,7 @@ const AppRouter = () => {
           }
         />
 
-        {/* Rutas Protegidas de Pasajero */}
+        {/* Subrutas Protegidas de Pasajero (/pasajero) */}
         <Route
           path="/pasajero"
           element={
@@ -173,7 +179,7 @@ const AppRouter = () => {
           }
         />
 
-        {/* Rutas Protegidas de Mototaxi */}
+        {/* Subrutas Protegidas de Mototaxi (/mototaxi) */}
         <Route
           path="/mototaxi"
           element={
@@ -199,7 +205,7 @@ const AppRouter = () => {
           }
         />
 
-        {/* Rutas Protegidas de Motoparrillero */}
+        {/* Subrutas Protegidas de Motoparrillero */}
         <Route
           path="/motoparrillero"
           element={
@@ -225,7 +231,7 @@ const AppRouter = () => {
           }
         />
 
-        {/* Rutas Protegidas de Motocarga */}
+        {/* Subrutas Protegidas de Motocarga */}
         <Route
           path="/motocarga"
           element={
@@ -251,7 +257,7 @@ const AppRouter = () => {
           }
         />
 
-        {/* Rutas Protegidas de Intermunicipal */}
+        {/* Subrutas Protegidas de Intermunicipal */}
         <Route
           path="/intermunicipal"
           element={
@@ -269,7 +275,7 @@ const AppRouter = () => {
           }
         />
 
-        {/* Rutas Protegidas de Despachador */}
+        {/* Subrutas Protegidas de Despachador (/despachador) */}
         <Route
           path="/despachador"
           element={
@@ -295,7 +301,7 @@ const AppRouter = () => {
           }
         />
 
-        {/* Rutas Protegidas de Administrador */}
+        {/* Subrutas Protegidas de Administrador */}
         <Route
           path="/admin/dashboard"
           element={
@@ -329,7 +335,7 @@ const AppRouter = () => {
           }
         />
 
-        {/* Redirección Raíz y Fallback */}
+        {/* Redirección Raíz y Fallback Global */}
         <Route path="/" element={<RoleRedirect />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
