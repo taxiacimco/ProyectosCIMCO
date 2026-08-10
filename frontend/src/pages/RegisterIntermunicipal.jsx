@@ -1,15 +1,17 @@
-// Versión Arquitectura: V1.9 - Integración de Indicadores visuales de Peso Máximo Documental (5MB)
+// Versión Arquitectura: V2.0 - Integración Estructural de Sección 2 (Unidad y Operación) y Sección de Rutas/Afiliación Logística
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterIntermunicipal.jsx
- * Misión: Captura de operadores de mediana distancia con UI informativa de restricciones documentales.
- * Estilo: CIMCO-UI V9.3 Glassmorphism (Indigo Theme).
+ * Misión: Registro de Operadores Intermunicipales con captura de Empresa/Cooperativa, Placa, Número Interno,
+ *         sección de Rutas y Afiliación Logística, y Carga Documental Digital (Cédula, Licencia, Tarjeta de Propiedad)
+ *         con control estricto de límite de 5 MB por archivo.
+ * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Indigo Accent).
  */
 
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { AlertTriangle, UploadCloud, FileText, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, UploadCloud, FileText, CheckCircle2, Building2, Bus, MapPin, Route, Check } from 'lucide-react';
 
 // Constantes de Validación Documental (Máx 5MB)
 const MAX_FILE_SIZE_MB = 5;
@@ -19,14 +21,21 @@ const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'applicatio
 const RegisterIntermunicipal = () => {
   const navigate = useNavigate();
   
-  // Estado con nomenclatura camelCase para consistencia en el Frontend
+  // 📡 ESTADOS DE IDENTIFICACIÓN Y OPERADOR
   const [nombre, setNombre] = useState('');
   const [celular, setCelular] = useState('');
   const [correo, setCorreo] = useState('');
   const [clave, setClave] = useState('');
-  const [placa, setPlaca] = useState('');
-  const [numeroInterno, setNumeroInterno] = useState(''); 
+
+  // 🚌 SECCIÓN 2: INFORMACIÓN DE UNIDAD Y OPERACIÓN
   const [cooperativa, setCooperativa] = useState('');
+  const [placa, setPlaca] = useState('');
+  const [numeroInterno, setNumeroInterno] = useState('');
+
+  // 🗺️ SECCIÓN 3: RUTAS Y AFILIACIÓN LOGÍSTICA
+  const [rutaOrigen, setRutaOrigen] = useState('');
+  const [rutaDestino, setRutaDestino] = useState('');
+  const [codigoAfiliacion, setCodigoAfiliacion] = useState('');
 
   // 📁 FILE STATES FOR VALIDATION (Terna documental obligatoria)
   const [cedulaFile, setCedulaFile] = useState(null);
@@ -41,7 +50,7 @@ const RegisterIntermunicipal = () => {
     if (!file) return null;
 
     if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      return `El archivo "${fileLabel}" tiene un formato no permitido. Usa imágenes (.jpg, .png) o PDF.`;
+      return `El archivo "${fileLabel}" tiene un formato no permitido. Usa imágenes (.jpg, .png, .webp) o PDF.`;
     }
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
@@ -74,7 +83,7 @@ const RegisterIntermunicipal = () => {
 
     // 🛡️ Guardas de seguridad preventivas (Anti-Undefined / Blindaje de Variables)
     if (!nombre?.trim() || !celular?.trim() || !correo?.trim() || !clave?.trim() || !placa?.trim() || !cooperativa?.trim()) {
-      setError("⚠️ Error de Validación: Todos los campos operacionales son obligatorios.");
+      setError("⚠️ Error de Validación: Todos los campos operacionales principales son obligatorios.");
       return;
     }
 
@@ -109,6 +118,10 @@ const RegisterIntermunicipal = () => {
       dataPayload.append('placa', placa.toUpperCase().trim());
       dataPayload.append('numero_interno', numeroInterno.trim());
       dataPayload.append('empresa', cooperativa.trim());
+      dataPayload.append('cooperativa', cooperativa.trim());
+      dataPayload.append('ruta_origen', rutaOrigen.trim());
+      dataPayload.append('ruta_destino', rutaDestino.trim());
+      dataPayload.append('codigo_afiliacion', codigoAfiliacion.trim());
       dataPayload.append('role', targetRole); 
       dataPayload.append('access_level', String(accessLevel));
 
@@ -140,121 +153,185 @@ const RegisterIntermunicipal = () => {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-zinc-900/20 via-black to-black z-0" />
 
       {/* Contenedor Glassmorphism CIMCO-UI */}
-      <div className="w-full max-w-2xl backdrop-blur-md bg-[#121214]/80 border border-white/5 p-8 rounded-3xl shadow-2xl shadow-black/60 relative z-10 transition-all duration-500">
+      <div className="w-full max-w-2xl backdrop-blur-md bg-[#121214]/80 border border-white/5 p-6 sm:p-8 rounded-3xl shadow-2xl shadow-black/60 relative z-10 transition-all duration-500 my-8">
         
         <div className="mb-6 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/[0.08] border border-indigo-500/20 rounded-full mb-3">
             <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
             <span className="text-[9px] font-mono tracking-[0.2em] text-indigo-400 uppercase font-black">Rutas Intermunicipales y Cooperativas</span>
           </div>
-          <h2 className="text-white font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-b from-white to-zinc-400 uppercase">Inscripción Nodo Conductor</h2>
-          <p className="text-zinc-500 font-mono text-[10px] tracking-[0.1em] mt-1 uppercase font-bold">Unidad de Gestión de Flota Regional</p>
+          <h2 className="text-white font-black text-2xl tracking-tighter bg-clip-text text-transparent bg-gradient-to-b from-white to-zinc-400 uppercase">Inscripción Conductor Intermunicipal</h2>
+          <p className="text-zinc-500 font-mono text-[10px] tracking-[0.1em] mt-1 uppercase font-bold">Unidad de Gestión de Flota Regional e Intercooperativa</p>
         </div>
 
         {error && (
           <div className="mb-6 text-red-400 bg-red-950/30 p-4 rounded-xl border border-red-500/20 text-[10px] font-mono uppercase tracking-widest font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-            <AlertTriangle size={12} />
+            <AlertTriangle size={12} className="shrink-0" />
             <span>SYSTEM_ALERT: {error}</span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Fila 1: Nombre y Celular */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Operador Cooperativo</label>
-              <input 
-                type="text" 
-                placeholder="Nombre completo" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
-                value={nombre} 
-                onChange={(e) => setNombre(e.target.value)} 
-                required 
-              />
+        <form onSubmit={handleSubmit} className="space-y-6">
+          
+          {/* SECCIÓN 1: OPERADOR Y CREDENCIALES */}
+          <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
+            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" />
+              Sección 1: Información Personal y Credenciales
             </div>
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Línea Celular</label>
-              <input 
-                type="tel" 
-                placeholder="3000000000" 
-                maxLength="10" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
-                value={celular} 
-                onChange={(e) => setCelular(e.target.value)} 
-                required 
-              />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Nombre Completo del Conductor</label>
+                <input 
+                  type="text" 
+                  placeholder="Ej. Carlos Fuentes" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                  value={nombre} 
+                  onChange={(e) => setNombre(e.target.value)} 
+                  required 
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Línea Celular</label>
+                <input 
+                  type="tel" 
+                  placeholder="3000000000" 
+                  maxLength="10" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                  value={celular} 
+                  onChange={(e) => setCelular(e.target.value.replace(/\D/g, ''))} 
+                  required 
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Correo Electrónico de Operaciones</label>
+                <input 
+                  type="email" 
+                  placeholder="ruta@cooperativa.com" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                  value={correo} 
+                  onChange={(e) => setCorreo(e.target.value)} 
+                  required 
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Contraseña de Acceso</label>
+                <input 
+                  type="password" 
+                  placeholder="••••••••" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs tracking-widest" 
+                  value={clave} 
+                  onChange={(e) => setClave(e.target.value)} 
+                  required 
+                />
+              </div>
             </div>
           </div>
 
-          {/* Fila 2: Cooperativa, Placa y Número Interno */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Empresa / Cooperativa</label>
-              <input 
-                type="text" 
-                placeholder="Ej. Cootrans" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
-                value={cooperativa} 
-                onChange={(e) => setCooperativa(e.target.value)} 
-                required 
-              />
+          {/* SECCIÓN 2: INFORMACIÓN DE UNIDAD Y OPERACIÓN */}
+          <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
+            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
+              <Bus size={12} className="text-indigo-400" />
+              Sección 2: Información de Unidad y Operación
             </div>
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Identificación Placa</label>
-              <input 
-                type="text" 
-                placeholder="SDF456" 
-                maxLength="6" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono uppercase" 
-                value={placa} 
-                onChange={(e) => setPlaca(e.target.value)} 
-                required 
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Número Interno Vial</label>
-              <input 
-                type="text" 
-                placeholder="Ej. INT-40" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
-                value={numeroInterno} 
-                onChange={(e) => setNumeroInterno(e.target.value)} 
-                required 
-              />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Empresa / Cooperativa</label>
+                <div className="relative">
+                  <Building2 size={13} className="absolute left-3 top-3.5 text-zinc-600" />
+                  <input 
+                    type="text" 
+                    placeholder="Ej. Cootrans" 
+                    className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 pl-9 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono uppercase" 
+                    value={cooperativa} 
+                    onChange={(e) => setCooperativa(e.target.value)} 
+                    required 
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Placa del Vehículo</label>
+                <input 
+                  type="text" 
+                  placeholder="SDF456" 
+                  maxLength="6" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono uppercase" 
+                  value={placa} 
+                  onChange={(e) => setPlaca(e.target.value)} 
+                  required 
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Número Interno Vial</label>
+                <input 
+                  type="text" 
+                  placeholder="Ej. INT-40" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                  value={numeroInterno} 
+                  onChange={(e) => setNumeroInterno(e.target.value)} 
+                  required 
+                />
+              </div>
             </div>
           </div>
 
-          {/* Fila 3: Correo y Clave */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Correo de Operaciones</label>
-              <input 
-                type="email" 
-                placeholder="ruta@cooperativa.com" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
-                value={correo} 
-                onChange={(e) => setCorreo(e.target.value)} 
-                required 
-              />
+          {/* SECCIÓN 3: RUTAS Y AFILIACIÓN LOGÍSTICA */}
+          <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
+            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
+              <Route size={12} className="text-indigo-400" />
+              Sección 3: Rutas y Afiliación Logística
             </div>
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Password de Seguridad</label>
-              <input 
-                type="password" 
-                placeholder="••••••••" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs tracking-widest" 
-                value={clave} 
-                onChange={(e) => setClave(e.target.value)} 
-                required 
-              />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Municipio Origen / Base</label>
+                <div className="relative">
+                  <MapPin size={13} className="absolute left-3 top-3.5 text-zinc-600" />
+                  <input 
+                    type="text" 
+                    placeholder="Ej. Valledupar" 
+                    className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 pl-9 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                    value={rutaOrigen} 
+                    onChange={(e) => setRutaOrigen(e.target.value)} 
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Municipio Destino Principal</label>
+                <div className="relative">
+                  <MapPin size={13} className="absolute left-3 top-3.5 text-zinc-600" />
+                  <input 
+                    type="text" 
+                    placeholder="Ej. La Jagua de Ibirico" 
+                    className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 pl-9 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                    value={rutaDestino} 
+                    onChange={(e) => setRutaDestino(e.target.value)} 
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Código de Afiliación / Planilla</label>
+                <input 
+                  type="text" 
+                  placeholder="Ej. AFL-8890" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono uppercase" 
+                  value={codigoAfiliacion} 
+                  onChange={(e) => setCodigoAfiliacion(e.target.value)} 
+                />
+              </div>
             </div>
           </div>
 
-          {/* 📂 SECCIÓN DE CARGA DOCUMENTAL GLASSMORPHISM */}
-          <div className="border-t border-white/5 pt-5">
-            <div className="flex items-center justify-between mb-1">
+          {/* 📂 SECCIÓN DE CARGA DOCUMENTAL DIGITAL */}
+          <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-white/5 pb-2">
               <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5">
-                <FileText size={12} className="text-indigo-400" /> Archivos de Verificación Nacional Terrestre (Obligatorios)
+                <FileText size={12} className="text-indigo-400" /> Documentación Legal de Transporte (Obligatoria)
               </label>
               
               {/* 💡 INDICADOR DESTACADO DE LÍMITE DE TAMAÑO */}
@@ -263,18 +340,18 @@ const RegisterIntermunicipal = () => {
               </span>
             </div>
 
-            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide mb-3">
+            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide">
               Formatos admitidos: JPG, PNG, WEBP, PDF • Tamaño máximo permitido: <strong className="text-indigo-400">5 MB</strong>
             </p>
             
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
               {/* Cédula */}
-              <div className="bg-black/40 border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative group hover:border-indigo-500/20 transition-colors cursor-pointer">
-                <UploadCloud size={18} className={cedulaFile ? "text-emerald-400" : "text-zinc-500"} />
+              <div className={`border p-4 rounded-xl flex flex-col items-center justify-center text-center relative group transition-colors cursor-pointer ${cedulaFile ? 'bg-indigo-950/20 border-indigo-500/40' : 'bg-black/40 border-white/5 hover:border-indigo-500/20'}`}>
+                {cedulaFile ? <Check size={18} className="text-indigo-400" /> : <UploadCloud size={18} className="text-zinc-500" />}
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
-                  {cedulaFile ? cedulaFile.name : "Cédula PDF/Img"}
+                  {cedulaFile ? cedulaFile.name : "Cédula Ciudadanía"}
                 </span>
-                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
+                <span className="text-[8px] text-zinc-500 font-mono mt-0.5">{cedulaFile ? `${(cedulaFile.size / (1024 * 1024)).toFixed(2)} MB` : "(Máx 5MB)"}</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 
@@ -284,12 +361,12 @@ const RegisterIntermunicipal = () => {
               </div>
 
               {/* Licencia */}
-              <div className="bg-black/40 border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative group hover:border-indigo-500/20 transition-colors cursor-pointer">
-                <CheckCircle2 size={18} className={licenciaFile ? "text-emerald-400" : "text-zinc-500"} />
+              <div className={`border p-4 rounded-xl flex flex-col items-center justify-center text-center relative group transition-colors cursor-pointer ${licenciaFile ? 'bg-indigo-950/20 border-indigo-500/40' : 'bg-black/40 border-white/5 hover:border-indigo-500/20'}`}>
+                {licenciaFile ? <Check size={18} className="text-indigo-400" /> : <CheckCircle2 size={18} className="text-zinc-500" />}
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {licenciaFile ? licenciaFile.name : "Licencia C2/C3"}
                 </span>
-                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
+                <span className="text-[8px] text-zinc-500 font-mono mt-0.5">{licenciaFile ? `${(licenciaFile.size / (1024 * 1024)).toFixed(2)} MB` : "(Máx 5MB)"}</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 
@@ -299,12 +376,12 @@ const RegisterIntermunicipal = () => {
               </div>
 
               {/* Tarjeta de Propiedad */}
-              <div className="bg-black/40 border border-white/5 p-4 rounded-xl flex flex-col items-center justify-center text-center relative group hover:border-indigo-500/20 transition-colors cursor-pointer">
-                <FileText size={18} className={tarjetaFile ? "text-emerald-400" : "text-zinc-500"} />
+              <div className={`border p-4 rounded-xl flex flex-col items-center justify-center text-center relative group transition-colors cursor-pointer ${tarjetaFile ? 'bg-indigo-950/20 border-indigo-500/40' : 'bg-black/40 border-white/5 hover:border-indigo-500/20'}`}>
+                {tarjetaFile ? <Check size={18} className="text-indigo-400" /> : <FileText size={18} className="text-zinc-500" />}
                 <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
                   {tarjetaFile ? tarjetaFile.name : "Tarjeta Propiedad"}
                 </span>
-                <span className="text-[8px] text-zinc-600 font-mono mt-0.5">(Máx 5MB)</span>
+                <span className="text-[8px] text-zinc-500 font-mono mt-0.5">{tarjetaFile ? `${(tarjetaFile.size / (1024 * 1024)).toFixed(2)} MB` : "(Máx 5MB)"}</span>
                 <input 
                   type="file" 
                   accept="image/jpeg,image/png,image/webp,application/pdf" 
@@ -319,7 +396,7 @@ const RegisterIntermunicipal = () => {
           <button 
             type="submit" 
             disabled={loading} 
-            className="w-full mt-6 py-4 text-[10px] font-mono uppercase tracking-[0.4em] rounded-xl font-black bg-indigo-600 text-white hover:bg-indigo-500 hover:shadow-lg hover:shadow-indigo-500/20 active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:cursor-wait"
+            className="w-full py-4 text-[10px] font-mono uppercase tracking-[0.4em] rounded-xl font-black bg-indigo-600 text-white hover:bg-indigo-500 hover:shadow-lg hover:shadow-indigo-500/20 active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:cursor-wait"
           >
             {loading ? "PROCESANDO_DATA..." : "FINALIZAR_REGISTRO_NODO"}
           </button>

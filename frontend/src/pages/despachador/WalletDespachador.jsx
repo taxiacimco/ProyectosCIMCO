@@ -1,14 +1,13 @@
-// Versión Arquitectura: V16.0 - Integración de Tesorería Backend, Sincronización REST/Socket y Preservación CIMCO-UI V9.3
+// Versión Arquitectura: V16.3 - Homologación de Importación useSocket y Sincronización de Tesorería REST/Socket
 /**
  * Ubicación: frontend\src\pages\despachador\WalletDespachador.jsx
  * Misión: Caja de Despachos Vinculada con Tesorería Central en MongoDB y Escucha de Saldo por WebSockets.
- * Ajuste V16.0: Conexión con endpoint REST `/api/usuarios/perfil` / `/api/conductores/billetera` para obtención de saldo,
- * escucha de eventos en tiempo real mediante Socket.io (`saldo_actualizado`), paso del Bearer Token y consumo de transacciones.
+ * Ajuste V16.3: Corregida ruta de importación de useSocket hacia @/hooks/useSocket para eliminar fallo de compilación en Vite.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { useSocket } from '@/hooks/SocketContext';
+import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';

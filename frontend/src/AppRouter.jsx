@@ -1,185 +1,340 @@
-// Versión Arquitectura: V21.8 - Alineación y Estandarización de Puentes QR Omnicanal por Rol Específico
-/**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
- * Misión: Orquestar el direccionamiento centralizado, inyectar puentes QR, blindar con autenticación basada en roles 
- *         y aplicar Carga Diferida (Lazy Loading) a módulos administrativos y de desarrollo para optimizar el bundle.
- * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
- */
-
-import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-
-// 🛡️ Importaciones de Contexto y Hooks
+// Versión Arquitectura: V9.3 - Rutas Protegidas y Navegación Global TAXIA CIMCO
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 
-// 📄 Componentes Core Públicos (Carga Directa para Fast First Load)
+// Componentes Compartidos y Vistas Principales
+import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import Login from '@/pages/Login';
-import ForgotPassword from '@/pages/ForgotPassword';
 import Register from '@/pages/Register';
 import RegisterPasajero from '@/pages/RegisterPasajero';
 import RegisterMoto from '@/pages/RegisterMoto';
-import RegisterDespachador from '@/pages/RegisterDespachador';
 import RegisterIntermunicipal from '@/pages/RegisterIntermunicipal';
+import RegisterDespachador from '@/pages/RegisterDespachador';
+import RegisterAdmin from '@/pages/RegisterAdmin';
+import ForgotPassword from '@/pages/ForgotPassword';
 
-// ⚡ CARGA DIFERIDA (Lazy Loading) - Excluidos del Bundle Principal de Producción
-const RegisterAdmin = lazy(() => import('@/pages/RegisterAdmin'));
+// Vistas por Rol
+import HomePasajero from '@/pages/pasajero/HomePasajero';
+import PerfilPasajero from '@/pages/pasajero/PerfilPasajero';
+import HistorialViajes from '@/pages/pasajero/HistorialViajes';
+import WalletPasajero from '@/pages/pasajero/WalletPasajero';
 
-// 📊 Módulo Administrativo y de Control (Lazy Loaded)
-const AdminDashboard = lazy(() => import('@/pages/admin/AdminDashboard'));
-const AdminPanel = lazy(() => import('@/pages/admin/AdminPanel'));
-const QrGenerator = lazy(() => import('@/pages/admin/QrGenerator'));
-const Cooperativas = lazy(() => import('@/pages/admin/Cooperativas'));
+import HomeMototaxi from '@/pages/mototaxi/HomeMototaxi';
+import HistorialMototaxi from '@/pages/mototaxi/HistorialMototaxi';
+import WalletMototaxi from '@/pages/mototaxi/WalletMototaxi';
 
-// 👤 Módulo de Pasajeros (Lazy Loaded)
-const HomePasajero = lazy(() => import('@/pages/pasajero/HomePasajero'));
-const PerfilPasajero = lazy(() => import('@/pages/pasajero/PerfilPasajero'));
-const HistorialViajes = lazy(() => import('@/pages/pasajero/HistorialViajes'));
+import HomeMotoparrillero from '@/pages/motoparrillero/HomeMotoparrillero';
+import HistorialMotoparrillero from '@/pages/motoparrillero/HistorialMotoparrillero';
+import WalletMotoparrillero from '@/pages/motoparrillero/WalletMotoparrillero';
 
-// 🚚 Módulos de Operación Logística, Despacho y Flota (Lazy Loaded)
-const HomeDespachador = lazy(() => import('@/pages/despachador/HomeDespachador'));
-const HomeIntermunicipal = lazy(() => import('@/pages/intermunicipal/HomeIntermunicipal'));
-const HomeMotocarga = lazy(() => import('@/pages/motocarga/HomeMotocarga'));
-const HistorialMotocarga = lazy(() => import('@/pages/motocarga/HistorialMotocarga'));
-const HomeMotoparrillero = lazy(() => import('@/pages/motoparrillero/HomeMotoparrillero'));
-const HomeMototaxi = lazy(() => import('@/pages/mototaxi/HomeMototaxi'));
+import HomeMotocarga from '@/pages/motocarga/HomeMotocarga';
+import HistorialMotocarga from '@/pages/motocarga/HistorialMotocarga';
+import WalletMotocarga from '@/pages/motocarga/WalletMotocarga';
 
-// 🔄 Componente de Carga Unificado de Pantalla de Transición (CIMCO-UI Standard)
-const RouterLoadingScreen = ({ mensaje }) => (
-    <div className="fixed inset-0 flex flex-col items-center justify-center bg-[#121214]/90 backdrop-blur-md text-white border border-white/5 z-50 font-sans">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-400 mb-3 shadow-[0_0_15px_rgba(34,211,238,0.5)]"></div>
-        <p className="text-[10px] uppercase tracking-widest text-cyan-400/80 font-mono animate-pulse">
-            {mensaje || 'SINCRO_NODO...'}
-        </p>
+import HomeIntermunicipal from '@/pages/intermunicipal/HomeIntermunicipal';
+import HistorialIntermunicipal from '@/pages/intermunicipal/HistorialIntermunicipal';
+
+import HomeDespachador from '@/pages/despachador/HomeDespachador';
+import HistorialDespachador from '@/pages/despachador/HistorialDespachador';
+import WalletDespachador from '@/pages/despachador/WalletDespachador';
+
+import AdminDashboard from '@/pages/admin/AdminDashboard';
+import AdminPanel from '@/pages/admin/AdminPanel';
+import Cooperativas from '@/pages/admin/Cooperativas';
+import QrGenerator from '@/pages/admin/QrGenerator';
+
+// Pantalla de Carga Glassmorphism con Guardas Anti-Undefined
+const LoadingScreen = () => (
+  <div className="min-h-screen bg-[#080d1a] bg-gradient-to-br from-[#080d1a] via-[#0f172a] to-[#1e1b4b] flex items-center justify-center p-4">
+    <div className="flex flex-col items-center gap-4 bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-8 rounded-3xl shadow-2xl">
+      <div className="w-10 h-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+      <span className="text-xs font-mono uppercase tracking-widest text-slate-300">Cargando Sistema CIMCO...</span>
     </div>
+  </div>
 );
 
-// 🛡️ ADUANA UNIFICADA: Componente Guard de Rutas Protegidas
-export const ProtectedRoute = ({ children, allowedRoles = [] }) => {
-    const { user, loading } = useAuth();
-    
-    if (loading) {
-        return <RouterLoadingScreen mensaje="📡 Verificando Nivel de Autoridad..." />;
-    }
-    
-    if (!user) {
-        return <Navigate to="/login" replace />;
-    }
+// Guardián de Rutas Protegidas
+const ProtectedRoute = ({ children, allowedRoles }) => {
+  const authContext = useAuth() || {};
+  const user = authContext.user || null;
+  const loading = authContext.loading || false;
 
-    const userRole = (user?.rol || user?.role || '').toLowerCase().trim();
-    
-    const isAdmin = userRole === 'admin' || user?.access_level === 99 || user?.level === 10 || userRole === 'gerente';
-    if (isAdmin) {
-        return children;
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (allowedRoles && Array.isArray(allowedRoles) && allowedRoles.length > 0) {
+    const userRole = (user.rol || user.tipoUsuario || '').toLowerCase();
+    const isAllowed = allowedRoles.some((role) => role.toLowerCase() === userRole);
+
+    if (!isAllowed) {
+      return <Navigate to="/" replace />;
     }
+  }
 
-    const normalizedRole = (userRole === 'conductor' || userRole === 'moto') ? 'mototaxi' : userRole;
+  return children;
+};
 
-    const safeAllowedRoles = Array.isArray(allowedRoles)
-        ? allowedRoles.map(role => role?.trim()?.toLowerCase())
-        : [];
+// Redireccionador por Rol Activo
+const RoleRedirect = () => {
+  const authContext = useAuth() || {};
+  const user = authContext.user || null;
+  const loading = authContext.loading || false;
 
-    if (safeAllowedRoles.length > 0 && !safeAllowedRoles.includes(normalizedRole)) {
-        console.warn(`⚠️ [CIMCO-SECURITY] Acceso denegado. UID: ${user?.uid || 'DESCONOCIDO'} | Rol Real: ${userRole} | Requerido: ${allowedRoles}`);
-        return <Navigate to="/" replace />;
-    }
-    
-    return children ? <>{children}</> : null;
+  if (loading) {
+    return <LoadingScreen />;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  const role = (user.rol || user.tipoUsuario || '').toLowerCase();
+
+  switch (role) {
+    case 'admin':
+      return <Navigate to="/admin/dashboard" replace />;
+    case 'despachador':
+      return <Navigate to="/despachador" replace />;
+    case 'intermunicipal':
+      return <Navigate to="/intermunicipal" replace />;
+    case 'mototaxi':
+      return <Navigate to="/mototaxi" replace />;
+    case 'motoparrillero':
+      return <Navigate to="/motoparrillero" replace />;
+    case 'motocarga':
+      return <Navigate to="/motocarga" replace />;
+    case 'pasajero':
+    default:
+      return <Navigate to="/pasajero" replace />;
+  }
 };
 
 const AppRouter = () => {
-    return (
-        <Router>
-            <Suspense fallback={<RouterLoadingScreen mensaje="CARGANDO_NODO_LOGICO..." />}>
-                <Routes>
-                    {/* Rutas Públicas de Acceso y Recuperación */}
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/forgot-password" element={<ForgotPassword />} />
-                    
-                    {/* Hub Central de Registro (Público) */}
-                    <Route path="/register" element={<Register />} />
-                    <Route path="/register-pasajero" element={<RegisterPasajero />} />
-                    <Route path="/register-moto" element={<RegisterMoto />} />
-                    <Route path="/register-despachador" element={<RegisterDespachador />} />
-                    <Route path="/register-intermunicipal" element={<RegisterIntermunicipal />} />
-                    
-                    {/* RUTA RESTRINGIDA DE DESARROLLO */}
-                    <Route 
-                        path="/register-admin" 
-                        element={
-                            <Suspense fallback={<RouterLoadingScreen mensaje="SINCRO_ADMIN_DEV..." />}>
-                                <RegisterAdmin />
-                            </Suspense>
-                        } 
-                    />
-                    
-                    {/* RUTAS ADMINISTRATIVAS PROTEGIDAS */}
-                    <Route path="/admin/dashboard" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><AdminDashboard /></ProtectedRoute>} />
-                    <Route path="/admin/panel" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><AdminPanel /></ProtectedRoute>} />
-                    <Route path="/admin/qr" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><QrGenerator /></ProtectedRoute>} />
-                    <Route path="/admin/cooperativas" element={<ProtectedRoute allowedRoles={['admin', 'gerente']}><Cooperativas /></ProtectedRoute>} />
-                    
-                    {/* RUTAS PASAJERO PROTEGIDAS */}
-                    <Route path="/pasajero/home" element={<ProtectedRoute allowedRoles={['pasajero']}><HomePasajero /></ProtectedRoute>} />
-                    <Route path="/pasajero/perfil" element={<ProtectedRoute allowedRoles={['pasajero']}><PerfilPasajero /></ProtectedRoute>} />
-                    <Route path="/pasajero/historial" element={<ProtectedRoute allowedRoles={['pasajero']}><HistorialViajes /></ProtectedRoute>} />
-                    
-                    {/* RUTAS LOGÍSTICAS Y FLOTA PROTEGIDAS */}
-                    <Route path="/despachador/home" element={<ProtectedRoute allowedRoles={['despachador']}><HomeDespachador /></ProtectedRoute>} />
-                    <Route path="/intermunicipal/home" element={<ProtectedRoute allowedRoles={['intermunicipal']}><HomeIntermunicipal /></ProtectedRoute>} />
-                    <Route path="/motocarga/home" element={<ProtectedRoute allowedRoles={['motocarga']}><HomeMotocarga /></ProtectedRoute>} />
-                    <Route path="/motocarga/historial" element={<ProtectedRoute allowedRoles={['motocarga']}><HistorialMotocarga /></ProtectedRoute>} />
-                    <Route path="/mototaxi/home" element={<ProtectedRoute allowedRoles={['mototaxi']}><HomeMototaxi /></ProtectedRoute>} />
-                    <Route path="/motoparrillero/home" element={<ProtectedRoute allowedRoles={['motoparrillero']}><HomeMotoparrillero /></ProtectedRoute>} />
-                    
-                    {/* 🚀 PUENTES DE ENTRADA DIRECTA PARA CÓDIGOS QR OMNICANAL */}
-                    <Route path="/mototaxi" element={<Navigate to="/login?role=mototaxi" replace />} />
-                    <Route path="/moto-parrillero" element={<Navigate to="/login?role=motoparrillero" replace />} />
-                    <Route path="/motoparrillero" element={<Navigate to="/login?role=motoparrillero" replace />} />
-                    <Route path="/motocarga" element={<Navigate to="/login?role=motocarga" replace />} />
-                    <Route path="/intermunicipal" element={<Navigate to="/login?role=intermunicipal" replace />} />
-                    <Route path="/pasajero" element={<Navigate to="/login?role=pasajero" replace />} />
-                    <Route path="/despachador" element={<Navigate to="/login?role=despachador" replace />} />
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Rutas Públicas */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/register/pasajero" element={<RegisterPasajero />} />
+        <Route path="/register/moto" element={<RegisterMoto />} />
+        <Route path="/register/intermunicipal" element={<RegisterIntermunicipal />} />
+        <Route path="/register/despachador" element={<RegisterDespachador />} />
+        <Route path="/register/admin" element={<RegisterAdmin />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
 
-                    {/* Home Central y Catch-all */}
-                    <Route path="/" element={<RoleBasedRedirect />} />
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-            </Suspense>
-        </Router>
-    );
-};
+        {/* Ruta Protegida Unificada: Ajustes de Perfil Multi-Rol */}
+        <Route
+          path="/ajustes-perfil"
+          element={
+            <ProtectedRoute>
+              <AjustesPerfil />
+            </ProtectedRoute>
+          }
+        />
 
-// 🔄 Componente de Redirección Dinámica
-const RoleBasedRedirect = () => {
-    const { user, loading } = useAuth();
+        {/* Rutas Protegidas de Pasajero */}
+        <Route
+          path="/pasajero"
+          element={
+            <ProtectedRoute allowedRoles={['pasajero']}>
+              <HomePasajero />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pasajero/perfil"
+          element={
+            <ProtectedRoute allowedRoles={['pasajero']}>
+              <PerfilPasajero />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pasajero/historial"
+          element={
+            <ProtectedRoute allowedRoles={['pasajero']}>
+              <HistorialViajes />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pasajero/wallet"
+          element={
+            <ProtectedRoute allowedRoles={['pasajero']}>
+              <WalletPasajero />
+            </ProtectedRoute>
+          }
+        />
 
-    if (loading) {
-        return <RouterLoadingScreen mensaje="📡 Resolviendo Matriz de Direccionamiento..." />;
-    }
+        {/* Rutas Protegidas de Mototaxi */}
+        <Route
+          path="/mototaxi"
+          element={
+            <ProtectedRoute allowedRoles={['mototaxi']}>
+              <HomeMototaxi />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mototaxi/historial"
+          element={
+            <ProtectedRoute allowedRoles={['mototaxi']}>
+              <HistorialMototaxi />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mototaxi/wallet"
+          element={
+            <ProtectedRoute allowedRoles={['mototaxi']}>
+              <WalletMototaxi />
+            </ProtectedRoute>
+          }
+        />
 
-    if (!user) {
-        return <Navigate to="/login" replace />;
-    }
+        {/* Rutas Protegidas de Motoparrillero */}
+        <Route
+          path="/motoparrillero"
+          element={
+            <ProtectedRoute allowedRoles={['motoparrillero']}>
+              <HomeMotoparrillero />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/motoparrillero/historial"
+          element={
+            <ProtectedRoute allowedRoles={['motoparrillero']}>
+              <HistorialMotoparrillero />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/motoparrillero/wallet"
+          element={
+            <ProtectedRoute allowedRoles={['motoparrillero']}>
+              <WalletMotoparrillero />
+            </ProtectedRoute>
+          }
+        />
 
-    const rawRole = user?.rol || user?.role || 'pasajero';
-    const userRole = rawRole.toLowerCase().trim();
+        {/* Rutas Protegidas de Motocarga */}
+        <Route
+          path="/motocarga"
+          element={
+            <ProtectedRoute allowedRoles={['motocarga']}>
+              <HomeMotocarga />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/motocarga/historial"
+          element={
+            <ProtectedRoute allowedRoles={['motocarga']}>
+              <HistorialMotocarga />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/motocarga/wallet"
+          element={
+            <ProtectedRoute allowedRoles={['motocarga']}>
+              <WalletMotocarga />
+            </ProtectedRoute>
+          }
+        />
 
-    const roleRoutes = {
-        'admin': '/admin/dashboard',
-        'gerente': '/admin/dashboard',
-        'pasajero': '/pasajero/home',
-        'despachador': '/despachador/home',
-        'intermunicipal': '/intermunicipal/home',
-        'motocarga': '/motocarga/home',
-        'mototaxi': '/mototaxi/home',
-        'motoparrillero': '/motoparrillero/home',
-        'conductor': '/mototaxi/home', 
-        'moto': '/mototaxi/home'
-    };
+        {/* Rutas Protegidas de Intermunicipal */}
+        <Route
+          path="/intermunicipal"
+          element={
+            <ProtectedRoute allowedRoles={['intermunicipal']}>
+              <HomeIntermunicipal />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/intermunicipal/historial"
+          element={
+            <ProtectedRoute allowedRoles={['intermunicipal']}>
+              <HistorialIntermunicipal />
+            </ProtectedRoute>
+          }
+        />
 
-    const destinoSeguro = roleRoutes[userRole] || '/pasajero/home';
+        {/* Rutas Protegidas de Despachador */}
+        <Route
+          path="/despachador"
+          element={
+            <ProtectedRoute allowedRoles={['despachador']}>
+              <HomeDespachador />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/despachador/historial"
+          element={
+            <ProtectedRoute allowedRoles={['despachador']}>
+              <HistorialDespachador />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/despachador/wallet"
+          element={
+            <ProtectedRoute allowedRoles={['despachador']}>
+              <WalletDespachador />
+            </ProtectedRoute>
+          }
+        />
 
-    return <Navigate to={destinoSeguro} replace />;
+        {/* Rutas Protegidas de Administrador */}
+        <Route
+          path="/admin/dashboard"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/panel"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminPanel />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/cooperativas"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <Cooperativas />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/qr-generator"
+          element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <QrGenerator />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Redirección Raíz y Fallback */}
+        <Route path="/" element={<RoleRedirect />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
 };
 
 export default AppRouter;

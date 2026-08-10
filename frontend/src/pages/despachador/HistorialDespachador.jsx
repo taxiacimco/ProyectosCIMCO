@@ -1,9 +1,8 @@
-// Versión Arquitectura: V16.1 - Saneamiento de Ruta REST sin Duplicidad de Prefijo /api
+// Versión Arquitectura: V16.2 - Saneamiento de Ruta REST e Importación Homologada de useSocket
 /**
  * Ubicación: frontend\src\pages\despachador\HistorialDespachador.jsx
  * Misión: Renderizar la bitácora de arqueos y manifiestos de salida del despachador en tiempo real.
- * Ajuste V16.1: Normalización de endpoint REST a /viajes/despachador/${idDespachador} eliminando prefijo redundante /api,
- * evitando errores 404 y garantizando la lectura directa en MongoDB antes de requerir fallback en Firestore.
+ * Ajuste V16.2: Corrección de la ruta de importación de useSocket hacia @/hooks/useSocket para eliminar error en Vite build.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -14,7 +13,7 @@ import { formatDireccion } from '@/utils/formatters';
 import { FileText, Users, MapPin, Loader, Clock, AlertTriangle, RefreshCw } from 'lucide-react';
 import { formatFechaColombia } from '@/utils/dateFormatter';
 import api from '@/config/api';
-import { useSocket } from '@/hooks/SocketContext';
+import { useSocket } from '@/hooks/useSocket';
 
 const HistorialDespachador = () => {
     const authContext = useAuth();
@@ -57,13 +56,12 @@ const HistorialDespachador = () => {
         };
     }, []);
 
-    // 🚀 Petición al Backend de Express/MongoDB (Consumo corregido sin duplicar /api)
+    // 🚀 Petición al Backend de Express/MongoDB
     const cargarHistorialBackend = useCallback(async () => {
         const idDespachador = user?._id || user?.id || user?.uid;
         if (!idDespachador) return false;
 
         try {
-            // Corrección de la URL: api (Axios) ya contiene la base /api
             const response = await api.get(`/viajes/despachador/${idDespachador}`);
 
             if (response?.data?.success && Array.isArray(response?.data?.data)) {
@@ -140,14 +138,12 @@ const HistorialDespachador = () => {
             setLoading(true);
             setErrorIndex(null);
 
-            // Intentar primero con Express / MongoDB REST
             const exitoBackend = await cargarHistorialBackend();
 
             if (isMounted) {
                 if (exitoBackend) {
                     setLoading(false);
                 } else {
-                    // Fallback automático a Firestore si Express/MongoDB falla
                     unsubFirestore = suscribirFirestore();
                 }
             }
@@ -180,7 +176,6 @@ const HistorialDespachador = () => {
         };
     }, [socket, origenDatos, normalizarDespacho]);
 
-    // ✅ Sanitizador interno para evitar roturas de UI con tipos de datos string/objeto en mapas
     const safeFormatDireccion = (destinoRaw) => {
         if (!destinoRaw) return "Dirección no especificada";
         if (typeof destinoRaw === 'string') return destinoRaw;

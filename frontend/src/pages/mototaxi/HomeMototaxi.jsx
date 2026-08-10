@@ -1,9 +1,10 @@
-// Versión Arquitectura: V18.0 - Rediseño CIMCO-UI V9.3 (Psicología del Color & Edición Dinámica de Vehículo)
+// Versión Arquitectura: V18.1 - Integración Quirúrgica AjustesPerfil Unificado & Preservación Socket.io
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
- *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo) y gestión integral
- *          de perfil y datos del vehículo para cambios de unidad.
+ *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo) e integración fluida
+ *          con el editor unificado AjustesPerfil preservando la conexión en tiempo real con Socket.io.
+ * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -14,6 +15,7 @@ import { useWallet } from '@/hooks/useWallet';
 import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api'; 
 import ModalCalificacion from '@/components/ModalCalificacion';
+import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
   CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X,
@@ -39,8 +41,9 @@ export default function HomeMototaxi() {
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [datosParaCalificar, setDatosParaCalificar] = useState(null);
 
-  // 📝 Estados para la Modal y Sincronización de Perfil/Vehículo
+  // 📝 Estados para la Modal / Renderizado de AjustesPerfil y Sincronización
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [modoEdicionAjustes, setModoEdicionAjustes] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [errorPerfil, setErrorPerfil] = useState('');
@@ -569,6 +572,11 @@ export default function HomeMototaxi() {
   const currentDriverName = formData.nombre || nombreConductor || 'CONDUCTOR';
   const currentPlate = formData.placa || 'SIN PLACA';
 
+  // Renderizado condicional para la vista global de AjustesPerfil preservando el estado de Socket.io
+  if (modoEdicionAjustes) {
+    return <AjustesPerfil onBack={() => setModoEdicionAjustes(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-[#0d0e12] text-slate-100 flex flex-col justify-between font-sans relative overflow-x-hidden selection:bg-sky-500 selection:text-white">
 
@@ -578,9 +586,9 @@ export default function HomeMototaxi() {
         {/* ID Conductor & Vehículo */}
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowSettingsModal(true)}
+            onClick={() => setModoEdicionAjustes(true)}
             className="relative group p-0.5 rounded-xl bg-gradient-to-tr from-sky-500/20 to-amber-500/20 border border-white/10 hover:border-white/30 transition-all duration-300 active:scale-95 text-left"
-            title="Configurar Perfil y Vehículo"
+            title="Configurar Perfil General"
           >
             <div className="bg-[#181920] px-3 py-1.5 rounded-[10px] flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 font-bold shadow-inner shrink-0">
@@ -907,14 +915,14 @@ export default function HomeMototaxi() {
             <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-5">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                  <Settings className="w-5 h-5" />
+                  <Bike className="w-5 h-5" />
                 </div>
                 <div className="text-left">
                   <h3 className="text-sm font-black tracking-wide uppercase text-amber-400">
-                    AJUSTES DE UNIDAD Y PERFIL
+                    DATOS TÉCNICOS DE UNIDAD
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Actualice sus datos personales y de su vehículo actual.
+                    Actualice los datos de su vehículo operativo.
                   </p>
                 </div>
               </div>

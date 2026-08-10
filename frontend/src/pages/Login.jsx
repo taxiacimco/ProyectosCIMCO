@@ -1,14 +1,14 @@
-// Versión Arquitectura: V21.28 - Corrección de Captura de Excepciones Axios/Fetch en el Hook useAuth y Mapeo Directo en Login
+// Versión Arquitectura: V21.29 - Integración Estructural de Sección de Seguridad y Clave de Acceso con Encriptación TLS en Login
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Blindar la captura de excepciones HTTP (401, 404, 403) provenientes del backend, extraídas directamente de `err.response.data` 
- * o `err.message`, garantizando que siempre se renderice el banner visual en la interfaz de usuario.
+ * Misión: Blindar la captura de excepciones HTTP (401, 404, 403) e integrar la Sección 3 de Seguridad y Credenciales de Acceso.
+ * Estilo: CIMCO-UI V9.3 Glassmorphism.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail, Shield, LogIn } from 'lucide-react';
+import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail, Shield, LogIn, Lock, ShieldCheck } from 'lucide-react';
 
 const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -219,50 +219,71 @@ const Login = () => {
         {/* Formulario de Acceso */}
         <form onSubmit={handleSubmit} className="space-y-5">
           
-          {/* Campo Identificador Operativo */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              {isEmailInput ? <Mail size={13} className="text-cyan-400" /> : <Phone size={13} className="text-cyan-400" />}
-              <span>Identificador Operativo (Celular o Correo)</span>
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                required
-                disabled={loading}
-                maxLength={80}
-                value={identifier}
-                onChange={handleIdentifierChange}
-                placeholder="EJ: 3001234567 O OPERADOR@CORREO.COM"
-                className="w-full py-3.5 px-4 bg-slate-950/60 border border-slate-700/60 rounded-xl text-slate-100 placeholder-slate-500 text-xs tracking-wider focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all duration-200 disabled:opacity-50"
-              />
+          {/* SECCIÓN 3: SEGURIDAD Y CREDENCIALES DE ACCESO */}
+          <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4 space-y-4">
+            <div className="text-[10px] text-slate-400 uppercase tracking-widest font-mono font-bold border-b border-slate-800/80 pb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <KeyRound size={12} className="text-cyan-400" />
+                Sección 3: Seguridad y Credenciales de Acceso
+              </span>
+              <span className="text-[8px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-mono">
+                <ShieldCheck size={10} /> TLS
+              </span>
             </div>
-          </div>
 
-          {/* Campo Clave de Acceso */}
-          <div>
-            <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">
-              Clave de Acceso
-            </label>
-            <div className="relative group">
-              <input
-                type={showPassword ? "text" : "password"}
-                required
-                disabled={loading}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-                className="w-full py-3.5 pl-4 pr-12 bg-slate-950/60 border border-slate-700/60 rounded-xl text-slate-100 placeholder-slate-500 text-xs tracking-[0.25em] focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all duration-200 disabled:opacity-50"
-              />
-              <button
-                type="button"
-                tabIndex="-1"
-                disabled={loading}
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-xs text-slate-400 hover:text-cyan-400 transition-colors bg-transparent border-none outline-none cursor-pointer p-0 disabled:opacity-30"
-              >
-                {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
+            {/* Campo Identificador Operativo */}
+            <div>
+              <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                {isEmailInput ? <Mail size={13} className="text-cyan-400" /> : <Phone size={13} className="text-cyan-400" />}
+                <span>Correo Electrónico y Contraseña</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  required
+                  disabled={loading}
+                  maxLength={80}
+                  value={identifier}
+                  onChange={handleIdentifierChange}
+                  placeholder="EJ: 3001234567 O OPERADOR@CORREO.COM"
+                  className="w-full py-3.5 px-4 bg-slate-950/60 border border-slate-700/60 rounded-xl text-slate-100 placeholder-slate-500 text-xs tracking-wider focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all duration-200 disabled:opacity-50"
+                />
+              </div>
+            </div>
+
+            {/* Campo Clave de Acceso */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider flex items-center gap-1">
+                  <Lock size={12} className="text-cyan-400" /> Clave de Acceso
+                </label>
+                <Link
+                  to="/forgot-password"
+                  className="text-[10px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors uppercase tracking-wider"
+                >
+                  Cambio / Restablecimiento de Clave
+                </Link>
+              </div>
+              <div className="relative group">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  disabled={loading}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full py-3.5 pl-4 pr-12 bg-slate-950/60 border border-slate-700/60 rounded-xl text-slate-100 placeholder-slate-500 text-xs tracking-[0.25em] focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all duration-200 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  tabIndex="-1"
+                  disabled={loading}
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-xs text-slate-400 hover:text-cyan-400 transition-colors bg-transparent border-none outline-none cursor-pointer p-0 disabled:opacity-30"
+                >
+                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
             </div>
           </div>
 

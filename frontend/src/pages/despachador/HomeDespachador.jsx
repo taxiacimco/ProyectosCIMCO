@@ -1,24 +1,24 @@
-// Versión Arquitectura: V16.2 - Corrección de Importación Alias @/hooks/useSocket y Sincronización WSS Principal
+// Versión Arquitectura: V16.3 - Integración de Parámetros Operativos Intermunicipales (Empresa, Terminal, Número Interno) y Gestión Unificada de Perfil
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones, calcomanía QR de autogestión,
  * monitoreo de saldo operativo y despliegue del radar satelital en tiempo real para las unidades de la cooperativa autorizada.
- * Ajuste V16.2: Reemplazo de la importación relativa/inconsistente por el hook unificado `@/hooks/useSocket`,
- * garantizando que las emisiones de despacho y monitoreo viajen centralizadas por la conexión WebSocket activa.
+ * Ajuste V16.3: Integración fluida de parámetros operativos (Empresa, Terminal, Número Interno)
+ *               con sincronización NoSQL/Firestore y REST API unificada para prevenir desincronizaciones de perfil.
  */
 
 import React, { useEffect, useState } from "react";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
 import { db, FIRESTORE_PATHS } from "@/config/firebase"; 
 import { useAuth } from "@/hooks/useAuth";
 import { useSocket } from "@/hooks/useSocket"; 
 import { useWallet } from "@/hooks/useWallet";
 import api, { VIAJES_ENDPOINTS } from "@/config/api"; 
-import { Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, QrCode, Download, Map, Settings, Wallet } from "lucide-react";
+import { Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, QrCode, Download, Map, Settings, Wallet, Building2, User, Phone, FileText } from "lucide-react";
 import { formatHoraColombia } from "@/utils/dateFormatter";
 import { QRCodeSVG } from "qrcode.react"; 
 
-// 🗺️ IMPORTACIÓN DEL RADAR GPS OPERATIVO DE CONFLICTOS DE RENDIMIENTO
+// 🗺️ IMPORTACIÓN DEL RADAR GPS OPERATIVO Y MODAL COMPARTIDO
 import MapaOperativo from "@/components/admin/MapaOperativo";
 import ModalEditarPerfil from "@/components/shared/ModalEditarPerfil";
 
@@ -54,9 +54,56 @@ const HomeDespachador = () => {
   const [mensajeExito, setMensajeExito] = useState("");
   const [mensajeError, setMensajeError] = useState("");
 
+  // 👤 ESTADOS DE IDENTIDAD Y PARÁMETROS OPERATIVOS EN VIVO
+  const [datosOperativos, setDatosOperativos] = useState({
+    nombre: "",
+    telefono: "",
+    empresa: "",
+    terminal: "",
+    placaVehiculo: "",
+    numeroInterno: ""
+  });
+
   // 🛠️ Normalización atómica de metadatos de la Cooperativa para evitar quiebres por Undefined
-  const cooperativaDespachador = user?.cooperativa || user?.empresa || "";
   const idOperadorLogistico = user?.id || user?._id || user?.uid || "";
+  const cooperativaDespachador = datosOperativos.empresa || user?.cooperativa || user?.empresa || "";
+  const terminalDespachador = datosOperativos.terminal || user?.terminal || user?.terminalOrigen || "";
+
+  // 1. ESCUCHA REACTIVA DE PERFIL Y PARÁMETROS EN FIRESTORE / REST
+  useEffect(() => {
+    if (!user?.uid && !idOperadorLogistico) return;
+
+    const pathUsuarios = FIRESTORE_PATHS?.users || FIRESTORE_PATHS?.usuarios || "usuarios";
+    const targetUid = user?.uid || idOperadorLogistico;
+    const despachadorRef = doc(db, pathUsuarios, targetUid);
+
+    const unsubscribe = onSnapshot(despachadorRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setDatosOperativos({
+          nombre: data?.fullName || data?.nombre || user?.fullName || user?.nombre || "",
+          telefono: data?.telefonoMovil || data?.telefono || user?.telefonoMovil || user?.telefono || "",
+          empresa: data?.empresa || data?.cooperativa || data?.empresaTransporte || user?.empresa || user?.cooperativa || "",
+          terminal: data?.terminal || data?.terminalOrigen || user?.terminal || "",
+          placaVehiculo: data?.placaVehiculo || data?.placa || user?.placaVehiculo || "",
+          numeroInterno: data?.numeroInterno || user?.numeroInterno || ""
+        });
+      } else {
+        setDatosOperativos({
+          nombre: user?.fullName || user?.nombre || "",
+          telefono: user?.telefonoMovil || user?.telefono || "",
+          empresa: user?.empresa || user?.cooperativa || "",
+          terminal: user?.terminal || "",
+          placaVehiculo: user?.placaVehiculo || "",
+          numeroInterno: user?.numeroInterno || ""
+        });
+      }
+    }, (err) => {
+      console.error("🚨 [CIMCO-DESPACHADOR-IDENTITY-ERR] Error al sincronizar perfil:", err);
+    });
+
+    return () => unsubscribe();
+  }, [user, idOperadorLogistico]);
 
   // 📡 STREAM EN TIEMPO REAL: Conductores Homologados a la misma Cooperativa
   useEffect(() => {
@@ -130,6 +177,7 @@ const HomeDespachador = () => {
       tarifa: Number(valorPasaje),
       tipoViaje: "intermunicipal",
       cooperativa: cooperativaDespachador,
+      terminal: terminalDespachador,
       creadoManualmente: true,
       estado: "asignado"
     };
@@ -199,7 +247,7 @@ const HomeDespachador = () => {
       
       const downloadLink = document.createElement("a");
       downloadLink.href = blobURL;
-      downloadLink.download = `QR_AUTOGESTION_${cooperativaDespachador.replace(/\s+/g, '_').toUpperCase()}.svg`;
+      downloadLink.download = `QR_AUTOGESTION_${(cooperativaDespachador || 'FLOTA').replace(/\s+/g, '_').toUpperCase()}.svg`;
       document.body.appendChild(downloadLink);
       downloadLink.click();
       document.body.removeChild(downloadLink);
@@ -223,7 +271,7 @@ const HomeDespachador = () => {
                 Módulo Central de Despacho Intermunicipal
               </h1>
               <p className="text-[10px] text-zinc-500 font-mono mt-0.5 uppercase tracking-wider">
-                COOPERATIVA: {cooperativaDespachador || "Flota Asignada"} | ID Operador: {String(idOperadorLogistico).substring(0, 8)}
+                COOPERATIVA: {cooperativaDespachador || "Flota Asignada"} | TERMINAL: {terminalDespachador || "N/A"} | ID: {String(idOperadorLogistico).substring(0, 8)}
               </p>
             </div>
           </div>
@@ -278,7 +326,7 @@ const HomeDespachador = () => {
                     type="text" 
                     value={origen}
                     onChange={(e) => setOrigen(e.target.value)}
-                    placeholder="Ej. AGUACHICA"
+                    placeholder={terminalDespachador ? `Ej. ${terminalDespachador}` : "Ej. AGUACHICA"}
                     className="w-full bg-zinc-950 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-orange-500/50 uppercase font-mono transition-all"
                   />
                 </div>
@@ -416,7 +464,7 @@ const HomeDespachador = () => {
                 <div className="py-12 text-center border border-dashed border-white/5 rounded-2xl bg-zinc-950/20">
                   <Bus size={24} className="text-zinc-700 mx-auto mb-2 animate-bounce" />
                   <p className="text-[10px] text-zinc-400 font-black uppercase tracking-wider">No hay unidades en rampa</p>
-                  <p className="text-[9px] text-zinc-600 font-mono mt-0.5 uppercase px-6">Imprima el calcomanía QR lateral para que los operadores se vinculen a su canal central.</p>
+                  <p className="text-[9px] text-zinc-600 font-mono mt-0.5 uppercase px-6">Imprima la calcomanía QR lateral para que los operadores se vinculen a su canal central.</p>
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800">
@@ -460,7 +508,7 @@ const HomeDespachador = () => {
                       <button 
                         onClick={() => handleRegistrarYDistribuirViaje(conductor)}
                         disabled={loadingAccion || isFormInvalid}
-                        className="w-full sm:w-auto bg-orange-500 hover:bg-orange-400 text-zinc-950 px-5 py-3 font-black text-[10px] uppercase rounded-xl transition-all shadow-md border border-orange-400 active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none shrink-0"
+                        className="w-full sm:w-auto bg-orange-500 hover:bg-orange-400 text-zinc-950 px-5 py-3 font-black text-[10px] uppercase rounded-xl transition-all shadow-md border border-orange-400 active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none shrink-0 cursor-pointer"
                       >
                         <Send size={12} />
                         {loadingAccion ? "Despachando..." : "Asignar Ruta e Inyectar"}
@@ -480,16 +528,31 @@ const HomeDespachador = () => {
       <ModalEditarPerfil 
         isOpen={isProfileModalOpen} 
         onClose={() => setIsProfileModalOpen(false)} 
-        user={user}
+        user={{ ...user, ...datosOperativos }}
         onUpdateSuccess={(updatedUser) => {
           console.log("Perfil de central sincronizado en sesión:", updatedUser);
-          if (setUser && typeof setUser === "function" && updatedUser) {
-            setUser(prev => ({
+          if (updatedUser) {
+            setDatosOperativos(prev => ({
               ...prev,
-              ...updatedUser,
-              rol: updatedUser?.rol || prev?.rol,
-              cooperativa: updatedUser?.cooperativa || prev?.cooperativa
+              nombre: updatedUser?.fullName || updatedUser?.nombre || prev.nombre,
+              telefono: updatedUser?.telefonoMovil || updatedUser?.telefono || prev.telefono,
+              empresa: updatedUser?.empresa || updatedUser?.cooperativa || prev.empresa,
+              terminal: updatedUser?.terminal || updatedUser?.terminalOrigen || prev.terminal,
+              placaVehiculo: updatedUser?.placaVehiculo || prev.placaVehiculo,
+              numeroInterno: updatedUser?.numeroInterno || prev.numeroInterno
             }));
+
+            if (setUser && typeof setUser === "function") {
+              setUser(prev => ({
+                ...prev,
+                ...updatedUser,
+                rol: updatedUser?.rol || prev?.rol,
+                role: updatedUser?.role || prev?.role,
+                cooperativa: updatedUser?.cooperativa || updatedUser?.empresa || prev?.cooperativa,
+                empresa: updatedUser?.empresa || updatedUser?.cooperativa || prev?.empresa,
+                terminal: updatedUser?.terminal || updatedUser?.terminalOrigen || prev?.terminal
+              }));
+            }
           }
         }}
       />

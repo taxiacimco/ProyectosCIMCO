@@ -1,9 +1,9 @@
-// Versión Arquitectura: V16.2 - Migración de Sockets a Instancia Unificada (@/hooks/useSocket) y Gestión de Salas Intermunicipales
+// Versión Arquitectura: V16.3 - Integración de Parámetros Operativos Intermunicipales (Empresa, Terminal, Número Interno) y Gestión de Perfil Operativo
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V16.2: Migración del hook `useSocket` desde `@/hooks/SocketContext` hacia `@/hooks/useSocket`.
- *               Consolidación de la instancia unificada para suscripciones y gestión de salas intermunicipales sin reconexión.
+ * Ajuste V16.3: Integración de campos operativos intermunicipales (Empresa, Terminal, Número Interno)
+ *               en la gestión de perfil con sincronización NoSQL/Firestore y REST backend central.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -15,7 +15,7 @@ import api from '@/config/api';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Bus, MapPin, CheckCircle, AlertTriangle, XCircle, Bell, User, Phone, FileText } from 'lucide-react';
+import { Bus, MapPin, CheckCircle, AlertTriangle, XCircle, Bell, User, Phone, FileText, Building2 } from 'lucide-react';
 
 // Corrección de Iconos Leaflet para despliegue intermunicipal
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -47,7 +47,7 @@ const HomeIntermunicipal = () => {
     const [viajesAsignados, setViajesAsignados] = useState([]);
     const [loading, setLoading] = useState(true);
     
-    // 👤 ESTADOS DE IDENTIDAD Y MUTACIÓN DE PERFIL
+    // 👤 ESTADOS DE IDENTIDAD Y MUTACIÓN DE PERFIL CON PARÁMETROS OPERATIVOS
     const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "OPERADOR FLOTA";
     const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback);
     const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
@@ -55,6 +55,8 @@ const HomeIntermunicipal = () => {
     const [datosPerfil, setDatosPerfil] = useState({
         nombre: '',
         telefono: '',
+        empresa: '',
+        terminal: '',
         placaVehiculo: '',
         numeroInterno: ''
     });
@@ -95,6 +97,8 @@ const HomeIntermunicipal = () => {
                 setDatosPerfil({
                     nombre: nombreCompleto || user?.nombre || '',
                     telefono: data?.telefono || data?.telefonoMovil || user?.telefono || '',
+                    empresa: data?.empresa || data?.empresaTransporte || data?.cooperativa || user?.empresa || '',
+                    terminal: data?.terminal || data?.terminalOrigen || user?.terminal || '',
                     placaVehiculo: data?.placaVehiculo || data?.placa || data?.vehiculo?.placa || user?.placaVehiculo || '',
                     numeroInterno: data?.numeroInterno || data?.vehiculo?.interno || user?.numeroInterno || ''
                 });
@@ -124,6 +128,10 @@ const HomeIntermunicipal = () => {
                 fullName: datosPerfil.nombre,
                 telefono: datosPerfil.telefono,
                 telefonoMovil: datosPerfil.telefono,
+                empresa: datosPerfil.empresa,
+                empresaTransporte: datosPerfil.empresa,
+                terminal: datosPerfil.terminal,
+                terminalOrigen: datosPerfil.terminal,
                 placaVehiculo: datosPerfil.placaVehiculo.toUpperCase(),
                 numeroInterno: datosPerfil.numeroInterno
             };
@@ -146,7 +154,7 @@ const HomeIntermunicipal = () => {
             }
 
             setMostrarModalPerfil(false);
-            alert("✅ DATOS DE OPERADOR Y VEHÍCULO INTERMUNICIPAL SINCRONIZADOS");
+            alert("✅ PARÁMETROS OPERATIVOS Y DATOS DE VEHÍCULO INTERMUNICIPAL SINCRONIZADOS");
         } catch (error) {
             console.error("🚨 [CIMCO-INTER-PROFILE-ERR] Error al actualizar datos:", error);
             alert("Error al salvar las modificaciones en el servidor central.");
@@ -310,8 +318,8 @@ const HomeIntermunicipal = () => {
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 font-mono antialiased relative selection:bg-yellow-500/20 selection:text-yellow-400">
             
-            {/* 🔝 ENCABEZADO SUPERIOR DE CONTROL DE IDENTIDAD */}
-            <div className="w-full bg-[#121214]/90 border-b border-white/5 sticky top-0 z-[50] backdrop-blur-md px-6 py-3 flex justify-between items-center">
+            {/* 🔝 ENCABEZADO SUPERIOR DE CONTROL DE IDENTIDAD Y PARÁMETROS OPERATIVOS */}
+            <div className="w-full bg-[#121214]/90 border-b border-white/5 sticky top-0 z-[50] backdrop-blur-md px-6 py-3 flex justify-between items-center flex-wrap gap-2">
                 <div 
                     onClick={() => setMostrarModalPerfil(true)}
                     className="flex items-center gap-3 cursor-pointer group"
@@ -328,8 +336,16 @@ const HomeIntermunicipal = () => {
                     </div>
                 </div>
 
-                <div className="text-[9px] uppercase tracking-wider bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400 font-bold">
-                    Interno: {datosPerfil.numeroInterno || 'N/A'}
+                <div className="flex items-center gap-2 flex-wrap text-[9px] uppercase tracking-wider font-bold">
+                    <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
+                        Empresa: <span className="text-yellow-400 font-black">{datosPerfil.empresa || 'N/A'}</span>
+                    </div>
+                    <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
+                        Terminal: <span className="text-yellow-400 font-black">{datosPerfil.terminal || 'N/A'}</span>
+                    </div>
+                    <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
+                        Interno: <span className="text-yellow-400 font-black">{datosPerfil.numeroInterno || 'N/A'}</span>
+                    </div>
                 </div>
             </div>
 
@@ -428,7 +444,7 @@ const HomeIntermunicipal = () => {
                         <div className="flex justify-between items-center border-b border-white/5 pb-3">
                             <div className="flex items-center gap-2 text-xs font-black text-yellow-400 uppercase tracking-widest">
                                 <Bus size={16} />
-                                <span>Ajustar Datos de Ruta</span>
+                                <span>Ajustar Datos de Ruta y Operación</span>
                             </div>
                             <button 
                                 onClick={() => setMostrarModalPerfil(false)}
@@ -461,6 +477,31 @@ const HomeIntermunicipal = () => {
                                     className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors"
                                     placeholder="Número de celular"
                                 />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><Building2 size={11} /> Empresa / Cooperativa</label>
+                                    <input 
+                                        type="text" 
+                                        required
+                                        value={datosPerfil.empresa}
+                                        onChange={(e) => setDatosPerfil({...datosPerfil, empresa: e.target.value})}
+                                        className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors uppercase"
+                                        placeholder="Ej: Copetran"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><MapPin size={11} /> Terminal Base</label>
+                                    <input 
+                                        type="text" 
+                                        required
+                                        value={datosPerfil.terminal}
+                                        onChange={(e) => setDatosPerfil({...datosPerfil, terminal: e.target.value})}
+                                        className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors uppercase"
+                                        placeholder="Ej: Terminal Central"
+                                    />
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-3">

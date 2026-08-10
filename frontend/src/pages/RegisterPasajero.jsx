@@ -1,15 +1,16 @@
-// Versión Arquitectura: V12.3 - Control de Peticiones y Contrato Unificado de Rol Pasajero
+// Versión Arquitectura: V12.4 - Registro Unificado de Pasajero con Sección de Perfil y Carga de Avatar Binario
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Yellow Accent).
- * Misión: Capturar identidad exclusivamente para PASAJEROS con control de peticiones en Step 1 y payload limpio.
+ * Misión: Capturar identidad exclusivamente para PASAJEROS con control de peticiones en Step 1, 
+ *         gestión de datos personales (Nombre, Celular, Correo) y previsualización/carga binaria de foto de perfil.
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth'; 
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { Phone, User, Mail, Lock, ShieldCheck, Camera } from 'lucide-react';
+import { Phone, User, Mail, Lock, ShieldCheck, Camera, Check } from 'lucide-react';
 
 const RegisterPasajero = () => {
     const navigate = useNavigate();
@@ -20,12 +21,13 @@ const RegisterPasajero = () => {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    // 📡 ESTADOS CORE
+    // 📡 ESTADOS CORE (DATOS PERSONALES E IMAGEN DE PERFIL)
     const [telefono, setTelefono] = useState('');
     const [nombre, setNombre] = useState('');
     const [correo, setCorreo] = useState('');
     const [clave, setClave] = useState('');
     const [fotoPerfilFile, setFotoPerfilFile] = useState(null);
+    const [previewUrl, setPreviewUrl] = useState(null);
 
     // Ref para abortar peticiones pendientes en Step 1 si el usuario reintenta o desmonta
     const checkPhoneControllerRef = useRef(null);
@@ -37,6 +39,32 @@ const RegisterPasajero = () => {
             }
         };
     }, []);
+
+    // Gestor de limpieza para previas de imágenes cargadas en memoria
+    useEffect(() => {
+        return () => {
+            if (previewUrl && previewUrl.startsWith('blob:')) {
+                URL.revokeObjectURL(previewUrl);
+            }
+        };
+    }, [previewUrl]);
+
+    const handleFileChange = (e) => {
+        const file = e.target.files ? e.target.files[0] : null;
+        if (file) {
+            if (!file.type.startsWith('image/')) {
+                setError('El archivo seleccionado debe ser una imagen válida.');
+                return;
+            }
+            if (file.size > 5 * 1024 * 1024) {
+                setError('La imagen de perfil no debe superar los 5MB.');
+                return;
+            }
+            setFotoPerfilFile(file);
+            setPreviewUrl(URL.createObjectURL(file));
+            setError('');
+        }
+    };
 
     const handleCheckPhone = async (e) => {
         e.preventDefault();
@@ -106,7 +134,7 @@ const RegisterPasajero = () => {
             formData.append('telefono', telefono.trim());
             formData.append('password', clave);
             
-            // 🚀 Inyección Atómica de Gobernanza (Se descontinúa la duplicidad "rol")
+            // 🚀 Inyección Atómica de Gobernanza
             formData.append('role', targetRole);
             formData.append('access_level', String(accessLevel));
 
@@ -185,70 +213,95 @@ const RegisterPasajero = () => {
                         <div className="bg-yellow-950/30 border border-yellow-500/20 rounded-xl p-3.5 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <ShieldCheck className="text-yellow-500" size={15} />
-                                <span className="text-[9px] text-yellow-500 uppercase tracking-widest font-mono font-bold">Identidad Celular</span>
+                                <span className="text-[9px] text-yellow-500 uppercase tracking-widest font-mono font-bold">Identidad Celular Verificada</span>
                             </div>
                             <span className="text-xs text-yellow-100 font-bold tracking-widest bg-[#18181b] px-2.5 py-1 rounded-md border border-white/5 font-mono">
                                 {telefono}
                             </span>
                         </div>
 
-                        {/* Módulo de Inyección Binaria (Foto) */}
-                        <div className="flex flex-col items-center justify-center p-3 bg-[#18181b]/60 border border-white/5 border-dashed rounded-xl transition-all hover:border-yellow-500/30 group">
-                            <div className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono font-bold mb-2 group-hover:text-zinc-400 transition-colors">Avatar / Foto de Perfil</div>
-                            <div className="flex items-center gap-3 w-full justify-center">
+                        {/* SECCIÓN 1: DATOS PERSONALES Y FOTO DE PERFIL BINARIA */}
+                        <div className="bg-[#18181b]/40 border border-white/5 rounded-xl p-4 space-y-4">
+                            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2">
+                                Sección 1: Datos Personales e Imagen de Perfil
+                            </div>
+
+                            {/* Módulo de Previsualización y Carga de Avatar Binario */}
+                            <div className="flex flex-col items-center justify-center p-3 bg-[#18181b]/80 border border-white/5 border-dashed rounded-xl transition-all hover:border-yellow-500/30 group">
+                                <div className="relative mb-2">
+                                    {previewUrl ? (
+                                        <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.2)]">
+                                            <img src={previewUrl} alt="Previsualización Avatar" className="w-full h-full object-cover" />
+                                        </div>
+                                    ) : (
+                                        <div className="w-16 h-16 rounded-full bg-[#27272a] border border-white/10 flex items-center justify-center text-zinc-500 group-hover:text-yellow-500 transition-colors">
+                                            <User size={28} />
+                                        </div>
+                                    )}
+                                </div>
+
                                 <input 
                                     type="file" 
                                     id="avatar" 
                                     accept="image/*" 
                                     className="hidden" 
-                                    onChange={(e) => setFotoPerfilFile(e.target.files ? e.target.files[0] : null)} 
+                                    onChange={handleFileChange} 
                                 />
                                 <label 
                                     htmlFor="avatar" 
-                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-[10px] font-mono font-bold uppercase tracking-wide transition-all ${fotoPerfilFile ? 'bg-yellow-950/50 text-yellow-500 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.1)]' : 'bg-[#27272a] text-zinc-400 hover:bg-[#3f3f46] border border-transparent'}`}
+                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer text-[10px] font-mono font-bold uppercase tracking-wide transition-all ${fotoPerfilFile ? 'bg-yellow-950/50 text-yellow-500 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.1)]' : 'bg-[#27272a] text-zinc-400 hover:bg-[#3f3f46] border border-transparent'}`}
                                 >
-                                    <Camera size={14} />
-                                    {fotoPerfilFile ? '✓ BINARIO LISTO' : 'SELECCIONAR FOTO'}
+                                    <Camera size={13} />
+                                    {fotoPerfilFile ? '✓ CAMBIAR FOTO' : 'SELECCIONAR FOTO DE PERFIL'}
                                 </label>
-                                {fotoPerfilFile && <span className="text-[10px] font-mono text-zinc-400 truncate max-w-[120px]">{fotoPerfilFile.name}</span>}
+                                {fotoPerfilFile && (
+                                    <span className="text-[9px] font-mono text-emerald-400 flex items-center gap-1 mt-1">
+                                        <Check size={10} /> {fotoPerfilFile.name}
+                                    </span>
+                                )}
                             </div>
-                        </div>
 
-                        <div className="relative group">
-                            <User className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
-                            <input 
-                                type="text" 
-                                placeholder="NOMBRE COMPLETO" 
-                                value={nombre} 
-                                onChange={(e) => setNombre(e.target.value)} 
-                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
-                                disabled={loading} 
-                                required 
-                            />
-                        </div>
-                        <div className="relative group">
-                            <Mail className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
-                            <input 
-                                type="email" 
-                                placeholder="CORREO ELECTRÓNICO" 
-                                value={correo} 
-                                onChange={(e) => setCorreo(e.target.value)} 
-                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
-                                disabled={loading} 
-                                required 
-                            />
-                        </div>
-                        <div className="relative group">
-                            <Lock className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
-                            <input 
-                                type="password" 
-                                placeholder="CONTRASEÑA SEGURA (Mín. 6)" 
-                                value={clave} 
-                                onChange={(e) => setClave(e.target.value)} 
-                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all tracking-widest placeholder:text-zinc-600 placeholder:tracking-normal disabled:opacity-50" 
-                                disabled={loading} 
-                                required 
-                            />
+                            {/* Nombre Completo */}
+                            <div className="relative group">
+                                <User className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
+                                <input 
+                                    type="text" 
+                                    placeholder="NOMBRE COMPLETO" 
+                                    value={nombre} 
+                                    onChange={(e) => setNombre(e.target.value)} 
+                                    className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
+                                    disabled={loading} 
+                                    required 
+                                />
+                            </div>
+
+                            {/* Correo Electrónico */}
+                            <div className="relative group">
+                                <Mail className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
+                                <input 
+                                    type="email" 
+                                    placeholder="CORREO ELECTRÓNICO" 
+                                    value={correo} 
+                                    onChange={(e) => setCorreo(e.target.value)} 
+                                    className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
+                                    disabled={loading} 
+                                    required 
+                                />
+                            </div>
+
+                            {/* Contraseña */}
+                            <div className="relative group">
+                                <Lock className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
+                                <input 
+                                    type="password" 
+                                    placeholder="CONTRASEÑA SEGURA (Mín. 6)" 
+                                    value={clave} 
+                                    onChange={(e) => setClave(e.target.value)} 
+                                    className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all tracking-widest placeholder:text-zinc-600 placeholder:tracking-normal disabled:opacity-50" 
+                                    disabled={loading} 
+                                    required 
+                                />
+                            </div>
                         </div>
 
                         <button 
