@@ -1,17 +1,15 @@
-// Versión Arquitectura: V23.8 - Validación Defensiva de Payloads QR y Enrutamiento por Rol
+// Versión Arquitectura: V23.9 - Validación Avanzada de Payloads QR y Sincronización Entorno-Host
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
- * Misión: Generación de códigos QR de reclutamiento con conmutador dinámico entre Entorno de Túnel/Local y Producción (Vercel).
- *         Estandarización de la constante RUTAS_AMIGABLES_ROL alineada 1:1 con el enrutador central AppRouter.jsx.
- * Ajuste V23.8: Validación estricta de payloads URI para prevenir la generación de QR con URLs malformadas o parámetros corruptos.
- * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
+ * Misión: Generación de códigos QR con conmutación dinámica entre Entornos Locales (LAN/Túnel) y Producción (Vercel).
+ * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism.
  */
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
-import { QrCode, Download, RefreshCw, ShieldCheck, Loader, AlertTriangle, Printer, Layers, Eye, Trash2, Calendar, UserPlus, Globe, Laptop } from 'lucide-react';
+import { QrCode, Download, RefreshCw, Loader, AlertTriangle, Printer, Layers, Eye, Trash2, Calendar, UserPlus, Globe, Laptop } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 const QrGenerator = () => {
@@ -25,34 +23,28 @@ const QrGenerator = () => {
     const [loadingHistorial, setLoadingHistorial] = useState(true);
     const qrRef = useRef(null);
 
-    // 🌐 DEFINICIÓN DE ENTORNOS
-    const URL_PRODUCCION = "https://frontend-opal-eight-58.vercel.app";
+    // 🌐 DEFINICIÓN DE ENTORNOS DEDICADOS
+    const URL_PRODUCCION = import.meta.env?.VITE_FRONTEND_URL_PROD || "https://frontend-opal-eight-58.vercel.app";
     
-    // Resolución dinámica priorizando variables de entorno y origen actual del navegador
     const getUrlLocal = () => {
         try {
-            // Prioridad 1: Variable VITE_FRONTEND_URL asignada en .env o .env.development
-            if (import.meta.env?.VITE_FRONTEND_URL) {
+            if (import.meta.env?.VITE_FRONTEND_URL && !import.meta.env.VITE_FRONTEND_URL.includes('vercel.app')) {
                 return import.meta.env.VITE_FRONTEND_URL.replace(/\/$/, '');
             }
-            // Prioridad 2: Variable VITE_APP_BASE_URL
             if (import.meta.env?.VITE_APP_BASE_URL) {
                 return import.meta.env.VITE_APP_BASE_URL.replace(/\/$/, '');
             }
-            // Prioridad 3: Origen dinámico desde donde el usuario escanea/accede
             if (typeof window !== 'undefined' && window.location?.origin) {
                 return window.location.origin;
             }
         } catch (err) {
-            console.warn("⚠️ No se pudo determinar origen dinámico de red local, usando fallback local.", err);
+            console.warn("⚠️ Error obteniendo origen dinámico local:", err);
         }
-        return "http://localhost:5173";
+        return "http://192.168.100.34:5173";
     };
 
-    // Determina la Base URL según el entorno seleccionado
     const baseUrlActiva = entorno === 'produccion' ? URL_PRODUCCION : getUrlLocal();
 
-    // Diccionario de Roles del Ecosistema TAXIA CIMCO
     const ROLES_CONTEXTO = {
         mototaxi: 'MOTOTAXI / OPERADOR',
         motoparrillero: 'MOTOPARRILLERO',
@@ -62,17 +54,16 @@ const QrGenerator = () => {
         pasajero: 'PASAJERO / USUARIO'
     };
 
-    // 🎯 Mapeo directo y estandarizado a las rutas declaradas en AppRouter.jsx
+    // Mapeo unificado a parámetros de acceso por rol
     const RUTAS_AMIGABLES_ROL = {
-        mototaxi: '/mototaxi',
-        motoparrillero: '/motoparrillero',
-        motocarga: '/motocarga',
-        despachador: '/despachador',
-        intermunicipal: '/intermunicipal',
-        pasajero: '/pasajero'
+        mototaxi: '/login?role=mototaxi',
+        motoparrillero: '/login?role=motoparrillero',
+        motocarga: '/login?role=motocarga',
+        despachador: '/login?role=despachador',
+        intermunicipal: '/login?role=intermunicipal',
+        pasajero: '/login?role=pasajero'
     };
 
-    // 🛡️ Construye y valida estrictamente la URL completa del QR antes de renderizar
     const getRutaDestinoRol = (role = rolSeleccionado, base = baseUrlActiva) => {
         const rolLimpio = (role || '').toString().trim().toLowerCase();
         const subRuta = RUTAS_AMIGABLES_ROL[rolLimpio] || `/login?role=${encodeURIComponent(rolLimpio)}`;
@@ -80,7 +71,6 @@ const QrGenerator = () => {
         const rawUrl = `${cleanBase}${subRuta}`;
 
         try {
-            // Validación sintáctica rigurosa de URI antes de entregar payload al SVG
             const parsedUrl = new URL(rawUrl);
             return parsedUrl.toString();
         } catch (err) {
@@ -91,7 +81,6 @@ const QrGenerator = () => {
 
     const targetUrlString = getRutaDestinoRol();
 
-    // Sincronización en tiempo real con Firestore
     useEffect(() => {
         const pathColeccion = FIRESTORE_PATHS?.qrs || 'qrs';
         const q = query(collection(db, pathColeccion), orderBy('fechaCreacion', 'desc'));
@@ -246,7 +235,7 @@ const QrGenerator = () => {
 
                         <form onSubmit={handleGenerarQrRol} className="flex flex-col gap-5">
                             
-                            {/* SELECTOR DE ENTORNO (LOCAL VS PRODUCCIÓN) */}
+                            {/* SELECTOR DE ENTORNO */}
                             <div>
                                 <label className="text-[9px] uppercase tracking-widest text-zinc-500 font-black flex items-center gap-1.5 mb-2">
                                     <Globe size={10} /> Selecciona el Entorno Destino
@@ -308,7 +297,7 @@ const QrGenerator = () => {
                     </div>
                 </div>
 
-                {/* VISOR VECTORIAL EN CALIENTE */}
+                {/* VISOR VECTORIAL */}
                 <div className="flex-1 backdrop-blur-md bg-[#121214]/60 rounded-3xl p-6 border border-white/5 shadow-lg flex flex-col items-center justify-center gap-6 min-h-[350px]">
                     {qrGenerado ? (
                         <div className="flex flex-col items-center gap-4 w-full animate-in fade-in zoom-in-95 duration-200">
@@ -347,7 +336,7 @@ const QrGenerator = () => {
                 </div>
             </div>
 
-            {/* HISTORIAL Y AUDITORÍA DE MATRICES EMITIDAS */}
+            {/* HISTORIAL Y AUDITORÍA */}
             <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-6 shadow-2xl">
                 <div className="flex justify-between items-center border-b border-white/5 pb-4 mb-4">
                     <div className="flex items-center gap-2">

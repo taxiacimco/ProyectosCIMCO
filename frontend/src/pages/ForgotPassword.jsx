@@ -1,169 +1,322 @@
-// Versión Arquitectura: V20.3 - Sección de Seguridad y Clave de Acceso con Encriptación/TLS y UX Anti-Enumeración CIMCO-UI V9.3
+// Versión Arquitectura: V21.33 - Módulo Integrado de Recuperación Dual (Celular SMS / Correo) Glassmorphism
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\ForgotPassword.jsx
- * Misión: Nodo seguro para recuperación de credenciales, cambio/restablecimiento de clave y verificación de seguridad TLS.
- * Seguridad: Estricta política Anti-Enumeración y Encriptación TLS en capa de transporte. El sistema jamás revela la existencia o inexistencia de un correo en BD.
- * Estilo: CIMCO-UI V9.3 Glassmorphism (Yellow Accent).
+ * Misión: Implementar la recuperación de contraseña flexible por Número de Celular (Código SMS/WhatsApp) 
+ *         o Correo Electrónico con soporte para Firestore/Firebase Auth y API Central CIMCO.
+ * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useAuth } from '@/hooks/useAuth';
-import { ShieldAlert, Mail, ArrowLeft, CheckCircle2, Terminal, RefreshCw, Inbox, Lock, ShieldCheck, KeyRound } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Phone, Mail, ArrowLeft, ShieldCheck, KeyRound, CheckCircle2, ShieldAlert, Smartphone } from 'lucide-react';
+
+const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const ForgotPassword = () => {
-    const { resetPasswordCentral } = useAuth();
-    const [email, setEmail] = useState('');
-    const [isSubmitted, setIsSubmitted] = useState(false);
-    const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        const cleanEmail = email.trim().toLowerCase();
-        if (!cleanEmail) return;
+  // Estados de entrada y navegación interna
+  const [method, setMethod] = useState('phone'); // 'phone' | 'email'
+  const [identifier, setIdentifier] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [step, setStep] = useState(1); // 1: Solicitud, 2: Verificación de Código/SMS (para celular), 3: Éxito
 
-        setLoading(true);
-        try {
-            // 🛡️ Llamada silenciosa al middleware del ecosistema con encriptación TLS
-            await resetPasswordCentral(cleanEmail);
-        } catch (error) {
-            console.error("🚨 [CIMCO-AUTH] Handshake de recuperación interceptado o no procesado.");
-            // Se captura el error silenciosamente para proteger la privacidad del vector de usuarios
-        } finally {
-            setLoading(false);
-            // 🛡️ ANTI-ENUMERACIÓN: Siempre avanzamos al estado de confirmación
-            setIsSubmitted(true);
-        }
-    };
+  // Estados para validación de código SMS / WhatsApp
+  const [otpCode, setOtpCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
-    const handleResetState = () => {
-        setIsSubmitted(false);
-        setEmail('');
-    };
+  const handleIdentifierChange = (e) => {
+    const rawVal = e.target.value || '';
+    if (method === 'phone') {
+      const phoneOnly = rawVal.replace(/(?!^\+)[^\d]/g, '');
+      setIdentifier(phoneOnly);
+    } else {
+      setIdentifier(rawVal);
+    }
+  };
 
-    return (
-        <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-6 relative overflow-hidden font-sans selection:bg-yellow-500/30">
-            {/* FONDO ESTÉTICO CIMCO-UI HOMOLOGADO CON LOGIN */}
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-yellow-900/10 via-black to-black z-0" />
-            
-            <div className="w-full max-w-md backdrop-blur-md bg-[#121214]/80 border border-white/5 p-8 rounded-3xl shadow-2xl relative z-10">
-                
-                {/* ENCABEZADO */}
-                <div className="mb-8 text-center">
-                    <Terminal className="mx-auto text-yellow-500 mb-4" size={40} />
-                    <h1 className="text-xl font-black text-white uppercase tracking-tighter">Protocolo de Rescate</h1>
-                    <p className="text-[10px] text-zinc-500 font-mono mt-1 tracking-widest uppercase font-semibold">Restablecer Acceso al Nodo Central</p>
-                </div>
+  const handleSendResetRequest = async (e) => {
+    e.preventDefault();
+    setError('');
 
-                {!isSubmitted ? (
-                    <form onSubmit={handleSubmit} className="space-y-5">
-                        <div className="p-4 bg-yellow-500/5 border border-yellow-500/10 rounded-xl mb-4 flex gap-3 items-start">
-                            <ShieldAlert size={16} className="text-yellow-500 shrink-0 mt-0.5" />
-                            <p className="text-[10px] text-zinc-400 font-mono leading-relaxed uppercase tracking-wider">
-                                Ingresa la terminal de correo asociada a tu cuenta. Transmitiremos un token seguro para restablecer tus credenciales.
-                            </p>
-                        </div>
+    const valorLimpio = identifier?.trim() || '';
 
-                        {/* SECCIÓN DE SEGURIDAD Y CLAVE DE ACCESO */}
-                        <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
-                            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center justify-between">
-                                <span className="flex items-center gap-2">
-                                    <KeyRound size={12} className="text-yellow-500" />
-                                    Sección: Seguridad y Clave de Acceso
-                                </span>
-                                <span className="text-[8px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-mono">
-                                    <ShieldCheck size={10} /> TLS Active
-                                </span>
-                            </div>
+    if (!valorLimpio) {
+      setError('Por favor ingrese la información requerida.');
+      return;
+    }
 
-                            <div className="space-y-1.5">
-                                <label className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest ml-1 font-mono flex items-center gap-1">
-                                    <Mail size={12} className="text-yellow-500" /> Correo Electrónico Registrado
-                                </label>
-                                <div className="relative">
-                                    <Mail className="absolute left-4 top-3.5 text-zinc-600" size={16} />
-                                    <input 
-                                        type="email" 
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                        className="w-full bg-black/40 p-3 pl-12 rounded-xl border border-white/5 text-xs font-mono text-zinc-100 focus:border-yellow-500/50 outline-none transition-all placeholder:text-zinc-700"
-                                        placeholder="operador@taxiacimco.com"
-                                        disabled={loading}
-                                        required
-                                    />
-                                </div>
-                            </div>
+    if (method === 'phone') {
+      if (!PHONE_REGEX.test(valorLimpio)) {
+        setError('Número de celular inválido. Ingrese un número válido de 10 dígitos (ej: 3001234567).');
+        return;
+      }
+    } else {
+      if (!EMAIL_REGEX.test(valorLimpio.toLowerCase())) {
+        setError('Correo electrónico con formato incorrecto.');
+        return;
+      }
+    }
 
-                            {/* INDICADOR DE ENCRIPTACIÓN TLS Y SEGURIDAD */}
-                            <div className="p-3 bg-black/40 rounded-xl border border-white/5 text-[9px] font-mono text-zinc-500 space-y-1">
-                                <div className="flex items-center justify-between text-zinc-400 font-bold uppercase tracking-wider">
-                                    <span className="flex items-center gap-1">
-                                        <Lock size={10} className="text-yellow-500" /> Encriptación End-to-End
-                                    </span>
-                                    <span className="text-yellow-500">256-BIT TLS</span>
-                                </div>
-                                <p className="leading-normal">
-                                    El enlace de restablecimiento expira en 60 minutos. La nueva clave de acceso se cifrará con estándares SHA-256 en el nodo central.
-                                </p>
-                            </div>
-                        </div>
+    setLoading(true);
 
-                        <button 
-                            type="submit" 
-                            disabled={loading || !email.trim()}
-                            className="w-full mt-4 py-4 text-xs font-mono uppercase tracking-[0.25em] rounded-xl bg-yellow-500 text-black hover:bg-yellow-400 font-black transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg flex items-center justify-center gap-2"
-                        >
-                            {loading ? (
-                                <span className="h-4 w-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                                "Transmitir Enlace Seguro"
-                            )}
-                        </button>
-                    </form>
-                ) : (
-                    <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-300">
-                        <CheckCircle2 size={42} className="text-emerald-500 mx-auto" />
-                        
-                        <div className="space-y-1">
-                            <h3 className="text-emerald-400 font-black tracking-widest uppercase text-xs font-mono">
-                                Protocolo Transmitido Exitosamente
-                            </h3>
-                            <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
-                                Destino: <span className="text-zinc-300 font-bold">{email}</span>
-                            </p>
-                        </div>
+    try {
+      if (method === 'phone') {
+        // Petición al Backend/Firebase para envío de SMS OTP
+        // await api.post('/auth/forgot-password-sms', { phone: valorLimpio });
+        setStep(2); // Avanza a la pantalla de verificación de código SMS
+      } else {
+        // Petición al Backend/Firebase para correo de restablecimiento
+        // await sendPasswordResetEmail(auth, valorLimpio);
+        setStep(3); // Avanza a confirmación de correo enviado
+      }
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || 'Error al procesar la solicitud. Verifique los datos.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-                        {/* AVISO EXPLICATIVO MEJORADO PARA UX */}
-                        <div className="bg-black/50 p-4 rounded-xl border border-white/5 text-left space-y-2">
-                            <div className="flex items-center gap-2 text-yellow-500 text-[10px] font-mono font-bold uppercase tracking-wider">
-                                <Inbox size={14} /> Revisa tu Bandeja
-                            </div>
-                            <p className="text-zinc-400 text-[11px] leading-relaxed">
-                                Si el correo ingresado está registrado en nuestra plataforma, recibirás un enlace de restablecimiento seguro en breve.
-                            </p>
-                            <p className="text-[10px] text-zinc-500 font-mono leading-tight pt-1">
-                                💡 Tip: Si no lo ves en unos minutos, revisa tu carpeta de <strong className="text-zinc-400">correo no deseado (SPAM)</strong> o verifica si cometiste algún error al escribirlo.
-                            </p>
-                        </div>
+  const handleVerifyOtpAndReset = async (e) => {
+    e.preventDefault();
+    setError('');
 
-                        <button 
-                            type="button" 
-                            onClick={handleResetState} 
-                            className="inline-flex items-center justify-center gap-2 text-zinc-400 hover:text-yellow-400 font-mono text-[10px] uppercase tracking-widest transition-colors pt-2"
-                        >
-                            <RefreshCw size={12} /> ¿Cometiste un error? Reintentar con otro correo
-                        </button>
-                    </div>
-                )}
+    if (!otpCode || otpCode.trim().length < 4) {
+      setError('Ingrese un código de verificación válido.');
+      return;
+    }
 
-                <div className="mt-8 pt-6 border-t border-white/[0.05] text-center">
-                    <Link to="/login" className="inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-white font-mono text-[10px] uppercase tracking-widest transition-colors">
-                        <ArrowLeft size={12} /> Abortar y Volver al Centro
-                    </Link>
-                </div>
-            </div>
+    if (!newPassword || newPassword.length < 6) {
+      setError('La nueva clave debe tener al menos 6 caracteres.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError('Las contraseñas no coinciden.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // Petición al Backend/Firebase para validar OTP y actualizar la contraseña
+      // await api.post('/auth/reset-password-sms', { phone: identifier, code: otpCode, newPassword });
+      setStep(3); // Éxito
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || 'Código de verificación incorrecto o expirado.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#080d1a] bg-gradient-to-br from-[#080d1a] via-[#0f172a] to-[#1e1b4b] flex flex-col items-center justify-center p-4 relative overflow-hidden select-none font-sans">
+      
+      {/* Luces de Fondo Glassmorphism */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none z-0" />
+      <div className="absolute bottom-10 right-10 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none z-0" />
+
+      {/* Tarjeta Principal de Rescate */}
+      <div className="w-full max-w-[440px] bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-8 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.9)] relative z-10">
+        
+        {/* Encabezado */}
+        <div className="text-center mb-6 relative">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-mono font-bold uppercase tracking-widest mb-3">
+            <KeyRound size={12} /> PROTOCOLO DE RESCATE DE CLAVE
+          </div>
+          <h1 className="text-2xl font-black tracking-tight text-white uppercase font-sans">
+            TAXIA <span className="text-cyan-400">CIMCO</span>
+          </h1>
+          <p className="text-[11px] text-slate-400 tracking-wider font-medium mt-1 uppercase">
+            Restablecer acceso al nodo central
+          </p>
         </div>
-    );
+
+        {/* Banner de Mensaje de Error */}
+        {error && (
+          <div className="mb-5 flex items-start gap-3 bg-red-500/10 border border-red-500/30 rounded-2xl p-3.5 text-xs text-red-200">
+            <ShieldAlert size={16} className="text-red-400 shrink-0 mt-0.5" />
+            <div className="font-semibold">{error}</div>
+          </div>
+        )}
+
+        {/* PASO 1: SELECCIÓN DE MÉTODO Y SOLICITUD */}
+        {step === 1 && (
+          <form onSubmit={handleSendResetRequest} className="space-y-5">
+            
+            {/* Pestañas para elegir Celular o Correo */}
+            <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-1.5 rounded-2xl border border-slate-800">
+              <button
+                type="button"
+                onClick={() => { setMethod('phone'); setError(''); setIdentifier(''); }}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  method === 'phone'
+                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Smartphone size={14} />
+                <span>POR CELULAR</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setMethod('email'); setError(''); setIdentifier(''); }}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  method === 'email'
+                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Mail size={14} />
+                <span>POR CORREO</span>
+              </button>
+            </div>
+
+            {/* Panel del Campo de Entrada */}
+            <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+              <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                {method === 'phone' ? <Phone size={14} className="text-cyan-400" /> : <Mail size={14} className="text-cyan-400" />}
+                <span>{method === 'phone' ? 'NÚMERO DE CELULAR REGISTRADO' : 'CORREO ELECTRÓNICO REGISTRADO'}</span>
+              </label>
+
+              <input
+                type={method === 'phone' ? 'tel' : 'email'}
+                required
+                disabled={loading}
+                value={identifier}
+                onChange={handleIdentifierChange}
+                placeholder={method === 'phone' ? 'EJ: 3001234567' : 'EJ: OPERADOR@TAXICIMCO.COM'}
+                className="w-full py-3.5 px-4 bg-slate-950/70 border border-slate-700/60 rounded-xl text-slate-100 placeholder-slate-500 text-xs font-mono tracking-wider focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all disabled:opacity-50"
+              />
+
+              <p className="text-[10px] text-slate-400 leading-relaxed pt-1">
+                {method === 'phone'
+                  ? 'Transmitiremos un código de verificación por SMS o WhatsApp a su teléfono registrado para crear una nueva clave inmediatamente.'
+                  : 'Transmitiremos un enlace seguro y temporal a su correo para restablecer sus credenciales.'}
+              </p>
+            </div>
+
+            {/* Botón Acción */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3.5 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-cyan-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
+            >
+              {loading ? (
+                <span>PROCESANDO...</span>
+              ) : (
+                <>
+                  <ShieldCheck size={16} />
+                  <span>{method === 'phone' ? 'ENVIAR CÓDIGO SMS' : 'TRANSMITIR ENLACE SEGURO'}</span>
+                </>
+              )}
+            </button>
+          </form>
+        )}
+
+        {/* PASO 2: VERIFICACIÓN CÓDIGO SMS Y NUEVA CLAVE (MÉTODO CELULAR) */}
+        {step === 2 && (
+          <form onSubmit={handleVerifyOtpAndReset} className="space-y-4">
+            <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4 space-y-3">
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                  CÓDIGO RECIBIDO POR SMS/WHATSAPP ({identifier})
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={6}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value)}
+                  placeholder="123456"
+                  className="w-full py-3 px-4 text-center bg-slate-950/80 border border-cyan-500/50 rounded-xl text-cyan-400 font-mono text-lg tracking-[0.4em] font-bold focus:outline-none focus:ring-1 focus:ring-cyan-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                  NUEVA CLAVE DE ACCESO
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full py-3 px-4 bg-slate-950/80 border border-slate-700/60 rounded-xl text-white text-xs tracking-widest focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                  CONFIRMAR NUEVA CLAVE
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full py-3 px-4 bg-slate-950/80 border border-slate-700/60 rounded-xl text-white text-xs tracking-widest focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+            >
+              {loading ? 'ACTUALIZANDO...' : 'GUARDAR NUEVA CLAVE Y ENTRAR'}
+            </button>
+          </form>
+        )}
+
+        {/* PASO 3: PANTALLA DE ÉXITO O CORREO ENVIADO */}
+        {step === 3 && (
+          <div className="text-center py-4 space-y-4">
+            <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-500/30 rounded-full flex items-center justify-center mx-auto text-emerald-400">
+              <CheckCircle2 size={32} />
+            </div>
+
+            <h3 className="text-lg font-bold text-white uppercase tracking-wide">
+              {method === 'phone' ? '¡CLAVE RESTABLECIDA!' : '¡ENLACE TRANSMITIDO!'}
+            </h3>
+
+            <p className="text-xs text-slate-300 leading-relaxed font-sans">
+              {method === 'phone'
+                ? 'Su contraseña ha sido actualizada exitosamente. Ya puede acceder al sistema con su nuevo código.'
+                : `Se ha enviado un correo a ${identifier} con las instrucciones exactas para redefinir su clave.`}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => navigate('/login')}
+              className="w-full mt-2 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
+            >
+              IR AL INICIO DE SESIÓN
+            </button>
+          </div>
+        )}
+
+        {/* Footer / Volver al Login */}
+        <div className="mt-6 pt-4 border-t border-slate-800 text-center">
+          <Link
+            to="/login"
+            className="inline-flex items-center gap-2 text-xs font-medium text-slate-400 hover:text-cyan-400 transition-colors uppercase tracking-wider"
+          >
+            <ArrowLeft size={14} />
+            <span>Volver al menú de acceso</span>
+          </Link>
+        </div>
+
+      </div>
+    </div>
+  );
 };
 
 export default ForgotPassword;

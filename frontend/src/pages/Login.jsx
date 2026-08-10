@@ -1,14 +1,15 @@
-// Versión Arquitectura: V21.29 - Integración Estructural de Sección de Seguridad y Clave de Acceso con Encriptación TLS en Login
+// Versión Arquitectura: V21.32 - Actualización de Label Identificador a Celular / Correo Electrónico
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Blindar la captura de excepciones HTTP (401, 404, 403) e integrar la Sección 3 de Seguridad y Credenciales de Acceso.
+ * Misión: Actualizar la etiqueta del campo de identificación para reflejar explícitamente "# CELULAR / CORREO ELECTRÓNICO",
+ *         manteniendo toda la lógica de validación, persistencia y estética Glassmorphism CIMCO-UI V9.3.
  * Estilo: CIMCO-UI V9.3 Glassmorphism.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail, Shield, LogIn, Lock, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail, LogIn, Lock } from 'lucide-react';
 
 const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -64,7 +65,7 @@ const Login = () => {
     }
     
     if (status === 401 || code === 'WRONG_PASSWORD' || code === 'auth/wrong-password' || rawMessage.includes('incorrecta')) {
-      return '❌ La clave de acceso es incorrecta. Verifícala e intenta nuevamente.';
+      return '❌ La clave de acceso es incorrecta. Veríficala e intenta nuevamente.';
     }
 
     if (status === 403 || code === 'ACCOUNT_PENDING_APPROVAL' || rawMessage.includes('proceso de revisión')) {
@@ -168,13 +169,8 @@ const Login = () => {
       {/* Tarjeta Principal de Login CIMCO-UI Glassmorphism */}
       <div className="w-full max-w-[420px] bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-8 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.9)] relative z-10">
         
-        {/* Encabezado e Identidad */}
+        {/* Encabezado e Identidad Simplificado */}
         <div className="text-center mb-8 relative">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold uppercase tracking-wider mb-4">
-            <Shield className="w-3.5 h-3.5" />
-            <span>Conexión Segura {roleParam ? `- ${roleParam.toUpperCase()}` : 'TLS'}</span>
-          </div>
-
           <h1 className="text-3xl font-extrabold tracking-tight text-white mb-1 uppercase font-sans">
             TAXIA <span className="text-cyan-400 font-bold tracking-widest text-2xl">CIMCO</span>
           </h1>
@@ -219,23 +215,13 @@ const Login = () => {
         {/* Formulario de Acceso */}
         <form onSubmit={handleSubmit} className="space-y-5">
           
-          {/* SECCIÓN 3: SEGURIDAD Y CREDENCIALES DE ACCESO */}
           <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4 space-y-4">
-            <div className="text-[10px] text-slate-400 uppercase tracking-widest font-mono font-bold border-b border-slate-800/80 pb-2 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <KeyRound size={12} className="text-cyan-400" />
-                Sección 3: Seguridad y Credenciales de Acceso
-              </span>
-              <span className="text-[8px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-mono">
-                <ShieldCheck size={10} /> TLS
-              </span>
-            </div>
 
             {/* Campo Identificador Operativo */}
             <div>
               <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 {isEmailInput ? <Mail size={13} className="text-cyan-400" /> : <Phone size={13} className="text-cyan-400" />}
-                <span>Correo Electrónico y Contraseña</span>
+                <span># CELULAR / CORREO ELECTRÓNICO</span>
               </label>
               <div className="relative">
                 <input
@@ -251,19 +237,11 @@ const Login = () => {
               </div>
             </div>
 
-            {/* Campo Clave de Acceso */}
+            {/* Campo Clave de Acceso y Enlace de Recuperación Abajo */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider flex items-center gap-1">
-                  <Lock size={12} className="text-cyan-400" /> Clave de Acceso
-                </label>
-                <Link
-                  to="/forgot-password"
-                  className="text-[10px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors uppercase tracking-wider"
-                >
-                  Cambio / Restablecimiento de Clave
-                </Link>
-              </div>
+              <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1">
+                <Lock size={12} className="text-cyan-400" /> Clave de Acceso
+              </label>
               <div className="relative group">
                 <input
                   type={showPassword ? "text" : "password"}
@@ -283,6 +261,16 @@ const Login = () => {
                 >
                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
+              </div>
+
+              {/* Enlace Posicionado Debajo de la Franja Blanca/Input */}
+              <div className="flex justify-end mt-2">
+                <Link
+                  to="/forgot-password"
+                  className="text-[10px] font-mono text-cyan-400 hover:text-cyan-300 transition-colors uppercase tracking-wider"
+                >
+                  Cambio / Restablecimiento de Clave
+                </Link>
               </div>
             </div>
           </div>
