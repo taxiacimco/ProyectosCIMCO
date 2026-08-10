@@ -1,11 +1,9 @@
-// Versión Arquitectura: V19.2 - Reemplazo de Import de Clustering a Paquete Canónico
+// Versión Arquitectura: V19.4 - Corrección Ciclo de Vida Leaflet / React 18
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
- * Misión: Despliegue táctico y renderizado de unidades mediante Leaflet.js con clustering reactivo, 
- *         destrucción limpia de instancias del mapa y canvas preferente en alta densidad.
+ * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled y prevención 
+ *         de colisiones de contenedor en React 18 / React-Leaflet.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Refactor V19.2:
- *   1. Corrección de import de clustering de '@tanstack/react-leaflet-cluster' a 'react-leaflet-cluster' para compatibilidad con Vite/NPM.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -19,7 +17,7 @@ import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { deduplicarEntidades } from '@/utils/deduplicar';
 
-// 🛡️ Inicialización blindada de marcadores para Leaflet
+// 🛡️ Inicialización de iconos por defecto de Leaflet
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
@@ -44,7 +42,6 @@ const createCustomIcon = (rol) => {
     });
 };
 
-// 🛡️ Icono para Clusters Personalizados con Estética Glassmorphism
 const createCustomClusterIcon = (cluster) => {
     const count = cluster.getChildCount();
     return L.divIcon({
@@ -54,42 +51,30 @@ const createCustomClusterIcon = (cluster) => {
     });
 };
 
-// 🛡️ Componente Interno para Destrucción Limpia y Asignación de Instancia
-const MapLifecycleHandler = ({ onMapCreated }) => {
+// 🛡️ Capturador de Referencia del Mapa sin interferir en el desmontaje nativo de React-Leaflet
+const MapReferenceBinder = ({ onMapReady }) => {
     const map = useMap();
 
     useEffect(() => {
-        if (onMapCreated) {
-            onMapCreated(map);
+        if (onMapReady) {
+            onMapReady(map);
         }
-
-        return () => {
-            if (map) {
-                try {
-                    map.remove();
-                } catch (e) {
-                    console.warn("⚠️ [CIMCO-LEAFLET-CLEANUP]: El mapa ya fue removido o destruido.", e);
-                }
-            }
-        };
-    }, [map, onMapCreated]);
+    }, [map, onMapReady]);
 
     return null;
 };
 
-const MapaOperativo = ({ cooperativaFiltro = null }) => {
+const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -73.34], zoom = 13 }) => {
     const [busqueda, setBusqueda] = useState('');
     const [loading, setLoading] = useState(true);
     const [errorServicio, setErrorServicio] = useState(null);
     const isMounted = useRef(true);
     const mapInstanceRef = useRef(null);
 
-    // 🔥 Amortiguador Térmico (Delay óptimo de 2000ms para movimiento fluido y balance de CPU)
+    // 🔥 Amortiguador Térmico (Throttled GPS Telemetry)
     const [vehiculosSuaves, actualizarCoordenadas] = useTelemetryThrottle(2000);
-    
-    // Guardamos la función en una referencia mutable para evitar re-suscripciones innecesarias
     const actualizarCoordenadasRef = useRef(actualizarCoordenadas);
-    
+
     useEffect(() => {
         actualizarCoordenadasRef.current = actualizarCoordenadas;
     }, [actualizarCoordenadas]);
@@ -98,19 +83,11 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         isMounted.current = true;
         return () => {
             isMounted.current = false;
-            // 🛡️ Garantizar destrucción explícita del Mapa al desmontar el componente
-            if (mapInstanceRef.current) {
-                try {
-                    mapInstanceRef.current.remove();
-                    mapInstanceRef.current = null;
-                } catch (err) {
-                    console.warn("⚠️ [CIMCO-MAP-UNMOUNT]: Limpieza de instancia de Leaflet omitida.", err);
-                }
-            }
+            mapInstanceRef.current = null;
         };
     }, []);
 
-    // Sincronización en tiempo real desde Firestore (Persistencia y Telemetría Reactiva)
+    // Sincronización Firestore en Tiempo Real
     useEffect(() => {
         setLoading(true);
         const pathUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
@@ -119,19 +96,17 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         const unsubscribe = onSnapshot(q, 
             (snapshot) => {
                 if (!isMounted.current) return;
-                
+
                 snapshot.docs.forEach(docSnap => {
                     const data = docSnap.data();
                     const lat = parseFloat(data?.latitud || data?.lat || data?.coords?.latitud || data?.position?.lat || data?.coordenadas?.lat);
                     const lng = parseFloat(data?.longitud || data?.lng || data?.coords?.longitud || data?.position?.lng || data?.coordenadas?.lng);
 
-                    // 🏢 REGLA MULTI-TENANT: Filtrado por cooperativa activa
                     if (cooperativaFiltro) {
                         const coopUnidad = data?.cooperativa || data?.empresa;
                         if (coopUnidad !== cooperativaFiltro) return;
                     }
 
-                    // 🛡️ Filtro matemático estricto de geolocalización válida
                     if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) {
                         actualizarCoordenadasRef.current(docSnap.id, {
                             id: docSnap.id,
@@ -146,7 +121,7 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                         });
                     }
                 });
-                
+
                 setLoading(false);
             },
             (err) => {
@@ -161,30 +136,22 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
         return () => unsubscribe();
     }, [cooperativaFiltro]);
 
-    // Conversión a matriz limpia y deduplicación táctica
     const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
-    
-    // 🛡️ Aplicamos deduplicación antes de filtrar y renderizar
     const marcadoresUnicos = typeof deduplicarEntidades === 'function' 
         ? deduplicarEntidades(listaMarcadoresSuaves)
         : listaMarcadoresSuaves;
 
     const filtrados = marcadoresUnicos.filter(m => {
         const queryTerm = busqueda.toLowerCase().trim();
-        const nombre = (m.nombre || '').toLowerCase();
-        const id = (m.id || '').toLowerCase();
-        const rol = (m.rol || '').toLowerCase();
-        const placa = (m.placa || '').toLowerCase();
-        const numInterno = (m.numeroInterno || '').toLowerCase();
+        const nombre = (m?.nombre || '').toLowerCase();
+        const id = (m?.id || '').toLowerCase();
+        const rol = (m?.rol || '').toLowerCase();
+        const placa = (m?.placa || '').toLowerCase();
+        const numInterno = (m?.numeroInterno || '').toLowerCase();
         return nombre.includes(queryTerm) || id.includes(queryTerm) || rol.includes(queryTerm) || placa.includes(queryTerm) || numInterno.includes(queryTerm);
     });
 
-    // 🛡️ Umbral de densidad para conmutar a Renderizador Canvas
     const usarCanvas = filtrados.length > 50;
-
-    const handleMapCreated = (mapInstance) => {
-        mapInstanceRef.current = mapInstance;
-    };
 
     return (
         <div className="w-full flex flex-col gap-4 font-mono antialiased text-zinc-100">
@@ -223,20 +190,19 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                 )}
 
                 <MapContainer 
-                    center={[9.715, -73.34]} 
-                    zoom={13} 
+                    center={coordenadasCentro} 
+                    zoom={zoom} 
                     zoomControl={false}
                     preferCanvas={usarCanvas}
                     className="w-full h-full"
                 >
-                    <MapLifecycleHandler onMapCreated={handleMapCreated} />
+                    <MapReferenceBinder onMapReady={(map) => { mapInstanceRef.current = map; }} />
 
                     <TileLayer
                         url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
                         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
                     />
 
-                    {/* 🛡️ AGRUPAMIENTO REACTIVO DE UNIDADES (MARKER CLUSTERING CANÓNICO) */}
                     <MarkerClusterGroup
                         chunkedLoading
                         iconCreateFunction={createCustomClusterIcon}
@@ -245,13 +211,17 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                         showCoverageOnHover={false}
                     >
                         {filtrados.map((m, index) => {
-                            const keyMarker = m.id || m.placa || m.numeroInterno || `marker-throt-${index}`;
+                            const keyMarker = m?.id || m?.placa || m?.numeroInterno || `marker-${index}`;
+                            const lat = m?.lat;
+                            const lng = m?.lng;
+
+                            if (!lat || !lng) return null;
 
                             return (
                                 <Marker 
                                     key={keyMarker}
-                                    position={[m.lat, m.lng]} 
-                                    icon={createCustomIcon(m.rol)}
+                                    position={[lat, lng]} 
+                                    icon={createCustomIcon(m?.rol)}
                                 >
                                     <Popup className="custom-popup">
                                         <div className="w-60 backdrop-blur-md bg-[#121214]/95 border border-white/10 rounded-2xl p-4 shadow-2xl font-mono text-zinc-100">
@@ -262,30 +232,30 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                                                 </span>
                                             </div>
 
-                                            <p className="text-xs font-black text-white uppercase truncate">{m.nombre}</p>
-                                            <p className="text-[9px] text-zinc-500 mt-0.5 truncate font-mono">ID: {m.id}</p>
+                                            <p className="text-xs font-black text-white uppercase truncate">{m?.nombre || 'UNIDAD DESCONOCIDA'}</p>
+                                            <p className="text-[9px] text-zinc-500 mt-0.5 truncate font-mono">ID: {m?.id || 'N/A'}</p>
 
                                             <div className="mt-3 space-y-1.5 text-[9px] uppercase tracking-tight">
                                                 <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
                                                     <span className="text-zinc-500">PLACA / INTERNO:</span>
-                                                    <span className="text-white font-bold">{m.placa} / Int. {m.numeroInterno}</span>
+                                                    <span className="text-white font-bold">{m?.placa || 'S/P'} / Int. {m?.numeroInterno || 'S/I'}</span>
                                                 </div>
                                                 <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
                                                     <span className="text-zinc-500">ORIGEN FEED:</span>
                                                     <span className="text-emerald-400 font-bold">
-                                                        {m.origenReporte}
+                                                        {m?.origenReporte || 'S/O'}
                                                     </span>
                                                 </div>
                                                 <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
                                                     <span className="text-zinc-500">COOPERATIVA:</span>
-                                                    <span className="text-orange-400 font-bold">{m.cooperativa}</span>
+                                                    <span className="text-orange-400 font-bold">{m?.cooperativa || 'S/C'}</span>
                                                 </div>
                                             </div>
 
                                             <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between">
                                                 <span className="text-[8px] text-zinc-500 uppercase">Coordenadas:</span>
                                                 <span className="text-[8px] text-zinc-400 font-mono font-bold">
-                                                    {m.lat.toFixed(5)}, {m.lng.toFixed(5)}
+                                                    {lat.toFixed(5)}, {lng.toFixed(5)}
                                                 </span>
                                             </div>
                                         </div>
@@ -296,7 +266,6 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                     </MarkerClusterGroup>
                 </MapContainer>
 
-                {/* ANIMACIÓN DE ESCANEO DE RED */}
                 {loading && (
                     <div className="absolute inset-0 z-[500] backdrop-blur-md bg-[#121214]/60 flex flex-col items-center justify-center gap-2">
                         <Activity className="text-orange-500 animate-spin" size={24} />
@@ -304,7 +273,6 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                     </div>
                 )}
 
-                {/* Capa técnica interna decorativa Glassmorphism */}
                 <div className="absolute inset-0 pointer-events-none rounded-3xl border border-white/5 shadow-[inset_0_0_30px_rgba(0,0,0,0.8)]" />
             </div>
 
@@ -317,7 +285,6 @@ const MapaOperativo = ({ cooperativaFiltro = null }) => {
                     transition: transform 0.6s cubic-bezier(0.25, 1, 0.5, 1);
                 }
 
-                /* ESTILOS CUSTOM GLASSMORPHISM PARA CLUSTERS */
                 .custom-cluster-wrapper {
                     background: transparent;
                 }
