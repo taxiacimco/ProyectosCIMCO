@@ -1,4 +1,4 @@
-// Versión Arquitectura: V9.3 - Componente Unificado de Ajustes de Perfil con Reactividad y Multipart/Form-Data
+// Versión Arquitectura: V9.4 - Inyección Explícita de Token JWT y Soporte Multipart Resiliente
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -95,10 +95,23 @@ const AjustesPerfil = ({ onBack }) => {
       }
 
       const userId = user?.id || user?._id || 'perfil';
+
+      // Extracción limpia y fallback de token JWT antes de despachar
+      const token = localStorage.getItem('cimco_token') || localStorage.getItem('token') || user?.token || user?.accessToken;
+      
+      const requestHeaders = {
+        'Content-Type': 'multipart/form-data',
+      };
+
+      if (token) {
+        const cleanToken = String(token).replace(/^"|"$/g, '').trim();
+        if (cleanToken) {
+          requestHeaders['Authorization'] = `Bearer ${cleanToken}`;
+        }
+      }
+
       const response = await api.put(`/usuarios/${userId}`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: requestHeaders,
       });
 
       const usuarioActualizado = response?.data?.usuario || response?.data || {};

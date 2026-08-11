@@ -1,7 +1,7 @@
-// Versión Arquitectura: V9.4 - Confirmación y Verificación de Subrutas y Roles TAXIA CIMCO
+// Versión Arquitectura: V9.5 - Sincronización Multi-Rol y Resolución Anti-Bucle de Navegación
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
- * Misión: Verificación y aseguramiento de subrutas requeridas (/pasajero, /mototaxi, /despachador, y registros asociados).
+ * Misión: Verificación y aseguramiento de subrutas requeridas (/pasajero, /mototaxi, /despachador, y registros asociados) con blindaje anti-bucle multi-rol.
  * Estilo: CIMCO-UI V9.3 Glassmorphism.
  */
 
@@ -60,7 +60,7 @@ const LoadingScreen = () => (
   </div>
 );
 
-// Guardián de Rutas Protegidas
+// Guardián de Rutas Protegidas con Detección Dinámica de Subroles y Homologación de Conductor
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const authContext = useAuth() || {};
   const user = authContext.user || null;
@@ -75,8 +75,22 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   if (allowedRoles && Array.isArray(allowedRoles) && allowedRoles.length > 0) {
-    const userRole = (user.rol || user.tipoUsuario || '').toLowerCase();
-    const isAllowed = allowedRoles.some((role) => role.toLowerCase() === userRole);
+    const primaryRole = (user.rol || user.tipoUsuario || '').toLowerCase();
+    const secondaryRole = (user.subrol || user.tipoConductor || user.tipoVehiculo || '').toLowerCase();
+
+    // Homologación de roles efectivos del usuario
+    const effectiveRoles = [primaryRole, secondaryRole].filter(Boolean);
+
+    // Mapeo defensivo: Si el rol es 'conductor' genérico sin subrol explícito, se homologa a servicios de conducción
+    if (primaryRole === 'conductor') {
+      if (!secondaryRole) {
+        effectiveRoles.push('mototaxi', 'motoparrillero', 'motocarga', 'intermunicipal');
+      }
+    }
+
+    const isAllowed = allowedRoles.some((allowed) =>
+      effectiveRoles.some((eRole) => eRole === allowed.toLowerCase())
+    );
 
     if (!isAllowed) {
       return <Navigate to="/" replace />;
@@ -86,7 +100,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   return children;
 };
 
-// Redireccionador por Rol Activo
+// Redireccionador por Rol Activo con Mapeo Inteligente Anti-Bucle
 const RoleRedirect = () => {
   const authContext = useAuth() || {};
   const user = authContext.user || null;
@@ -100,9 +114,10 @@ const RoleRedirect = () => {
     return <Navigate to="/login" replace />;
   }
 
-  const role = (user.rol || user.tipoUsuario || '').toLowerCase();
+  const primaryRole = (user.rol || user.tipoUsuario || '').toLowerCase();
+  const secondaryRole = (user.subrol || user.tipoConductor || user.tipoVehiculo || '').toLowerCase();
 
-  switch (role) {
+  switch (primaryRole) {
     case 'admin':
       return <Navigate to="/admin/dashboard" replace />;
     case 'despachador':
@@ -115,6 +130,11 @@ const RoleRedirect = () => {
       return <Navigate to="/motoparrillero" replace />;
     case 'motocarga':
       return <Navigate to="/motocarga" replace />;
+    case 'conductor':
+      if (secondaryRole === 'motoparrillero') return <Navigate to="/motoparrillero" replace />;
+      if (secondaryRole === 'motocarga') return <Navigate to="/motocarga" replace />;
+      if (secondaryRole === 'intermunicipal') return <Navigate to="/intermunicipal" replace />;
+      return <Navigate to="/mototaxi" replace />;
     case 'pasajero':
     default:
       return <Navigate to="/pasajero" replace />;
@@ -183,7 +203,7 @@ const AppRouter = () => {
         <Route
           path="/mototaxi"
           element={
-            <ProtectedRoute allowedRoles={['mototaxi']}>
+            <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
               <HomeMototaxi />
             </ProtectedRoute>
           }
@@ -191,7 +211,7 @@ const AppRouter = () => {
         <Route
           path="/mototaxi/historial"
           element={
-            <ProtectedRoute allowedRoles={['mototaxi']}>
+            <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
               <HistorialMototaxi />
             </ProtectedRoute>
           }
@@ -199,7 +219,7 @@ const AppRouter = () => {
         <Route
           path="/mototaxi/wallet"
           element={
-            <ProtectedRoute allowedRoles={['mototaxi']}>
+            <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
               <WalletMototaxi />
             </ProtectedRoute>
           }
@@ -209,7 +229,7 @@ const AppRouter = () => {
         <Route
           path="/motoparrillero"
           element={
-            <ProtectedRoute allowedRoles={['motoparrillero']}>
+            <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
               <HomeMotoparrillero />
             </ProtectedRoute>
           }
@@ -217,7 +237,7 @@ const AppRouter = () => {
         <Route
           path="/motoparrillero/historial"
           element={
-            <ProtectedRoute allowedRoles={['motoparrillero']}>
+            <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
               <HistorialMotoparrillero />
             </ProtectedRoute>
           }
@@ -225,7 +245,7 @@ const AppRouter = () => {
         <Route
           path="/motoparrillero/wallet"
           element={
-            <ProtectedRoute allowedRoles={['motoparrillero']}>
+            <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
               <WalletMotoparrillero />
             </ProtectedRoute>
           }
@@ -235,7 +255,7 @@ const AppRouter = () => {
         <Route
           path="/motocarga"
           element={
-            <ProtectedRoute allowedRoles={['motocarga']}>
+            <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
               <HomeMotocarga />
             </ProtectedRoute>
           }
@@ -243,7 +263,7 @@ const AppRouter = () => {
         <Route
           path="/motocarga/historial"
           element={
-            <ProtectedRoute allowedRoles={['motocarga']}>
+            <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
               <HistorialMotocarga />
             </ProtectedRoute>
           }
@@ -251,7 +271,7 @@ const AppRouter = () => {
         <Route
           path="/motocarga/wallet"
           element={
-            <ProtectedRoute allowedRoles={['motocarga']}>
+            <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
               <WalletMotocarga />
             </ProtectedRoute>
           }
@@ -261,7 +281,7 @@ const AppRouter = () => {
         <Route
           path="/intermunicipal"
           element={
-            <ProtectedRoute allowedRoles={['intermunicipal']}>
+            <ProtectedRoute allowedRoles={['intermunicipal', 'conductor']}>
               <HomeIntermunicipal />
             </ProtectedRoute>
           }
@@ -269,7 +289,7 @@ const AppRouter = () => {
         <Route
           path="/intermunicipal/historial"
           element={
-            <ProtectedRoute allowedRoles={['intermunicipal']}>
+            <ProtectedRoute allowedRoles={['intermunicipal', 'conductor']}>
               <HistorialIntermunicipal />
             </ProtectedRoute>
           }

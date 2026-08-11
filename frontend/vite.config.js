@@ -1,4 +1,4 @@
-// Versión Arquitectura: V9.9.9 - Configuración Híbrida LAN / Cloudflare Tunnel
+// Versión Arquitectura: V10.0.0 - Sincronización de Proxy Inverso Híbrido (LAN / Cloudflare Tunnel)
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';

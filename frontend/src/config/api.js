@@ -1,4 +1,4 @@
-// Versión Arquitectura: V15.9 - Corrección de Encabezados Anti-Caché y Estandarización de Endpoints
+// Versión Arquitectura: V16.0 - Inyección Transparente JWT y Mapeo Dinámico de Tokens Anti-401
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
  * Misión: Centralización de Axios, inyección de cabeceras anti-caché e interceptores JWT con resiliencia.
@@ -38,14 +38,35 @@ export const api = axios.create({
     withCredentials: true
 });
 
-// 🛡️ INTERCEPTOR DE PETICIONES: INYECCIÓN DE FIRMA JWT (CIMCO-GUARD)
+// 🛡️ INTERCEPTOR DE PETICIONES: INYECCIÓN MULTI-CAPA DE FIRMA JWT (CIMCO-GUARD)
 api.interceptors.request.use(
     (config) => {
         try {
+            config.headers = config.headers || {};
+
             if (typeof window !== 'undefined' && window.localStorage) {
-                const token = localStorage.getItem('cimco_token') || localStorage.getItem('token');
+                // 1. Búsqueda primaria de token en almacenamiento
+                let token = localStorage.getItem('cimco_token') || localStorage.getItem('token');
+
+                // 2. Fallback de resiliencia: Extracción desde objeto de usuario persistido
+                if (!token) {
+                    const storedUser = localStorage.getItem('cimco_user');
+                    if (storedUser) {
+                        try {
+                            const parsedUser = JSON.parse(storedUser);
+                            token = parsedUser?.token || parsedUser?.accessToken || parsedUser?.stsTokenManager?.accessToken || null;
+                        } catch (parseErr) {
+                            // Ignorar error de parseo y continuar
+                        }
+                    }
+                }
+
+                // 3. Sanitización e inyección estandarizada en cabecera HTTP
                 if (token) {
-                    config.headers.Authorization = `Bearer ${token}`;
+                    const cleanToken = String(token).replace(/^"|"$/g, '').trim();
+                    if (cleanToken) {
+                        config.headers['Authorization'] = `Bearer ${cleanToken}`;
+                    }
                 }
             }
             return config;
