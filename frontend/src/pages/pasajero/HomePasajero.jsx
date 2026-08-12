@@ -1,8 +1,8 @@
-// Versión Arquitectura: V14.9 - Refactorización de Sockets con Hook Unificado useSocket
+// Versión Arquitectura: V15.0 - Integración REST, Sockets y Notificación de Expiración (60s)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Emisión activa de telemetría, solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS), edición de perfil, pasarela de billetera y selección avanzada de punto de recogida + destino.
- * Ajuste V14.9: Eliminación de importación e instanciación directa de `socket.io-client`. Consumo centralizado mediante el hook `useSocket`.
+ * Ajuste V15.0: Conexión de solicitud con API REST, reactividad en tiempo real vía Socket.io y escucha del evento `viaje_expirado` para notificar al pasajero tras 60s sin conductores disponibles.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -14,7 +14,7 @@ import { useGpsGuard } from '@/hooks/useGpsGuard';
 import { useWallet } from '@/hooks/useWallet';
 import { useSocket } from '@/hooks/useSocket';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, DollarSign, Send, MessageSquare, Activity, Wallet, QrCode, Banknote, ShieldAlert, User, Edit3, X, CreditCard, Crosshair } from 'lucide-react';
+import { MapPin, Compass, Clock, CheckCircle, Navigation, Bike, Users, Package, Milestone, LogOut, DollarSign, Send, MessageSquare, Activity, Wallet, QrCode, Banknote, ShieldAlert, User, Edit3, X, CreditCard, Crosshair, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import GpsRequiredModal from '@/components/shared/GpsRequiredModal';
@@ -63,7 +63,7 @@ const ActualizadorMapa = ({ centro }) => {
 };
 
 const HomePasajero = () => {
-    const { user, logout } = useAuth();
+    const { user, logout, token } = useAuth();
     const navigate = useNavigate();
     
     // 🔌 Canal de Telemetría Sockets Centralizado mediante Hook Unificado
@@ -92,6 +92,7 @@ const HomePasajero = () => {
     const [procesandoPeticion, setProcesandoPeticion] = useState(false);
     const [errorInterno, setErrorInterno] = useState('');
     const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
+    const [mensajeExpirado, setMensajeExpirado] = useState('');
     
     // 🗲 Estados de la UI / Secciones dinámicas inferiores
     const [seccionActiva, setSeccionActiva] = useState('radar'); // 'radar' | 'billetera'
@@ -139,12 +140,33 @@ const HomePasajero = () => {
             }
         };
 
+        const handleViajeAceptado = (data) => {
+            if (data?.viajeId && (data.viajeId === rideId || !rideId)) {
+                setRideId(data.viajeId);
+                setEstadoViaje('ACEPTADO');
+                if (data.conductor) {
+                    setDatosConductor(data.conductor);
+                }
+            }
+        };
+
+        const handleViajeExpirado = (data) => {
+            if (!data?.viajeId || data.viajeId === rideId) {
+                setEstadoViaje('EXPIRADO');
+                setMensajeExpirado("⚠️ Ningún conductor aceptó tu solicitud tras 60 segundos. Por favor intenta de nuevo.");
+            }
+        };
+
         socket.on('ubicacion_conductor_actualizada', handleActualizacionUbicacion);
+        socket.on('viaje_aceptado', handleViajeAceptado);
+        socket.on('viaje_expirado', handleViajeExpirado);
 
         return () => {
             socket.off('ubicacion_conductor_actualizada', handleActualizacionUbicacion);
+            socket.off('viaje_aceptado', handleViajeAceptado);
+            socket.off('viaje_expirado', handleViajeExpirado);
         };
-    }, [socket, isConnected]);
+    }, [socket, isConnected, rideId]);
 
     // 🔄 Streaming reactivo de datos de perfil del Pasajero en Firestore (Optimizado sin duplicar wallet listeners)
     useEffect(() => {
@@ -227,6 +249,9 @@ const HomePasajero = () => {
                     }
                     if (data.estado === 'FINALIZADO') {
                         setMostrarModalCalificacion(true);
+                    }
+                    if (data.estado === 'EXPIRADO') {
+                        setMensajeExpirado("⚠️ Ningún conductor aceptó tu solicitud tras 60 segundos. Por favor intenta de nuevo.");
                     }
                 }
             }
@@ -339,6 +364,7 @@ const HomePasajero = () => {
 
         setProcesandoPeticion(true);
         setErrorInterno('');
+        setMensajeExpirado('');
 
         try {
             let coordsActuales = coordenadas;
@@ -363,17 +389,38 @@ const HomePasajero = () => {
             };
 
             const docRef = await addDoc(collection(db, pathViajes), payload);
-            setRideId(docRef.id);
+            const idGenerado = docRef.id;
+            setRideId(idGenerado);
             setEstadoViaje('BUSCANDO');
+
+            // Intento de conexión con API REST / Sockets backend
+            try {
+                const apiHost = import.meta.env?.VITE_API_URL || '';
+                if (apiHost) {
+                    await fetch(`${apiHost}/api/viajes/solicitar`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                        },
+                        body: JSON.stringify({
+                            viajeId: idGenerado,
+                            ...payload
+                        })
+                    });
+                }
+            } catch (apiErr) {
+                console.warn("⚠️ [REST-API] No se pudo notificar al backend REST (usando fallback WebSocket/Firestore):", apiErr);
+            }
 
             if (socket && isConnected) {
                 socket.emit('solicitar_viaje', {
-                    viajeId: docRef.id,
+                    viajeId: idGenerado,
                     ...payload
                 });
             }
 
-            console.log(`🚀 [CIMCO-LOGISTICS] Viaje creado con ID atómico: ${docRef.id}`);
+            console.log(`🚀 [CIMCO-LOGISTICS] Viaje creado con ID atómico: ${idGenerado}`);
         } catch (err) {
             console.error("❌ [LOGISTICS-ERROR] Desbordamiento en inserción de orden:", err);
             setErrorInterno("Fallo al propagar la orden al Core Logístico.");
@@ -398,9 +445,17 @@ const HomePasajero = () => {
             setEstadoViaje('IDLE');
             setRideId(null);
             setDatosConductor(null);
+            setMensajeExpirado('');
         } catch (err) {
             console.error("❌ [LOGISTICS-ERROR] No se pudo revocar el servicio activo:", err);
         }
+    };
+
+    const handleReiniciarEstadoExpirado = () => {
+        setEstadoViaje('IDLE');
+        setRideId(null);
+        setDatosConductor(null);
+        setMensajeExpirado('');
     };
 
     const handleCierreCalificacion = () => {
@@ -409,6 +464,7 @@ const HomePasajero = () => {
         setRideId(null);
         setDatosConductor(null);
         setDestinoText('');
+        setMensajeExpirado('');
     };
 
     const handleLogoutSeguro = async () => {
@@ -436,7 +492,7 @@ const HomePasajero = () => {
                     </div>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V14.9</span>
+                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V15.0</span>
                         </h1>
                         <div className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
@@ -583,6 +639,24 @@ const HomePasajero = () => {
                                         className="px-5 py-2.5 rounded-xl border border-red-500/30 bg-red-500/5 hover:bg-red-500/10 text-red-400 text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95"
                                     >
                                         Abortar Petición
+                                    </button>
+                                </div>
+                            )}
+
+                            {estadoViaje === 'EXPIRADO' && (
+                                <div className="p-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 backdrop-blur-md relative overflow-hidden shadow-2xl flex flex-col items-center justify-center text-center py-8 animate-fadeIn">
+                                    <div className="w-14 h-14 rounded-full bg-amber-500/20 flex items-center justify-center border border-amber-500/40 mb-3 text-amber-400">
+                                        <AlertTriangle size={28} />
+                                    </div>
+                                    <h3 className="text-xs font-black uppercase tracking-widest text-amber-400 mb-2">Solicitud Expirada (60s)</h3>
+                                    <p className="text-[11px] text-amber-200/90 font-mono leading-relaxed mb-6 max-w-[260px]">
+                                        {mensajeExpirado || "Ningún conductor disponible aceptó la solicitud dentro del tiempo límite de 60 segundos."}
+                                    </p>
+                                    <button
+                                        onClick={handleReiniciarEstadoExpirado}
+                                        className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95 shadow-lg"
+                                    >
+                                        Reintentar Solicitud
                                     </button>
                                 </div>
                             )}

@@ -1,9 +1,9 @@
-// Versión Arquitectura: V18.3 - Sincronización Fuera de Transacción Mongo y Resiliencia Firestore
+// Versión Arquitectura: V18.4 - Bloqueo Atómico de Asignación con Filtro de Estado SOLICITADO y HTTP 409 Conflict
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
  * Misión: Procesar flujos operativos, liquidación contable (10% comisión), transición de estados, cancelación y sincronización Firestore.
- * Ajuste V18.3: Corrección crítica de sincronización en completarViaje. La ejecución de descuento en Firestore se realiza
- * fuera del bucle de reintentos (WriteConflict), únicamente tras confirmarse el commitTransaction() de MongoDB.
+ * Ajuste V18.4: Modificación de la función aceptarViaje para implementar bloqueo atómico con findOneAndUpdate 
+ *              evaluando estado 'SOLICITADO' / 'solicitado' y retornando HTTP 409 Conflict ante colisiones de concurrencia.
  */
 
 import crypto from 'crypto';
@@ -272,7 +272,7 @@ export const solicitarViaje = async (req, res) => {
 };
 
 // ==================================================================
-// 2. ASIGNACIÓN ATÓMICA CON LOCK ANTI-COLLISION (RACE CONDITION FIX)
+// 2. ASIGNACIÓN ATÓMICA CON LOCK ANTI-COLLISION (RACE CONDITION FIX 409)
 // ==================================================================
 export const aceptarViaje = async (req, res) => {
     if (!req || !req.body) {
@@ -314,9 +314,19 @@ export const aceptarViaje = async (req, res) => {
             });
         }
 
+        // 🔒 ATOMIC LOCK: Bloqueo transaccional de concurrencia usando findOneAndUpdate con filtro de estado SOLICITADO
         const viajeAsignado = await Viaje.findOneAndUpdate(
-            { _id: viajeId, estado: 'solicitado' }, 
-            { $set: { conductorId: conductorId, estado: 'aceptado', estadoViaje: 'aceptado' } },
+            { 
+                _id: viajeId, 
+                estado: { $in: ['SOLICITADO', 'solicitado'] } 
+            }, 
+            { 
+                $set: { 
+                    conductorId: conductorId, 
+                    estado: 'aceptado', 
+                    estadoViaje: 'aceptado' 
+                } 
+            },
             { new: true, session }
         );
 
@@ -525,7 +535,6 @@ export const completarViaje = async (req, res) => {
             }
 
             // Sincronización diferida en Firestore: Ejecutada EXCLUSIVAMENTE fuera del bucle de reintentos
-            // únicamente tras confirmar el commitTransaction() de MongoDB
             if (dbFirestore) {
                 const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
                 const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';

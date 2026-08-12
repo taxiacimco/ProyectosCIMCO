@@ -1,4 +1,4 @@
-// Versión Arquitectura: V10.0.0 - Sincronización de Proxy Inverso Híbrido (LAN / Cloudflare Tunnel)
+// Versión Arquitectura: V10.1.0 - Sincronización de HMR Seguro (WSS / ClientPort 443) para Túnel Cloudflare
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -44,9 +44,10 @@ export default defineConfig({
     watch: {
       usePolling: true,
     },
-    // Removido hmr.host fijo para permitir resolución automática por IP local o Túnel HTTPS
+    // Configuración HMR forzada a WebSocket Seguro (WSS) para compatibilidad con el túnel HTTPS de Cloudflare
     hmr: {
-      protocol: 'ws',
+      protocol: 'wss',
+      clientPort: 443,
     }
   },
   build: {

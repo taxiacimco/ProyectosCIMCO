@@ -1,8 +1,9 @@
-// Versión Arquitectura: V16.1 - Normalización Híbrida Adaptativa VITE_BACKEND_URL & WSS (CIMCO-RADAR LINK)
+// Versión Arquitectura: V16.2 - Control Adaptativo de Reconexión y Detención Anti-Bucle en Fallos Auth
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\socket.js
  * Misión: Orquestador central de WebSockets adaptativo. Detecta automáticamente HTTPS/HTTP,
- *         túneles Cloudflare/Ngrok, IP de red LAN y despliegues en la Nube (Vercel/Railway).
+ *         túneles Cloudflare/Ngrok, IP de red LAN y gestiona reconexiones inteligentes con
+ *         detención automática ante fallos de autenticación JWT.
  */
 
 import { io } from 'socket.io-client';
@@ -59,9 +60,30 @@ export const socket = io(SOCKET_URL, {
     rejectUnauthorized: false,
     withCredentials: true,
     auth: (cb) => {
-        // Inyección dinámica de credenciales seguras en el apretón de manos (handshake)
-        const token = localStorage.getItem('cimco_token') || localStorage.getItem('token');
+        // Inyección dinámica de credenciales seguras en el apretón de manos (handshake) con guarda anti-undefined
+        const token = typeof window !== 'undefined' && window.localStorage 
+            ? (localStorage.getItem('cimco_token') || localStorage.getItem('token') || '')
+            : '';
         cb({ token });
+    }
+});
+
+// 🛡️ GUARDA ANTI-BUCLE: Detener reconexión automática si el error de conexión es por falla de autenticación
+socket.on('connect_error', (error) => {
+    const errorMsg = error?.message || '';
+    const errorReason = error?.data?.reason || '';
+    const errorCode = error?.data?.code || '';
+
+    const esErrorAuth = errorMsg.includes('Autenticación rechazada') ||
+                        errorMsg.includes('AUTH_EXPIRED') ||
+                        errorMsg.includes('INVALID_TOKEN') ||
+                        errorMsg.includes('TOKEN') ||
+                        errorReason === 'nodo_inexistente' ||
+                        errorCode.startsWith('TOKEN_');
+
+    if (esErrorAuth) {
+        console.warn('⚠️ [CIMCO-SOCKET] Rechazo por autenticación inválida o token expirado. Abortando reintentos infinitos.');
+        socket.active = false; // Deshabilita reconexiones automáticas en Socket.io client
     }
 });
 

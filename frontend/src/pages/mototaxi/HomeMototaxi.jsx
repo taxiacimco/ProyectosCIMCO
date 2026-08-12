@@ -1,9 +1,10 @@
-// Versión Arquitectura: V18.1 - Integración Quirúrgica AjustesPerfil Unificado & Preservación Socket.io
+// Versión Arquitectura: V19.1 - Sincronización Dinámica de Radar WebSocket y Gestión de Conflictos HTTP 409
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
- *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo) e integración fluida
- *          con el editor unificado AjustesPerfil preservando la conexión en tiempo real con Socket.io.
+ *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo), integración fluida
+ *          con AjustesPerfil, validación local rigurosa de expiración JWT (Anti-401) en tiempo real
+ *          y sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409).
  * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 
@@ -21,6 +22,28 @@ import {
   CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X,
   Wifi, WifiOff, Settings, Bike, ShieldCheck, RefreshCw, Phone, FileText, CheckCircle2, Palette
 } from 'lucide-react';
+
+/**
+ * 🛡️ HELPER DE SEGURIDAD: Decodificación y Verificación Local de Expiración JWT
+ * Previene llamadas HTTP innecesarias que resulten en 401 Unauthenticated.
+ */
+const isTokenExpired = (rawToken) => {
+  if (!rawToken || typeof rawToken !== 'string') return true;
+  try {
+    const parts = rawToken.split('.');
+    if (parts.length !== 3) return true;
+    const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const decodedJson = JSON.parse(window.atob(payloadBase64));
+    if (!decodedJson || !decodedJson.exp) return false;
+    
+    // Margen de seguridad de 10 segundos ante desfaces de reloj
+    const currentTimeInSeconds = Math.floor(Date.now() / 1000);
+    return decodedJson.exp <= (currentTimeInSeconds + 10);
+  } catch (err) {
+    console.error("🚨 [CIMCO-AUTH-GUARD] Error al decodificar JWT:", err);
+    return true;
+  }
+};
 
 export default function HomeMototaxi() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
@@ -63,12 +86,37 @@ export default function HomeMototaxi() {
   const [historial, setHistorial] = useState([]);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
 
-  // Referencias para control de Telemetría GPS
+  // Referencias para control de Telemetría GPS y Desacoplamiento de Efectos
   const geoWatchRef = useRef(null);
+  const formDataRef = useRef(formData);
+  const conductorIdRef = useRef(null);
+  const servicioActivoRef = useRef(servicioActivo);
+  const solicitudViajeRef = useRef(solicitudViaje);
+  const socketRef = useRef(socket);
 
   // Recuperación estricta sin ID predeterminado MOCK
   const conductorId = user?.uid || user?.id || user?._id || localStorage.getItem('conductorId'); 
-  const token = localStorage.getItem('token') || user?.token;
+
+  // Sincronizar referencias persistentes para evitar re-suscripciones innecesarias en Socket.io
+  useEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
+
+  useEffect(() => {
+    conductorIdRef.current = conductorId;
+  }, [conductorId]);
+
+  useEffect(() => {
+    servicioActivoRef.current = servicioActivo;
+  }, [servicioActivo]);
+
+  useEffect(() => {
+    solicitudViajeRef.current = solicitudViaje;
+  }, [solicitudViaje]);
+
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
 
   // Mapeo seguro con fallback de $20.000 COP en caso de indeterminación
   const saldoVivo = Number(
@@ -146,62 +194,70 @@ export default function HomeMototaxi() {
       geoWatchRef.current = null;
       console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
     }
-    if (socket && (socket.connected || isConnected)) {
-      if (conductorId) {
-        socket.emit('conductor:offline', { 
-          uid: conductorId,
-          nombre: formData.nombre,
-          placa: formData.placa
+    const currentSocket = socketRef.current;
+    if (currentSocket && (currentSocket.connected || isConnected)) {
+      const currentUid = conductorIdRef.current;
+      const currentFormData = formDataRef.current;
+      if (currentUid) {
+        currentSocket.emit('conductor:offline', { 
+          uid: currentUid,
+          nombre: currentFormData.nombre,
+          placa: currentFormData.placa
         });
-        socket.emit('desactivar_conductor', { conductorId });
+        currentSocket.emit('desactivar_conductor', { conductorId: currentUid });
       }
       console.log("📡 [CIMCO-SOCKET] Notificación de desactivación enviada al socket unificado.");
     }
-  }, [socket, isConnected, conductorId, formData.nombre, formData.placa]);
+  }, [isConnected]);
 
-  const iniciarTrackingGPS = useCallback(() => {
-    if (!('geolocation' in navigator)) {
-      console.error("❌ [GPS-ERROR] Geolocalización no soportada por este navegador/dispositivo.");
-      alert("⚠️ El navegador o dispositivo actual no soporta geolocalización.");
-      setIsOnline(false);
-      return;
-    }
+  // Estabilización de Telemetría GPS: Depender ÚNICAMENTE del estado Online/Offline
+  useEffect(() => {
+    if (!isOnline) return;
 
-    console.log("🛰️ [CIMCO-TELEMETRIA] Encendiendo receptor de satélites GPS...");
-    geoWatchRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        if (!position || !position.coords) return;
+    console.log('🛰️ [CIMCO-TELEMETRIA] Encendiendo receptor GPS...');
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
         const newCoords = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
         };
         setCoords(newCoords);
 
-        if (socket && (socket.connected || isConnected)) {
-          socket.emit('telemetria:location', {
-            uid: conductorId,
+        const activeSocket = socketRef.current;
+        const currentUid = conductorIdRef.current || user?.uid;
+
+        if (activeSocket && currentUid) {
+          const coordsArray = [pos.coords.longitude, pos.coords.latitude];
+          activeSocket.emit('actualizar_ubicacion', { uid: currentUid, coords: coordsArray });
+
+          const currentFormData = formDataRef.current;
+          activeSocket.emit('telemetria:location', {
+            uid: currentUid,
             coords: newCoords,
             rol: 'mototaxi',
-            placa: formData.placa || 'SIN PLACA'
+            placa: currentFormData.placa || 'SIN PLACA'
           });
-          socket.emit('actualizar_radar_gps', {
-            conductorId,
+          activeSocket.emit('actualizar_radar_gps', {
+            conductorId: currentUid,
             lat: newCoords.lat,
             lng: newCoords.lng
           });
           console.log(`🎯 [RADAR-BURST] Coordenadas emitidas al ecosistema unificado: [${newCoords.lng}, ${newCoords.lat}]`);
         }
       },
-      (error) => {
-        console.warn("⚠️ [CIMCO-GPS] Alerta de cobertura satelital:", error?.message);
-        if (error?.code === error?.PERMISSION_DENIED) {
-          alert("⚠️ Permiso de GPS denegado. Para recibir servicios, habilite la ubicación en su navegador/dispositivo.");
-          setIsOnline(false);
-        }
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      (err) => console.error(err),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 3000 }
     );
-  }, [socket, isConnected, conductorId, formData.placa]);
+
+    geoWatchRef.current = watchId;
+
+    return () => {
+      console.log('🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.');
+      navigator.geolocation.clearWatch(watchId);
+      geoWatchRef.current = null;
+    };
+  }, [isOnline]);
 
   // ==================================================================
   // 3. GOBERNANZA DEL CANAL WEBSOCKET CENTRALIZADO (useSocket)
@@ -227,53 +283,129 @@ export default function HomeMototaxi() {
 
       console.log(`📡 [CIMCO-SOCKET] Suscribiendo a instancia global centralizada.`);
 
-      if (socket.connected || isConnected) {
+      const registrarYUnirSalas = () => {
+        // 1. Notificar estado online e identidad
         socket.emit('conductor:online', {
           uid: conductorId,
-          nombre: formData.nombre,
-          placa: formData.placa
+          nombre: formDataRef.current.nombre,
+          placa: formDataRef.current.placa,
+          tipoServicio: formDataRef.current.modalidad || 'Mototaxi'
         });
+
+        // 2. Registrar conductor y unirse a salas clave de despacho
         socket.emit('registrar_conductor', { 
           conductorId, 
-          tipoServicio: formData.modalidad,
+          tipoServicio: formDataRef.current.modalidad || 'Mototaxi',
           email: user?.email || localStorage.getItem('conductorEmail') || ''
         });
+
+        // Unir explícitamente a la sala del tipo de vehículo por si el backend emite a io.to('mototaxi') o io.to('sala_conductores')
+        socket.emit('join_room', 'sala_conductores');
+        socket.emit('join_room', 'mototaxi');
+        socket.emit('unir_sala', { sala: 'mototaxi' });
+      };
+
+      if (socket.connected || isConnected) {
+        registrarYUnirSalas();
       }
 
+      // Re-registrar si el socket se reconecta
+      socket.on('connect', registrarYUnirSalas);
+
+      // Handler unificado de recepción de servicios con desfragmentación de payloads y VALIDACIÓN LOCAL JWT
       const handleNuevaSolicitud = (data) => {
-        console.log("🔥 [CIMCO-RADAR] ¡Alerta de viaje entrante detectada en el perímetro!", data);
-        if (!servicioActivo && !solicitudViaje) {
-          setSolicitudViaje(data);
+        console.log("🔥 [CIMCO-RADAR] ¡Alerta de viaje entrante capturada!", data);
+        if (!data) return;
+
+        // 🛡️ VALIDACIÓN LOCAL DE VIGENCIA JWT ANTES DE RENDERIZAR
+        const activeToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
+        if (isTokenExpired(activeToken)) {
+          console.warn("⚠️ [CIMCO-AUTH-GUARD] JWT expirado detectado al recibir nuevo_viaje_disponible. Desconectando red.");
+          setIsOnline(false);
+          alert("🔒 Sesión Expirada: Su token de seguridad ha caducado. Inicie sesión nuevamente para recibir solicitudes.");
+          desconectarEcosistema();
+          logout();
+          return;
+        }
+
+        // 1. Desempaquetar payload si data viene envuelto en Array o dentro de un objeto anidado
+        let viaje = Array.isArray(data) ? data[0] : data;
+        if (viaje && typeof viaje === 'object' && viaje.viaje) {
+          viaje = viaje.viaje;
+        }
+
+        if (!viaje) return;
+
+        // 2. Asignar estado de solicitud si el conductor no tiene servicios activos ni solicitudes pendientes
+        if (!servicioActivoRef.current && !solicitudViajeRef.current) {
+          setSolicitudViaje(viaje);
+        } else {
+          console.warn("⚠️ [CIMCO-RADAR] Solicitud recibida ignorada por existir un servicio activo o una alerta en curso.");
         }
       };
 
-      socket.on('nueva_solicitud_viaje', handleNuevaSolicitud);
+      // Handler para remover dinámicamente ofertas expiradas o tomadas por otro conductor
+      const handleViajeRemovido = (payload) => {
+        const viajeIdRemover = payload?.viajeId || payload?._id || payload?.id;
+        console.log(`🗑️ [CIMCO-RADAR] Removiendo solicitud del radar local: ${viajeIdRemover}`);
+        if (!viajeIdRemover) return;
 
-      iniciarTrackingGPS();
-
-      return () => {
-        socket.off('nueva_solicitud_viaje', handleNuevaSolicitud);
-        desconectarEcosistema();
+        setOfertasDisponibles((prev) => prev.filter((v) => v.id !== viajeIdRemover && v._id !== viajeIdRemover && v.viajeId !== viajeIdRemover));
+        setSolicitudViaje((prev) => {
+          if (!prev) return null;
+          const currentId = prev.viajeId || prev.id || prev._id;
+          return currentId === viajeIdRemover ? null : prev;
+        });
       };
 
-    } else {
-      desconectarEcosistema();
+      // 🚨 Escuchar todos los posibles nombres de eventos emitidos por el servidor de despacho
+      socket.on('viaje_difundido', handleNuevaSolicitud);
+      socket.on('solicitud_servicio', handleNuevaSolicitud);
+      socket.on('nuevo_viaje', handleNuevaSolicitud);
+      socket.on('servicio_disponible', handleNuevaSolicitud);
+      socket.on('nuevo_servicio_mototaxi', handleNuevaSolicitud);
+      socket.on('nuevo_viaje_disponible', handleNuevaSolicitud);
+      socket.on('viaje_removido_radar', handleViajeRemovido);
+
+      // 🛠️ Traza completa para depuración en vivo: Imprime absolutamente TODO evento que envíe el servidor
+      const handleAnyEvent = (eventName, ...args) => {
+        console.log(`📥 [SOCKET-INCOMING-DEBUG] Evento recibido: "${eventName}"`, args);
+      };
+      socket.onAny(handleAnyEvent);
+
+      return () => {
+        socket.off('connect', registrarYUnirSalas);
+        socket.off('viaje_difundido', handleNuevaSolicitud);
+        socket.off('solicitud_servicio', handleNuevaSolicitud);
+        socket.off('nuevo_viaje', handleNuevaSolicitud);
+        socket.off('servicio_disponible', handleNuevaSolicitud);
+        socket.off('nuevo_servicio_mototaxi', handleNuevaSolicitud);
+        socket.off('nuevo_viaje_disponible', handleNuevaSolicitud);
+        socket.off('viaje_removido_radar', handleViajeRemovido);
+        socket.offAny(handleAnyEvent);
+      };
     }
   }, [
     isOnline, 
     conductorId, 
-    formData.modalidad, 
-    formData.nombre,
-    formData.placa,
     puedeOperar, 
     socket, 
     isConnected, 
-    servicioActivo, 
-    solicitudViaje, 
-    iniciarTrackingGPS, 
-    desconectarEcosistema, 
-    user?.email
+    user?.email,
+    user?.token,
+    desconectarEcosistema,
+    logout
   ]);
+
+  // Limpieza defensiva del receptor GPS al desmontar de forma definitiva la vista
+  useEffect(() => {
+    return () => {
+      if (geoWatchRef.current !== null) {
+        navigator.geolocation.clearWatch(geoWatchRef.current);
+        geoWatchRef.current = null;
+      }
+    };
+  }, []);
 
   // Alternar Estado Conectado / Desconectado
   const handleToggleState = () => {
@@ -281,12 +413,15 @@ export default function HomeMototaxi() {
     setIsOnline(nextState);
 
     if (socket && (socket.connected || isConnected)) {
-      const eventName = nextState ? 'conductor:online' : 'conductor:offline';
-      socket.emit(eventName, {
-        uid: conductorId,
-        nombre: formData.nombre,
-        placa: formData.placa
-      });
+      if (!nextState) {
+        desconectarEcosistema();
+      } else {
+        socket.emit('conductor:online', {
+          uid: conductorId,
+          nombre: formData.nombre,
+          placa: formData.placa
+        });
+      }
     }
   };
 
@@ -477,26 +612,62 @@ export default function HomeMototaxi() {
       setSolicitudViaje(null);
       return;
     }
+
+    // 🛡️ VALIDACIÓN PREVIA DEL JWT EN LA ACCIÓN "ACEPTAR VIAJE"
+    const currentToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
+    if (isTokenExpired(currentToken)) {
+      console.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de aceptación con JWT expirado. Abortando POST y cerrando sesión.");
+      alert("🔒 Sesión Expirada: Su token de acceso ha caducado. Por favor reautentíquese en TAXIA CIMCO.");
+      setSolicitudViaje(null);
+      desconectarEcosistema();
+      await logout();
+      window.location.replace('/');
+      return;
+    }
+    
     setLoading(true);
+    const idCorrecto = solicitudViaje?.viajeId || solicitudViaje?.id || solicitudViaje?._id || solicitudViaje?.idViaje;
+    const idConductorActual = user?.uid || user?.id || user?._id || conductorId || localStorage.getItem('conductorId');
+
     try {
-      console.log(`⚡ [ACID-DESPACHO] Intentando aceptar el viaje ID: ${solicitudViaje.viajeId}`);
-      
+      console.log(`⚡ [ACID-DESPACHO] Reclamando viaje ID: ${idCorrecto} para Conductor: ${idConductorActual}`);
+
+      const headers = {};
+      if (currentToken) {
+        headers['Authorization'] = `Bearer ${currentToken}`;
+      }
+      if (idConductorActual) {
+        headers['x-conductor-id'] = idConductorActual;
+      }
+
       const respuesta = await api.post(`/viajes/aceptar`, {
-        viajeId: solicitudViaje.viajeId,
-        conductorId
-      }, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
+        viajeId: idCorrecto,
+        conductorId: idConductorActual
+      }, { headers });
 
       if (respuesta?.data?.success) {
-        setServicioActivo(respuesta.data.viaje);
+        setServicioActivo(respuesta.data.viaje || { id: idCorrecto, ...solicitudViaje, estado: 'ACEPTADO' });
         setSolicitudViaje(null);
-        console.log("✅ [ACID-DESPACHO] Viaje adjudicado y sincronizado.");
+        console.log("✅ [ACID-DESPACHO] Viaje adjudicado y sincronizado con éxito.");
       }
     } catch (error) {
-      console.error("🚨 [DESPACHO-ERR] Error al reclamar solicitud de servicio:", error?.response?.data?.message || error?.message);
-      alert(error?.response?.data?.message || "La solicitud caducó o fue tomada por otro operador.");
-      setSolicitudViaje(null);
+      if (error?.response && error.response.status === 409) {
+        const msgConflicto = error.response.data?.error || error.response.data?.message || 'La solicitud caducó o fue tomada por otro operador.';
+        alert(msgConflicto);
+        // Limpiar la tarjeta localmente para mantener la UI sincronizada
+        setOfertasDisponibles((prev) => prev.filter((v) => v.id !== idCorrecto && v._id !== idCorrecto && v.viajeId !== idCorrecto));
+        setSolicitudViaje(null);
+      } else if (error?.response?.status === 401) {
+        alert("⚠️ SESIÓN EXPIRADA O NODOS DESSINCRO: Tu cuenta requiere reautenticación en el clúster central. Inicia sesión nuevamente.");
+        desconectarEcosistema();
+        await logout();
+        window.location.replace('/');
+      } else {
+        const msgError = error?.response?.data?.message || error?.response?.data?.error || "Error de conexión al procesar la solicitud.";
+        console.error("🚨 [DESPACHO-ERR] Error al reclamar solicitud:", msgError);
+        alert(msgError);
+        setSolicitudViaje(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -505,6 +676,17 @@ export default function HomeMototaxi() {
   const capturarOferta = async (viajeId) => {
     if (!puedeOperar) {
       alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para procesar despachos.");
+      return;
+    }
+
+    // 🛡️ VALIDACIÓN PREVIA DEL JWT AL CAPTURAR DESDE EL RADAR
+    const currentToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
+    if (isTokenExpired(currentToken)) {
+      console.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de captura con JWT expirado. Abortando transaccion.");
+      alert("🔒 Sesión Expirada: Su token de acceso ha caducado. Por favor reautentíquese.");
+      desconectarEcosistema();
+      await logout();
+      window.location.replace('/');
       return;
     }
 
@@ -532,6 +714,7 @@ export default function HomeMototaxi() {
     } catch (err) {
       console.error("🚨 [CIMCO-CAPTURE-FAIL] Bloqueo transaccional:", err?.message);
       alert(err?.message);
+      setOfertasDisponibles((prev) => prev.filter((v) => v.id !== viajeId && v._id !== viajeId));
     }
   };
 
@@ -729,11 +912,16 @@ export default function HomeMototaxi() {
                   <span className="text-xs font-black text-amber-400 uppercase tracking-widest flex items-center gap-2">
                     ⚡ NUEVA SOLICITUD DE SERVICIO
                   </span>
+                  <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1">
+                    <Clock className="w-3 h-3 animate-spin" /> 60s RADAR
+                  </span>
                 </div>
                 <div className="space-y-2 text-left mb-6">
-                  <p className="text-sm font-bold text-white">{solicitudViaje.origen || 'Origen solicitado'}</p>
-                  {solicitudViaje.destino && <p className="text-xs text-slate-300">Destino: {solicitudViaje.destino}</p>}
-                  <p className="text-xl font-mono font-bold text-emerald-400">${Number(solicitudViaje.valor || 0).toLocaleString('es-CO')} COP</p>
+                  <p className="text-sm font-bold text-white">{solicitudViaje.origen || solicitudViaje.origenDireccion || 'Origen solicitado'}</p>
+                  {(solicitudViaje.destino || solicitudViaje.destinoDireccion) && (
+                    <p className="text-xs text-slate-300">Destino: {solicitudViaje.destino || solicitudViaje.destinoDireccion}</p>
+                  )}
+                  <p className="text-xl font-mono font-bold text-emerald-400">${Number(solicitudViaje.valor || solicitudViaje.precio || 0).toLocaleString('es-CO')} COP</p>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <button
@@ -816,7 +1004,7 @@ export default function HomeMototaxi() {
                         <div key={of.id} className="bg-[#181920] p-3 rounded-xl border border-white/5 flex justify-between items-center">
                           <div className="text-xs">
                             <p className="font-bold text-white">{of.origenDireccion || of.origen || 'Origen sin especificar'}</p>
-                            <p className="text-emerald-400 font-mono font-bold">${Number(of.valor || 0).toLocaleString('es-CO')} COP</p>
+                            <p className="text-emerald-400 font-mono font-bold">${Number(of.valor || 0).toLocaleString('es-CO')}</p>
                           </div>
                           <button
                             onClick={() => capturarOferta(of.id)}

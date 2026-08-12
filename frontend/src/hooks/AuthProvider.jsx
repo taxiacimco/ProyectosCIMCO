@@ -1,12 +1,10 @@
-// Versión Arquitectura: V22.3 - Propagación de Excepciones y Re-lanzamiento de Errores en Login Local
+// Versión Arquitectura: V22.4 - Sincronización Global de Sesión, Exposición de RefreshToken y Deslogueo Anti-401
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
- * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO.
- * Ajuste V22.3: Re-lanzamiento de excepciones (throw error) en loginLocal para permitir 
- *              la captura centralizada de fallos desde componentes consumidores (ej. Login.jsx).
+ * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO con soporte para auto-cleanup y refresco de tokens.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import api from '@/config/api';
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
 import { auth } from '@/config/firebase';
@@ -18,12 +16,91 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [initialized, setInitialized] = useState(false);
 
+    // 🧹 Método de Deslogueo Atómico de la aplicación
+    const logout = useCallback(async () => {
+        // Purga de seguridad completa de la aplicación durante el Logout
+        if (typeof window !== 'undefined' && window.localStorage) {
+            localStorage.removeItem('cimco_token');
+            localStorage.removeItem('cimco_user');
+            localStorage.removeItem('token');
+            localStorage.removeItem('taxia_token');
+        }
+        
+        if (api && api.defaults && api.defaults.headers && api.defaults.headers.common) {
+            delete api.defaults.headers.common['Authorization'];
+        }
+        setUser(null);
+        
+        try {
+            if (auth && auth.currentUser) {
+                await signOut(auth);
+                console.log("🧹 [CIMCO-AUTH] Canal satelital Firebase cerrado de forma segura.");
+            }
+        } catch (error) {
+            console.error("❌ [CIMCO-AUTH] Error al cerrar sesión en Firebase:", error);
+        }
+    }, []);
+
+    // 🔄 Método de Verificación / Refresco del Token con el Nodo Central
+    const refreshToken = useCallback(async () => {
+        try {
+            const tokenExistente = typeof window !== 'undefined' && window.localStorage 
+                ? (localStorage.getItem('cimco_token') || localStorage.getItem('token'))
+                : null;
+
+            if (!tokenExistente) {
+                await logout();
+                return { success: false, message: 'No hay token activo para verificar.' };
+            }
+
+            // Intento de re-validación de identidad contra el backend central
+            const respuesta = await api.get('/auth/me');
+            if (respuesta && respuesta.data && (respuesta.data.success || respuesta.data.user || respuesta.data.usuario)) {
+                const userData = respuesta.data.user || respuesta.data.usuario || respuesta.data.data?.user;
+                if (userData) {
+                    userData.uid = userData._id || userData.id || userData.uid || userData.conductorId;
+                    userData._id = userData._id || userData.uid || userData.id || userData.conductorId;
+                    setUser(userData);
+                    if (typeof window !== 'undefined' && window.localStorage) {
+                        localStorage.setItem('cimco_user', JSON.stringify(userData));
+                    }
+                }
+                return { success: true, user: userData, data: respuesta.data };
+            } else {
+                await logout();
+                return { success: false, message: 'Nodo de identidad no válido o expirado.' };
+            }
+        } catch (error) {
+            console.error("❌ [CIMCO-AUTH] Error al intentar re-validar sesión:", error);
+            await logout();
+            return { success: false, error };
+        }
+    }, [logout]);
+
+    // 🎧 Listener Event-Driven para Captura Global de Expiración (Sincronización con Interceptor HTTP api.js)
+    useEffect(() => {
+        const handleAuthExpired = (event) => {
+            console.warn("⚠️ [CIMCO-AUTH] Evento cimco:auth_expired capturado. Ejecutando purga global de sesión.", event?.detail);
+            logout();
+        };
+
+        if (typeof window !== 'undefined') {
+            window.addEventListener('cimco:auth_expired', handleAuthExpired);
+        }
+
+        return () => {
+            if (typeof window !== 'undefined') {
+                window.removeEventListener('cimco:auth_expired', handleAuthExpired);
+            }
+        };
+    }, [logout]);
+
     // 📡 Inicialización analítica perimetral de la sesión
     useEffect(() => {
         const initializeSession = async () => {
             try {
                 // 🛡️ Búsqueda aislada usando exclusivamente la clave oficial del sistema
-                const token = localStorage.getItem('cimco_token');
+                const token = typeof window !== 'undefined' && window.localStorage ? localStorage.getItem('cimco_token') : null;
                 
                 if (token && token !== 'undefined' && token !== 'null') {
                     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -52,8 +129,10 @@ export const AuthProvider = ({ children }) => {
                 }
             } catch (error) {
                 console.error("❌ [CIMCO-AUTH-FATAL] Fallo en la inicialización del ecosistema de identidad:", error);
-                localStorage.removeItem('cimco_token');
-                localStorage.removeItem('cimco_user');
+                if (typeof window !== 'undefined' && window.localStorage) {
+                    localStorage.removeItem('cimco_token');
+                    localStorage.removeItem('cimco_user');
+                }
             } finally {
                 setLoading(false);
                 setInitialized(true);
@@ -72,7 +151,9 @@ export const AuthProvider = ({ children }) => {
             usuarioActualizado.uid = usuarioActualizado.uid || usuarioActualizado._id || usuarioActualizado.id || usuarioActualizado.conductorId;
             usuarioActualizado._id = usuarioActualizado._id || usuarioActualizado.uid || usuarioActualizado.id || usuarioActualizado.conductorId;
             
-            localStorage.setItem('cimco_user', JSON.stringify(usuarioActualizado));
+            if (typeof window !== 'undefined' && window.localStorage) {
+                localStorage.setItem('cimco_user', JSON.stringify(usuarioActualizado));
+            }
             return usuarioActualizado;
         });
     };
@@ -103,8 +184,10 @@ export const AuthProvider = ({ children }) => {
                     userData.access_level = userData.access_level || DEFAULT_ACCESS_LEVELS[userData.role] || 1;
                 }
 
-                localStorage.setItem('cimco_token', token);
-                localStorage.setItem('cimco_user', JSON.stringify(userData));
+                if (typeof window !== 'undefined' && window.localStorage) {
+                    localStorage.setItem('cimco_token', token);
+                    localStorage.setItem('cimco_user', JSON.stringify(userData));
+                }
                 
                 api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
                 setUser(userData);
@@ -166,26 +249,6 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const logout = async () => {
-        // 🧹 Purga de seguridad completa de la aplicación durante el Logout explícito
-        localStorage.removeItem('cimco_token');
-        localStorage.removeItem('cimco_user');
-        localStorage.removeItem('token');
-        localStorage.removeItem('taxia_token');
-        
-        delete api.defaults.headers.common['Authorization'];
-        setUser(null);
-        
-        try {
-            if (auth && auth.currentUser) {
-                await signOut(auth);
-                console.log("🧹 [CIMCO-AUTH] Canal satelital Firebase cerrado de forma segura.");
-            }
-        } catch (error) {
-            console.error("Error al cerrar sesión en Firebase:", error);
-        }
-    };
-
     return (
         <AuthContext.Provider value={{ 
             user, 
@@ -196,6 +259,7 @@ export const AuthProvider = ({ children }) => {
             loginLocal, 
             login: loginLocal, 
             logout, 
+            refreshToken,
             registerCentral, 
             resetPasswordCentral 
         }}>

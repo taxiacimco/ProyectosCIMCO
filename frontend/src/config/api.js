@@ -1,7 +1,7 @@
-// Versión Arquitectura: V16.0 - Inyección Transparente JWT y Mapeo Dinámico de Tokens Anti-401
+// Versión Arquitectura: V16.1 - Interceptor de Respuesta Anti-401, Purga de Sesión y Notificación Global
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
- * Misión: Centralización de Axios, inyección de cabeceras anti-caché e interceptores JWT con resiliencia.
+ * Misión: Centralización de Axios, inyección de cabeceras anti-caché e interceptores JWT con resiliencia y auto-cleanup anti-401.
  */
 
 import axios from 'axios';
@@ -78,7 +78,7 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA Y AUTO-CLEANUP
+// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA, PURGA DE SESIÓN Y NOTIFICACIÓN GLOBAL ANTI-401
 api.interceptors.response.use(
     (response) => {
         try {
@@ -99,14 +99,36 @@ api.interceptors.response.use(
         }
         return response;
     },
-    (error) => {
+    async (error) => {
         if (error && error.response) {
-            console.error(`🚨 [CIMCO-NEXUS-RESPONSE] Error de Servidor [${error.response.status}]:`, error.response.data);
+            const status = error.response.status;
+            console.error(`🚨 [CIMCO-NEXUS-RESPONSE] Error de Servidor [${status}]:`, error.response.data);
             
-            if (error.response.status === 401 || error.response.status === 403) {
-                localStorage.removeItem('token');
-                localStorage.removeItem('cimco_token');
-                localStorage.removeItem('cimco_user');
+            if (status === 401 || status === 403) {
+                try {
+                    if (typeof window !== 'undefined' && window.localStorage) {
+                        localStorage.removeItem('token');
+                        localStorage.removeItem('cimco_token');
+                        localStorage.removeItem('cimco_user');
+                    }
+
+                    // Notificación global a la app mediante evento personalizado
+                    if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('cimco:auth_expired', { 
+                            detail: { 
+                                status, 
+                                message: error.response.data?.message || 'Sesión expirada o desincronizada' 
+                            } 
+                        }));
+
+                        // Redirección defensiva si no se encuentra en la vista de inicio de sesión
+                        if (window.location.pathname !== '/login') {
+                            window.location.href = '/login';
+                        }
+                    }
+                } catch (cleanupErr) {
+                    console.error('🚨 [CIMCO-NEXUS-AUTH-CLEANUP] Error durante purga de credenciales:', cleanupErr);
+                }
             }
         } else if (error && error.request) {
             console.error('🚨 [CIMCO-NEXUS-NETWORK] Sin respuesta del nodo central. Verifique conectividad o estado del Backend.');
