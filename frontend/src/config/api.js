@@ -1,4 +1,4 @@
-// Versión Arquitectura: V16.1 - Interceptor de Respuesta Anti-401, Purga de Sesión y Notificación Global
+// Versión Arquitectura: V16.2 - Sanitización de Prefijos y Prevención de Duplicación /api
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
  * Misión: Centralización de Axios, inyección de cabeceras anti-caché e interceptores JWT con resiliencia y auto-cleanup anti-401.
@@ -12,7 +12,9 @@ export const HOST_IP = import.meta.env.VITE_HOST_IP || '127.0.0.1';
 const DETERMINAR_URL_BASE = () => {
     // 1. Prioridad Absoluta: Variable unificada desde .env / build
     if (import.meta.env.VITE_API_URL) {
-        return import.meta.env.VITE_API_URL;
+        // Sanitización para eliminar '/api' o '/' al final si la variable de entorno ya lo incluye
+        const cleanEnvUrl = import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
+        return `${cleanEnvUrl}/api`;
     }
     // 2. Fallback Seguro para Desarrollo Local
     return `http://${HOST_IP}:3000/api`;
