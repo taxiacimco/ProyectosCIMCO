@@ -1,9 +1,9 @@
-// Versión Arquitectura: V17.8 - Enrutador Administrativo Perimetral Inline y Resiliencia ESM
+// Versión Arquitectura: V17.9 - Actualización Canónica CORS Vercel y Resiliencia Perimetral ESM
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
- * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte explícito
- * para frontend-taxia-cimco.vercel.app, orquestación de sockets e inyección de enrutadores del sistema.
- * Ajuste V17.8: Definición de enrutador administrativo inline en `/api/admin` para prevenir errores ESM (ERR_MODULE_NOT_FOUND) y resolver peticiones de administración.
+ * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte canónico
+ * para frontend-opal-eight-58.vercel.app, orquestación de sockets e inyección de enrutadores del sistema.
+ * Ajuste V17.9: Sincronización de dominio canónico de producción en lista blanca de CORS y Socket.IO.
  */
 
 import 'dotenv/config';
@@ -32,6 +32,7 @@ const logLocal = (msg) => {
 
 // 🌐 ORIGENES PERMITIDOS PARA DESARROLLO LOCAL, RED LOCAL, NGROK, CLOUDFLARE TUNNEL Y PRODUCCIÓN VERCEL
 const allowedOrigins = [
+  'https://frontend-opal-eight-58.vercel.app',
   'https://frontend-taxia-cimco.vercel.app',
   'http://localhost:5173',
   'http://localhost:4173',

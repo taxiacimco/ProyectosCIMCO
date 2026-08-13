@@ -1,4 +1,4 @@
-<!-- Versión Arquitectura: V9.9.7 - Inyección de Hoja de Estilos CSS de Leaflet y Preservación de CDN Wompi -->
+<!-- Versión Arquitectura: V10.0 - Metadatos Canónicos, Integración PWA Manifest y Soporte Mobile WebApp -->
 <!DOCTYPE html>
 <html lang="es">
   <head>
@@ -6,6 +6,19 @@
     <link rel="icon" type="image/png" href="/assets/pasajero-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Taxia CIMCO - La Jagua de Ibirico</title>
+
+    <!-- Metadatos Canónicos y Redes Sociales (Open Graph) -->
+    <link rel="canonical" href="https://frontend-opal-eight-58.vercel.app/" />
+    <meta property="og:url" content="https://frontend-opal-eight-58.vercel.app/" />
+
+    <!-- Configuración PWA y Compatibilidad Mobile WebApp -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="CIMCO" />
+    <link rel="apple-touch-icon" href="/assets/pwa-icons/pwa-192x192.png" />
 
     <!-- Leaflet CSS (Requerido para la correcta renderización visual de mapas, azulejos y marcadores) -->
     <link 
@@ -17,6 +30,9 @@
 
     <!-- Widget de Pagos Wompi -->
     <script type="text/javascript" src="https://checkout.wompi.co/widget.js"></script>
+
+    <!-- Inicialización del Service Worker PWA -->
+    <script src="/registerSW.js"></script>
   </head>
   <body class="bg-[#121214]">
     <div id="root"></div>

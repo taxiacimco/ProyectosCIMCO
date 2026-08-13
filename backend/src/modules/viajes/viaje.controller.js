@@ -1,9 +1,9 @@
-// Versión Arquitectura: V18.4 - Bloqueo Atómico de Asignación con Filtro de Estado SOLICITADO y HTTP 409 Conflict
+// Versión Arquitectura: V18.5 - Sincronización Canónica de Redirect URL de Pasarelas (Wompi/PSE) al Frontend Vercel
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
- * Misión: Procesar flujos operativos, liquidación contable (10% comisión), transición de estados, cancelación y sincronización Firestore.
- * Ajuste V18.4: Modificación de la función aceptarViaje para implementar bloqueo atómico con findOneAndUpdate 
- *              evaluando estado 'SOLICITADO' / 'solicitado' y retornando HTTP 409 Conflict ante colisiones de concurrencia.
+ * Misión: Procesar flujos operativos, liquidación contable (10% comisión), transición de estados, cancelación,
+ *         sincronización Firestore y gestión de pasarelas de pago con redirección canónica a Vercel.
+ * Ajuste V18.5: Configuración y validación estricta de redirectUrl/redirect_url apuntando dinámicamente a ${process.env.FRONTEND_URL}/billetera.
  */
 
 import crypto from 'crypto';
@@ -746,8 +746,32 @@ export const obtenerDetalleViaje = async (req, res) => {
 };
 
 // ==================================================================
-// 6. WEBHOOK WOMPI
+// 6. GESTIÓN DE PASARELAS DE PAGO Y WEBHOOK WOMPI (CANONICAL VERCEL REDIRECT)
 // ==================================================================
+export const prepararCheckoutPasarela = async (req, res) => {
+    try {
+        const { monto, referencia, moneda = 'COP', descripcion } = req.body || {};
+        
+        // Resolución canónica perimetral del frontend Vercel
+        const baseFrontend = process.env.FRONTEND_URL || process.env.CLIENT_URL || 'https://frontend-opal-eight-58.vercel.app';
+        const urlLimpia = String(baseFrontend).trim().replace(/\/+$/, '');
+        const redirectUrl = `${urlLimpia}/billetera`;
+
+        return res.status(200).json({
+            success: true,
+            redirectUrl: redirectUrl,
+            redirect_url: redirectUrl,
+            moneda: moneda || 'COP',
+            monto: monto ? parseFloat(monto) : 0,
+            referencia: referencia || `CIMCO-TX-${Date.now()}`,
+            descripcion: descripcion || 'Recarga de Billetera Digital TAXIA CIMCO'
+        });
+    } catch (error) {
+        console.error("🚨 [CIMCO-CHECKOUT-ERR]:", error);
+        return res.status(500).json({ success: false, message: 'Error interno al preparar checkout de pasarela de pagos.' });
+    }
+};
+
 export const recibirAlertaWompiLocal = async (req, res) => {
     try {
         if (!req || !req.body) {
@@ -765,7 +789,7 @@ export const recibirAlertaWompiLocal = async (req, res) => {
         if (data.transaction.payment_method_type?.toUpperCase() === 'CARD') return res.status(200).json({ status: 'ignored', message: 'Tarjetas deshabilitadas.' });
         
         if (data.transaction.status === 'APPROVED' && event === 'transaction.updated') {
-            console.log(`✅ [CIMCO-TRANSACCION] Recarga Wompi processed.`);
+            console.log(`✅ [CIMCO-TRANSACCION] Recarga Wompi procesada.`);
         }
         return res.status(200).json({ success: true, status: 'processed' });
     } catch (error) {
@@ -905,6 +929,7 @@ export default {
     obtenerHistorialViajes,
     obtenerViajePorId,
     obtenerDetalleViaje,
+    prepararCheckoutPasarela,
     recibirAlertaWompiLocal,
     despacharViajeAtomico
 };
