@@ -1,8 +1,8 @@
-// Versión Arquitectura: V15.0 - Integración REST, Sockets y Notificación de Expiración (60s)
+// Versión Arquitectura: V15.1 - Corrección de Enrutamiento REST sin Prefijos Duplicados
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Emisión activa de telemetría, solicitud de servicios con soporte multipago, verificación estricta de hardware (GPS), edición de perfil, pasarela de billetera y selección avanzada de punto de recogida + destino.
- * Ajuste V15.0: Conexión de solicitud con API REST, reactividad en tiempo real vía Socket.io y escucha del evento `viaje_expirado` para notificar al pasajero tras 60s sin conductores disponibles.
+ * Ajuste V15.1: Corrección quirúrgica del endpoint de solicitud REST para eliminar la duplicación '/api/api/viajes/solicitar' usando la ruta relativa '/viajes/solicitar'.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -393,11 +393,12 @@ const HomePasajero = () => {
             setRideId(idGenerado);
             setEstadoViaje('BUSCANDO');
 
-            // Intento de conexión con API REST / Sockets backend
+            // Intento de conexión con API REST / Sockets backend (Ajustado a la ruta relativa correcta)
             try {
                 const apiHost = import.meta.env?.VITE_API_URL || '';
                 if (apiHost) {
-                    await fetch(`${apiHost}/api/viajes/solicitar`, {
+                    const cleanApiHost = apiHost.replace(/\/+$/, '');
+                    await fetch(`${cleanApiHost}/viajes/solicitar`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -492,7 +493,7 @@ const HomePasajero = () => {
                     </div>
                     <div>
                         <h1 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V15.0</span>
+                            TAXIA CIMCO <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono border border-cyan-500/20">PASAJERO V15.1</span>
                         </h1>
                         <div className="text-[10px] text-zinc-400 font-mono uppercase tracking-widest flex items-center gap-2">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>

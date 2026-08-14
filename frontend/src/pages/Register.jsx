@@ -1,14 +1,14 @@
-// Versión Arquitectura: V23.4 - Fusión de Interceptor de QR con Eliminación de Alta Gerencia y Estética CIMCO-UI V9.3
+// Versión Arquitectura: V23.5 - Normalización de Rutas de Registro e Integración Híbrida CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Register.jsx
- * Misión: Enrutador maestro de roles con interceptor para QR institucionales, protección de sesión activa,
- *         fallback preventivo de roles y remoción definitiva del punto de acceso público a Alta Gerencia.
- * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Híbrida).
+ * Misión: Enrutador maestro de roles con interceptor de códigos QR, protección de sesión activa,
+ *         rutas estandarizadas (/register/...) y estética de alto impacto UX/UI CIMCO-UI V9.3 Glassmorphism.
+ * Estilo: CIMCO-UI V9.3 Glassmorphism Premium.
  */
 
 import React, { useEffect } from 'react';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
-import { User, Bike, Bus, Terminal, ArrowLeft, Loader } from 'lucide-react';
+import { User, Bike, Bus, Terminal, ArrowLeft, Loader, ShieldCheck, Zap } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
 const Register = () => {
@@ -16,7 +16,7 @@ const Register = () => {
     const navigate = useNavigate();
     const { user, loading } = useAuth();
     
-    // Guardas de Seguridad para mitigar desbordamientos por tipos inválidos
+    // Guardas de Seguridad para mitigar desbordamientos por tipos inválidos[cite: 12]
     const targetRole = searchParams ? searchParams.get('role') : null;
 
     // 🛡️ INTERCEPTOR DOBLE: VERIFICA SESIÓN Y REDIRIGE SEGÚN CÓDIGO QR O ROL (CON FALLBACK)
@@ -25,7 +25,7 @@ const Register = () => {
 
         // 1️⃣ CASO A: EL USUARIO YA TIENE SESIÓN ABIERTA
         if (user) {
-            navigate('/login', { replace: true });
+            navigate('/', { replace: true });
             return;
         }
 
@@ -40,107 +40,132 @@ const Register = () => {
             const isDespachador = normalizedRole === 'despachador';
 
             if (isPasajero) {
-                navigate('/register-pasajero', { replace: true });
+                navigate('/register/pasajero', { replace: true });
             } else if (isMoto) {
-                navigate(`/register-moto?role=${normalizedRole}`, { replace: true });
+                navigate(`/register/moto?role=${normalizedRole}`, { replace: true });
             } else if (isIntermunicipal) {
-                navigate('/register-intermunicipal', { replace: true });
+                navigate('/register/intermunicipal', { replace: true });
             } else if (isDespachador) {
-                navigate('/register-despachador', { replace: true });
+                navigate('/register/despachador', { replace: true });
             } else {
                 console.warn(`⚠️ [CIMCO-QR] Parámetro ?role="${targetRole}" no válido. Aplicando fallback a registro de pasajero.`);
-                navigate('/register-pasajero', { replace: true });
+                navigate('/register/pasajero', { replace: true });
             }
         }
     }, [user, loading, targetRole, navigate]);
 
-    // 🗂️ Mapeo de Roles y Rutas Homologados CIMCO-UI V9.3
+    // 🗂️ Mapeo con Rutas Corregidas (/register/...) y Estilos de Psicología del Color CIMCO-UI V9.3
     const roles = [
         {
             id: 'pasajero',
             title: 'Pasajero',
-            desc: 'Solicita viajes y envíos rápidamente.',
-            path: '/register-pasajero',
-            icon: <User size={24} className="text-yellow-500" />,
-            borderColor: 'hover:border-yellow-500/50',
-            bgColor: 'hover:bg-yellow-500/10'
+            badge: 'Viajes Instantáneos',
+            desc: 'Solicita transporte seguro, rastrea tu viaje en tiempo real y gestiona tus pagos.',
+            path: '/register/pasajero',
+            icon: <User size={26} className="text-amber-400" />,
+            borderColor: 'hover:border-amber-500/50 hover:shadow-[0_0_25px_rgba(245,158,11,0.15)]',
+            badgeBg: 'bg-amber-500/10 text-amber-400 border-amber-500/20'
         },
         {
             id: 'moto',
             title: 'Escuadrón Moto',
-            desc: 'Mototaxi, Motoparrillero o Motocarga.',
-            path: '/register-moto',
-            icon: <Bike size={24} className="text-teal-500" />,
-            borderColor: 'hover:border-teal-500/50',
-            bgColor: 'hover:bg-teal-500/10'
+            badge: 'Mototaxi / Parrillero / Carga',
+            desc: 'Operación ágil de transporte motorizado urbano con verificación en línea.',
+            path: '/register/moto',
+            icon: <Bike size={26} className="text-teal-400" />,
+            borderColor: 'hover:border-teal-500/50 hover:shadow-[0_0_25px_rgba(20,184,166,0.15)]',
+            badgeBg: 'bg-teal-500/10 text-teal-400 border-teal-500/20'
         },
         {
             id: 'intermunicipal',
             title: 'Intermunicipal',
-            desc: 'Operadores de Cooperativas y Rutas Medianas.',
-            path: '/register-intermunicipal',
-            icon: <Bus size={24} className="text-indigo-500" />,
-            borderColor: 'hover:border-indigo-500/50',
-            bgColor: 'hover:bg-indigo-500/10'
+            badge: 'Rutas Regionales',
+            desc: 'Conductores de cooperativas y rutas de mediano y largo alcance.',
+            path: '/register/intermunicipal',
+            icon: <Bus size={26} className="text-indigo-400" />,
+            borderColor: 'hover:border-indigo-500/50 hover:shadow-[0_0_25px_rgba(99,102,241,0.15)]',
+            badgeBg: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
         },
         {
             id: 'despachador',
             title: 'Despachador de Nodo',
-            desc: 'Gestión y control de despachos en terminales.',
-            path: '/register-despachador',
-            icon: <Terminal size={24} className="text-amber-500" />,
-            borderColor: 'hover:border-amber-500/50',
-            bgColor: 'hover:bg-amber-500/10'
+            badge: 'Gestión de Terminal',
+            desc: 'Control de despachos, asignación de turnos y taquilla operativa.',
+            path: '/register/despachador',
+            icon: <Terminal size={26} className="text-blue-400" />,
+            borderColor: 'hover:border-blue-500/50 hover:shadow-[0_0_25px_rgba(59,130,246,0.15)]',
+            badgeBg: 'bg-blue-500/10 text-blue-400 border-blue-500/20'
         }
     ];
 
     // Pantalla de carga mientras useAuth() valida las credenciales
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#08080a] flex flex-col items-center justify-center p-4">
-                <Loader size={32} className="animate-spin text-yellow-500 mb-3" />
-                <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest">Validando credenciales en la red CIMCO...</p>
+            <div className="min-h-screen bg-[#060913] flex flex-col items-center justify-center p-4">
+                <Loader size={36} className="animate-spin text-cyan-400 mb-3" />
+                <p className="text-xs text-slate-400 font-mono uppercase tracking-widest">Sincronizando con la red de transporte CIMCO...</p>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-[#08080a] flex items-center justify-center p-4 selection:bg-cyan-500/30 relative overflow-hidden font-sans">
-            {/* FONDO ESTÉTICO CIMCO-UI HOMOLOGADO */}
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(6,182,212,0.03)_0%,transparent_70%)] pointer-events-none" />
-            
-            <div className="w-full max-w-4xl backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-8 shadow-[0_0_50px_rgba(0,0,0,0.5)] relative z-10">
-                <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center bg-zinc-900 px-4 py-1.5 rounded-full border border-white/5 text-[10px] text-zinc-400 font-mono tracking-widest uppercase mb-3">
-                        Núcleo Central CIMCO
+        <div className="min-h-screen bg-[#060913] flex items-center justify-center p-4 selection:bg-cyan-500/30 relative overflow-hidden font-sans">
+            {/* Ambient Background Lights */}
+            <div className="absolute -top-32 -left-32 w-96 h-96 bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none" />
+
+            <div className="w-full max-w-4xl backdrop-blur-2xl bg-[#0d1322]/80 border border-slate-800/80 rounded-3xl p-6 sm:p-10 shadow-[0_0_60px_rgba(0,0,0,0.8)] relative z-10">
+                
+                {/* Header */}
+                <div className="text-center mb-10">
+                    <div className="inline-flex items-center gap-2 bg-slate-900/90 px-4 py-1.5 rounded-full border border-slate-700/60 text-[10px] text-cyan-400 font-mono tracking-widest uppercase mb-4 shadow-inner">
+                        <ShieldCheck size={14} className="text-cyan-400" /> Sistema Oficial TAXIA CIMCO
                     </div>
-                    <h2 className="text-xl font-black text-white uppercase tracking-wider">Crear Cuenta Corporativa</h2>
-                    <p className="text-xs text-zinc-500 uppercase font-mono tracking-wider mt-1">Selecciona tu perfil de operaciones satelitales</p>
+                    <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">
+                        Crear Cuenta Operativa
+                    </h1>
+                    <p className="text-xs text-slate-400 font-mono tracking-wide mt-2 max-w-lg mx-auto">
+                        Selecciona tu rol en la plataforma para iniciar la vinculación con el sistema satelital de movilidad.
+                    </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Grid de Selección de Roles */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     {roles && roles.map((rol) => (
                         <Link 
                             key={rol?.id || Math.random()}
                             to={rol?.path || '/register'}
-                            className={`flex items-start gap-4 p-5 rounded-2xl bg-black/40 border border-white/5 transition-all duration-300 text-decoration-none group ${rol?.borderColor || ''} ${rol?.bgColor || ''}`}
+                            className={`flex flex-col justify-between p-6 rounded-2xl bg-slate-900/50 border border-slate-800/80 transition-all duration-300 group text-decoration-none relative overflow-hidden ${rol?.borderColor || ''}`}
                         >
-                            <div className="p-3 bg-zinc-900 rounded-xl border border-white/[0.03] group-hover:scale-105 transition-transform shrink-0">
-                                {rol?.icon}
-                            </div>
-                            <div className="min-w-0">
-                                <h3 className="text-white font-bold tracking-wide mb-1 uppercase text-sm">{rol?.title || 'Indefinido'}</h3>
-                                <p className="text-zinc-500 text-[9px] uppercase font-mono tracking-wider leading-relaxed">
-                                    {rol?.desc || ''}
-                                </p>
+                            <div className="flex items-start gap-4 mb-3">
+                                <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 group-hover:scale-110 transition-transform shrink-0 shadow-lg">
+                                    {rol?.icon}
+                                </div>
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <h3 className="text-white font-bold tracking-wide uppercase text-sm group-hover:text-cyan-300 transition-colors">
+                                            {rol?.title || 'Indefinido'}
+                                        </h3>
+                                    </div>
+                                    <span className={`inline-block text-[9px] font-mono px-2 py-0.5 rounded-md border ${rol?.badgeBg || ''} font-bold uppercase mb-2`}>
+                                        {rol?.badge || ''}
+                                    </span>
+                                    <p className="text-slate-400 text-[11px] font-normal leading-relaxed">
+                                        {rol?.desc || ''}
+                                    </p>
+                                </div>
                             </div>
                         </Link>
                     ))}
                 </div>
 
-                <div className="mt-8 pt-6 border-t border-white/[0.05] text-center">
-                    <Link to="/login" className="inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-white font-mono text-[10px] uppercase tracking-widest transition-colors text-decoration-none">
-                        <ArrowLeft size={12} /> Abortar y volver al Login Central
+                {/* Footer */}
+                <div className="mt-10 pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500 uppercase">
+                        <Zap size={12} className="text-cyan-400" /> Conexión Cifrada SSL 256-bit
+                    </div>
+                    <Link to="/login" className="inline-flex items-center gap-2 text-slate-400 hover:text-white font-mono text-[11px] uppercase tracking-wider transition-colors text-decoration-none">
+                        <ArrowLeft size={14} /> Volver al Login Central
                     </Link>
                 </div>
             </div>

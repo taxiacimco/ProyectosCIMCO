@@ -1,8 +1,8 @@
-// Versión Arquitectura: V17.2 - Adaptación de Aduana para Payloads Multipart/Form-Data y Estructuras Extendidas por Rol
+// Versión Arquitectura: V17.3 - Validación Explícita de Inexistencia de Nodo de Identidad y Verificación Estricta en BD
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\auth.middleware.js
- * Misión: Securización estricta de JWT, inspección de tokens, bypass local, compatibilidad multipart/form-data con Multer y protección de rutas.
- * Integridad: Fusión Atómica. Permite payloads multipart/form-data extendidos, normaliza variables heterogéneas (fullName/nombre, correo/email) y preserva toda la lógica de seguridad previa.
+ * Misión: Securización estricta de JWT, inspección de tokens, bypass local, compatibilidad multipart/form-data con Multer, verificación explícita de existencia en BD (HTTP 401) y protección de rutas.
+ * Integridad: Fusión Atómica. Preserva la retrocompatibilidad, normalización de payloads, guardas de seguridad y el manejo unificado de errores.
  */
 
 import jwt from 'jsonwebtoken';
@@ -161,10 +161,21 @@ export const verificarToken = async (req, res, next) => {
         }
 
         const idBúsqueda = decodificado.id || decodificado._id || decodificado.uid;
-        const usuarioEncontrado = await Usuario.findById(idBúsqueda).select('-password');
+        
+        // Búsqueda por _id o uid en la base de datos central de MongoDB Atlas
+        let usuarioEncontrado = null;
+        if (idBúsqueda) {
+            usuarioEncontrado = await Usuario.findOne({
+                $or: [{ _id: idBúsqueda }, { uid: idBúsqueda }]
+            }).select('-password');
+        }
 
+        // 🛡️ Validación explícita de existencia en BD y emisión limpia de HTTP 401
         if (!usuarioEncontrado) {
-            return res.status(401).json({ success: false, message: '❌ Acceso Denegado: El nodo de identidad ya no existe en el clúster central.' });
+            return res.status(401).json({
+                success: false,
+                message: '❌ Acceso Denegado: El nodo de identidad ya no existe en el clúster central.'
+            });
         }
 
         // Inyección unificada del payload del usuario sincronizando propiedades críticas (Anti-Undefined)

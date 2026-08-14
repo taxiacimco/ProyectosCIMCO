@@ -1,7 +1,7 @@
 // Versión Arquitectura: V9.5 - Sincronización Multi-Rol y Resolución Anti-Bucle de Navegación
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
- * Misión: Verificación y aseguramiento de subrutas requeridas (/pasajero, /mototaxi, /despachador, y registros asociados) con blindaje anti-bucle multi-rol.
+ * Misión: Normalización de subrutas (/register/pasajero, /register/moto, /register/intermunicipal, /register/despachador, /register/admin) con blindaje anti-bucle multi-rol.
  * Estilo: CIMCO-UI V9.3 Glassmorphism.
  */
 
@@ -145,7 +145,7 @@ const AppRouter = () => {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Rutas Públicas de Autenticación y Registro */}
+        {/* Rutas Públicas de Autenticación y Registro (SIN ProtectedRoute) */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/register/pasajero" element={<RegisterPasajero />} />

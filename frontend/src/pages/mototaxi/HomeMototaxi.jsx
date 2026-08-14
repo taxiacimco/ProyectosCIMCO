@@ -1,9 +1,10 @@
-// Versión Arquitectura: V19.1 - Sincronización Dinámica de Radar WebSocket y Gestión de Conflictos HTTP 409
+// Versión Arquitectura: V19.2 - Intercepción Quirúrgica de Error 401 y Cierre de Sesión Explícito
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
  *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo), integración fluida
- *          con AjustesPerfil, validación local rigurosa de expiración JWT (Anti-401) en tiempo real
+ *          con AjustesPerfil, validación local rigurosa de expiración JWT (Anti-401) en tiempo real,
+ *          captura explícita de error HTTP 401 por nodo de identidad extinto con logout defensivo
  *          y sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409).
  * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
@@ -605,8 +606,11 @@ export default function HomeMototaxi() {
     }
   };
 
-  const aceptarViaje = async () => {
-    if (!solicitudViaje) return;
+  const aceptarViaje = async (viajeIdParam) => {
+    // Resolver ID de viaje priorizando parámetro directo o estado de solicitud activa
+    const viajeIdTarget = viajeIdParam || solicitudViaje?.viajeId || solicitudViaje?.id || solicitudViaje?._id || solicitudViaje?.idViaje;
+    if (!viajeIdTarget && !solicitudViaje) return;
+
     if (!puedeOperar) {
       alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para procesar despachos.");
       setSolicitudViaje(null);
@@ -617,16 +621,19 @@ export default function HomeMototaxi() {
     const currentToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
     if (isTokenExpired(currentToken)) {
       console.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de aceptación con JWT expirado. Abortando POST y cerrando sesión.");
-      alert("🔒 Sesión Expirada: Su token de acceso ha caducado. Por favor reautentíquese en TAXIA CIMCO.");
+      alert("⚠️ Tu cuenta requiere reautenticación o el usuario no existe en el servidor. Inicia sesión nuevamente.");
       setSolicitudViaje(null);
       desconectarEcosistema();
-      await logout();
-      window.location.replace('/');
+      if (typeof logout === 'function') {
+        await logout();
+      } else {
+        window.location.href = '/login';
+      }
       return;
     }
     
     setLoading(true);
-    const idCorrecto = solicitudViaje?.viajeId || solicitudViaje?.id || solicitudViaje?._id || solicitudViaje?.idViaje;
+    const idCorrecto = viajeIdTarget;
     const idConductorActual = user?.uid || user?.id || user?._id || conductorId || localStorage.getItem('conductorId');
 
     try {
@@ -640,7 +647,7 @@ export default function HomeMototaxi() {
         headers['x-conductor-id'] = idConductorActual;
       }
 
-      const respuesta = await api.post(`/viajes/aceptar`, {
+      const respuesta = await api.post('/viajes/aceptar', { 
         viajeId: idCorrecto,
         conductorId: idConductorActual
       }, { headers });
@@ -651,17 +658,26 @@ export default function HomeMototaxi() {
         console.log("✅ [ACID-DESPACHO] Viaje adjudicado y sincronizado con éxito.");
       }
     } catch (error) {
+      console.error("Error al aceptar viaje:", error);
+
+      // 🛡️ Captura explícita de error 401 por nodo de identidad extinto / sesión inválida
+      if (error.response && error.response.status === 401) {
+        alert("⚠️ Tu cuenta requiere reautenticación o el usuario no existe en el servidor. Inicia sesión nuevamente.");
+        desconectarEcosistema();
+        if (typeof logout === 'function') {
+          await logout();
+        } else {
+          window.location.href = '/login';
+        }
+        return;
+      }
+
       if (error?.response && error.response.status === 409) {
         const msgConflicto = error.response.data?.error || error.response.data?.message || 'La solicitud caducó o fue tomada por otro operador.';
         alert(msgConflicto);
         // Limpiar la tarjeta localmente para mantener la UI sincronizada
         setOfertasDisponibles((prev) => prev.filter((v) => v.id !== idCorrecto && v._id !== idCorrecto && v.viajeId !== idCorrecto));
         setSolicitudViaje(null);
-      } else if (error?.response?.status === 401) {
-        alert("⚠️ SESIÓN EXPIRADA O NODOS DESSINCRO: Tu cuenta requiere reautenticación en el clúster central. Inicia sesión nuevamente.");
-        desconectarEcosistema();
-        await logout();
-        window.location.replace('/');
       } else {
         const msgError = error?.response?.data?.message || error?.response?.data?.error || "Error de conexión al procesar la solicitud.";
         console.error("🚨 [DESPACHO-ERR] Error al reclamar solicitud:", msgError);
@@ -741,7 +757,9 @@ export default function HomeMototaxi() {
     if (window.confirm("¿Desea cerrar sesión y salir de la consola de operaciones?")) {
       try {
         desconectarEcosistema();
-        await logout();
+        if (typeof logout === 'function') {
+          await logout();
+        }
         window.location.replace('/');
       } catch (error) {
         console.error("🚨 [CIMCO-LOGOUT-FAIL] Error crítico al desconectar nodo de autenticación:", error);
@@ -931,7 +949,7 @@ export default function HomeMototaxi() {
                     IGNORAR
                   </button>
                   <button
-                    onClick={aceptarViaje}
+                    onClick={() => aceptarViaje()}
                     disabled={loading}
                     className="py-2.5 rounded-xl bg-emerald-500 text-white font-bold text-xs hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
                   >

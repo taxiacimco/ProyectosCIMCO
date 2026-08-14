@@ -1,7 +1,7 @@
-// Versión Arquitectura: V12.1 - Matriz de Gobernanza Temática y Exportación Flexible
+// Versión Arquitectura: V12.2 - Sanitización de Endpoints y Matriz de Gobernanza
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\constants.js
- * Misión: Centralizar los diccionarios, roles oficiales y niveles de acceso jerárquicos del ecosistema.
+ * Misión: Centralizar los diccionarios, roles oficiales, niveles de acceso jerárquicos y endpoints de API sanitizados del ecosistema.
  */
 
 // 👥 ROLES PRINCIPALES DEL SISTEMA
@@ -37,10 +37,21 @@ export const COLLECTIONS = {
     USUARIOS: 'usuarios'
 };
 
+// 📡 ENDPOINTS DE VIAJES (Rutas relativas sanitizadas sin prefijo '/api' redundante)
+export const VIAJES_ENDPOINTS = {
+    SOLICITAR: '/viajes/solicitar',
+    ACEPTAR: '/viajes/aceptar',
+    CANCELAR: '/viajes/cancelAR',
+    COMPLETAR: '/viajes/completar',
+    OBTENER_ACTIVO: '/viajes/activo',
+    HISTORIAL: '/viajes/historial'
+};
+
 // 🔹 EXPORTACIÓN POR DEFECTO PARA SOPORTAR AMBAS FORMAS DE IMPORTACIÓN
 export default {
     ROLES,
     VEHICLE_TYPES,
     DEFAULT_ACCESS_LEVELS,
-    COLLECTIONS
+    COLLECTIONS,
+    VIAJES_ENDPOINTS
 };
