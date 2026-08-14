@@ -1,9 +1,8 @@
-// Versión Arquitectura: V23.5 - Normalización de Rutas de Registro e Integración Híbrida CIMCO-UI V9.3
+// Versión Arquitectura: V24.0 - Sincronización de Rutas QR a Slugs Planos y Rediseño Dark Glassmorphism Premium
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Register.jsx
  * Misión: Enrutador maestro de roles con interceptor de códigos QR, protección de sesión activa,
- *         rutas estandarizadas (/register/...) y estética de alto impacto UX/UI CIMCO-UI V9.3 Glassmorphism.
- * Estilo: CIMCO-UI V9.3 Glassmorphism Premium.
+ *         rutas estandarizadas con guion (/register-...) y estética Dark Glassmorphism Premium (CIMCO-UI V9.3).
  */
 
 import React, { useEffect } from 'react';
@@ -14,22 +13,24 @@ import { useAuth } from '@/hooks/useAuth';
 const Register = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { user, loading } = useAuth();
+    const authContext = useAuth() || {};
+    const user = authContext.user || null;
+    const loading = authContext.loading || false;
     
-    // Guardas de Seguridad para mitigar desbordamientos por tipos inválidos[cite: 12]
+    // Guardas de Seguridad para mitigar desbordamientos por tipos inválidos
     const targetRole = searchParams ? searchParams.get('role') : null;
 
-    // 🛡️ INTERCEPTOR DOBLE: VERIFICA SESIÓN Y REDIRIGE SEGÚN CÓDIGO QR O ROL (CON FALLBACK)
+    // 🛡️ INTERCEPTOR DOBLE: VERIFICA SESIÓN Y REDIRIGE SEGÚN CÓDIGO QR O ROL (ANTI-BUCLE Y SLUGS PLANOS)
     useEffect(() => {
         if (loading) return;
 
-        // 1️⃣ CASO A: EL USUARIO YA TIENE SESIÓN ABIERTA
+        // 1️⃣ CASO A: EL USUARIO YA TIENE SESIÓN ABIERTA -> Redirige a raíz para que RoleRedirect lo ubique sin bucles
         if (user) {
             navigate('/', { replace: true });
             return;
         }
 
-        // 2️⃣ CASO B: EL USUARIO NO TIENE SESIÓN Y ESCANEÓ UN QR (Redirección por Rol con Fallback)
+        // 2️⃣ CASO B: LECTURA DE CÓDIGO QR CON REDIRECCIÓN A RUTAS NORMALIZADAS CON GUION (/register-...)
         if (targetRole) {
             const normalizedRole = String(targetRole).toLowerCase().trim();
             
@@ -40,86 +41,86 @@ const Register = () => {
             const isDespachador = normalizedRole === 'despachador';
 
             if (isPasajero) {
-                navigate('/register/pasajero', { replace: true });
+                navigate('/register-pasajero', { replace: true });
             } else if (isMoto) {
-                navigate(`/register/moto?role=${normalizedRole}`, { replace: true });
+                navigate(`/register-moto?role=${normalizedRole}`, { replace: true });
             } else if (isIntermunicipal) {
-                navigate('/register/intermunicipal', { replace: true });
+                navigate('/register-intermunicipal', { replace: true });
             } else if (isDespachador) {
-                navigate('/register/despachador', { replace: true });
+                navigate('/register-despachador', { replace: true });
             } else {
                 console.warn(`⚠️ [CIMCO-QR] Parámetro ?role="${targetRole}" no válido. Aplicando fallback a registro de pasajero.`);
-                navigate('/register/pasajero', { replace: true });
+                navigate('/register-pasajero', { replace: true });
             }
         }
     }, [user, loading, targetRole, navigate]);
 
-    // 🗂️ Mapeo con Rutas Corregidas (/register/...) y Estilos de Psicología del Color CIMCO-UI V9.3
+    // 🗂️ Mapeo con Rutas Corregidas (/register-...) y Psicología del Color CIMCO-UI V9.3 Glassmorphism
     const roles = [
         {
             id: 'pasajero',
             title: 'Pasajero',
             badge: 'Viajes Instantáneos',
             desc: 'Solicita transporte seguro, rastrea tu viaje en tiempo real y gestiona tus pagos.',
-            path: '/register/pasajero',
-            icon: <User size={26} className="text-amber-400" />,
-            borderColor: 'hover:border-amber-500/50 hover:shadow-[0_0_25px_rgba(245,158,11,0.15)]',
-            badgeBg: 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+            path: '/register-pasajero',
+            icon: <User size={26} className="text-[#3b82f6]" />,
+            borderColor: 'hover:border-[#3b82f6]/50 hover:shadow-[0_0_25px_rgba(59,130,246,0.2)]',
+            badgeBg: 'bg-[#3b82f6]/10 text-[#3b82f6] border-[#3b82f6]/20'
         },
         {
             id: 'moto',
             title: 'Escuadrón Moto',
             badge: 'Mototaxi / Parrillero / Carga',
             desc: 'Operación ágil de transporte motorizado urbano con verificación en línea.',
-            path: '/register/moto',
-            icon: <Bike size={26} className="text-teal-400" />,
-            borderColor: 'hover:border-teal-500/50 hover:shadow-[0_0_25px_rgba(20,184,166,0.15)]',
-            badgeBg: 'bg-teal-500/10 text-teal-400 border-teal-500/20'
+            path: '/register-moto',
+            icon: <Bike size={26} className="text-[#10b981]" />,
+            borderColor: 'hover:border-[#10b981]/50 hover:shadow-[0_0_25px_rgba(16,185,129,0.2)]',
+            badgeBg: 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20'
         },
         {
             id: 'intermunicipal',
             title: 'Intermunicipal',
             badge: 'Rutas Regionales',
             desc: 'Conductores de cooperativas y rutas de mediano y largo alcance.',
-            path: '/register/intermunicipal',
-            icon: <Bus size={26} className="text-indigo-400" />,
-            borderColor: 'hover:border-indigo-500/50 hover:shadow-[0_0_25px_rgba(99,102,241,0.15)]',
-            badgeBg: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+            path: '/register-intermunicipal',
+            icon: <Bus size={26} className="text-[#f59e0b]" />,
+            borderColor: 'hover:border-[#f59e0b]/50 hover:shadow-[0_0_25px_rgba(245,158,11,0.2)]',
+            badgeBg: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/20'
         },
         {
             id: 'despachador',
             title: 'Despachador de Nodo',
             badge: 'Gestión de Terminal',
             desc: 'Control de despachos, asignación de turnos y taquilla operativa.',
-            path: '/register/despachador',
-            icon: <Terminal size={26} className="text-blue-400" />,
-            borderColor: 'hover:border-blue-500/50 hover:shadow-[0_0_25px_rgba(59,130,246,0.15)]',
-            badgeBg: 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+            path: '/register-despachador',
+            icon: <Terminal size={26} className="text-[#f59e0b]" />,
+            borderColor: 'hover:border-[#f59e0b]/50 hover:shadow-[0_0_25px_rgba(245,158,11,0.2)]',
+            badgeBg: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/20'
         }
     ];
 
-    // Pantalla de carga mientras useAuth() valida las credenciales
+    // Pantalla de carga Glassmorphism mientras useAuth() valida las credenciales
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#060913] flex flex-col items-center justify-center p-4">
-                <Loader size={36} className="animate-spin text-cyan-400 mb-3" />
+            <div className="min-h-screen bg-[#0a0f1d] flex flex-col items-center justify-center p-4">
+                <Loader size={36} className="animate-spin text-[#3b82f6] mb-3" />
                 <p className="text-xs text-slate-400 font-mono uppercase tracking-widest">Sincronizando con la red de transporte CIMCO...</p>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-[#060913] flex items-center justify-center p-4 selection:bg-cyan-500/30 relative overflow-hidden font-sans">
+        <div className="min-h-screen bg-[#0a0f1d] flex items-center justify-center p-4 selection:bg-[#3b82f6]/30 relative overflow-hidden font-sans">
             {/* Ambient Background Lights */}
-            <div className="absolute -top-32 -left-32 w-96 h-96 bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none" />
-            <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#3b82f6]/10 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-[#10b981]/10 rounded-full blur-[120px] pointer-events-none" />
 
-            <div className="w-full max-w-4xl backdrop-blur-2xl bg-[#0d1322]/80 border border-slate-800/80 rounded-3xl p-6 sm:p-10 shadow-[0_0_60px_rgba(0,0,0,0.8)] relative z-10">
+            <div className="w-full max-w-4xl backdrop-blur-2xl bg-[#0a0f1d]/90 border border-slate-800/80 rounded-3xl p-6 sm:p-10 shadow-[0_0_60px_rgba(0,0,0,0.8)] relative z-10">
                 
                 {/* Header */}
                 <div className="text-center mb-10">
-                    <div className="inline-flex items-center gap-2 bg-slate-900/90 px-4 py-1.5 rounded-full border border-slate-700/60 text-[10px] text-cyan-400 font-mono tracking-widest uppercase mb-4 shadow-inner">
-                        <ShieldCheck size={14} className="text-cyan-400" /> Sistema Oficial TAXIA CIMCO
+                    <div className="inline-flex items-center gap-2 bg-slate-900/90 px-4 py-1.5 rounded-full border border-slate-700/60 text-[10px] text-[#3b82f6] font-mono tracking-widest uppercase mb-4 shadow-inner">
+                        <ShieldCheck size={14} className="text-[#3b82f6]" /> Sistema Oficial TAXIA CIMCO
                     </div>
                     <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">
                         Crear Cuenta Operativa
@@ -143,7 +144,7 @@ const Register = () => {
                                 </div>
                                 <div className="min-w-0">
                                     <div className="flex items-center gap-2 mb-1">
-                                        <h3 className="text-white font-bold tracking-wide uppercase text-sm group-hover:text-cyan-300 transition-colors">
+                                        <h3 className="text-white font-bold tracking-wide uppercase text-sm group-hover:text-white transition-colors">
                                             {rol?.title || 'Indefinido'}
                                         </h3>
                                     </div>
@@ -162,7 +163,7 @@ const Register = () => {
                 {/* Footer */}
                 <div className="mt-10 pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4">
                     <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500 uppercase">
-                        <Zap size={12} className="text-cyan-400" /> Conexión Cifrada SSL 256-bit
+                        <Zap size={12} className="text-[#3b82f6]" /> Conexión Cifrada SSL 256-bit
                     </div>
                     <Link to="/login" className="inline-flex items-center gap-2 text-slate-400 hover:text-white font-mono text-[11px] uppercase tracking-wider transition-colors text-decoration-none">
                         <ArrowLeft size={14} /> Volver al Login Central

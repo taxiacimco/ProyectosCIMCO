@@ -1,7 +1,8 @@
-// Versión Arquitectura: V1.7 - Integración Estructural de Sección de Asignación de Sede Operativa y Gobernanza Level 3
+// Versión Arquitectura: V1.8 - Sincronización de Navegación de Retorno Directa al Selector (/register) y Gobernanza Level 3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterDespachador.jsx
- * Misión: Registro de Despachadores con validación de Empresa Matriz, Terminal / Sede y Sección de Asignación de Sede Operativa.
+ * Misión: Registro de Despachadores con validación de Empresa Matriz, Terminal / Sede, Sección de Asignación de Sede Operativa,
+ *         y sincronización explícita de navegación de retorno a la selección de rol central (/register).
  * Regla de Negocio: Recibe solicitudes de Pasajeros y gestiona despachos hacia Intermunicipales.
  * Estilo: CIMCO-UI V9.3 Glassmorphism (Amber Theme).
  */
@@ -10,7 +11,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { Building2, MapPin, AlertTriangle, UploadCloud, FileText, CheckCircle2, ShieldCheck, UserCheck } from 'lucide-react';
+import { Building2, MapPin, AlertTriangle, UploadCloud, FileText, CheckCircle2, ShieldCheck, UserCheck, ArrowLeft } from 'lucide-react';
 
 // Constantes de Validación Documental Preventiva (Máx 5MB)
 const MAX_FILE_SIZE_MB = 5;
@@ -111,8 +112,8 @@ const RegisterDespachador = () => {
         formDataPayload.append('password', clave);
         formDataPayload.append('empresa', empresa.trim());
         formDataPayload.append('terminal_sede', terminalSede.trim());
-        formDataPayload.append('codigo_taquilla', codigoTaquilla.trim());
-        formDataPayload.append('turno_asignado', turnoAsignado.trim());
+        formDataPayload.append('codigo_taquilla', codigoTaquilla?.trim() || '');
+        formDataPayload.append('turno_asignado', turnoAsignado?.trim() || '');
         formDataPayload.append('role', targetRole);
         formDataPayload.append('access_level', String(accessLevel));
 
@@ -130,8 +131,8 @@ const RegisterDespachador = () => {
           password: clave,
           empresa: empresa.trim(),
           terminal_sede: terminalSede.trim(),
-          codigo_taquilla: codigoTaquilla.trim(),
-          turno_asignado: turnoAsignado.trim(),
+          codigo_taquilla: codigoTaquilla?.trim() || '',
+          turno_asignado: turnoAsignado?.trim() || '',
           role: targetRole,
           access_level: accessLevel
         };
@@ -161,6 +162,14 @@ const RegisterDespachador = () => {
 
       <div className="w-full max-w-xl backdrop-blur-md bg-[#121214]/80 border border-white/5 p-6 sm:p-8 rounded-3xl shadow-2xl shadow-black/60 relative z-10 transition-all duration-500 my-8">
         
+        {/* Botón de Retorno Explícito a Selección de Rol */}
+        <Link 
+            to="/register" 
+            className="inline-flex items-center gap-2 text-slate-400 hover:text-white font-mono text-xs uppercase tracking-wider transition-colors mb-6 text-decoration-none"
+        > 
+            <ArrowLeft size={16} /> Volver a Selección de Rol
+        </Link>
+
         <div className="mb-6 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/[0.06] border border-amber-500/20 rounded-full mb-3">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
@@ -355,8 +364,8 @@ const RegisterDespachador = () => {
         </form>
 
         <div className="mt-6 text-center">
-          <Link to="/login" className="text-amber-400 hover:text-amber-300 font-mono text-xs font-bold transition-colors">
-            ← Regresar al acceso central
+          <Link to="/register" className="text-amber-400 hover:text-amber-300 font-mono text-xs font-bold transition-colors">
+            ← Regresar a Selección de Rol
           </Link>
         </div>
       </div>

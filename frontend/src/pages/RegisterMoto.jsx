@@ -1,8 +1,9 @@
-// Versión Arquitectura: V2.3 - Integración de Ajustes de Unidad, Operación y Carga Documental con Límite 5MB
+// Versión Arquitectura: V2.4 - Registro Escuadrón Moto con Retorno Explícito a Selección de Rol y Blindaje Multipart 5MB
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterMoto.jsx
  * Misión: Registro del Escuadrón Moto con sección de información de unidad/operación (Placa, Número Interno, Empresa/Cooperativa, Tipo de Unidad)
- *         y sección de ajustes de unidad con carga documental digital (Cédula, Licencia, Tarjeta de Propiedad) validando el límite de 5 MB por archivo.
+ *         y sección de ajustes de unidad con carga documental digital (Cédula, Licencia, Tarjeta de Propiedad) validando el límite de 5 MB por archivo,
+ *         soporte de navegación de retorno a /register y gestión atómica de multipart/form-data.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Teal Accent).
  */
 
@@ -10,7 +11,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { ShieldCheck, FileText, Camera, UploadCloud, AlertTriangle, Building2, Truck, Check } from 'lucide-react';
+import { ShieldCheck, FileText, Camera, UploadCloud, AlertTriangle, Building2, Truck, Check, ArrowLeft } from 'lucide-react';
 
 // 🛡️ CONSTANTES DE VALIDACIÓN DOCUMENTAL (MÁX 5MB)
 const MAX_FILE_SIZE_MB = 5;
@@ -79,7 +80,7 @@ const RegisterMoto = () => {
     }
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      return `El archivo "${fileLabel}" excede el límite máximo permitido de ${MAX_FILE_SIZE_MB}MB.`;
+      return `⚠️ El archivo "${fileLabel}" excede el límite permitido de ${MAX_FILE_SIZE_MB} MB.`;
     }
 
     return null;
@@ -177,6 +178,14 @@ const RegisterMoto = () => {
 
       <div className="w-full max-w-2xl backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-6 sm:p-8 shadow-[0_0_50px_-12px_rgba(20,184,166,0.15)] relative z-10 my-8">
         
+        {/* Botón de Retorno Explícito a Selección de Rol */}
+        <Link 
+            to="/register" 
+            className="inline-flex items-center gap-2 text-slate-400 hover:text-white font-mono text-xs uppercase tracking-wider transition-colors mb-6 text-decoration-none"
+        > 
+            <ArrowLeft size={16} /> Volver a Selección de Rol
+        </Link>
+
         <div className="mb-6 text-center">
           <div className="inline-flex items-center gap-1.5 bg-teal-500/10 border border-teal-500/20 px-3 py-1 rounded-full text-[9px] font-mono tracking-widest text-teal-400 uppercase font-bold mb-3">
             <ShieldCheck size={10} /> Conexión Directa Escuadrón Móvil

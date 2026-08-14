@@ -1,20 +1,22 @@
-// Versión Arquitectura: V12.4 - Registro Unificado de Pasajero con Sección de Perfil y Carga de Avatar Binario
+// Versión Arquitectura: V12.5 - Registro Unificado de Pasajero con Transición Limpia a Login y Retorno Explícito a Selección de Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Yellow Accent).
  * Misión: Capturar identidad exclusivamente para PASAJEROS con control de peticiones en Step 1, 
- *         gestión de datos personales (Nombre, Celular, Correo) y previsualización/carga binaria de foto de perfil.
+ *         gestión de datos personales (Nombre, Celular, Correo), previsualización/carga binaria de foto de perfil,
+ *         flujo de salida garantizado hacia /register y transición limpia tras registro a /login.
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth'; 
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { Phone, User, Mail, Lock, ShieldCheck, Camera, Check } from 'lucide-react';
+import { Phone, User, Mail, Lock, ShieldCheck, Camera, Check, ArrowLeft } from 'lucide-react';
 
 const RegisterPasajero = () => {
     const navigate = useNavigate();
-    const { loginLocal } = useAuth();
+    const authContext = useAuth() || {};
+    const loginLocal = authContext.loginLocal;
 
     // 🔄 CONTROL DE FLUJO PROGRESIVO
     const [step, setStep] = useState(1);
@@ -50,9 +52,9 @@ const RegisterPasajero = () => {
     }, [previewUrl]);
 
     const handleFileChange = (e) => {
-        const file = e.target.files ? e.target.files[0] : null;
+        const file = e.target?.files ? e.target.files[0] : null;
         if (file) {
-            if (!file.type.startsWith('image/')) {
+            if (!file.type || !file.type.startsWith('image/')) {
                 setError('El archivo seleccionado debe ser una imagen válida.');
                 return;
             }
@@ -96,12 +98,12 @@ const RegisterPasajero = () => {
             
             if (res?.data?.success && res?.data?.existe) {
                 setError('Este terminal ya posee una identidad indexada. Redirigiendo...');
-                setTimeout(() => navigate('/login'), 2500);
+                setTimeout(() => navigate('/login', { replace: true }), 2500);
             } else {
                 setStep(2);
             }
         } catch (err) {
-            if (err.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED') {
+            if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED') {
                 setError('Error de enlace en el gateway. Verifique el nodo central.');
             }
         } finally {
@@ -149,13 +151,16 @@ const RegisterPasajero = () => {
             });
             
             if (res?.data?.success) {
-                // Iniciar sesión automáticamente delegando el token
-                loginLocal(res.data.usuario, res.data.token);
-                navigate('/');
+                // Iniciar sesión automáticamente delegando el token si la función existe
+                if (typeof loginLocal === 'function' && res.data.usuario && res.data.token) {
+                    loginLocal(res.data.usuario, res.data.token);
+                }
+                // Transición limpia hacia /login
+                navigate('/login', { replace: true });
             }
         } catch (err) {
             console.error("❌ [CIMCO-GATEWAY] Error de Form-Data:", err);
-            setError(err.response?.data?.message || 'Error de sincronización con el servidor de carga binaria.');
+            setError(err?.response?.data?.message || 'Error de sincronización con el servidor de carga binaria.');
         } finally {
             setLoading(false);
         }
@@ -169,6 +174,15 @@ const RegisterPasajero = () => {
             
             {/* Contenedor Principal CIMCO-UI */}
             <div className="w-full max-w-md bg-[#121214]/80 backdrop-blur-xl border border-white/5 rounded-2xl p-6 shadow-2xl relative z-10">
+                
+                {/* Botón de retorno explícito a Selección de Rol */}
+                <Link 
+                    to="/register" 
+                    className="inline-flex items-center gap-2 text-slate-400 hover:text-white font-mono text-xs uppercase tracking-wider transition-colors mb-6 text-decoration-none"
+                > 
+                    <ArrowLeft size={16} /> Volver a Selección de Rol
+                </Link>
+
                 <div className="text-center mb-6">
                     <h2 className="text-xs font-bold uppercase tracking-[0.25em] text-yellow-500">TAXIA CIMCO</h2>
                     <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1 font-mono font-semibold">Registro de Pasajero</p>
@@ -324,7 +338,7 @@ const RegisterPasajero = () => {
                 )}
 
                 <div className="mt-6 pt-4 border-t border-white/5 text-center font-mono">
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest">¿Ya tienes cuenta? <Link className="text-yellow-500 hover:text-yellow-400 ml-1 font-bold transition-colors" to="/login">LOGUEAR ENTRADA</Link></p>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest">¿Ya tienes cuenta? <Link className="text-yellow-500 hover:text-yellow-400 ml-1 font-bold transition-colors text-decoration-none" to="/login">LOGUEAR ENTRADA</Link></p>
                 </div>
             </div>
         </div>

@@ -1,9 +1,9 @@
-// Versión Arquitectura: V2.0 - Integración Estructural de Sección 2 (Unidad y Operación) y Sección de Rutas/Afiliación Logística
+// Versión Arquitectura: V2.1 - Sincronización de Navegación de Retorno Directa al Selector (/register) y Blindaje de Datos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterIntermunicipal.jsx
  * Misión: Registro de Operadores Intermunicipales con captura de Empresa/Cooperativa, Placa, Número Interno,
- *         sección de Rutas y Afiliación Logística, y Carga Documental Digital (Cédula, Licencia, Tarjeta de Propiedad)
- *         con control estricto de límite de 5 MB por archivo.
+ *         sección de Rutas y Afiliación Logística, Carga Documental Digital (Cédula, Licencia, Tarjeta de Propiedad)
+ *         con control estricto de límite de 5 MB por archivo, y sincronización explícita del botón de retorno hacia el selector central (/register).
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Indigo Accent).
  */
 
@@ -11,7 +11,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { AlertTriangle, UploadCloud, FileText, CheckCircle2, Building2, Bus, MapPin, Route, Check } from 'lucide-react';
+import { AlertTriangle, UploadCloud, FileText, CheckCircle2, Building2, Bus, MapPin, Route, Check, ArrowLeft } from 'lucide-react';
 
 // Constantes de Validación Documental (Máx 5MB)
 const MAX_FILE_SIZE_MB = 5;
@@ -116,12 +116,12 @@ const RegisterIntermunicipal = () => {
       dataPayload.append('email', correo.toLowerCase().trim());
       dataPayload.append('password', clave);
       dataPayload.append('placa', placa.toUpperCase().trim());
-      dataPayload.append('numero_interno', numeroInterno.trim());
+      dataPayload.append('numero_interno', numeroInterno?.trim() || '');
       dataPayload.append('empresa', cooperativa.trim());
       dataPayload.append('cooperativa', cooperativa.trim());
-      dataPayload.append('ruta_origen', rutaOrigen.trim());
-      dataPayload.append('ruta_destino', rutaDestino.trim());
-      dataPayload.append('codigo_afiliacion', codigoAfiliacion.trim());
+      dataPayload.append('ruta_origen', rutaOrigen?.trim() || '');
+      dataPayload.append('ruta_destino', rutaDestino?.trim() || '');
+      dataPayload.append('codigo_afiliacion', codigoAfiliacion?.trim() || '');
       dataPayload.append('role', targetRole); 
       dataPayload.append('access_level', String(accessLevel));
 
@@ -155,6 +155,14 @@ const RegisterIntermunicipal = () => {
       {/* Contenedor Glassmorphism CIMCO-UI */}
       <div className="w-full max-w-2xl backdrop-blur-md bg-[#121214]/80 border border-white/5 p-6 sm:p-8 rounded-3xl shadow-2xl shadow-black/60 relative z-10 transition-all duration-500 my-8">
         
+        {/* Botón de Retorno Explícito a Selección de Rol */}
+        <Link 
+            to="/register" 
+            className="inline-flex items-center gap-2 text-slate-400 hover:text-white font-mono text-xs uppercase tracking-wider transition-colors mb-6 text-decoration-none"
+        > 
+            <ArrowLeft size={16} /> Volver a Selección de Rol
+        </Link>
+
         <div className="mb-6 text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/[0.08] border border-indigo-500/20 rounded-full mb-3">
             <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
