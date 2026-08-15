@@ -1,4 +1,4 @@
-// Versión Arquitectura: V10.1.0 - Sincronización de HMR Seguro (WSS / ClientPort 443) para Túnel Cloudflare
+// Versión Arquitectura: V10.2.0 - Sincronización de HMR Seguro (WSS / ClientPort 443) para Túnel Cloudflare
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
