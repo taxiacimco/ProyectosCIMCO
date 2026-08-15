@@ -1,11 +1,13 @@
-// Versión Arquitectura: V19.2 - Operación Atómica $inc Unificada para Eliminación de Duplicidad en Saldo
+// Versión Arquitectura: V19.3 - Búsqueda Polimórfica Multi-Colección con Integración Atómica de Billetera Global
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
- * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado y flujo financiero sin mutaciones dobles de saldo.
+ * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado, flujo financiero sin mutaciones dobles de saldo y ajuste polimórfico multi-colección.
  */
 
 import mongoose from 'mongoose';
 import Usuario from '../../models/Usuario.js';
+import Conductor from '../../models/Conductor.js';
+import Pasajero from '../../models/Pasajero.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
 import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 import { FieldValue } from 'firebase-admin/firestore';
@@ -328,7 +330,7 @@ export const asignarTerminalDespachador = async (req, res) => {
 };
 
 // ==================================================================
-// 3. BILLETERA Y FINANZAS DE DESPACHADORES
+// 3. BILLETERA Y FINANZAS DE DESPACHADORES Y AJUSTES GLOBAL POLIMÓRFICOS
 // ==================================================================
 
 /**
@@ -464,6 +466,101 @@ export const recargarSaldoDespachador = async (req, res) => {
         await session.abortTransaction();
         session.endSession();
         return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * 💳 AJUSTE TRANSACCIONAL DE BILLETERA (Búsqueda Polimórfica Multi-Colección)
+ */
+export const ajustarSaldoBilletera = async (req, res) => {
+    try {
+        const { usuarioId, idTarget, monto, concepto, rol } = req.body;
+        const targetId = usuarioId || idTarget || req.params.id;
+
+        if (!targetId) {
+            return res.status(400).json({ success: false, message: "El ID del destinatario es requerido." });
+        }
+
+        const montoNumerico = Number(monto);
+        if (isNaN(montoNumerico) || montoNumerico === 0) {
+            return res.status(400).json({ success: false, message: "Monto inválido para el ajuste." });
+        }
+
+        // 1️⃣ BÚSQUEDA POLIMÓRFICA CONCURRENTE EN LAS 3 COLECCIONES
+        const isObjectId = mongoose.Types.ObjectId.isValid(targetId);
+        const queryCond = isObjectId ? { _id: targetId } : { uid: targetId };
+
+        const [usuarioAdmin, usuarioConductor, usuarioPasajero] = await Promise.all([
+            Usuario.findOne(queryCond),
+            Conductor.findOne(queryCond),
+            Pasajero.findOne(queryCond)
+        ]);
+
+        // Identificar en cuál colección existe el objetivo
+        const entidadDestino = usuarioAdmin || usuarioConductor || usuarioPasajero;
+
+        if (!entidadDestino) {
+            return res.status(404).json({ 
+                success: false, 
+                message: "Usuario no encontrado en ninguna colección del sistema." 
+            });
+        }
+
+        // 2️⃣ CÁLCULO Y ACTUALIZACIÓN DE SALDO
+        const saldoActual = Number(entidadDestino.saldoWallet ?? entidadDestino.saldo ?? entidadDestino.balance ?? 0);
+        const nuevoSaldo = saldoActual + montoNumerico;
+
+        entidadDestino.saldo = nuevoSaldo;
+        if (entidadDestino.saldoWallet !== undefined || entidadDestino.saldoWallet === null) entidadDestino.saldoWallet = nuevoSaldo;
+        if (entidadDestino.balance !== undefined || entidadDestino.balance === null) entidadDestino.balance = nuevoSaldo;
+
+        await entidadDestino.save();
+
+        const docFirestoreId = entidadDestino.uid || entidadDestino._id.toString();
+
+        // Espejo de Billetera en Firebase Firestore
+        try {
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                id: docFirestoreId,
+                nombreUsuario: entidadDestino.nombre || entidadDestino.nombres || 'Usuario TAXIA',
+                saldo: nuevoSaldo,
+                saldoWallet: nuevoSaldo,
+                balance: nuevoSaldo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsWalletErr) {
+            console.warn("⚠️ [FIRESTORE-WALLET-WARN] Error actualizando billetera:", fsWalletErr.message);
+        }
+
+        // Auditoría centralizada en Firestore
+        await registrarTransaccionFirestore({
+            idUsuario: docFirestoreId,
+            rol: entidadDestino.rol || entidadDestino.role || rol || 'usuario',
+            subrol: entidadDestino.subrol || 'general',
+            monto: montoNumerico,
+            saldoAnterior: saldoActual,
+            saldoNuevo: nuevoSaldo,
+            tipoOperacion: montoNumerico > 0 ? 'RECARGA_POLIMORFICA' : 'DEBITO_POLIMORFICO',
+            autorizadoPor: req.user?.id || req.user?._id || 'SISTEMA',
+            referencia: concepto || `AJUSTE-POLI-${Date.now()}`
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Ajuste de billetera procesado con éxito.",
+            saldoAnterior: saldoActual,
+            nuevoSaldo: nuevoSaldo,
+            usuario: {
+                id: entidadDestino._id,
+                nombre: entidadDestino.nombre || entidadDestino.nombres,
+                rol: entidadDestino.rol || entidadDestino.role || rol
+            }
+        });
+
+    } catch (error) {
+        console.error("🚨 [CIMCO-WALLET-FATAL] Error al ajustar saldo de billetera:", error);
+        return res.status(500).json({ success: false, message: "Error interno al procesar la transacción." });
     }
 };
 

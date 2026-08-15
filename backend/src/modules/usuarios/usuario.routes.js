@@ -1,7 +1,7 @@
-// Versión Arquitectura: V19.1 - Mapeo Expreso y Alias Dinámicos de Saldo Gerencial Anti-404
+// Versión Arquitectura: V19.4 - Integración Polimórfica de Billetera y Endpoints Globales de Ajuste de Saldo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.routes.js
- * Misión: Exponer alias explícitos para el endpoint de ajuste de saldo (`/:id/saldo`) resolviendo el error [CIMCO-ROUTE-MISS].
+ * Misión: Exponer alias explícitos para el endpoint de ajuste de saldo (`/:id/saldo`) y nuevos endpoints unificados de billetera (/debit, /recargar, /ajustar-saldo) resolviendo invocaciones de useWallet y desbordamientos.
  */
 
 import { Router } from 'express';
@@ -15,7 +15,8 @@ import {
     asignarTerminalDespachador,
     obtenerSaldoDespachador,
     recargarSaldoDespachador,
-    recargarSaldo
+    recargarSaldo,
+    ajustarSaldoBilletera
 } from './usuario.controller.js';
 import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
 
@@ -36,7 +37,11 @@ router.post('/despachador/asignar-terminal', verificarToken, esAdmin, asignarTer
 router.get('/despachador/saldo/:id', verificarToken, obtenerSaldoDespachador);
 router.post('/despachador/recargar', verificarToken, esAdmin, recargarSaldoDespachador);
 
-// 💳 ENDPOINTS PARA AJUSTE DE SALDO (ABONO / DÉBITO) POR EL ADMIN
+// 💳 ENDPOINTS PARA BILLETERA Y AJUSTE DE SALDO (POLIMÓRFICOS Y GERENCIALES)
+router.post('/debit', verificarToken, ajustarSaldoBilletera);
+router.post('/recargar', verificarToken, esAdmin, ajustarSaldoBilletera);
+router.post('/ajustar-saldo', verificarToken, esAdmin, ajustarSaldoBilletera);
+
 // ✅ CORRECCIÓN QUIRÚRGICA V19.1: Mapeo explícito de `/:id/saldo` para absorber peticiones PUT/POST del cliente
 router.put('/:id/saldo', verificarToken, esAdmin, recargarSaldo);
 router.post('/:id/saldo', verificarToken, esAdmin, recargarSaldo);

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V1.1 - Módulo CEO para Gestión de Credenciales con Cancelación Asíncrona y Revocación de Accesos
+// Versión Arquitectura: V1.2 - Módulo CEO para Gestión de Credenciales con Integración Polimórfica de Endpoints, AbortController y Estética CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionAdmins.jsx
  * Misión: Permitir al CEO la creación, asignación de permisos y revocación de administradores/oficinas.
@@ -10,8 +10,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { auth } from '@/config/firebase';
 import { 
     UserPlus, ShieldCheck, Lock, Mail, User, Building, 
-    Search, Loader2, AlertCircle, Trash2, KeyRound 
+    Search, Loader2, AlertCircle, Trash2, KeyRound, RefreshCw
 } from 'lucide-react';
+import axios from 'axios';
 
 const GestionAdmins = () => {
     const { user } = useAuth();
@@ -37,17 +38,26 @@ const GestionAdmins = () => {
     const getAuthToken = async () => {
         let token = user?.token || localStorage.getItem('token') || localStorage.getItem('cimco_token');
         if (!token && auth?.currentUser) {
-            token = await auth.currentUser.getIdToken();
+            try {
+                token = await auth.currentUser.getIdToken();
+            } catch (err) {
+                console.warn('⚠️ No se pudo obtener Firebase ID token:', err);
+            }
         }
         return token || '';
+    };
+
+    // Helper para normalizar la URL Base de la API
+    const getCleanApiUrl = () => {
+        const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        return rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
     };
 
     // 1. Cargar Administradores Existentes con AbortController
     const cargarAdministradores = async (signal) => {
         try {
             setLoading(true);
-            const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-            const cleanBaseUrl = rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
+            const cleanBaseUrl = getCleanApiUrl();
             const token = await getAuthToken();
 
             const response = await fetch(`${cleanBaseUrl}/api/admin/usuarios`, {
@@ -61,8 +71,16 @@ const GestionAdmins = () => {
 
             if (response.ok) {
                 const result = await response.json();
-                const listaRaw = result?.data || result?.usuarios || [];
-                setAdministradores(Array.isArray(listaRaw) ? listaRaw : []);
+                const listaRaw = Array.isArray(result) 
+                    ? result 
+                    : (result?.data || result?.usuarios || []);
+                
+                // Filtrar roles administrativos y de despacho con guarda de seguridad
+                const listaFiltrada = (listaRaw || []).filter(u => 
+                    u && ['admin', 'oficina', 'despachador', 'ceo'].includes(u.role || u.rol)
+                );
+
+                setAdministradores(listaFiltrada);
             }
         } catch (err) {
             if (err.name !== 'AbortError') {
@@ -82,7 +100,7 @@ const GestionAdmins = () => {
         };
     }, []);
 
-    // 2. Registrar Nuevo Administrador u Oficina
+    // 2. Registrar Nuevo Administrador u Oficina con fallback de endpoints
     const handleSubmit = async (e) => {
         e.preventDefault();
         setMensaje({ tipo: '', texto: '' });
@@ -90,6 +108,7 @@ const GestionAdmins = () => {
         const nombreLimpio = formData.nombre?.trim() || '';
         const emailLimpio = formData.email?.trim() || '';
         const passwordLimpia = formData.password?.trim() || '';
+        const rolLimpio = formData.role || 'oficina';
 
         if (!nombreLimpio || !emailLimpio || !passwordLimpia) {
             setMensaje({ tipo: 'error', texto: 'Todos los campos marcados son obligatorios.' });
@@ -98,28 +117,46 @@ const GestionAdmins = () => {
 
         try {
             setGuardando(true);
-            const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-            const cleanBaseUrl = rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
+            const cleanBaseUrl = getCleanApiUrl();
             const token = await getAuthToken();
 
-            const response = await fetch(`${cleanBaseUrl}/api/admin/crear-credencial`, {
+            const payload = {
+                nombre: nombreLimpio,
+                email: emailLimpio,
+                password: passwordLimpia,
+                rol: rolLimpio,
+                role: rolLimpio,
+                access_level: formData.access_level || 8,
+                cooperativaId: formData.cooperativaId || null,
+                aprobado: true
+            };
+
+            // Intentar primero endpoint primario
+            let response = await fetch(`${cleanBaseUrl}/api/admin/crear-credencial`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({
-                    ...formData,
-                    nombre: nombreLimpio,
-                    email: emailLimpio,
-                    password: passwordLimpia
-                })
+                body: JSON.stringify(payload)
             });
+
+            // Fallback a endpoint de autenticación si el primario responde 404
+            if (response.status === 404) {
+                response = await fetch(`${cleanBaseUrl}/api/auth/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+            }
 
             const result = await response.json();
 
-            if (response.ok && (result?.success || result?.ok)) {
-                setMensaje({ tipo: 'exito', texto: 'Credencial corporativa creada exitosamente.' });
+            if (response.ok && (result?.success || result?.ok || result?._id || result?.uid)) {
+                setMensaje({ tipo: 'exito', texto: `Credencial creada exitosamente para ${nombreLimpio}` });
                 await cargarAdministradores();
                 setTimeout(() => {
                     setModalAbierto(false);
@@ -127,7 +164,10 @@ const GestionAdmins = () => {
                     setMensaje({ tipo: '', texto: '' });
                 }, 1500);
             } else {
-                setMensaje({ tipo: 'error', texto: result?.error || result?.message || 'Error al crear la credencial.' });
+                setMensaje({ 
+                    tipo: 'error', 
+                    texto: result?.error || result?.message || 'Error al crear la credencial gerencial.' 
+                });
             }
         } catch (err) {
             console.error('❌ Error de red:', err);
@@ -140,13 +180,12 @@ const GestionAdmins = () => {
     // 3. Revocar o Eliminar Credencial Administrativa
     const handleRevocarCredencial = async (adminId) => {
         if (!adminId) return;
-        const confirmacion = window.confirm('⚠️ ¿Está seguro de que desea revocar el acceso a esta credencial administrativa?');
+        const confirmacion = window.confirm('⚠️ ¿Está seguro de revocar esta credencial? El acceso será bloqueado inmediatamente.');
         if (!confirmacion) return;
 
         try {
             setRevocandoId(adminId);
-            const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-            const cleanBaseUrl = rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
+            const cleanBaseUrl = getCleanApiUrl();
             const token = await getAuthToken();
 
             const response = await fetch(`${cleanBaseUrl}/api/admin/usuarios/${adminId}`, {
@@ -159,7 +198,7 @@ const GestionAdmins = () => {
 
             const result = await response.json();
 
-            if (response.ok && (result?.success || result?.ok)) {
+            if (response.ok && (result?.success || result?.ok || response.status === 200)) {
                 await cargarAdministradores();
             } else {
                 alert(`❌ Error al revocar credencial: ${result?.error || result?.message || 'Operación fallida'}`);
@@ -173,8 +212,9 @@ const GestionAdmins = () => {
     };
 
     const adminsFiltrados = (administradores || []).filter(admin => {
-        const nombreStr = admin?.nombre?.toLowerCase() || '';
-        const emailStr = admin?.email?.toLowerCase() || '';
+        if (!admin) return false;
+        const nombreStr = (admin?.nombre || admin?.displayName || '').toLowerCase();
+        const emailStr = (admin?.email || '').toLowerCase();
         const query = busqueda.toLowerCase().trim();
         return nombreStr.includes(query) || emailStr.includes(query);
     });
@@ -195,28 +235,44 @@ const GestionAdmins = () => {
                         <KeyRound className="w-5 h-5 text-amber-400" />
                         Gestión de Credenciales de Oficina & Admins
                     </h2>
-                    <p className="text-[10px] text-zinc-500 uppercase mt-0.5">Creación de accesos de personal administrativo y operadores de terminal</p>
+                    <p className="text-[10px] text-zinc-500 uppercase mt-0.5">
+                        Creación, asignación de roles y revocación de accesos gerenciales en tiempo real
+                    </p>
                 </div>
 
-                <button
-                    onClick={() => { setMensaje({ tipo: '', texto: '' }); setModalAbierto(true); }}
-                    className="px-5 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-500/10 transition-all flex items-center gap-2"
-                >
-                    <UserPlus className="w-4 h-4 stroke-[3]" />
-                    Nueva Credencial
-                </button>
+                <div className="flex items-center gap-3">
+                    <button 
+                        onClick={() => cargarAdministradores()}
+                        className="p-3 bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-xl text-zinc-300 hover:text-white transition-colors"
+                        title="Recargar credenciales"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-400' : ''}`} />
+                    </button>
+                    <button
+                        onClick={() => { setMensaje({ tipo: '', texto: '' }); setModalAbierto(true); }}
+                        className="px-5 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-500/10 transition-all flex items-center gap-2"
+                    >
+                        <UserPlus className="w-4 h-4 stroke-[3]" />
+                        Nueva Credencial
+                    </button>
+                </div>
             </div>
 
-            {/* BUSCADOR */}
-            <div className="relative">
-                <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
-                <input 
-                    type="text"
-                    placeholder="Buscar por Nombre o Correo..."
-                    value={busqueda}
-                    onChange={(e) => setBusqueda(e.target.value)}
-                    className="w-full bg-[#121214]/80 border border-white/5 rounded-xl py-3 pl-11 pr-4 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-all"
-                />
+            {/* BUSCADOR Y ESTADÍSTICAS */}
+            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                <div className="relative w-full sm:w-96">
+                    <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <input 
+                        type="text"
+                        placeholder="Buscar por Nombre o Correo..."
+                        value={busqueda}
+                        onChange={(e) => setBusqueda(e.target.value)}
+                        className="w-full bg-[#121214]/80 border border-white/5 rounded-xl py-3 pl-11 pr-4 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-all"
+                    />
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-400 bg-[#121214]/80 border border-white/5 px-4 py-2.5 rounded-xl">
+                    Accesos Activos: <strong className="text-amber-400 font-black">{adminsFiltrados.length}</strong>
+                </div>
             </div>
 
             {/* TABLA / TARJETAS DE ADMINISTRADORES */}
@@ -233,24 +289,31 @@ const GestionAdmins = () => {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {adminsFiltrados.map((admin) => {
-                        const targetId = admin?._id || admin?.id;
+                        const targetId = admin?._id || admin?.id || admin?.uid;
                         const isRevocando = revocandoId === targetId;
+                        const userRole = admin?.role || admin?.rol || 'admin';
 
                         return (
                             <div key={targetId || Math.random()} className="backdrop-blur-md bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-2xl p-5 shadow-xl transition-all relative group">
                                 <div className="flex justify-between items-start mb-2 gap-2">
-                                    <h3 className="font-bold text-white text-sm uppercase truncate">{admin?.nombre || 'Sin nombre'}</h3>
+                                    <h3 className="font-bold text-white text-sm uppercase truncate">
+                                        {admin?.nombre || admin?.displayName || 'Usuario'}
+                                    </h3>
                                     <div className="flex items-center gap-1.5 shrink-0">
                                         <span className={`text-[9px] font-bold px-2 py-0.5 rounded border uppercase ${
-                                            admin?.role === 'ceo' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                                            userRole === 'ceo' 
+                                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' 
+                                                : userRole === 'admin'
+                                                ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                                                : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                                         }`}>
-                                            {admin?.role || 'Admin'}
+                                            {userRole}
                                         </span>
                                         <button
                                             onClick={() => handleRevocarCredencial(targetId)}
                                             disabled={isRevocando}
                                             title="Revocar Credencial"
-                                            className="p-1 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all disabled:opacity-50"
+                                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all disabled:opacity-50"
                                         >
                                             {isRevocando ? (
                                                 <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
@@ -260,7 +323,7 @@ const GestionAdmins = () => {
                                         </button>
                                     </div>
                                 </div>
-                                <p className="text-zinc-400 text-xs truncate mb-3 flex items-center gap-1.5">
+                                <p className="text-zinc-400 text-xs truncate mb-3 flex items-center gap-1.5 font-mono">
                                     <Mail className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                                     {admin?.email || 'N/A'}
                                 </p>
@@ -277,17 +340,20 @@ const GestionAdmins = () => {
             {/* MODAL DE CREACIÓN */}
             {modalAbierto && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-                    <div className="bg-[#121214] border border-zinc-800 rounded-3xl w-full max-w-md p-6 shadow-2xl relative">
+                    <div className="bg-[#121214] border border-white/10 rounded-3xl w-full max-w-md p-6 shadow-2xl relative">
                         <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-                            <KeyRound className="w-4 h-4 text-amber-400" /> Crear Credencial de Oficina
+                            <KeyRound className="w-4 h-4 text-amber-400" /> Emitir Credencial Corporativa
                         </h3>
 
                         {mensaje.texto && (
-                            <div className={`mb-4 p-3 rounded-xl border text-xs flex items-center gap-2 ${
+                            <div className={`mb-4 p-3 rounded-xl border text-xs flex items-center justify-between gap-2 ${
                                 mensaje.tipo === 'exito' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'
                             }`}>
-                                <AlertCircle className="w-4 h-4 shrink-0" />
-                                <span>{mensaje.texto}</span>
+                                <div className="flex items-center gap-2">
+                                    <AlertCircle className="w-4 h-4 shrink-0" />
+                                    <span>{mensaje.texto}</span>
+                                </div>
+                                <button onClick={() => setMensaje({ tipo: '', texto: '' })} className="text-[10px] font-bold underline">Cerrar</button>
                             </div>
                         )}
 
@@ -340,8 +406,8 @@ const GestionAdmins = () => {
                                         disabled={guardando}
                                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-50"
                                     >
-                                        <option value="admin">Administrador</option>
                                         <option value="oficina">Oficina / Despacho</option>
+                                        <option value="admin">Administrador Gerencial</option>
                                         <option value="ceo">CEO / SuperAdmin</option>
                                     </select>
                                 </div>
@@ -363,14 +429,14 @@ const GestionAdmins = () => {
                                     type="button"
                                     onClick={() => setModalAbierto(false)}
                                     disabled={guardando}
-                                    className="px-4 py-2 bg-zinc-800 text-zinc-300 font-bold text-xs uppercase rounded-xl disabled:opacity-50"
+                                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs uppercase rounded-xl transition-colors disabled:opacity-50"
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={guardando}
-                                    className="px-4 py-2 bg-amber-500 text-black font-extrabold text-xs uppercase rounded-xl flex items-center gap-2 disabled:opacity-50"
+                                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase rounded-xl flex items-center gap-2 transition-all disabled:opacity-50"
                                 >
                                     {guardando && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                                     {guardando ? 'Emitiendo...' : 'Emitir Credencial'}
