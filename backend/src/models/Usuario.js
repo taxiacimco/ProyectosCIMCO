@@ -1,9 +1,9 @@
-// Versión Arquitectura: V17.3 - Restricción de Persistencia con Email y Teléfono Obligatorios en Mongoose
+// Versión Arquitectura: V17.4 - Verificación y Blindaje del Hook Pre-Save de Bcrypt contra Doble Hashing
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
- * Integridad: Fusión Atómica. Garantiza persistencia estricta exigiendo 'email' y 'telefono' obligatorios, preservando
- * sincronización bidireccional (rol ↔ role, saldo ↔ balance), hashing bcrypt, atributos para despachadores e indices GeoJSON.
+ * Integridad: Fusión Atómica. Preserva la sincronización bidireccional (rol ↔ role, saldo ↔ balance), persistencia estricta,
+ * indices GeoJSON y encriptación bcrypt única en el hook pre-save controlando isModified('password').
  */
 
 import mongoose from 'mongoose';
@@ -41,7 +41,8 @@ const usuarioSchema = new mongoose.Schema({
     },
     password: {
         type: String,
-        required: [true, '⚠️ La clave de acceso criptográfica es obligatoria para el resguardo de la sesión.']
+        required: [true, '⚠️ La clave de acceso criptográfica es obligatoria para el resguardo de la sesión.'],
+        select: false
     },
     rol: {
         type: String,
@@ -189,7 +190,14 @@ usuarioSchema.pre('save', async function (next) {
             usuario.coordenadas = { type: 'Point', coordinates: [-73.3332, 9.5661] };
         }
 
+        // 🛡️ CONTROL ANTI-DOBLE HASHING:
+        // Solo encripta si la clave ha sido modificada o enviada en texto plano directamente.
+        // Si la clave no cambió o si ya viene con hash de bcrypt ($2a$, $2b$, $2y$), omitir rehashing.
         if (!usuario.isModified('password')) {
+            return next();
+        }
+
+        if (typeof usuario.password === 'string' && usuario.password.startsWith('$2')) {
             return next();
         }
 

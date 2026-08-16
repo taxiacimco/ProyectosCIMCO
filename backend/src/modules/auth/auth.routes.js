@@ -1,21 +1,15 @@
-// Versión Arquitectura: V17.2 - Soporte de Intercepción Multidocumento Multipart/Form-Data
+// Versión Arquitectura: V21.28 - Mapeo Multicamino POST /api/auth (login, register, forgot-password, reset-password, otp)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
- * Misión: Enrutador perimetral de autenticación alineado con soporte multicamino para perfil y carga documental.
- * Integridad: Preserva el interceptor híbrido multipart/form-data expandido a múltiplos adjuntos (cédula, licencia, tarjeta, ID),
- * middlewares de validación de payload y ruteo a las funciones exportadas del auth.controller.js.
+ * Misión: Enrutador perimetral de autenticación con mapeo completo de subrutas HTTP POST bajo el prefijo /api/auth.
+ * Integridad: Garantiza la coexistencia limpia de los aliases estándar (/forgot-password, /reset-password) con los endpoints
+ * preexistentes (/solicitar-otp, /restablecer), preservando el middleware de carga híbrida Multipart/Multer, la validación
+ * de payloads, la trazabilidad de peticiones y las guardas anti-crash ESM.
  */
 
 import express from 'express'; 
 import multer from 'multer'; 
-import { 
-    login, 
-    register, 
-    solicitarOTP, 
-    verificarOTPyRestablecer, 
-    verificarTelefono,
-    updateProfile
-} from './auth.controller.js';
+import * as authController from './auth.controller.js';
 import { validateRegisterPayload, verificarToken } from '../../middleware/auth.middleware.js';
 
 const router = express.Router();
@@ -61,29 +55,58 @@ const interceptorCargaHibrida = (req, res, next) => {
     }
 };
 
+// 🛡️ RESOLUCIÓN DINÁMICA DE CONTROLADORES (ANTI-CRASH ESM)
+const loginHandler = authController?.login;
+const registerHandler = authController?.register;
+const solicitarOTPHandler = authController?.forgotPassword || authController?.solicitarOTP;
+const restablecerHandler = authController?.resetPassword || authController?.verificarOTPyRestablecer;
+const verificarTelefonoHandler = authController?.verificarTelefono || authController?.checkPhone;
+const checkPhoneHandler = authController?.checkPhone || authController?.verificarTelefono;
+const updateProfileHandler = authController?.updateProfile;
+
 /**
  * 🚀 ENDPOINTS DE ACCESO Y REGISTRO
  */
-router.post('/login', verificarPayloadLogin, login);
-router.post('/register', interceptorCargaHibrida, validateRegisterPayload, register);
+if (typeof loginHandler === 'function') {
+    router.post('/login', verificarPayloadLogin, loginHandler);
+}
+
+if (typeof registerHandler === 'function') {
+    router.post('/register', interceptorCargaHibrida, validateRegisterPayload, registerHandler);
+}
 
 /**
- * 🔑 PASARELA DE RECUPERACIÓN DE CREDENCIALES (OTP)
+ * 🔑 PASARELA DE RECUPERACIÓN DE CREDENCIALES (OTP & FORGOT/RESET PASSWORD)
  */
-router.post('/solicitar-otp', solicitarOTP);
-router.post('/restablecer', verificarOTPyRestablecer);
+if (typeof solicitarOTPHandler === 'function') {
+    router.post('/forgot-password', solicitarOTPHandler);
+    router.post('/solicitar-otp', solicitarOTPHandler);
+}
+
+if (typeof restablecerHandler === 'function') {
+    router.post('/reset-password', restablecerHandler);
+    router.post('/restablecer', restablecerHandler);
+}
 
 /**
  * 📡 VALIDACIONES EN CALIENTE (REGISTRO DINÁMICO)
  */
-router.post('/verificar-telefono', verificarTelefono);
+if (typeof verificarTelefonoHandler === 'function') {
+    router.post('/verificar-telefono', verificarTelefonoHandler);
+}
+
+if (typeof checkPhoneHandler === 'function') {
+    router.post('/check-phone', checkPhoneHandler);
+}
 
 /**
  * 🔄 GESTIÓN DE PERFIL DE USUARIO (Rutas Protegidas con Alias de Compatibilidad)
  */
-router.put('/update-profile', verificarToken, interceptorCargaHibrida, updateProfile);
-router.put('/perfil', verificarToken, interceptorCargaHibrida, updateProfile);
-router.put('/profile', verificarToken, interceptorCargaHibrida, updateProfile);
-router.patch('/update-profile', verificarToken, interceptorCargaHibrida, updateProfile);
+if (typeof updateProfileHandler === 'function') {
+    router.put('/update-profile', verificarToken, interceptorCargaHibrida, updateProfileHandler);
+    router.put('/perfil', verificarToken, interceptorCargaHibrida, updateProfileHandler);
+    router.put('/profile', verificarToken, interceptorCargaHibrida, updateProfileHandler);
+    router.patch('/update-profile', verificarToken, interceptorCargaHibrida, updateProfileHandler);
+}
 
 export default router;

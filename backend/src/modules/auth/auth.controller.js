@@ -1,11 +1,9 @@
-// Versión Arquitectura: V21.25 - Mapeo Explícito y Validación Estricta de Correo y Teléfono en Registro
+// Versión Arquitectura: V21.27 - Fusión Atómica de Login Dual, Anti-Doble Hashing y Flujo de Recuperación OTP
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
- * extracción e integración de subdocumentos/archivos (req.files), atributos extendidos (terminal_sede, access_level),
- * validación explícita de campos obligatorios (email y teléfono) en registro para prevenir datos incompletos en MongoDB/Firebase,
- * respuestas de error granuladas para login (USER_NOT_FOUND, WRONG_PASSWORD, ACCOUNT_PENDING_APPROVAL)
- * e implementación del flujo diferido de activación.
+ * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
+ * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword) y validaciones perimetrales.
  */
 
 import jwt from 'jsonwebtoken';
@@ -42,7 +40,8 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 /**
- * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO (POLIMÓRFICO CON CAPTURA MULTIPART/FILES, MAPEO EXPLÍCITO DE EMAIL/TELÉFONO Y FLUJO DIFERIDO DE APROBACIÓN)
+ * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO
+ * Lógica anti-doble hashing: Se delega el cifrado al middleware pre('save') del modelo Mongoose.
  */
 export const register = async (req, res) => {
     try {
@@ -142,7 +141,8 @@ export const register = async (req, res) => {
             return res.status(400).json({ success: false, message: "El número telefónico ya está vinculado a otra cuenta." });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // 🛡️ SIN DOBLE HASHING: Se pasa la contraseña plana para que el Hook pre('save') la encripte
+        const plainPassword = String(password);
 
         let nuevoUsuario;
         let esPasajero = false;
@@ -154,8 +154,7 @@ export const register = async (req, res) => {
                 nombre: nombreFinal,
                 fullName: nombreFinal,
                 email: emailLimpio,
-                password: hashedPassword,
-                passwordHash: hashedPassword,
+                password: plainPassword,
                 telefonoMovil: telFinal,
                 telefono: telFinal,
                 rol: 'pasajero',
@@ -186,8 +185,7 @@ export const register = async (req, res) => {
                 nombre: nombreFinal,
                 fullName: nombreFinal,
                 email: emailLimpio,
-                password: hashedPassword,
-                passwordHash: hashedPassword,
+                password: plainPassword,
                 telefonoMovil: telFinal,
                 telefono: telFinal,
                 rol: rolNormalizado,
@@ -226,8 +224,7 @@ export const register = async (req, res) => {
                 nombre: nombreFinal,
                 fullName: nombreFinal,
                 email: emailLimpio,
-                password: hashedPassword,
-                passwordHash: hashedPassword,
+                password: plainPassword,
                 telefonoMovil: telFinal,
                 telefono: telFinal,
                 rol: rolNormalizado,
@@ -248,7 +245,7 @@ export const register = async (req, res) => {
 
         await nuevoUsuario.save();
 
-        // Sincronización hacia Firebase Firestore con Denormalización Saneada de Billetera y Archivos
+        // Sincronización hacia Firebase Firestore con Denormalización Saneada
         if (dbFirestore) {
             try {
                 const coleccionFirestore = esPasajero 
@@ -260,7 +257,7 @@ export const register = async (req, res) => {
                     email: nuevoUsuario.email,
                     nombre: nuevoUsuario.nombre,
                     fullName: nuevoUsuario.nombre,
-                    telefono: nuevoUsuario.telefonoMovil,
+                    telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
                     rol: nuevoUsuario.rol,
                     subrol: nuevoUsuario.subrol || subrolFinal || null,
                     estado: nuevoUsuario.estado,
@@ -286,7 +283,7 @@ export const register = async (req, res) => {
 
                 await dbFirestore.collection(coleccionFirestore).doc(String(nuevoUsuario._id)).set(payloadFirestore);
 
-                // Denormalización de Billetera/Wallet en Firestore para evitar fallas del frontend
+                // Denormalización de Billetera/Wallet en Firestore
                 const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
                 await dbFirestore.collection(pathBilleteras).doc(String(nuevoUsuario._id)).set({
                     id: String(nuevoUsuario._id),
@@ -311,7 +308,7 @@ export const register = async (req, res) => {
                     id: nuevoUsuario._id,
                     nombre: nuevoUsuario.nombre,
                     email: nuevoUsuario.email,
-                    telefono: nuevoUsuario.telefonoMovil,
+                    telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
                     rol: nuevoUsuario.rol,
                     estado: nuevoUsuario.estado,
                     isActive: nuevoUsuario.isActive,
@@ -328,7 +325,7 @@ export const register = async (req, res) => {
                 id: nuevoUsuario._id,
                 nombre: nuevoUsuario.nombre,
                 email: nuevoUsuario.email,
-                telefono: nuevoUsuario.telefonoMovil,
+                telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
                 rol: nuevoUsuario.rol,
                 estado: nuevoUsuario.estado,
                 isActive: nuevoUsuario.isActive,
@@ -344,37 +341,53 @@ export const register = async (req, res) => {
 };
 
 /**
- * 🔑 INICIO DE SESIÓN POLIMÓRFICO CON TRIPLE COMPROBACIÓN SÍNCRONA
+ * 🔑 INICIO DE SESIÓN DUAL (CORREO O CELULAR) CON TRIPLE COMPROBACIÓN Y SELECT('+PASSWORD')
  */
 export const login = async (req, res) => {
     try {
-        const { identifier, password } = req.body || {};
+        const body = req.body || {};
+        const loginInput = body.loginInput || body.identifier;
+        const password = body.password;
 
-        if (!identifier || !password) {
-            return res.status(400).json({ success: false, message: "Debe proveer un identificador (correo o teléfono) y su contraseña." });
+        if (!loginInput || !password) {
+            return res.status(400).json({ 
+                success: false, 
+                code: 'MISSING_FIELDS',
+                message: "Por favor ingresa tu celular/correo y contraseña." 
+            });
         }
 
-        const inputLimpio = String(identifier).trim();
-        const esCorreo = inputLimpio.includes('@');
+        const cleanInput = String(loginInput).trim().toLowerCase();
+        const digitsOnly = cleanInput.replace(/\D/g, '');
 
-        let consulta = {};
-        if (esCorreo) {
-            consulta.email = inputLimpio.toLowerCase();
-        } else {
-            // Consulta polimórfica para soportar tanto 'telefonoMovil' como 'telefono'
-            consulta = {
-                $or: [
-                    { telefonoMovil: inputLimpio },
-                    { telefono: inputLimpio }
-                ]
-            };
+        // Construcción de consulta dual con tolerancias de prefijo internacional (57) y números limpios
+        const queryConditions = [
+            { email: cleanInput },
+            { telefono: cleanInput },
+            { telefonoMovil: cleanInput }
+        ];
+
+        if (digitsOnly) {
+            queryConditions.push({ telefono: digitsOnly });
+            queryConditions.push({ telefonoMovil: digitsOnly });
+            queryConditions.push({ telefono: `57${digitsOnly}` });
+            queryConditions.push({ telefonoMovil: `57${digitsOnly}` });
+
+            // Si el input viene con prefijo '57' de 12 dígitos, busca también la versión local de 10 dígitos
+            if (digitsOnly.startsWith('57') && digitsOnly.length === 12) {
+                const localDigits = digitsOnly.substring(2);
+                queryConditions.push({ telefono: localDigits });
+                queryConditions.push({ telefonoMovil: localDigits });
+            }
         }
 
-        // Ejecución Concurrente del Triple Handshake de Búsqueda
+        const consulta = { $or: queryConditions };
+
+        // Ejecución Concurrente con inclusión explícita del hash criptográfico (+password)
         const [usuarioAdmin, usuarioConductor, usuarioPasajero] = await Promise.all([
-            Usuario.findOne(consulta),
-            Conductor.findOne(consulta),
-            Pasajero.findOne(consulta)
+            Usuario.findOne(consulta).select('+password +passwordHash'),
+            Conductor.findOne(consulta).select('+password +passwordHash'),
+            Pasajero.findOne(consulta).select('+password +passwordHash')
         ]);
 
         const cuentaEncontrada = usuarioAdmin || usuarioConductor || usuarioPasajero;
@@ -384,7 +397,7 @@ export const login = async (req, res) => {
             return res.status(404).json({ 
                 success: false, 
                 code: 'USER_NOT_FOUND',
-                message: "El número de teléfono o correo no está registrado. Por favor presiona 'Crear Cuenta'." 
+                message: "No existe una cuenta asociada a este correo o celular." 
             });
         }
 
@@ -417,7 +430,7 @@ export const login = async (req, res) => {
         }
 
         // 2️⃣ VALIDACIÓN 2: Clave de acceso errada
-        const passwordValido = await bcrypt.compare(password, hashAlmacenada);
+        const passwordValido = await bcrypt.compare(String(password), hashAlmacenada);
         if (!passwordValido) {
             return res.status(401).json({ 
                 success: false, 
@@ -439,7 +452,7 @@ export const login = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Acreditación exitosa.",
+            message: "Inicio de sesión exitoso",
             token,
             user: {
                 id: cuentaEncontrada._id,
@@ -447,6 +460,7 @@ export const login = async (req, res) => {
                 email: cuentaEncontrada.email,
                 rol: cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero',
                 estado: cuentaEncontrada.estado,
+                telefono: cuentaEncontrada.telefono || cuentaEncontrada.telefonoMovil || "",
                 telefonoMovil: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono || "",
                 cooperativa: cuentaEncontrada.cooperativa || cuentaEncontrada.empresa || "",
                 terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa || "",
@@ -457,34 +471,43 @@ export const login = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-AUTH-LOGIN-FATAL] Error en el proceso de autenticación:", error);
-        return res.status(500).json({ success: false, message: "Error interno del servidor durante el inicio de sesión." });
+        return res.status(500).json({ 
+            success: false, 
+            code: 'SERVER_ERROR',
+            message: error.message || "Error interno del servidor durante el inicio de sesión." 
+        });
     }
 };
 
 /**
- * 📡 SOLICITUD DE OTP PARA RESTABLECIMIENTO DE ACCESO
+ * 📡 SOLICITUD DE OTP / RECUPERACIÓN DE CLAVE (FORGOT-PASSWORD)
  */
 export const solicitarOTP = async (req, res) => {
     try {
-        const { identifier } = req.body || {};
-        if (!identifier) {
-            return res.status(400).json({ success: false, message: "El identificador (correo o teléfono móvil) es requerido." });
+        const body = req.body || {};
+        const loginInput = body.loginInput || body.identifier || body.email || body.telefono;
+
+        if (!loginInput) {
+            return res.status(400).json({ success: false, message: "El identificador (correo o teléfono celular) es requerido." });
         }
 
-        const inputLimpio = String(identifier).trim();
-        const esCorreo = inputLimpio.includes('@');
+        const cleanInput = String(loginInput).trim().toLowerCase();
+        const digitsOnly = cleanInput.replace(/\D/g, '');
 
-        let consulta = {};
-        if (esCorreo) {
-            consulta.email = inputLimpio.toLowerCase();
-        } else {
-            consulta = {
-                $or: [
-                    { telefonoMovil: inputLimpio },
-                    { telefono: inputLimpio }
-                ]
-            };
+        const queryConditions = [
+            { email: cleanInput },
+            { telefono: cleanInput },
+            { telefonoMovil: cleanInput }
+        ];
+
+        if (digitsOnly) {
+            queryConditions.push({ telefono: digitsOnly });
+            queryConditions.push({ telefonoMovil: digitsOnly });
+            queryConditions.push({ telefono: `57${digitsOnly}` });
+            queryConditions.push({ telefonoMovil: `57${digitsOnly}` });
         }
+
+        const consulta = { $or: queryConditions };
 
         // Búsqueda en los tres dominios de datos
         const [u, c, p] = await Promise.all([
@@ -499,23 +522,23 @@ export const solicitarOTP = async (req, res) => {
             return res.status(404).json({ success: false, message: "No se localizó ninguna cuenta asociada a dicho identificador." });
         }
 
-        const telefonoContacto = usuarioExistente.telefonoMovil || usuarioExistente.telefono;
+        const telefonoContacto = usuarioExistente.telefono || usuarioExistente.telefonoMovil || cleanInput;
 
         // Generación de código numérico de 6 dígitos
         const codigoOTP = Math.floor(100000 + Math.random() * 900000).toString();
         
-        // Registrar OTP en la bóveda volátil con tiempo de expiración (5 minutos)
+        // Registrar OTP en la bóveda volátil con tiempo de expiración (15 minutos)
         otpStore.set(telefonoContacto, {
             codigo: codigoOTP,
-            expira: Date.now() + 5 * 60 * 1000,
+            expira: Date.now() + 15 * 60 * 1000,
             usuarioId: usuarioExistente._id
         });
 
-        console.log(`🔑 [CIMCO-OTP-GATEWAY] Código generado para ${telefonoContacto}: [ ${codigoOTP} ] (Válido por 5 minutos)`);
+        console.log(`🔑 [CIMCO-OTP-GATEWAY] Código generado para ${telefonoContacto}: [ ${codigoOTP} ] (Válido por 15 minutos)`);
 
         return res.status(200).json({ 
             success: true, 
-            message: "Código de verificación generado con éxito.",
+            message: "Código de verificación y restablecimiento enviado con éxito.",
             debugOtp: process.env.NODE_ENV !== 'production' ? codigoOTP : undefined
         });
 
@@ -525,33 +548,41 @@ export const solicitarOTP = async (req, res) => {
     }
 };
 
+export const forgotPassword = solicitarOTP;
+
 /**
- * 🛠️ VERIFICACIÓN DE OTP Y REESCRITURA DE CREDENCIALES
+ * 🛠️ VERIFICACIÓN DE OTP Y RESTABLECIMIENTO DE CLAVE (RESET-PASSWORD)
  */
 export const verificarOTPyRestablecer = async (req, res) => {
     try {
-        const { identifier, codigo, nuevaPassword } = req.body || {};
+        const body = req.body || {};
+        const loginInput = body.loginInput || body.identifier || body.email || body.telefono;
+        const codigo = body.codigo || body.otp || body.token;
+        const nuevaPassword = body.nuevaPassword || body.password || body.newPassword;
 
-        if (!identifier || !codigo || !nuevaPassword) {
-            return res.status(400).json({ success: false, message: "Faltan parámetros requeridos para completar la reescritura." });
+        if (!loginInput || !codigo || !nuevaPassword) {
+            return res.status(400).json({ success: false, message: "Faltan parámetros requeridos (identificador, código u OTP, y nueva contraseña)." });
         }
 
-        const inputLimpio = String(identifier).trim();
-        const esCorreo = inputLimpio.includes('@');
+        const cleanInput = String(loginInput).trim().toLowerCase();
+        const digitsOnly = cleanInput.replace(/\D/g, '');
 
-        let consulta = {};
-        if (esCorreo) {
-            consulta.email = inputLimpio.toLowerCase();
-        } else {
-            consulta = {
-                $or: [
-                    { telefonoMovil: inputLimpio },
-                    { telefono: inputLimpio }
-                ]
-            };
+        const queryConditions = [
+            { email: cleanInput },
+            { telefono: cleanInput },
+            { telefonoMovil: cleanInput }
+        ];
+
+        if (digitsOnly) {
+            queryConditions.push({ telefono: digitsOnly });
+            queryConditions.push({ telefonoMovil: digitsOnly });
+            queryConditions.push({ telefono: `57${digitsOnly}` });
+            queryConditions.push({ telefonoMovil: `57${digitsOnly}` });
         }
 
-        // Localizar el usuario en primer lugar
+        const consulta = { $or: queryConditions };
+
+        // Localizar el usuario
         const [u, c, p] = await Promise.all([
             Usuario.findOne(consulta),
             Conductor.findOne(consulta),
@@ -564,11 +595,11 @@ export const verificarOTPyRestablecer = async (req, res) => {
             return res.status(404).json({ success: false, message: "Identificador de cuenta inválido." });
         }
 
-        const telefonoContacto = usuario.telefonoMovil || usuario.telefono;
+        const telefonoContacto = usuario.telefono || usuario.telefonoMovil || cleanInput;
         const registroOTP = otpStore.get(telefonoContacto);
 
         if (!registroOTP) {
-            return res.status(400).json({ success: false, message: "No se ha solicitado ningún código para este número o ya expiró." });
+            return res.status(400).json({ success: false, message: "No se ha solicitado ningún código para esta cuenta o ya expiró." });
         }
 
         if (Date.now() > registroOTP.expira) {
@@ -577,53 +608,21 @@ export const verificarOTPyRestablecer = async (req, res) => {
         }
 
         if (registroOTP.codigo !== String(codigo).trim()) {
-            return res.status(400).json({ success: false, message: "Código de verificación incorrecto." });
+            return res.status(400).json({ success: false, message: "Código de verificación o OTP incorrecto." });
         }
 
-        const newHashedPassword = await bcrypt.hash(nuevaPassword, 10);
-
-        const condicionesUsuario = [
-            { _id: usuario._id },
-            { email: inputLimpio.toLowerCase() },
-            { telefonoMovil: inputLimpio },
-            { telefono: inputLimpio }
-        ];
-
-        const payloadUpdate = {
-            password: newHashedPassword,
-            passwordHash: newHashedPassword
-        };
-
-        let modificado = await Usuario.findOneAndUpdate(
-            { $or: condicionesUsuario }, 
-            payloadUpdate,
-            { new: true }
-        );
-        
-        if (!modificado) {
-            modificado = await Conductor.findOneAndUpdate(
-                { $or: condicionesUsuario }, 
-                payloadUpdate,
-                { new: true }
-            );
+        // Reescritura usando .save() para activar hooks o hash explícito
+        usuario.password = String(nuevaPassword);
+        if (usuario.passwordHash !== undefined) {
+            usuario.passwordHash = String(nuevaPassword);
         }
 
-        if (!modificado) {
-            modificado = await Pasajero.findOneAndUpdate(
-                { $or: condicionesUsuario },
-                payloadUpdate,
-                { new: true }
-            );
-        }
-
-        if (!modificado) {
-            return res.status(404).json({ success: false, message: "No se encontró ninguna entidad vinculada a este identificador." });
-        }
+        await usuario.save();
 
         otpStore.delete(telefonoContacto);
-        console.log(`🔒 [CIMCO-SECURITY] Credenciales actualizadas vía OTP en Colección Central para: ${telefonoContacto}`);
+        console.log(`🔒 [CIMCO-SECURITY] Credenciales actualizadas correctamente para: ${telefonoContacto}`);
 
-        return res.status(200).json({ success: true, message: "Contraseña actualizada correctamente." });
+        return res.status(200).json({ success: true, message: "Contraseña restablecida correctamente." });
 
     } catch (error) {
         console.error("🚨 [CIMCO-AUTH-RESET-FATAL] Error en reescritura de credenciales:", error);
@@ -631,8 +630,10 @@ export const verificarOTPyRestablecer = async (req, res) => {
     }
 };
 
+export const resetPassword = verificarOTPyRestablecer;
+
 /**
- * 📡 VERIFICACIÓN DE DISPONIBILIDAD TELEFÓNICA
+ * 📡 VERIFICACIÓN DE DISPONIBILIDAD TELEFÓNICA (RETROCOMPATIBILIDAD)
  */
 export const verificarTelefono = async (req, res) => {
     try {
@@ -650,13 +651,63 @@ export const verificarTelefono = async (req, res) => {
         ]);
 
         if (u || c || p) {
-            return res.status(200).json({ success: true, disponible: false, message: "El teléfono ya se encuentra en uso." });
+            return res.status(200).json({ success: true, disponible: false, existe: true, message: "El teléfono ya se encuentra en uso." });
         }
 
-        return res.status(200).json({ success: true, disponible: true, message: "Teléfono apto para vinculación." });
+        return res.status(200).json({ success: true, disponible: true, existe: false, message: "Teléfono apto para vinculación." });
     } catch (error) {
         console.error("🚨 [CIMCO-VALIDATION-FATAL] Error en escaneo de red:", error);
         return res.status(500).json({ success: false, message: "Error de validación interna." });
+    }
+};
+
+/**
+ * 📡 CONSULTA DE REGISTRO TELEFÓNICO (CHECK-PHONE / SUBRUTA /check-phone)
+ */
+export const checkPhone = async (req, res) => {
+    try {
+        const body = req.body || {};
+        const telefonoInput = body.telefono || body.telefonoMovil;
+
+        if (!telefonoInput) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'El número de teléfono es requerido.' 
+            });
+        }
+
+        const telBusqueda = String(telefonoInput).trim();
+        const consultaTel = { $or: [{ telefonoMovil: telBusqueda }, { telefono: telBusqueda }] };
+
+        const [u, c, p] = await Promise.all([
+            Usuario.findOne(consultaTel),
+            Conductor.findOne(consultaTel),
+            Pasajero.findOne(consultaTel)
+        ]);
+
+        const usuarioExistente = u || c || p;
+
+        if (usuarioExistente) {
+            return res.json({ 
+                success: true, 
+                existe: true, 
+                disponible: false,
+                message: 'El teléfono ya se encuentra registrado.' 
+            });
+        }
+
+        return res.json({ 
+            success: true, 
+            existe: false, 
+            disponible: true,
+            message: 'Línea disponible para registro.' 
+        });
+    } catch (error) {
+        console.error("❌ [CIMCO-AUTH-ERROR] Error en check-phone:", error);
+        return res.status(500).json({ 
+            success: false, 
+            message: 'Error interno en el servidor de autenticación.' 
+        });
     }
 };
 
@@ -833,7 +884,10 @@ export default {
     register,
     login,
     solicitarOTP,
+    forgotPassword,
     verificarOTPyRestablecer,
+    resetPassword,
     verificarTelefono,
+    checkPhone,
     updateProfile
 };

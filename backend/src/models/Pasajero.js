@@ -1,9 +1,10 @@
-// Versión Arquitectura: V17.2 - Soporte de Foto de Perfil y Avatar Multimedia Pasajero
+// Versión Arquitectura: V21.28 - Verificación y Protección Anti-Doble Hashing en Pre-Save Hook Pasajero
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
- * Integridad: Fusión Atómica. Preserva cifrado Bcrypt, esquema de direcciones favoritas, soporte
- * GeoJSON 2dsphere, aprobación automática inmediata e inyecta soporte para la URL de foto_perfil.
+ * Integridad: Fusión Atómica. Preserva cifrado Bcrypt con guarda anti-doble hashing (isModified('password')
+ * y detección de prefijo hash $2a$/$2b$), esquema de direcciones favoritas, soporte GeoJSON 2dsphere,
+ * aprobación automática inmediata e inyecta soporte para la URL de foto_perfil y normalización de variables.
  */
 
 import mongoose from 'mongoose';
@@ -47,7 +48,8 @@ const pasajeroSchema = new mongoose.Schema({
     },
     password: {
         type: String,
-        required: false
+        required: false,
+        select: false
     },
     role: {
         type: String,
@@ -90,6 +92,11 @@ const pasajeroSchema = new mongoose.Schema({
         trim: true,
         default: 'Particular'
     },
+    terminal_sede: {
+        type: String,
+        trim: true,
+        default: 'Particular'
+    },
     uid: {
         type: String,
         sparse: true
@@ -111,7 +118,7 @@ const pasajeroSchema = new mongoose.Schema({
 // Índices optimizados
 pasajeroSchema.index({ "coordenadas.coordinates": "2dsphere" }, { background: true });
 
-// 🛡️ Sincronización Homóloga de Variables y Cifrado
+// 🛡️ Sincronización Homóloga de Variables y Cifrado Anti-Doble Hashing
 pasajeroSchema.pre('save', async function (next) {
     try {
         if (!this.fullName && this.nombre) {
@@ -140,7 +147,15 @@ pasajeroSchema.pre('save', async function (next) {
             this.coordenadas = { type: 'Point', coordinates: [-73.3325, 9.5623] };
         }
 
+        // 🔒 BLINDAJE ANTI-DOBLE HASHING:
+        // Evalúa si el campo contraseña fue modificado y no está vacío
         if (!this.isModified('password') || !this.password) {
+            return next();
+        }
+
+        // Si la contraseña ya viene encriptada con Bcrypt (empieza por $2a$, $2b$ o $2y$ y tiene longitud de hash), evita un segundo hashing
+        const isAlreadyHashed = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(this.password);
+        if (isAlreadyHashed) {
             return next();
         }
 

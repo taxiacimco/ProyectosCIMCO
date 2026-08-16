@@ -1,17 +1,18 @@
-// Versión Arquitectura: V12.6 - Refuerzo de Validaciones Estrictas para Correo Electrónico y Celular Colombiano (10 Dígitos)
+// Versión Arquitectura: V12.8 - Diagnóstico de Endpoint /auth/check-phone y Control de Flujo Progresivo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Yellow Accent).
- * Misión: Capturar identidad exclusivamente para PASAJEROS con control de peticiones en Step 1, 
- *         gestión de datos personales con validación estricta de correo (type="email") y teléfono celular colombiano (10 dígitos starting in 3),
- *         previsualización/carga binaria de foto de perfil, flujo de salida garantizado hacia /register y transición limpia tras registro a /login.
+ * Misión: Capturar identidad para PASAJEROS con verificación de celular en Step 1.
+ *         Si el número NO está registrado (existe: false), el sistema despliega automáticamente la Fase 2 (Perfil).
+ *         Si la ruta del backend no existe (404 ROUTE-MISS), expone de forma directa y limpia el error de arquitectura.
  */
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth'; 
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { Phone, User, Mail, Lock, ShieldCheck, Camera, Check, ArrowLeft } from 'lucide-react';
+import { Phone, User, Mail, Lock, ShieldCheck, Camera, Check, ArrowLeft, ArrowRight, Sparkles } from 'lucide-react';
 
 const RegisterPasajero = () => {
     const navigate = useNavigate();
@@ -98,7 +99,7 @@ const RegisterPasajero = () => {
         
         try {
             const res = await api.post(
-                `/api/auth/check-phone`, 
+                `/auth/check-phone`, 
                 { telefono: telefono.trim() },
                 { signal: checkPhoneControllerRef.current.signal }
             );
@@ -107,11 +108,17 @@ const RegisterPasajero = () => {
                 setError('Este terminal ya posee una identidad indexada. Redirigiendo...');
                 setTimeout(() => navigate('/login', { replace: true }), 2500);
             } else {
+                // ✅ Si el número NO existe, el sistema habilita el formulario de registro (Fase 2)
                 setStep(2);
             }
         } catch (err) {
             if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED') {
-                setError('Error de enlace en el gateway. Verifique el nodo central.');
+                const apiMessage = err?.response?.data?.message;
+                if (apiMessage) {
+                    setError(`⚠️ SYSTEM_FAULT: ${apiMessage}`);
+                } else {
+                    setError('⚠️ SYSTEM_FAULT: El recurso solicitado [POST] /api/auth/check-phone no existe en el mapa de servicios del Nodo Central.');
+                }
             }
         } finally {
             setLoading(false);
@@ -166,113 +173,147 @@ const RegisterPasajero = () => {
                 formData.append('foto_perfil', fotoPerfilFile);
             }
 
-            // Llamada al endpoint con headers explícitos para Multer/Cloudinary
-            const res = await api.post(`/api/auth/register`, formData, {
+            const res = await api.post(`/auth/register`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             
             if (res?.data?.success) {
-                // Iniciar sesión automáticamente delegando el token si la función existe
                 if (typeof loginLocal === 'function' && res.data.usuario && res.data.token) {
                     loginLocal(res.data.usuario, res.data.token);
                 }
-                // Transición limpia hacia /login
                 navigate('/login', { replace: true });
             }
         } catch (err) {
             console.error("❌ [CIMCO-GATEWAY] Error de Form-Data:", err);
-            setError(err?.response?.data?.message || 'Error de sincronización con el servidor de carga binaria.');
+            const apiMessage = err?.response?.data?.message;
+            setError(apiMessage ? `⚠️ SYSTEM_FAULT: ${apiMessage}` : 'Error de sincronización con el servidor de carga binaria.');
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-[#0a0a0c] text-zinc-200 flex flex-col items-center justify-center p-4 font-sans selection:bg-yellow-500/30 relative transition-colors duration-500">
+        <div className="min-h-screen bg-[#0a0a0c] text-zinc-200 flex flex-col items-center justify-center p-4 font-sans selection:bg-amber-500/30 relative overflow-hidden transition-colors duration-500">
             
             {/* Efecto de luz ambiental posterior (Glassmorphism Light Bleed) */}
-            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-yellow-500/[0.05] rounded-full blur-[100px] pointer-events-none" />
+            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 translate-y-1/2 w-[400px] h-[400px] bg-amber-500/10 rounded-full blur-[100px] pointer-events-none" />
             
-            {/* Contenedor Principal CIMCO-UI */}
-            <div className="w-full max-w-md bg-[#121214]/80 backdrop-blur-xl border border-white/5 rounded-2xl p-6 shadow-2xl relative z-10">
+            {/* Contenedor Principal CIMCO-UI Premium Glassmorphism */}
+            <div className="w-full max-w-md bg-[#121214]/80 backdrop-blur-xl border border-white/5 rounded-3xl p-6 md:p-8 shadow-2xl relative z-10">
                 
                 {/* Botón de retorno explícito a Selección de Rol */}
                 <Link 
                     to="/register" 
-                    className="inline-flex items-center gap-2 text-slate-400 hover:text-white font-mono text-xs uppercase tracking-wider transition-colors mb-6 text-decoration-none"
+                    className="inline-flex items-center gap-2 text-slate-400 hover:text-amber-400 font-mono text-xs uppercase tracking-wider transition-colors mb-6 text-decoration-none group"
                 > 
-                    <ArrowLeft size={16} /> Volver a Selección de Rol
+                    <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" /> 
+                    <span>Volver a Selección de Rol</span>
                 </Link>
 
-                <div className="text-center mb-6">
-                    <h2 className="text-xs font-bold uppercase tracking-[0.25em] text-yellow-500">TAXIA CIMCO</h2>
-                    <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1 font-mono font-semibold">Registro de Pasajero</p>
+                {/* Cabecera & Badge de Seguridad */}
+                <div className="text-center space-y-2 mb-6">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-mono font-bold tracking-wider">
+                        <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                        <span>CONEXIÓN CIFRADA SSL 256-BIT</span>
+                    </div>
+                    <h2 className="text-xl font-extrabold uppercase tracking-widest text-amber-500 font-mono flex items-center justify-center gap-2">
+                        TAXIA CIMCO
+                    </h2>
+                    <p className="text-xs text-slate-400 font-mono">
+                        {step === 1 ? 'Paso 1 de 2: Verificación de línea móvil' : 'Paso 2 de 2: Formulación de Identidad'}
+                    </p>
                 </div>
 
+                {/* Stepper Progresivo */}
+                <div className="flex items-center justify-between mb-6 px-2 font-mono">
+                    <div className={`flex items-center gap-2 font-bold text-xs ${step === 1 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                        <span className={`w-6 h-6 rounded-full border flex items-center justify-center text-[10px] ${step === 1 ? 'bg-amber-400/20 border-amber-400' : 'bg-emerald-500/20 border-emerald-500 text-emerald-400'}`}>
+                            {step > 1 ? <Check size={12} /> : '1'}
+                        </span>
+                        <span>TELÉFONO</span>
+                    </div>
+                    <div className={`h-[2px] flex-1 mx-3 transition-colors ${step > 1 ? 'bg-emerald-500/50' : 'bg-slate-800'}`} />
+                    <div className={`flex items-center gap-2 font-bold text-xs ${step === 2 ? 'text-amber-400' : 'text-slate-500'}`}>
+                        <span className={`w-6 h-6 rounded-full border flex items-center justify-center text-[10px] ${step === 2 ? 'bg-amber-400/20 border-amber-400' : 'bg-slate-800 border-slate-700'}`}>
+                            2
+                        </span>
+                        <span>PERFIL</span>
+                    </div>
+                </div>
+
+                {/* Notificación Dinámica de Error */}
                 {error && (
-                    <div className="mb-4 p-3 bg-red-950/40 border border-red-500/20 text-red-400 text-xs font-mono rounded-lg backdrop-blur-sm flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-                        <span className="font-bold flex-shrink-0 text-red-500">⚠️ SYSTEM_FAULT:</span> 
-                        <span className="leading-tight">{error}</span>
+                    <div className="mb-6 p-3 bg-red-950/40 border border-red-500/20 text-red-400 text-xs font-mono rounded-2xl backdrop-blur-sm flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2">
+                        <span className="font-bold flex-shrink-0 text-red-500 mt-0.5">⚠️ SYSTEM_FAULT:</span> 
+                        <span className="leading-relaxed">{error.replace(/^⚠️ SYSTEM_FAULT:\s*/, '')}</span>
                     </div>
                 )}
 
                 {step === 1 ? (
-                    <form onSubmit={handleCheckPhone} className="space-y-4">
-                        <div className="text-center mb-1">
-                            <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono font-bold">Fase 01: Vinculación Telefónica</span>
+                    <form onSubmit={handleCheckPhone} className="space-y-6">
+                        <div>
+                            <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300 mb-2">
+                                Número Celular Colombiano
+                            </label>
+                            <div className="relative group">
+                                <Phone className="absolute left-3.5 top-3.5 text-slate-500 group-focus-within:text-amber-400 transition-colors" size={16} />
+                                <input 
+                                    type="tel" 
+                                    name="telefono"
+                                    required
+                                    pattern="[3][0-9]{9}"
+                                    maxLength={10}
+                                    placeholder="Ej. 3157654321" 
+                                    title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3157654321)"
+                                    value={telefono} 
+                                    onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))} 
+                                    className="w-full bg-[#18181b]/80 border border-white/10 rounded-2xl py-3.5 pl-11 pr-4 text-xs font-mono tracking-wider text-zinc-200 focus:outline-none focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/80 focus:bg-[#1f1f22] transition-all placeholder:text-slate-600 disabled:opacity-50" 
+                                    disabled={loading} 
+                                />
+                            </div>
+                            <p className="text-[10px] text-slate-500 mt-2 font-mono">10 dígitos iniciando por 3 (Ej. 3157654321)</p>
                         </div>
-                        <div className="relative group">
-                            <Phone className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
-                            <input 
-                                type="tel" 
-                                name="telefono"
-                                required
-                                pattern="[3][0-9]{9}"
-                                maxLength={10}
-                                placeholder="Ej. 3101234567" 
-                                title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567)"
-                                value={telefono} 
-                                onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))} 
-                                className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs font-mono uppercase tracking-wide text-zinc-200 focus:outline-none focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] transition-all placeholder:text-zinc-600 disabled:opacity-50" 
-                                disabled={loading} 
-                            />
-                        </div>
+
                         <button 
                             type="submit" 
                             disabled={loading} 
-                            className="w-full bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed text-black text-xs font-mono font-black uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_25px_rgba(234,179,8,0.4)]"
+                            className="w-full bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-mono font-black text-xs uppercase tracking-widest py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_30px_rgba(245,158,11,0.4)] flex items-center justify-center gap-2 group"
                         >
-                            {loading ? 'VERIFICANDO DISPONIBILIDAD...' : 'VERIFICAR DISPONIBILIDAD'}
+                            <span>{loading ? 'VERIFICANDO DISPONIBILIDAD...' : 'VERIFICAR DISPONIBILIDAD'}</span>
+                            {!loading && <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />}
                         </button>
                     </form>
                 ) : (
-                    <form onSubmit={handleRegister} className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
+                    <form onSubmit={handleRegister} className="space-y-5 animate-in fade-in zoom-in-95 duration-300">
                         
-                        <div className="bg-yellow-950/30 border border-yellow-500/20 rounded-xl p-3.5 flex items-center justify-between">
+                        {/* Estado del Terminal Verificado */}
+                        <div className="bg-emerald-950/30 border border-emerald-500/20 rounded-2xl p-3.5 flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <ShieldCheck className="text-yellow-500" size={15} />
-                                <span className="text-[9px] text-yellow-500 uppercase tracking-widest font-mono font-bold">Identidad Celular Verificada</span>
+                                <Check className="text-emerald-400" size={16} />
+                                <span className="text-[10px] text-emerald-400 uppercase tracking-wider font-mono font-bold">Línea Móvil Verificada</span>
                             </div>
-                            <span className="text-xs text-yellow-100 font-bold tracking-widest bg-[#18181b] px-2.5 py-1 rounded-md border border-white/5 font-mono">
+                            <span className="text-xs text-emerald-200 font-bold tracking-widest bg-[#18181b] px-3 py-1 rounded-xl border border-white/5 font-mono">
                                 {telefono}
                             </span>
                         </div>
 
                         {/* SECCIÓN 1: DATOS PERSONALES Y FOTO DE PERFIL BINARIA */}
-                        <div className="bg-[#18181b]/40 border border-white/5 rounded-xl p-4 space-y-4">
-                            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2">
-                                Sección 1: Datos Personales e Imagen de Perfil
+                        <div className="bg-[#18181b]/50 border border-white/5 rounded-2xl p-4 space-y-4">
+                            <div className="text-[10px] text-slate-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-1.5">
+                                <Sparkles size={12} className="text-amber-400" />
+                                <span>Datos Personales & Fotografía</span>
                             </div>
 
                             {/* Módulo de Previsualización y Carga de Avatar Binario */}
-                            <div className="flex flex-col items-center justify-center p-3 bg-[#18181b]/80 border border-white/5 border-dashed rounded-xl transition-all hover:border-yellow-500/30 group">
+                            <div className="flex flex-col items-center justify-center p-3 bg-[#18181b]/80 border border-white/10 border-dashed rounded-2xl transition-all hover:border-amber-400/40 group">
                                 <div className="relative mb-2">
                                     {previewUrl ? (
-                                        <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.2)]">
+                                        <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
                                             <img src={previewUrl} alt="Previsualización Avatar" className="w-full h-full object-cover" />
                                         </div>
                                     ) : (
-                                        <div className="w-16 h-16 rounded-full bg-[#27272a] border border-white/10 flex items-center justify-center text-zinc-500 group-hover:text-yellow-500 transition-colors">
+                                        <div className="w-16 h-16 rounded-full bg-[#27272a] border border-white/10 flex items-center justify-center text-slate-500 group-hover:text-amber-400 transition-colors">
                                             <User size={28} />
                                         </div>
                                     )}
@@ -287,7 +328,7 @@ const RegisterPasajero = () => {
                                 />
                                 <label 
                                     htmlFor="avatar" 
-                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer text-[10px] font-mono font-bold uppercase tracking-wide transition-all ${fotoPerfilFile ? 'bg-yellow-950/50 text-yellow-500 border border-yellow-500/30 shadow-[0_0_10px_rgba(234,179,8,0.1)]' : 'bg-[#27272a] text-zinc-400 hover:bg-[#3f3f46] border border-transparent'}`}
+                                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl cursor-pointer text-[10px] font-mono font-bold uppercase tracking-wide transition-all ${fotoPerfilFile ? 'bg-amber-950/50 text-amber-400 border border-amber-500/30 shadow-[0_0_10px_rgba(245,158,11,0.1)]' : 'bg-[#27272a] text-slate-300 hover:bg-[#3f3f46] border border-transparent'}`}
                                 >
                                     <Camera size={13} />
                                     {fotoPerfilFile ? '✓ CAMBIAR FOTO' : 'SELECCIONAR FOTO DE PERFIL'}
@@ -300,55 +341,70 @@ const RegisterPasajero = () => {
                             </div>
 
                             {/* Nombre Completo */}
-                            <div className="relative group">
-                                <User className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
-                                <input 
-                                    type="text" 
-                                    name="nombre"
-                                    placeholder="NOMBRE COMPLETO *" 
-                                    value={nombre} 
-                                    onChange={(e) => setNombre(e.target.value)} 
-                                    className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
-                                    disabled={loading} 
-                                    required 
-                                />
+                            <div>
+                                <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300 mb-1">
+                                    Nombre Completo *
+                                </label>
+                                <div className="relative group">
+                                    <User className="absolute left-3.5 top-3.5 text-slate-500 group-focus-within:text-amber-400 transition-colors" size={15} />
+                                    <input 
+                                        type="text" 
+                                        name="nombre"
+                                        placeholder="Diana Mendoza Altahona" 
+                                        value={nombre} 
+                                        onChange={(e) => setNombre(e.target.value)} 
+                                        className="w-full bg-[#18181b]/80 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/80 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-slate-600 disabled:opacity-50" 
+                                        disabled={loading} 
+                                        required 
+                                    />
+                                </div>
                             </div>
 
-                            {/* Correo Electrónico Obligatorio con Validación Estricta */}
-                            <div className="relative group">
-                                <Mail className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
-                                <input 
-                                    type="email" 
-                                    name="email"
-                                    required
-                                    placeholder="usuario@dominio.com *" 
-                                    value={correo} 
-                                    onChange={(e) => setCorreo(e.target.value)} 
-                                    className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50 font-mono" 
-                                    disabled={loading} 
-                                />
+                            {/* Correo Electrónico Obligatorio */}
+                            <div>
+                                <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300 mb-1">
+                                    Correo Electrónico *
+                                </label>
+                                <div className="relative group">
+                                    <Mail className="absolute left-3.5 top-3.5 text-slate-500 group-focus-within:text-amber-400 transition-colors" size={15} />
+                                    <input 
+                                        type="email" 
+                                        name="email"
+                                        required
+                                        placeholder="diana.mendoza@gmail.com" 
+                                        value={correo} 
+                                        onChange={(e) => setCorreo(e.target.value)} 
+                                        className="w-full bg-[#18181b]/80 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/80 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-slate-600 disabled:opacity-50 font-mono" 
+                                        disabled={loading} 
+                                    />
+                                </div>
                             </div>
 
                             {/* Contraseña */}
-                            <div className="relative group">
-                                <Lock className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
-                                <input 
-                                    type="password" 
-                                    name="password"
-                                    placeholder="CONTRASEÑA SEGURA (Mín. 6) *" 
-                                    value={clave} 
-                                    onChange={(e) => setClave(e.target.value)} 
-                                    className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all tracking-widest placeholder:text-zinc-600 placeholder:tracking-normal disabled:opacity-50" 
-                                    disabled={loading} 
-                                    required 
-                                />
+                            <div>
+                                <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-slate-300 mb-1">
+                                    Clave de Acceso *
+                                </label>
+                                <div className="relative group">
+                                    <Lock className="absolute left-3.5 top-3.5 text-slate-500 group-focus-within:text-amber-400 transition-colors" size={15} />
+                                    <input 
+                                        type="password" 
+                                        name="password"
+                                        placeholder="CONTRASEÑA SEGURA (Mín. 6)" 
+                                        value={clave} 
+                                        onChange={(e) => setClave(e.target.value)} 
+                                        className="w-full bg-[#18181b]/80 border border-white/10 rounded-xl py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/80 focus:bg-[#1f1f22] outline-none transition-all tracking-widest placeholder:text-slate-600 placeholder:tracking-normal disabled:opacity-50" 
+                                        disabled={loading} 
+                                        required 
+                                    />
+                                </div>
                             </div>
                         </div>
 
                         <button 
                             type="submit" 
                             disabled={loading} 
-                            className="w-full bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed text-black text-xs font-mono font-black uppercase tracking-widest py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(234,179,8,0.2)] hover:shadow-[0_0_25px_rgba(234,179,8,0.4)] mt-2"
+                            className="w-full bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 text-xs font-mono font-black uppercase tracking-widest py-4 rounded-2xl transition-all shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_30px_rgba(245,158,11,0.4)] mt-2"
                         >
                             {loading ? 'ALMACENANDO EN CENTRAL...' : 'FINALIZAR INSCRIPCIÓN'}
                         </button>
@@ -357,16 +413,22 @@ const RegisterPasajero = () => {
                             type="button" 
                             onClick={() => setStep(1)} 
                             disabled={loading}
-                            className="w-full text-center text-zinc-500 hover:text-zinc-300 text-[9px] uppercase tracking-widest pt-2 transition-colors font-mono font-bold disabled:opacity-50"
+                            className="w-full text-center text-slate-400 hover:text-amber-400 text-[10px] uppercase tracking-widest pt-2 transition-colors font-mono font-bold disabled:opacity-50"
                         >
                             ← MODIFICAR TERMINAL TELEFÓNICO
                         </button>
                     </form>
                 )}
 
-                <div className="mt-6 pt-4 border-t border-white/5 text-center font-mono">
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest">¿Ya tienes cuenta? <Link className="text-yellow-500 hover:text-yellow-400 ml-1 font-bold transition-colors text-decoration-none" to="/login">LOGUEAR ENTRADA</Link></p>
+                <div className="mt-8 pt-4 border-t border-white/5 text-center font-mono">
+                    <p className="text-[10px] text-slate-400 uppercase tracking-widest">
+                        ¿Ya tienes una cuenta activada?{' '}
+                        <Link className="text-amber-400 hover:text-amber-300 ml-1 font-bold transition-colors text-decoration-none" to="/login">
+                            LOGUEAR ENTRADA
+                        </Link>
+                    </p>
                 </div>
+
             </div>
         </div>
     );
