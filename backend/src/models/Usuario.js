@@ -1,9 +1,9 @@
-// Versión Arquitectura: V17.2 - Soporte de Acreditación Personal, Terminales y Perfil Multimedia
+// Versión Arquitectura: V17.3 - Restricción de Persistencia con Email y Teléfono Obligatorios en Mongoose
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
- * Integridad: Fusión Atómica. Preserva sincronización bidireccional (rol ↔ role, saldo ↔ balance), hashing bcrypt,
- * atributos para despachadores de terminales e inyecta soporte para foto_perfil, doc_identificacion, terminal_sede y access_level.
+ * Integridad: Fusión Atómica. Garantiza persistencia estricta exigiendo 'email' y 'telefono' obligatorios, preservando
+ * sincronización bidireccional (rol ↔ role, saldo ↔ balance), hashing bcrypt, atributos para despachadores e indices GeoJSON.
  */
 
 import mongoose from 'mongoose';
@@ -27,7 +27,7 @@ const usuarioSchema = new mongoose.Schema({
     },
     email: {
         type: String,
-        required: [true, '⚠️ El correo electrónico institucional es un campo requerido.'],
+        required: [true, '⚠️ El correo electrónico institucional es un campo obligatorio.'],
         unique: true,
         lowercase: true,
         trim: true,
@@ -35,7 +35,7 @@ const usuarioSchema = new mongoose.Schema({
     },
     telefono: {
         type: String,
-        required: [true, '⚠️ El identificador telefónico es mandatorio para el ruteo de alertas OTP.'],
+        required: [true, '⚠️ El identificador telefónico es un campo obligatorio.'],
         unique: true,
         trim: true
     },
@@ -45,6 +45,7 @@ const usuarioSchema = new mongoose.Schema({
     },
     rol: {
         type: String,
+        required: [true, '⚠️ El rol operativo es obligatorio.'],
         enum: {
             values: ['pasajero', 'despachador', 'admin', 'secretaria', 'staff', 'conductor'],
             message: '⚠️ El rol operativo proporcionado ({VALUE}) no pertenece a la matriz autorizada.'

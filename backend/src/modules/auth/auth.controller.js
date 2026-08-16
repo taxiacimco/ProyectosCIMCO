@@ -1,8 +1,9 @@
-// Versión Arquitectura: V21.24 - Actualización Login Polimórfico con Códigos de Error Diferenciados (USER_NOT_FOUND, WRONG_PASSWORD)
+// Versión Arquitectura: V21.25 - Mapeo Explícito y Validación Estricta de Correo y Teléfono en Registro
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * extracción e integración de subdocumentos/archivos (req.files), atributos extendidos (terminal_sede, access_level),
+ * validación explícita de campos obligatorios (email y teléfono) en registro para prevenir datos incompletos en MongoDB/Firebase,
  * respuestas de error granuladas para login (USER_NOT_FOUND, WRONG_PASSWORD, ACCOUNT_PENDING_APPROVAL)
  * e implementación del flujo diferido de activación.
  */
@@ -41,19 +42,19 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 /**
- * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO (POLIMÓRFICO CON CAPTURA MULTIPART/FILES Y FLUJO DIFERIDO DE APROBACIÓN)
+ * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO (POLIMÓRFICO CON CAPTURA MULTIPART/FILES, MAPEO EXPLÍCITO DE EMAIL/TELÉFONO Y FLUJO DIFERIDO DE APROBACIÓN)
  */
 export const register = async (req, res) => {
     try {
         const body = req.body || {};
         const { 
             email, 
+            telefono,
+            telefonoMovil,
             password, 
             nombre, 
             fullName, 
             nombreCompleto, 
-            telefonoMovil, 
-            telefono, 
             rol, 
             role, 
             subrol, 
@@ -67,16 +68,28 @@ export const register = async (req, res) => {
             accessLevel
         } = body;
 
-        // Normalización anti-undefined de datos personales
+        // 🛡️ VALIDACIÓN EXPLÍCITA DE CAMPOS CRÍTICOS OBLIGATORIOS (EMAIL Y TELÉFONO)
+        const emailLimpioInput = email ? String(email).trim() : '';
+        const telInput = (telefono || telefonoMovil || '').toString().trim();
+
+        if (!emailLimpioInput || !telInput) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Correo y teléfono son campos obligatorios.',
+                message: 'Correo y teléfono son campos obligatorios.' 
+            });
+        }
+
+        // Normalización anti-undefined de datos personales y credenciales
         const nombreFinal = (nombre || fullName || nombreCompleto || '').toString().trim();
-        const telFinal = (telefonoMovil || telefono || '').toString().trim();
+        const telFinal = telInput;
         const rolSuministrado = rol || role;
 
-        if (!email || !password || !nombreFinal || !telFinal || !rolSuministrado) {
+        if (!password || !nombreFinal || !rolSuministrado) {
             return res.status(400).json({ success: false, message: "Todos los campos obligatorios deben ser suministrados." });
         }
 
-        const emailLimpio = String(email).toLowerCase().trim();
+        const emailLimpio = emailLimpioInput.toLowerCase();
         const rolNormalizado = String(rolSuministrado).toLowerCase().trim();
         const subrolFinal = subrol ? String(subrol).toLowerCase().trim() : (rolNormalizado === 'conductor' ? 'mototaxi' : rolNormalizado);
         
@@ -298,6 +311,7 @@ export const register = async (req, res) => {
                     id: nuevoUsuario._id,
                     nombre: nuevoUsuario.nombre,
                     email: nuevoUsuario.email,
+                    telefono: nuevoUsuario.telefonoMovil,
                     rol: nuevoUsuario.rol,
                     estado: nuevoUsuario.estado,
                     isActive: nuevoUsuario.isActive,
@@ -314,6 +328,7 @@ export const register = async (req, res) => {
                 id: nuevoUsuario._id,
                 nombre: nuevoUsuario.nombre,
                 email: nuevoUsuario.email,
+                telefono: nuevoUsuario.telefonoMovil,
                 rol: nuevoUsuario.rol,
                 estado: nuevoUsuario.estado,
                 isActive: nuevoUsuario.isActive,

@@ -1,10 +1,10 @@
-// Versión Arquitectura: V19.6 - Generación Unívoca de UUIDs Criptográficos y Normalización Blindada
+// Versión Arquitectura: V19.8 - Desacoplamiento Nativo de Express-Validator y Preservación Total de Despacho Perimetral
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\validate.middleware.js
- * Misión: Validar y sanitizar los payloads de despacho perimetral (Urbano, Intermunicipal e Inmediato) antes de impactar el bus de datos central.
- * Ajuste V19.6: FUSIÓN ATÓMICA. Se integra el módulo nativo 'crypto' (crypto.randomUUID()) para garantizar la generación unívoca
- *               de identificadores de viaje en el puente de retrocompatibilidad intermunicipal, reemplazando la generación aleatoria pseudo-débil.
- *               Se preservan intactas las guardas polimórficas de coordenadas, el flujo de despacho inmediato y las reglas financieras.
+ * Misión: Validar y sanitizar los payloads de despacho perimetral (Urbano, Intermunicipal e Inmediato) y registros de usuario antes de impactar el bus de datos central.
+ * Ajuste V19.8: DESACOPLEMENTO NATIVO. Se elimina la dependencia externa 'express-validator' y se implementa un motor nativo
+ *               de cadenas de validación fluida en JavaScript (body, param, query, check, validationResult, validate),
+ *               eliminando el error ERR_MODULE_NOT_FOUND y conservando intactos 'validarRegistro' y 'validarDespacho'.
  */
 
 import crypto from 'crypto';
@@ -12,6 +12,174 @@ import crypto from 'crypto';
 const logLocal = (msg) => {
     console.log(`[${new Date().toLocaleString('es-CO')}] 📡 [CIMCO-VALIDACION] ${msg}`);
 };
+
+/**
+ * Genera una función middleware de Express con métodos encadenables de validación.
+ * Reemplaza la dependencia externa 'express-validator' sin alterar firmas existentes.
+ */
+function createValidationChain(field, location = 'body') {
+    const checks = [];
+    const sanitizers = [];
+    let currentCustomMsg = null;
+
+    const middleware = async (req, res, next) => {
+        if (!req) {
+            if (typeof next === 'function') next();
+            return;
+        }
+        const source = req[location] || {};
+        let val = source[field];
+
+        for (const checkObj of checks) {
+            const errorMsg = checkObj.fn(val);
+            if (errorMsg) {
+                if (!req._validationErrors) req._validationErrors = [];
+                req._validationErrors.push({
+                    path: field,
+                    param: field,
+                    msg: checkObj.customMsg || errorMsg,
+                    value: val
+                });
+                break; // Detiene comprobaciones adicionales para este mismo campo
+            }
+        }
+
+        // Aplicar sanitizaciones sobre la fuente si no hay errores
+        for (const sanFn of sanitizers) {
+            if (req[location] && req[location][field] !== undefined) {
+                req[location][field] = sanFn(req[location][field]);
+            }
+        }
+
+        if (typeof next === 'function') next();
+    };
+
+    const addCheck = (fn) => {
+        checks.push({ fn, customMsg: currentCustomMsg });
+        currentCustomMsg = null;
+        return middleware;
+    };
+
+    // --- Métodos de Encadenamiento (Chainable Helpers) ---
+
+    middleware.withMessage = (msg) => {
+        if (checks.length > 0) {
+            checks[checks.length - 1].customMsg = msg;
+        } else {
+            currentCustomMsg = msg;
+        }
+        return middleware;
+    };
+
+    middleware.notEmpty = () => addCheck((val) => {
+        if (val === undefined || val === null || String(val).trim() === '') {
+            return `El campo '${field}' es obligatorio.`;
+        }
+        return null;
+    });
+
+    middleware.isEmail = () => addCheck((val) => {
+        if (!val) return null;
+        const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return !regex.test(String(val).trim()) ? `El campo '${field}' debe ser un correo válido.` : null;
+    });
+
+    middleware.matches = (pattern) => addCheck((val) => {
+        if (!val) return null;
+        const regex = pattern instanceof RegExp ? pattern : new RegExp(pattern);
+        return !regex.test(String(val)) ? `El campo '${field}' no cumple con el formato requerido.` : null;
+    });
+
+    middleware.isLength = (options = {}) => addCheck((val) => {
+        if (!val) return null;
+        const len = String(val).length;
+        if (options.min !== undefined && len < options.min) return `El campo '${field}' debe tener al menos ${options.min} caracteres.`;
+        if (options.max !== undefined && len > options.max) return `El campo '${field}' no puede superar los ${options.max} caracteres.`;
+        return null;
+    });
+
+    middleware.isNumeric = () => addCheck((val) => {
+        if (!val) return null;
+        return isNaN(Number(val)) ? `El campo '${field}' debe ser numérico.` : null;
+    });
+
+    middleware.normalizeEmail = () => {
+        sanitizers.push((val) => typeof val === 'string' ? val.trim().toLowerCase() : val);
+        return middleware;
+    };
+
+    middleware.optional = () => middleware;
+    middleware.run = async (req) => middleware(req, {}, () => {});
+
+    return middleware;
+}
+
+export const body = (field) => createValidationChain(field, 'body');
+export const param = (field) => createValidationChain(field, 'params');
+export const query = (field) => createValidationChain(field, 'query');
+export const check = (field) => createValidationChain(field, 'body');
+
+/**
+ * Extrae los errores acumulados durante la ejecución de las cadenas de validación.
+ */
+export const validationResult = (req) => {
+    const errors = (req && req._validationErrors) ? req._validationErrors : [];
+    return {
+        isEmpty: () => errors.length === 0,
+        array: () => errors,
+        mapped: () => errors.reduce((acc, err) => ({ ...acc, [err.path]: err }), {})
+    };
+};
+
+/**
+ * Middleware que evalúa el resultado de validación y responde HTTP 400 si hay fallos.
+ */
+export const validate = (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            success: false,
+            errors: errors.array(),
+            message: errors.array()[0]?.msg || 'Error de validación en los datos enviados.'
+        });
+    }
+    next();
+};
+
+/**
+ * Middleware de Validación Estricta para Registro de Usuarios (Email y Teléfono Celular Colombiano)
+ */
+export const validarRegistro = [
+    body('email')
+        .notEmpty().withMessage('El correo electrónico es requerido')
+        .isEmail().withMessage('Debe proporcionar un correo electrónico válido')
+        .normalizeEmail(),
+    body('telefono')
+        .notEmpty().withMessage('El número celular es requerido')
+        .matches(/^3\d{9}$/).withMessage('El celular debe ser un número colombiano válido de 10 dígitos que empiece por 3'),
+    (req, res, next) => {
+        // 🛡️ GUARDA DE SEGURIDAD ABSOLUTA
+        if (!req || !req.body) {
+            logLocal("🚨 Bloqueado en Registro: Payload ausente.");
+            return res.status(400).json({ 
+                status: 'ERROR', 
+                success: false, 
+                error: "⚠️ ALERTA DE ARQUITECTURA: Cuerpo de la petición (req.body) ausente o corrupto." 
+            });
+        }
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            logLocal(`🚨 Fallo de Validación en Registro: ${JSON.stringify(errors.array())}`);
+            return res.status(400).json({ 
+                status: 'ERROR', 
+                success: false, 
+                errors: errors.array() 
+            });
+        }
+        next();
+    }
+];
 
 /**
  * Middleware Maestro de Validación Perimetral para Despachos
@@ -29,7 +197,7 @@ export const validarDespacho = (req, res, next) => {
         });
     }
 
-    const { body, originalUrl } = req;
+    const { body: reqBody, originalUrl } = req;
     const { 
         viajeId, 
         conductorId, 
@@ -45,7 +213,7 @@ export const validarDespacho = (req, res, next) => {
         destinoLng,
         origen,
         destino
-    } = body;
+    } = reqBody;
 
     // Detectar ruta actual para activar la guarda electiva de taquilla / andén
     const esDespachoInmediato = originalUrl && originalUrl.includes('/despachar-inmediato');
@@ -232,4 +400,15 @@ export const validarDespacho = (req, res, next) => {
     }
 
     next();
+};
+
+export default {
+    body,
+    param,
+    query,
+    check,
+    validationResult,
+    validate,
+    validarRegistro,
+    validarDespacho
 };

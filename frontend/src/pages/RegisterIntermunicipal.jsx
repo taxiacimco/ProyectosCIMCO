@@ -1,9 +1,10 @@
-// Versión Arquitectura: V2.1 - Sincronización de Navegación de Retorno Directa al Selector (/register) y Blindaje de Datos
+// Versión Arquitectura: V2.2 - Sincronización Estricta de Teléfono Celular Colombiano y Email con Validaciones Operativas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterIntermunicipal.jsx
  * Misión: Registro de Operadores Intermunicipales con captura de Empresa/Cooperativa, Placa, Número Interno,
  *         sección de Rutas y Afiliación Logística, Carga Documental Digital (Cédula, Licencia, Tarjeta de Propiedad)
- *         con control estricto de límite de 5 MB por archivo, y sincronización explícita del botón de retorno hacia el selector central (/register).
+ *         con control estricto de límite de 5 MB por archivo, sincronización explícita del botón de retorno
+ *         hacia el selector central (/register) y validación unificada de correo electrónico y teléfono celular colombiano (10 dígitos).
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Indigo Accent).
  */
 
@@ -11,7 +12,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '@/config/api'; 
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
-import { AlertTriangle, UploadCloud, FileText, CheckCircle2, Building2, Bus, MapPin, Route, Check, ArrowLeft } from 'lucide-react';
+import { AlertTriangle, UploadCloud, FileText, CheckCircle2, Building2, Bus, MapPin, Route, Check, ArrowLeft, ShieldCheck } from 'lucide-react';
 
 // Constantes de Validación Documental (Máx 5MB)
 const MAX_FILE_SIZE_MB = 5;
@@ -84,6 +85,20 @@ const RegisterIntermunicipal = () => {
     // 🛡️ Guardas de seguridad preventivas (Anti-Undefined / Blindaje de Variables)
     if (!nombre?.trim() || !celular?.trim() || !correo?.trim() || !clave?.trim() || !placa?.trim() || !cooperativa?.trim()) {
       setError("⚠️ Error de Validación: Todos los campos operacionales principales son obligatorios.");
+      return;
+    }
+
+    // Validar celular colombiano (10 dígitos iniciando en 3)
+    const phoneRegex = /^3\d{9}$/;
+    if (!phoneRegex.test(celular.trim())) {
+      setError("El número de celular debe ser válido en Colombia (10 dígitos iniciando por 3).");
+      return;
+    }
+
+    // Validar formato estricto de correo electrónico
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(correo.trim())) {
+      setError("Ingrese un correo electrónico válido para habilitar notificaciones y recuperación.");
       return;
     }
 
@@ -184,15 +199,18 @@ const RegisterIntermunicipal = () => {
           {/* SECCIÓN 1: OPERADOR Y CREDENCIALES */}
           <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
             <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
-              <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" />
+              <ShieldCheck size={12} className="text-indigo-400" />
               Sección 1: Información Personal y Credenciales
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Nombre Completo del Conductor</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">
+                  Nombre Completo del Conductor *
+                </label>
                 <input 
                   type="text" 
+                  name="nombre"
                   placeholder="Ej. Carlos Fuentes" 
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
                   value={nombre} 
@@ -200,41 +218,58 @@ const RegisterIntermunicipal = () => {
                   required 
                 />
               </div>
+
+              {/* Teléfono Celular (10 dígitos en Colombia) */}
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Línea Celular</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">
+                  Teléfono Celular (WhatsApp / Llamadas) *
+                </label>
                 <input 
                   type="tel" 
-                  placeholder="3000000000" 
-                  maxLength="10" 
+                  name="telefono" 
+                  required 
+                  pattern="[3][0-9]{9}" 
+                  maxLength={10} 
+                  placeholder="Ej. 3101234567" 
+                  title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567)" 
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
                   value={celular} 
                   onChange={(e) => setCelular(e.target.value.replace(/\D/g, ''))} 
-                  required 
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Correo Electrónico Obligatorio */}
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Correo Electrónico de Operaciones</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">
+                  Correo Electrónico (Para Recuperación y Factura) *
+                </label>
                 <input 
                   type="email" 
-                  placeholder="ruta@cooperativa.com" 
+                  name="email" 
+                  required 
+                  placeholder="usuario@dominio.com" 
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
                   value={correo} 
                   onChange={(e) => setCorreo(e.target.value)} 
-                  required 
                 />
               </div>
+
+              {/* Contraseña de Acceso */}
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Contraseña de Acceso</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">
+                  Contraseña de Acceso *
+                </label>
                 <input 
                   type="password" 
+                  name="password"
+                  required 
+                  minLength={6}
                   placeholder="••••••••" 
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs tracking-widest" 
                   value={clave} 
                   onChange={(e) => setClave(e.target.value)} 
-                  required 
                 />
               </div>
             </div>
@@ -249,7 +284,7 @@ const RegisterIntermunicipal = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Empresa / Cooperativa</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Empresa / Cooperativa *</label>
                 <div className="relative">
                   <Building2 size={13} className="absolute left-3 top-3.5 text-zinc-600" />
                   <input 
@@ -263,7 +298,7 @@ const RegisterIntermunicipal = () => {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Placa del Vehículo</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Placa del Vehículo *</label>
                 <input 
                   type="text" 
                   placeholder="SDF456" 
@@ -275,7 +310,7 @@ const RegisterIntermunicipal = () => {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Número Interno Vial</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Número Interno Vial *</label>
                 <input 
                   type="text" 
                   placeholder="Ej. INT-40" 

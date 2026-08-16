@@ -1,9 +1,10 @@
-// Versión Arquitectura: V1.8 - Sincronización de Navegación de Retorno Directa al Selector (/register) y Gobernanza Level 3
+// Versión Arquitectura: V1.9 - Refuerzo de Validaciones Estrictas para Celular Colombiano y Correo Electrónico con Gobernanza Level 3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterDespachador.jsx
  * Misión: Registro de Despachadores con validación de Empresa Matriz, Terminal / Sede, Sección de Asignación de Sede Operativa,
+ *         refuerzo estricto de campos de contacto obligatorios (Teléfono Celular Colombiano y Correo Electrónico),
  *         y sincronización explícita de navegación de retorno a la selección de rol central (/register).
- * Regla de Negocio: Recibe solicitudes de Pasajeros y gestiona despachos hacia Intermunicipales.
+ * Regla de Negocio: Recibe solicitudes de Pasajeros y gestiona despachos hacia Intermunicipales (Gobernanza Access Level 3).
  * Estilo: CIMCO-UI V9.3 Glassmorphism (Amber Theme).
  */
 
@@ -78,6 +79,20 @@ const RegisterDespachador = () => {
     // 🛡️ GUARDA DE SEGURIDAD ESTRICTA PARA ACCESS_LEVEL 3
     if (!nombre?.trim() || !celular?.trim() || !correo?.trim() || !clave?.trim()) {
       setError("Todos los campos personales de acceso son obligatorios.");
+      return;
+    }
+
+    // Validar celular colombiano (10 dígitos iniciando en 3)
+    const phoneRegex = /^3\d{9}$/;
+    if (!phoneRegex.test(celular.trim())) {
+      setError("Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567).");
+      return;
+    }
+
+    // Validar formato estricto de correo electrónico
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(correo.trim())) {
+      setError("Ingrese un correo electrónico válido para habilitar notificaciones y recuperación.");
       return;
     }
 
@@ -181,7 +196,7 @@ const RegisterDespachador = () => {
 
         {error && (
           <div className="mb-6 text-red-400 bg-red-950/30 p-3.5 rounded-xl border border-red-500/20 text-xs font-mono flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-            <AlertTriangle size={14} className="flex-shrink-0" />
+            <AlertTriangle size={14} className="shrink-0" />
             <span>{error}</span>
           </div>
         )}
@@ -196,9 +211,10 @@ const RegisterDespachador = () => {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Nombre del Operador / Encargado</label>
+              <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Nombre del Operador / Encargado *</label>
               <input 
                 type="text" 
+                name="nombre"
                 placeholder="Ej. Carlos Despacho Norte" 
                 className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono" 
                 value={nombre} 
@@ -209,37 +225,49 @@ const RegisterDespachador = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Teléfono Celular (10 dígitos en Colombia) */}
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Línea Celular</label>
+                <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">
+                  Teléfono Celular (WhatsApp / Llamadas) *
+                </label>
                 <input 
                   type="tel" 
-                  placeholder="Ej. 3001234567" 
-                  maxLength="10" 
+                  name="telefono"
+                  required
+                  pattern="[3][0-9]{9}"
+                  maxLength={10}
+                  placeholder="Ej. 3101234567" 
+                  title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567)"
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono" 
                   value={celular} 
                   onChange={(e) => setCelular(e.target.value.replace(/\D/g, ''))} 
                   disabled={loading}
-                  required 
                 />
               </div>
+
+              {/* Correo Electrónico Obligatorio */}
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Correo de Despacho</label>
+                <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">
+                  Correo Electrónico (Para Recuperación y Factura) *
+                </label>
                 <input 
                   type="email" 
-                  placeholder="despacho@cimco.com" 
+                  name="email"
+                  required
+                  placeholder="usuario@dominio.com" 
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono" 
                   value={correo} 
                   onChange={(e) => setCorreo(e.target.value)} 
                   disabled={loading}
-                  required 
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Clave de Acceso Central</label>
+              <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Clave de Acceso Central *</label>
               <input 
                 type="password" 
+                name="password"
                 placeholder="Mínimo 6 caracteres" 
                 className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all tracking-widest text-xs" 
                 value={clave} 
@@ -260,7 +288,7 @@ const RegisterDespachador = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-amber-400 font-mono text-[10px] uppercase tracking-widest font-bold flex items-center gap-1">
-                  <Building2 size={12} /> Empresa Matriz
+                  <Building2 size={12} /> Empresa Matriz *
                 </label>
                 <input 
                   type="text" 
@@ -275,7 +303,7 @@ const RegisterDespachador = () => {
 
               <div className="space-y-1.5">
                 <label className="text-amber-400 font-mono text-[10px] uppercase tracking-widest font-bold flex items-center gap-1">
-                  <MapPin size={12} /> Terminal / Sede
+                  <MapPin size={12} /> Terminal / Sede *
                 </label>
                 <input 
                   type="text" 

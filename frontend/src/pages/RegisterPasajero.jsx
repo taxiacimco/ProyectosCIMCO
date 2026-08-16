@@ -1,10 +1,10 @@
-// Versión Arquitectura: V12.5 - Registro Unificado de Pasajero con Transición Limpia a Login y Retorno Explícito a Selección de Rol
+// Versión Arquitectura: V12.6 - Refuerzo de Validaciones Estrictas para Correo Electrónico y Celular Colombiano (10 Dígitos)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Yellow Accent).
  * Misión: Capturar identidad exclusivamente para PASAJEROS con control de peticiones en Step 1, 
- *         gestión de datos personales (Nombre, Celular, Correo), previsualización/carga binaria de foto de perfil,
- *         flujo de salida garantizado hacia /register y transición limpia tras registro a /login.
+ *         gestión de datos personales con validación estricta de correo (type="email") y teléfono celular colombiano (10 dígitos starting in 3),
+ *         previsualización/carga binaria de foto de perfil, flujo de salida garantizado hacia /register y transición limpia tras registro a /login.
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -71,11 +71,18 @@ const RegisterPasajero = () => {
     const handleCheckPhone = async (e) => {
         e.preventDefault();
         
-        // 🛡️ GUARDAS DE SEGURIDAD PREVENTIVAS (Bloqueo si está cargando o datos inválidos)
+        // 🛡️ GUARDAS DE SEGURIDAD PREVENTIVAS
         if (loading) return;
 
-        if (!telefono || !telefono?.trim() || telefono.trim().length < 7) {
-            setError('El número de teléfono (mínimo 7 dígitos) es obligatorio.');
+        if (!telefono || !telefono?.trim()) {
+            setError('El número de teléfono es obligatorio.');
+            return;
+        }
+
+        // Validar celular colombiano (10 dígitos iniciando en 3)
+        const phoneRegex = /^3\d{9}$/;
+        if (!phoneRegex.test(telefono.trim())) {
+            setError('Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567).');
             return;
         }
 
@@ -121,6 +128,20 @@ const RegisterPasajero = () => {
         // 🛡️ GUARDA DE SEGURIDAD: Validación estructural local
         if (!nombre?.trim() || !correo?.trim() || !clave?.trim()) {
             setError('Todos los campos básicos son estructuralmente requeridos.');
+            return;
+        }
+
+        // Validar celular colombiano (10 dígitos iniciando en 3)
+        const phoneRegex = /^3\d{9}$/;
+        if (!phoneRegex.test(telefono.trim())) {
+            setError('Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567).');
+            return;
+        }
+
+        // Validar formato estricto de correo electrónico para canal de recuperación
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(correo.trim())) {
+            setError('Ingrese un correo electrónico válido para habilitar notificaciones y recuperación.');
             return;
         }
 
@@ -204,13 +225,16 @@ const RegisterPasajero = () => {
                             <Phone className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
                             <input 
                                 type="tel" 
-                                placeholder="INGRESAR NÚMERO CELULAR" 
+                                name="telefono"
+                                required
+                                pattern="[3][0-9]{9}"
+                                maxLength={10}
+                                placeholder="Ej. 3101234567" 
+                                title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567)"
                                 value={telefono} 
                                 onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))} 
                                 className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs font-mono uppercase tracking-wide text-zinc-200 focus:outline-none focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] transition-all placeholder:text-zinc-600 disabled:opacity-50" 
                                 disabled={loading} 
-                                maxLength={10} 
-                                required 
                             />
                         </div>
                         <button 
@@ -280,7 +304,8 @@ const RegisterPasajero = () => {
                                 <User className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
                                 <input 
                                     type="text" 
-                                    placeholder="NOMBRE COMPLETO" 
+                                    name="nombre"
+                                    placeholder="NOMBRE COMPLETO *" 
                                     value={nombre} 
                                     onChange={(e) => setNombre(e.target.value)} 
                                     className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
@@ -289,17 +314,18 @@ const RegisterPasajero = () => {
                                 />
                             </div>
 
-                            {/* Correo Electrónico */}
+                            {/* Correo Electrónico Obligatorio con Validación Estricta */}
                             <div className="relative group">
                                 <Mail className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
                                 <input 
                                     type="email" 
-                                    placeholder="CORREO ELECTRÓNICO" 
+                                    name="email"
+                                    required
+                                    placeholder="usuario@dominio.com *" 
                                     value={correo} 
                                     onChange={(e) => setCorreo(e.target.value)} 
-                                    className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50" 
+                                    className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all placeholder:text-zinc-600 disabled:opacity-50 font-mono" 
                                     disabled={loading} 
-                                    required 
                                 />
                             </div>
 
@@ -308,7 +334,8 @@ const RegisterPasajero = () => {
                                 <Lock className="absolute left-3.5 top-3.5 text-zinc-500 group-focus-within:text-yellow-500 transition-colors" size={14} />
                                 <input 
                                     type="password" 
-                                    placeholder="CONTRASEÑA SEGURA (Mín. 6)" 
+                                    name="password"
+                                    placeholder="CONTRASEÑA SEGURA (Mín. 6) *" 
                                     value={clave} 
                                     onChange={(e) => setClave(e.target.value)} 
                                     className="w-full bg-[#18181b]/80 border border-white/5 rounded-lg py-3 pl-10 pr-4 text-xs text-zinc-200 focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/50 focus:bg-[#1f1f22] outline-none transition-all tracking-widest placeholder:text-zinc-600 placeholder:tracking-normal disabled:opacity-50" 

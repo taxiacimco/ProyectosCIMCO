@@ -1,8 +1,9 @@
-// Versión Arquitectura: V2.4 - Registro Escuadrón Moto con Retorno Explícito a Selección de Rol y Blindaje Multipart 5MB
+// Versión Arquitectura: V2.5 - Registro Escuadrón Moto con Validación Estricta de Correo y Celular Colombiano (10 Dígitos) + Blindaje Multipart 5MB
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterMoto.jsx
- * Misión: Registro del Escuadrón Moto con sección de información de unidad/operación (Placa, Número Interno, Empresa/Cooperativa, Tipo de Unidad)
- *         y sección de ajustes de unidad con carga documental digital (Cédula, Licencia, Tarjeta de Propiedad) validando el límite de 5 MB por archivo,
+ * Misión: Registro del Escuadrón Moto con sección de información de unidad/operación (Placa, Número Interno, Empresa/Cooperativa, Tipo de Unidad),
+ *         validación estricta de correo electrónico y teléfono celular colombiano de 10 dígitos (iniciando en 3),
+ *         sección de ajustes de unidad con carga documental digital (Cédula, Licencia, Tarjeta de Propiedad) validando el límite de 5 MB por archivo,
  *         soporte de navegación de retorno a /register y gestión atómica de multipart/form-data.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Teal Accent).
  */
@@ -107,9 +108,23 @@ const RegisterMoto = () => {
     e.preventDefault();
     setError('');
 
-    // 🛡️ GUARDAS DE SEGURIDAD OPERATIVA
+    // 🛡️ GUARDAS DE SEGURIDAD OPERATIVA Y VALIDACIÓN DE FORMATO
     if (!nombre?.trim() || !celular?.trim() || !correo?.trim() || !clave?.trim() || !placa?.trim()) {
       setError("Faltan variables operacionales críticas.");
+      return;
+    }
+
+    // Validar celular colombiano (10 dígitos iniciando en 3)
+    const phoneRegex = /^3\d{9}$/;
+    if (!phoneRegex.test(celular.trim())) {
+      setError("El número de celular debe ser válido en Colombia (10 dígitos iniciando por 3).");
+      return;
+    }
+
+    // Validar formato estricto de correo electrónico
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(correo.trim())) {
+      setError("Ingrese un correo electrónico válido para habilitar notificaciones y recuperación.");
       return;
     }
 
@@ -212,23 +227,72 @@ const RegisterMoto = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest font-bold pl-1">Nombre Completo</label>
-                <input type="text" placeholder="Ej. Carlos Fuentes" className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-zinc-100 focus:border-teal-500/40 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" value={nombre} onChange={(e) => setNombre(e.target.value)} required />
+                <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest font-bold pl-1">
+                  Nombre Completo *
+                </label>
+                <input 
+                  type="text" 
+                  name="nombre" 
+                  placeholder="Ej. Carlos Fuentes" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-zinc-100 focus:border-teal-500/40 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                  value={nombre} 
+                  onChange={(e) => setNombre(e.target.value)} 
+                  required 
+                />
               </div>
+
+              {/* Teléfono Celular (10 dígitos en Colombia) */}
               <div className="space-y-1.5">
-                <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest font-bold pl-1">Teléfono Celular</label>
-                <input type="tel" placeholder="Ej. 3101234567" maxLength="10" className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-zinc-100 focus:border-teal-500/40 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" value={celular} onChange={(e) => setCelular(e.target.value.replace(/\D/g, ''))} required />
+                <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest font-bold pl-1">
+                  Teléfono Celular (WhatsApp / Llamadas) *
+                </label>
+                <input 
+                  type="tel" 
+                  name="telefono" 
+                  required 
+                  pattern="[3][0-9]{9}" 
+                  maxLength={10} 
+                  placeholder="Ej. 3101234567" 
+                  title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567)" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-zinc-100 focus:border-teal-500/40 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                  value={celular} 
+                  onChange={(e) => setCelular(e.target.value.replace(/\D/g, ''))} 
+                />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Correo Electrónico Obligatorio */}
               <div className="space-y-1.5">
-                <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest font-bold pl-1">Correo Electrónico</label>
-                <input type="email" placeholder="moto@cimco.com" className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-zinc-100 focus:border-teal-500/40 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" value={correo} onChange={(e) => setCorreo(e.target.value)} required />
+                <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest font-bold pl-1">
+                  Correo Electrónico (Para Recuperación y Factura) *
+                </label>
+                <input 
+                  type="email" 
+                  name="email" 
+                  required 
+                  placeholder="usuario@dominio.com" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-zinc-100 focus:border-teal-500/40 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                  value={correo} 
+                  onChange={(e) => setCorreo(e.target.value)} 
+                />
               </div>
+
+              {/* Contraseña de Acceso */}
               <div className="space-y-1.5">
-                <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest font-bold pl-1">Contraseña de Acceso</label>
-                <input type="password" placeholder="Mínimo 6 caracteres" className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-zinc-100 focus:border-teal-500/40 focus:bg-[#16161f] outline-none transition-all text-xs tracking-widest" value={clave} onChange={(e) => setClave(e.target.value)} required />
+                <label className="text-zinc-500 font-mono text-[10px] uppercase tracking-widest font-bold pl-1">
+                  Contraseña de Acceso *
+                </label>
+                <input 
+                  type="password" 
+                  name="password" 
+                  required 
+                  minLength={6} 
+                  placeholder="Mínimo 6 caracteres" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-zinc-100 focus:border-teal-500/40 focus:bg-[#16161f] outline-none transition-all text-xs tracking-widest" 
+                  value={clave} 
+                  onChange={(e) => setClave(e.target.value)} 
+                />
               </div>
             </div>
           </div>
