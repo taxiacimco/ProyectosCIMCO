@@ -1,13 +1,14 @@
-// Versión Arquitectura: V17.2 - Inyección de Campos Documentales y Adjuntos Multimedia
+// Versión Arquitectura: V21.29 - Integración Cifrado Bcrypt Anti-Doble Hashing en Pre-Save Hook Conductor
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
- * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo) e inyecta soporte
- * persistente para URLs documentales (foto_perfil, documento_cedula, documento_licencia, doc_tarjeta).
+ * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales) e inyecta
+ * cifrado de contraseñas Bcrypt con guarda de seguridad anti-doble hashing (isModified('password') y expresión regular $2a$/$2b$/$2y$).
  */
 
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 
 const coordenadasSchema = new mongoose.Schema({
     latitud: { type: Number },
@@ -45,7 +46,8 @@ const ConductorSchema = new mongoose.Schema({
     },
     password: { 
         type: String, 
-        required: true 
+        required: true,
+        select: false
     },
     role: { 
         type: String, 
@@ -168,71 +170,86 @@ ConductorSchema.index({ ubicacion: "2dsphere" });
 ConductorSchema.index({ estadoOperativo: 1 });
 ConductorSchema.index({ estadoAdministrativo: 1 });
 
-// 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados, Geometría y Sanitización Financiera Anti-Undefined
-ConductorSchema.pre('save', function(next) {
-    const cond = this;
+// 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados, Geometría, Cifrado de Password y Sanitización Financiera
+ConductorSchema.pre('save', async function(next) {
+    try {
+        const cond = this;
 
-    // Sincronización de espejo para teléfono y teléfonoMóvil
-    if (cond.telefono && !cond.telefonoMovil) {
-        cond.telefonoMovil = cond.telefono;
-    }
+        // Sincronización de espejo para teléfono y teléfonoMóvil
+        if (cond.telefono && !cond.telefonoMovil) {
+            cond.telefonoMovil = cond.telefono;
+        } else if (cond.telefonoMovil && !cond.telefono) {
+            cond.telefono = cond.telefonoMovil;
+        }
 
-    // Normalización de Estado Administrativo vs Estado Operativo
-    if (cond.isModified('estado') || cond.isModified('estadoAdministrativo') || cond.isModified('viajeActualId')) {
-        const est = cond.estado ? String(cond.estado).toUpperCase() : 'PENDIENTE';
-        
-        if (['PENDIENTE', 'SUSPENDIDO', 'RECHAZADO'].includes(est) || cond.estadoAdministrativo === 'PENDIENTE') {
-            cond.isActive = false;
-            cond.estadoOperativo = 'NO_DISPONIBLE';
-        } else if (cond.viajeActualId || ['BUSY', 'OCUPADO', 'EN_RUTA', 'ASIGNADO'].includes(est)) {
-            cond.estadoOperativo = 'OCUPADO';
-        } else if (['ACTIVE', 'DISPONIBLE', 'APROBADO'].includes(est)) {
-            cond.estadoOperativo = 'DISPONIBLE';
+        // Normalización de Estado Administrativo vs Estado Operativo
+        if (cond.isModified('estado') || cond.isModified('estadoAdministrativo') || cond.isModified('viajeActualId')) {
+            const est = cond.estado ? String(cond.estado).toUpperCase() : 'PENDIENTE';
+            
+            if (['PENDIENTE', 'SUSPENDIDO', 'RECHAZADO'].includes(est) || cond.estadoAdministrativo === 'PENDIENTE') {
+                cond.isActive = false;
+                cond.estadoOperativo = 'NO_DISPONIBLE';
+            } else if (cond.viajeActualId || ['BUSY', 'OCUPADO', 'EN_RUTA', 'ASIGNADO'].includes(est)) {
+                cond.estadoOperativo = 'OCUPADO';
+            } else if (['ACTIVE', 'DISPONIBLE', 'APROBADO'].includes(est)) {
+                cond.estadoOperativo = 'DISPONIBLE';
+            } else {
+                cond.estadoOperativo = 'NO_DISPONIBLE';
+            }
+        }
+
+        // Sincronización de espejo para la estructura incrustada coordenadasSchema
+        if (cond.ubicacion && Array.isArray(cond.ubicacion.coordinates) && cond.ubicacion.coordinates.length === 2) {
+            cond.coordenadas.longitud = cond.ubicacion.coordinates[0];
+            cond.coordenadas.latitud = cond.ubicacion.coordinates[1];
+            cond.coordenadas.ultimaActualizacion = new Date();
+        } else if (cond.coordenadas && cond.coordenadas.longitud && cond.coordenadas.latitud) {
+            cond.ubicacion = {
+                type: 'Point',
+                coordinates: [cond.coordenadas.longitud, cond.coordenadas.latitud]
+            };
         } else {
-            cond.estadoOperativo = 'NO_DISPONIBLE';
+            // Salvaguarda geométrica GeoJSON Point nativa predeterminada
+            cond.ubicacion = { type: 'Point', coordinates: [-73.3332, 9.5661] };
+            cond.coordenadas = { longitud: -73.3332, latitud: 9.5661, ultimaActualizacion: new Date() };
         }
-    }
 
-    // Sincronización de espejo para la estructura incrustada coordenadasSchema
-    if (cond.ubicacion && Array.isArray(cond.ubicacion.coordinates) && cond.ubicacion.coordinates.length === 2) {
-        cond.coordenadas.longitud = cond.ubicacion.coordinates[0];
-        cond.coordenadas.latitud = cond.ubicacion.coordinates[1];
-        cond.coordenadas.ultimaActualizacion = new Date();
-    } else if (cond.coordenadas && cond.coordenadas.longitud && cond.coordenadas.latitud) {
-        cond.ubicacion = {
-            type: 'Point',
-            coordinates: [cond.coordenadas.longitud, cond.coordenadas.latitud]
-        };
-    } else {
-        // Salvaguarda geométrica GeoJSON Point nativa predeterminada
-        cond.ubicacion = { type: 'Point', coordinates: [-73.3332, 9.5661] };
-        cond.coordenadas = { longitud: -73.3332, latitud: 9.5661, ultimaActualizacion: new Date() };
-    }
-
-    // 🛡️ UNIFICACIÓN Y SANITIZACIÓN FINANCIERA ATÓMICA
-    let saldoConsolidado = cond.saldo;
-    
-    // Si detectamos un valor residual en saldoWallet, migramos su valor a saldo si saldo estaba en 0
-    if (cond._doc.saldoWallet !== undefined && cond._doc.saldoWallet !== null) {
-        const valorWallet = Number(cond._doc.saldoWallet);
-        if (!isNaN(valorWallet) && (saldoConsolidado === undefined || saldoConsolidado === 0)) {
-            saldoConsolidado = valorWallet;
+        // 🛡️ UNIFICACIÓN Y SANITIZACIÓN FINANCIERA ATÓMICA
+        let saldoConsolidado = cond.saldo;
+        
+        // Si detectamos un valor residual en saldoWallet, migramos su valor a saldo si saldo estaba en 0
+        if (cond._doc.saldoWallet !== undefined && cond._doc.saldoWallet !== null) {
+            const valorWallet = Number(cond._doc.saldoWallet);
+            if (!isNaN(valorWallet) && (saldoConsolidado === undefined || saldoConsolidado === 0)) {
+                saldoConsolidado = valorWallet;
+            }
+            delete cond._doc.saldoWallet; // Remoción inmediata del buffer Mongoose
         }
-        delete cond._doc.saldoWallet; // Remoción inmediata del buffer Mongoose
+
+        // Guardas de seguridad contra valores nulos o corruptos
+        saldoConsolidado = Number(saldoConsolidado);
+        cond.saldo = isNaN(saldoConsolidado) || saldoConsolidado < 0 ? 0 : saldoConsolidado;
+
+        // Sincronización bidireccional homóloga de roles operativos
+        if (cond.isModified('rol') && cond.rol) {
+            cond.role = cond.rol;
+        } else if (cond.isModified('role') && cond.role) {
+            cond.rol = cond.role;
+        }
+
+        // 🔒 BLINDAJE Y CIFRADO DE CONTRASEÑA ANTI-DOBLE HASHING
+        if (cond.isModified('password') && cond.password) {
+            const isAlreadyHashed = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(cond.password);
+            if (!isAlreadyHashed) {
+                const salt = await bcrypt.genSalt(10);
+                cond.password = await bcrypt.hash(cond.password, salt);
+            }
+        }
+
+        next();
+    } catch (error) {
+        next(error);
     }
-
-    // Guardas de seguridad contra valores nulos o corruptos
-    saldoConsolidado = Number(saldoConsolidado);
-    cond.saldo = isNaN(saldoConsolidado) || saldoConsolidado < 0 ? 0 : saldoConsolidado;
-
-    // Sincronización bidireccional homóloga de roles operativos
-    if (cond.isModified('rol') && cond.rol) {
-        cond.role = cond.rol;
-    } else if (cond.isModified('role') && cond.role) {
-        cond.rol = cond.role;
-    }
-
-    next();
 });
 
 // 🛠️ HOOK PRE-UPDATE: Sanitización en operaciones de actualización directa (findOneAndUpdate, updateOne, etc.)
