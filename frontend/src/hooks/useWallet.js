@@ -1,7 +1,7 @@
-// Versión Arquitectura: V8.3 - Control Anti-Ráfaga con Memorización de Dependencias
+// Versión Arquitectura: V8.4 - Timeout Resiliente HTTP (5s) y Fallback Anti-Desbordamiento
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
- * Misión: Sincronización exacta de saldo por rol con detención de bucles de re-renderizado, redundancia en tiempo real vía Firestore y resiliencia transaccional.
+ * Misión: Sincronización exacta de saldo por rol con detención de bucles de re-renderizado, redundancia en tiempo real vía Firestore, timeout HTTP a 5s y resiliencia transaccional.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -27,7 +27,8 @@ export const useWallet = () => {
 
     // Asignación inicial resiliente con fallback a propiedades conocidas del usuario
     const [saldo, setSaldo] = useState(() => {
-        return Number(user?.saldoWallet ?? user?.saldo ?? user?.balance ?? user?.billetera?.saldo ?? 0);
+        const saldoInicial = Number(user?.saldoWallet ?? user?.saldo ?? user?.balance ?? user?.billetera?.saldo ?? 0);
+        return isNaN(saldoInicial) ? 0 : saldoInicial;
     });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -55,10 +56,10 @@ export const useWallet = () => {
 
     /**
      * 🌐 Consulta SSOT directa a la API REST de Node/MongoDB con enrutamiento dinámico por rol
-     * Memorizada sin dependencia directa del objeto `user` para prevenir bucles infinitos de consultas.
+     * Resiliente con timeout de 5000ms y fallback automático a $0 COP ante latencia o fallos de red.
      */
     const obtenerSaldoDesdeBackend = useCallback(async () => {
-        if (!idDocumentoUnificado) return null;
+        if (!idDocumentoUnificado) return 0;
         
         // Determinación de la ruta API REST según el rol del usuario
         let endpoint = `/conductores/${idDocumentoUnificado}`;
@@ -69,30 +70,44 @@ export const useWallet = () => {
         }
 
         try {
-            const respuesta = await api.get(endpoint);
-            const datosBackend = respuesta.data?.conductor || respuesta.data?.pasajero || respuesta.data?.usuario || respuesta.data?.user || respuesta.data;
+            // Timeout de 5000ms (5 segundos) inquebrantable para prevenir congelamiento de la UI
+            const respuesta = await api.get(endpoint, { timeout: 5000 });
+            const datosBackend = respuesta?.data?.conductor || respuesta?.data?.pasajero || respuesta?.data?.usuario || respuesta?.data?.user || respuesta?.data;
             
             const saldoBackend = datosBackend?.saldoWallet ?? datosBackend?.saldo ?? datosBackend?.balance ?? datosBackend?.billetera?.saldo;
 
             if (saldoBackend !== undefined && saldoBackend !== null) {
                 const saldoNumerico = Number(saldoBackend);
-                setSaldo(saldoNumerico);
+                const saldoValido = isNaN(saldoNumerico) ? 0 : saldoNumerico;
+                setSaldo(saldoValido);
+
                 if (typeof actualizarEstadoLocalRef.current === 'function') {
-                    actualizarEstadoLocalRef.current({ saldo: saldoNumerico, saldoWallet: saldoNumerico, balance: saldoNumerico });
+                    try {
+                        actualizarEstadoLocalRef.current({ saldo: saldoValido, saldoWallet: saldoValido, balance: saldoValido });
+                    } catch (authErr) {
+                        console.warn("⚠️ [CIMCO-WALLET] No se pudo sincronizar estado con AuthProvider:", authErr?.message);
+                    }
                 }
-                return saldoNumerico;
+                return saldoValido;
             }
         } catch (apiErr) {
-            // Manejo controlado y silencioso de respuestas 404 (recurso no existente en la colección específica)
-            if (apiErr.response?.status === 404) {
-                const currentUser = userRef.current;
-                const saldoFallback = Number(currentUser?.saldoWallet ?? currentUser?.saldo ?? currentUser?.balance ?? 0);
-                setSaldo(saldoFallback);
-                return saldoFallback;
+            console.warn("⚠️ [CIMCO-WALLET] Fallback activo por timeout/error HTTP en Billetera (5000ms excedido):", apiErr?.message);
+            
+            // Fallback seguro de $0 COP para prevenir excepciones no capturadas o bloqueos en AuthProvider
+            const saldoFallback = 0;
+            setSaldo(saldoFallback);
+
+            if (typeof actualizarEstadoLocalRef.current === 'function') {
+                try {
+                    actualizarEstadoLocalRef.current({ saldo: saldoFallback, saldoWallet: saldoFallback, balance: saldoFallback });
+                } catch (authErr) {
+                    console.warn("⚠️ [CIMCO-WALLET] Excepción aislada en AuthProvider durante fallback:", authErr?.message);
+                }
             }
-            console.warn("⚠️ [CIMCO-WALLET] No se pudo obtener saldo via REST API (MongoDB):", apiErr.message);
+            return saldoFallback;
         }
-        return null;
+
+        return 0;
     }, [idDocumentoUnificado, rolNormalizado]);
 
     useEffect(() => {
@@ -104,7 +119,7 @@ export const useWallet = () => {
         let unsubscribeFirestore = null;
 
         const sincronizarBoveda = async () => {
-            // 1. Carga prioritaria inmediata desde MongoDB (SSOT)
+            // 1. Carga prioritaria inmediata desde MongoDB (SSOT) con timeout a 5s
             await obtenerSaldoDesdeBackend();
 
             // 2. Suscripción en tiempo real vía Firestore
@@ -114,29 +129,32 @@ export const useWallet = () => {
                 unsubscribeFirestore = onSnapshot(referenciaBilletera, (snapshot) => {
                     if (snapshot.exists()) {
                         const datosEnVivo = snapshot.data();
-                        const saldoDetectado = datosEnVivo.saldo ?? datosEnVivo.saldoWallet ?? datosEnVivo.balance;
+                        const saldoDetectado = datosEnVivo?.saldo ?? datosEnVivo?.saldoWallet ?? datosEnVivo?.balance;
 
                         if (saldoDetectado !== undefined && saldoDetectado !== null) {
                             const nuevoSaldo = Number(saldoDetectado);
-                            setSaldo(nuevoSaldo);
+                            const saldoFinal = isNaN(nuevoSaldo) ? 0 : nuevoSaldo;
+                            setSaldo(saldoFinal);
                             
                             if (typeof actualizarEstadoLocalRef.current === 'function') {
-                                actualizarEstadoLocalRef.current({ saldo: nuevoSaldo, saldoWallet: nuevoSaldo, balance: nuevoSaldo });
+                                try {
+                                    actualizarEstadoLocalRef.current({ saldo: saldoFinal, saldoWallet: saldoFinal, balance: saldoFinal });
+                                } catch (authErr) {
+                                    console.warn("⚠️ [CIMCO-WALLET] Error aislado al actualizar AuthProvider desde Firestore:", authErr?.message);
+                                }
                             }
                         }
-                    } else {
-                        setLoading(false);
                     }
                     setLoading(false);
                 }, (err) => {
-                    console.error('🚨 [CIMCO-WALLET-FATAL] Fallo en el socket Firestore:', err.message);
-                    setError(err.message);
+                    console.error('🚨 [CIMCO-WALLET-FATAL] Fallo en el socket Firestore:', err?.message);
+                    setError(err?.message || "Error de sincronización en tiempo real");
                     setLoading(false);
                 });
 
             } catch (err) {
-                console.error('🚨 [CIMCO-WALLET-FATAL] Fallo al ensamblar listener:', err.message);
-                setError(err.message);
+                console.error('🚨 [CIMCO-WALLET-FATAL] Fallo al ensamblar listener:', err?.message);
+                setError(err?.message || "Error al conectar boveda de saldo");
                 setLoading(false);
             }
         };
@@ -153,7 +171,7 @@ export const useWallet = () => {
      */
     const procesarDebitoTransaccional = async (montoDebito, motivo = "DEBITO_OPERATIVO") => {
         if (!idDocumentoUnificado) throw new Error("No hay un identificador de usuario válido para la transacción.");
-        if (montoDebito <= 0) throw new Error("El monto a debitar debe ser mayor a cero.");
+        if (!montoDebito || montoDebito <= 0) throw new Error("El monto a debitar debe ser mayor a cero.");
 
         setIsMutating(true);
 
@@ -164,12 +182,13 @@ export const useWallet = () => {
                 monto: montoDebito,
                 concepto: motivo,
                 rol: rolNormalizado
-            });
+            }, { timeout: 10000 });
 
-            const nuevoSaldoApi = respuestaBackend.data?.nuevoSaldo ?? respuestaBackend.data?.saldo;
+            const nuevoSaldoApi = respuestaBackend?.data?.nuevoSaldo ?? respuestaBackend?.data?.saldo;
             
-            if (nuevoSaldoApi !== undefined) {
-                setSaldo(Number(nuevoSaldoApi));
+            if (nuevoSaldoApi !== undefined && nuevoSaldoApi !== null) {
+                const saldoCalculado = Number(nuevoSaldoApi);
+                setSaldo(isNaN(saldoCalculado) ? 0 : saldoCalculado);
             }
 
             // STEP 2: Sincronización secundaria opcional en Firestore
@@ -182,8 +201,8 @@ export const useWallet = () => {
                     const sfDoc = await transaction.get(referenciaBilletera);
                     if (sfDoc.exists()) {
                         const datosActuales = sfDoc.data();
-                        const saldoActual = Number(datosActuales.saldo ?? datosActuales.saldoWallet ?? datosActuales.balance ?? 0);
-                        const nuevoSaldoCalculado = Math.max(0, saldoActual - montoDebito);
+                        const saldoActual = Number(datosActuales?.saldo ?? datosActuales?.saldoWallet ?? datosActuales?.balance ?? 0);
+                        const nuevoSaldoCalculado = Math.max(0, (isNaN(saldoActual) ? 0 : saldoActual) - montoDebito);
 
                         transaction.update(referenciaBilletera, {
                             saldo: nuevoSaldoCalculado,
@@ -204,13 +223,13 @@ export const useWallet = () => {
                     }
                 });
             } catch (fsErr) {
-                console.warn("⚠️ [CIMCO-WALLET] Sync en Firestore falló o documento no existe:", fsErr.message);
+                console.warn("⚠️ [CIMCO-WALLET] Sync en Firestore falló o documento no existe:", fsErr?.message);
             }
 
             setIsMutating(false);
             return true;
         } catch (err) {
-            console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Error en el débito:", err.message);
+            console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Error en el débito:", err?.message);
             setIsMutating(false);
             throw err;
         }

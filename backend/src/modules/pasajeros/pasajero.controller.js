@@ -1,8 +1,8 @@
-// Versión Arquitectura: V18.2 - Optimización Pipeline Aggregation y Normalización BSON adminId
+// Versión Arquitectura: V18.3 - Restricción maxTimeMS(3000) y Resiliencia en Consulta de Saldo Pasajero
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
  * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos y operaciones de saldo/billetera.
- * Ajuste V18.2: Optimización de obtenerPasajeros mediante pipeline de agregación de Mongoose para prevenir desbordamiento de RAM, y sanitización/normalización de adminId en recargarSaldoPasajero.
+ * Ajuste V18.3: Aplicación de maxTimeMS(3000) en consulta de saldo de pasajeros y manejo resiliente con fallback HTTP 200 { success: true, saldo: 0 }.
  */
 
 import mongoose from 'mongoose';
@@ -383,7 +383,7 @@ export const obtenerHistorialViajesPasajero = async (req, res) => {
 // ==================================================================
 
 /**
- * 💰 Consultar saldo del pasajero
+ * 💰 Consultar saldo del pasajero con timeout estricto de 3000ms y fallback resiliente $0 COP
  */
 export const obtenerSaldoPasajero = async (req, res) => {
     try {
@@ -397,19 +397,35 @@ export const obtenerSaldoPasajero = async (req, res) => {
                 { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
                 { uid: targetId }
             ]
-        }).select('saldo nombre email').lean();
+        })
+        .select('saldo nombre email')
+        .maxTimeMS(3000)
+        .lean();
 
         if (!pasajero) {
-            return res.status(404).json({ success: false, message: 'Pasajero no encontrado.' });
+            return res.status(200).json({
+                success: true,
+                saldo: 0,
+                message: 'Pasajero no encontrado, asignado saldo por defecto $0 COP.',
+                data: { saldo: 0 }
+            });
         }
+
+        const saldoNumerico = Number(pasajero.saldo ?? 0);
 
         return res.status(200).json({
             success: true,
-            saldo: pasajero.saldo || 0,
+            saldo: isNaN(saldoNumerico) ? 0 : saldoNumerico,
             data: pasajero
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        console.warn("⚠️ [CIMCO-PASAJERO-SALDO] Error o latencia en DB Mongoose (maxTimeMS 3000ms alcanzado). Fallback activo $0 COP:", error?.message);
+        return res.status(200).json({
+            success: true,
+            saldo: 0,
+            error: error?.message || "Excepción de base de datos capturada",
+            data: { saldo: 0 }
+        });
     }
 };
 
