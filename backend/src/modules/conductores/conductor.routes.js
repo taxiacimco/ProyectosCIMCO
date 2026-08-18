@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.3 - Blindaje de Seguridad en Rutas de Aprobación y Compatibilidad de Middlewares
+// Versión Arquitectura: V19.3 - Blindaje de Seguridad en Rutas de Aprobación y Mapeo Métrica Capital Circulante
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
- * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría y recargas auditadas sin provocar CIMCO-ROUTE-MISS.
- * Ajuste V19.3: Garantía de blindaje de seguridad con middlewares de autenticación (soporte para autenticarJWT/verificarToken y verificarRol('admin')/esAdmin) en rutas de aprobación y cambio de estado.
+ * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría, métricas y recargas auditadas sin provocar CIMCO-ROUTE-MISS.
+ * Ajuste V19.3: Preservación de la integración del endpoint `/metricas/capital-circulante` asegurando coexistencia con la ruta legacy `/capital-circulante` e inmunidad ante regresiones.
  */
 
 import express from 'express';

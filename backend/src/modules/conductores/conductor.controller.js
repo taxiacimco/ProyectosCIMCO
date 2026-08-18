@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.2 - Integración Quirúrgica: Finalización de Sintaxis en eliminarConductor
+// Versión Arquitectura: V19.3 - Integración Quirúrgica: Agregación Global Dinámica de Capital Circulante
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, telemetría GPS y recargas atómicas.
- * Ajuste V19.2: Corrección de truncamiento sintáctico en eliminarConductor, completando el flujo de borrado con respuesta HTTP adecuada y manejo de errores.
+ * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, telemetría GPS, recargas atómicas y métricas de capital circulante.
+ * Ajuste V19.3: Actualización de la pipeline de agregación en obtenerCapitalCirculante para calcular dinámicamente el saldo sobre la colección global Usuario, preservando la respuesta HTTP y la compatibilidad de respuesta.
  */
 
 import mongoose from 'mongoose';
@@ -443,7 +443,8 @@ export const obtenerConductoresDisponibles = async (req, res) => {
 
 export const obtenerCapitalCirculante = async (req, res) => {
     try {
-        const resultado = await Conductor.aggregate([
+        const resultado = await Usuario.aggregate([
+            { $match: { estado: 'activo' } },
             {
                 $group: {
                     _id: null,
@@ -452,17 +453,19 @@ export const obtenerCapitalCirculante = async (req, res) => {
             }
         ]);
 
-        const capitalTotal = resultado.length > 0 ? resultado[0].totalCapital : 0;
+        const capitalTotal = resultado?.[0]?.totalCapital || 0;
 
         return res.status(200).json({
             success: true,
+            capitalCirculante: capitalTotal,
             totalCapital: capitalTotal
         });
     } catch (error) {
         console.error("❌ Error calculando capital circulante:", error);
         return res.status(500).json({ 
             success: false, 
-            message: "Error interno calculando el capital circulante." 
+            message: "Error interno calculando el capital circulante.",
+            error: 'Error al calcular capital circulante'
         });
     }
 };
