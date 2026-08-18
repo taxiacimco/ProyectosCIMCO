@@ -1,10 +1,11 @@
-// Versión Arquitectura: V2.5 - Registro Escuadrón Moto con Validación Estricta de Correo y Celular Colombiano (10 Dígitos) + Blindaje Multipart 5MB
+// Versión Arquitectura: V2.6 - Corrección Clave Multipart doc_tarjeta y Sincronización Estricta de Carga Documental
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterMoto.jsx
  * Misión: Registro del Escuadrón Moto con sección de información de unidad/operación (Placa, Número Interno, Empresa/Cooperativa, Tipo de Unidad),
- *         validación estricta de correo electrónico y teléfono celular colombiano de 10 dígitos (iniciando en 3),
- *         sección de ajustes de unidad con carga documental digital (Cédula, Licencia, Tarjeta de Propiedad) validando el límite de 5 MB por archivo,
- *         soporte de navegación de retorno a /register y gestión atómica de multipart/form-data.
+ * validación estricta de correo electrónico y teléfono celular colombiano de 10 dígitos (iniciando en 3),
+ * sección de ajustes de unidad con carga documental digital (Cédula, Licencia, Tarjeta de Propiedad) validando el límite de 5 MB por archivo,
+ * sincronización exacta de las llaves multipart con el servidor (doc_tarjeta),
+ * soporte de navegación de retorno a /register y gestión atómica de multipart/form-data.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Teal Accent).
  */
 
@@ -89,8 +90,9 @@ const RegisterMoto = () => {
 
   const handleFileChange = (e, setFile, fileLabel) => {
     setError('');
-    if (e?.target?.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
+    const files = e?.target?.files;
+    if (files && files.length > 0) {
+      const selectedFile = files[0];
       const validationError = validateFile(selectedFile, fileLabel);
 
       if (validationError) {
@@ -101,6 +103,8 @@ const RegisterMoto = () => {
       }
 
       setFile(selectedFile);
+    } else {
+      setFile(null);
     }
   };
 
@@ -164,9 +168,10 @@ const RegisterMoto = () => {
       payloadData.append('rol', selectedRole);  
       payloadData.append('access_level', String(accessLevel));
 
-      // Inyección de ficheros para auditoría legal
+      // Inyección de ficheros para auditoría legal con normalización de llaves Multer
       payloadData.append('documento_cedula', docCedula);
       payloadData.append('documento_licencia', docLicencia);
+      payloadData.append('doc_tarjeta', docTarjetaPropiedad);
       payloadData.append('documento_tarjeta', docTarjetaPropiedad);
 
       const respuesta = await api.post('/api/auth/register', payloadData, {

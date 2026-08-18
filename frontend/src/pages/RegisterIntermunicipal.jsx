@@ -1,10 +1,10 @@
-// Versión Arquitectura: V2.2 - Sincronización Estricta de Teléfono Celular Colombiano y Email con Validaciones Operativas
+// Versión Arquitectura: V2.3 - Unificación de Claves FormData (documento_cedula, documento_licencia, doc_tarjeta) para Registro Intermunicipal
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterIntermunicipal.jsx
  * Misión: Registro de Operadores Intermunicipales con captura de Empresa/Cooperativa, Placa, Número Interno,
- *         sección de Rutas y Afiliación Logística, Carga Documental Digital (Cédula, Licencia, Tarjeta de Propiedad)
- *         con control estricto de límite de 5 MB por archivo, sincronización explícita del botón de retorno
- *         hacia el selector central (/register) y validación unificada de correo electrónico y teléfono celular colombiano (10 dígitos).
+ * sección de Rutas y Afiliación Logística, Carga Documental Digital (Cédula, Licencia, Tarjeta de Propiedad)
+ * con control estricto de límite de 5 MB por archivo, sincronización explícita del botón de retorno
+ * hacia el selector central (/register) y validación unificada de correo electrónico y teléfono celular colombiano (10 dígitos).
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Indigo Accent).
  */
 
@@ -140,9 +140,9 @@ const RegisterIntermunicipal = () => {
       dataPayload.append('role', targetRole); 
       dataPayload.append('access_level', String(accessLevel));
 
-      // Inyección unificada de ficheros limpios
-      dataPayload.append('doc_cedula', cedulaFile);
-      dataPayload.append('doc_licencia', licenciaFile);
+      // Inyección unificada de ficheros limpios (Claves estandarizadas para backend multipart)
+      dataPayload.append('documento_cedula', cedulaFile);
+      dataPayload.append('documento_licencia', licenciaFile);
       dataPayload.append('doc_tarjeta', tarjetaFile);
 
       const res = await api.post('/api/auth/register', dataPayload, {
@@ -195,61 +195,52 @@ const RegisterIntermunicipal = () => {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          
-          {/* SECCIÓN 1: OPERADOR Y CREDENCIALES */}
+          {/* SECCIÓN 1: IDENTIFICACIÓN DEL CONDUCTOR */}
           <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
             <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
-              <ShieldCheck size={12} className="text-indigo-400" />
-              Sección 1: Información Personal y Credenciales
+              <ShieldCheck size={12} className="text-indigo-400" /> Sección 1: Identificación del Conductor
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Nombre Completo */}
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">
-                  Nombre Completo del Conductor *
-                </label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Nombre Completo *</label>
                 <input 
                   type="text" 
                   name="nombre"
+                  required
                   placeholder="Ej. Carlos Fuentes" 
-                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs" 
                   value={nombre} 
                   onChange={(e) => setNombre(e.target.value)} 
-                  required 
                 />
               </div>
 
-              {/* Teléfono Celular (10 dígitos en Colombia) */}
+              {/* Teléfono Celular Colombiano */}
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">
-                  Teléfono Celular (WhatsApp / Llamadas) *
-                </label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Teléfono Celular *</label>
                 <input 
                   type="tel" 
-                  name="telefono" 
-                  required 
-                  pattern="[3][0-9]{9}" 
-                  maxLength={10} 
+                  name="telefono"
+                  required
+                  pattern="[3][0-9]{9}"
+                  maxLength={10}
                   placeholder="Ej. 3101234567" 
-                  title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567)" 
+                  title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567)"
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
                   value={celular} 
                   onChange={(e) => setCelular(e.target.value.replace(/\D/g, ''))} 
                 />
               </div>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Correo Electrónico Obligatorio */}
+              {/* Correo Electrónico */}
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">
-                  Correo Electrónico (Para Recuperación y Factura) *
-                </label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Correo Electrónico *</label>
                 <input 
                   type="email" 
-                  name="email" 
-                  required 
-                  placeholder="usuario@dominio.com" 
+                  name="email"
+                  required
+                  placeholder="carlos@ejemplo.com" 
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
                   value={correo} 
                   onChange={(e) => setCorreo(e.target.value)} 
@@ -264,7 +255,7 @@ const RegisterIntermunicipal = () => {
                 <input 
                   type="password" 
                   name="password"
-                  required 
+                  required
                   minLength={6}
                   placeholder="••••••••" 
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs tracking-widest" 
@@ -278,8 +269,7 @@ const RegisterIntermunicipal = () => {
           {/* SECCIÓN 2: INFORMACIÓN DE UNIDAD Y OPERACIÓN */}
           <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
             <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
-              <Bus size={12} className="text-indigo-400" />
-              Sección 2: Información de Unidad y Operación
+              <Bus size={12} className="text-indigo-400" /> Sección 2: Información de Unidad y Operación
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -297,27 +287,28 @@ const RegisterIntermunicipal = () => {
                   />
                 </div>
               </div>
+
               <div className="space-y-1.5">
                 <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Placa del Vehículo *</label>
                 <input 
                   type="text" 
                   placeholder="SDF456" 
-                  maxLength="6" 
-                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono uppercase" 
+                  maxLength={6} 
+                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono uppercase font-bold tracking-widest" 
                   value={placa} 
-                  onChange={(e) => setPlaca(e.target.value)} 
+                  onChange={(e) => setPlaca(e.target.value.toUpperCase())} 
                   required 
                 />
               </div>
+
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1 text-indigo-400">Número Interno Vial *</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Número Interno</label>
                 <input 
                   type="text" 
-                  placeholder="Ej. INT-40" 
+                  placeholder="Ej. 1024" 
                   className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
                   value={numeroInterno} 
                   onChange={(e) => setNumeroInterno(e.target.value)} 
-                  required 
                 />
               </div>
             </div>
@@ -326,13 +317,12 @@ const RegisterIntermunicipal = () => {
           {/* SECCIÓN 3: RUTAS Y AFILIACIÓN LOGÍSTICA */}
           <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
             <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
-              <Route size={12} className="text-indigo-400" />
-              Sección 3: Rutas y Afiliación Logística
+              <Route size={12} className="text-indigo-400" /> Sección 3: Rutas y Afiliación Logística
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Municipio Origen / Base</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Ruta Origen Predeterminada</label>
                 <div className="relative">
                   <MapPin size={13} className="absolute left-3 top-3.5 text-zinc-600" />
                   <input 
@@ -344,20 +334,22 @@ const RegisterIntermunicipal = () => {
                   />
                 </div>
               </div>
+
               <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Municipio Destino Principal</label>
+                <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Ruta Destino Predeterminada</label>
                 <div className="relative">
                   <MapPin size={13} className="absolute left-3 top-3.5 text-zinc-600" />
                   <input 
                     type="text" 
-                    placeholder="Ej. La Jagua de Ibirico" 
+                    placeholder="Ej. Barranquilla" 
                     className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 pl-9 rounded-xl text-white focus:border-indigo-500/50 focus:bg-[#16161f] outline-none transition-all text-xs font-mono" 
                     value={rutaDestino} 
                     onChange={(e) => setRutaDestino(e.target.value)} 
                   />
                 </div>
               </div>
-              <div className="space-y-1.5">
+
+              <div className="space-y-1.5 sm:col-span-2">
                 <label className="text-slate-400 font-mono text-[9px] uppercase tracking-wider font-bold ml-1">Código de Afiliación / Planilla</label>
                 <input 
                   type="text" 
@@ -376,22 +368,17 @@ const RegisterIntermunicipal = () => {
               <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-black flex items-center gap-1.5">
                 <FileText size={12} className="text-indigo-400" /> Documentación Legal de Transporte (Obligatoria)
               </label>
-              
               {/* 💡 INDICADOR DESTACADO DE LÍMITE DE TAMAÑO */}
-              <span className="text-[9px] font-mono font-bold bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 px-2 py-0.5 rounded-md uppercase">
-                Máx. {MAX_FILE_SIZE_MB} MB por archivo
+              <span className="text-[9px] font-mono text-amber-400/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full font-bold">
+                MÁX 5MB POR ARCHIVO
               </span>
             </div>
 
-            <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-wide">
-              Formatos admitidos: JPG, PNG, WEBP, PDF • Tamaño máximo permitido: <strong className="text-indigo-400">5 MB</strong>
-            </p>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-              {/* Cédula */}
-              <div className={`border p-4 rounded-xl flex flex-col items-center justify-center text-center relative group transition-colors cursor-pointer ${cedulaFile ? 'bg-indigo-950/20 border-indigo-500/40' : 'bg-black/40 border-white/5 hover:border-indigo-500/20'}`}>
-                {cedulaFile ? <Check size={18} className="text-indigo-400" /> : <UploadCloud size={18} className="text-zinc-500" />}
-                <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Documento 1: Cédula */}
+              <div className={`border border-dashed p-3 rounded-xl flex flex-col items-center justify-center text-center transition-all relative overflow-hidden group ${cedulaFile ? 'bg-indigo-950/20 border-indigo-500/50' : 'bg-[#131318]/80 border-white/10 hover:border-indigo-500/30'}`}>
+                {cedulaFile ? <CheckCircle2 size={18} className="text-indigo-400 mb-1" /> : <UploadCloud size={18} className="text-zinc-500 group-hover:text-indigo-400 transition-colors mb-1" />}
+                <span className="text-[10px] font-mono font-bold text-zinc-300 truncate w-full">
                   {cedulaFile ? cedulaFile.name : "Cédula Ciudadanía"}
                 </span>
                 <span className="text-[8px] text-zinc-500 font-mono mt-0.5">{cedulaFile ? `${(cedulaFile.size / (1024 * 1024)).toFixed(2)} MB` : "(Máx 5MB)"}</span>
@@ -403,11 +390,11 @@ const RegisterIntermunicipal = () => {
                 />
               </div>
 
-              {/* Licencia */}
-              <div className={`border p-4 rounded-xl flex flex-col items-center justify-center text-center relative group transition-colors cursor-pointer ${licenciaFile ? 'bg-indigo-950/20 border-indigo-500/40' : 'bg-black/40 border-white/5 hover:border-indigo-500/20'}`}>
-                {licenciaFile ? <Check size={18} className="text-indigo-400" /> : <CheckCircle2 size={18} className="text-zinc-500" />}
-                <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
-                  {licenciaFile ? licenciaFile.name : "Licencia C2/C3"}
+              {/* Documento 2: Licencia */}
+              <div className={`border border-dashed p-3 rounded-xl flex flex-col items-center justify-center text-center transition-all relative overflow-hidden group ${licenciaFile ? 'bg-indigo-950/20 border-indigo-500/50' : 'bg-[#131318]/80 border-white/10 hover:border-indigo-500/30'}`}>
+                {licenciaFile ? <CheckCircle2 size={18} className="text-indigo-400 mb-1" /> : <UploadCloud size={18} className="text-zinc-500 group-hover:text-indigo-400 transition-colors mb-1" />}
+                <span className="text-[10px] font-mono font-bold text-zinc-300 truncate w-full">
+                  {licenciaFile ? licenciaFile.name : "Licencia Conducción"}
                 </span>
                 <span className="text-[8px] text-zinc-500 font-mono mt-0.5">{licenciaFile ? `${(licenciaFile.size / (1024 * 1024)).toFixed(2)} MB` : "(Máx 5MB)"}</span>
                 <input 
@@ -418,10 +405,10 @@ const RegisterIntermunicipal = () => {
                 />
               </div>
 
-              {/* Tarjeta de Propiedad */}
-              <div className={`border p-4 rounded-xl flex flex-col items-center justify-center text-center relative group transition-colors cursor-pointer ${tarjetaFile ? 'bg-indigo-950/20 border-indigo-500/40' : 'bg-black/40 border-white/5 hover:border-indigo-500/20'}`}>
-                {tarjetaFile ? <Check size={18} className="text-indigo-400" /> : <FileText size={18} className="text-zinc-500" />}
-                <span className="text-[9px] font-bold text-zinc-300 uppercase tracking-tight mt-1.5 truncate max-w-full">
+              {/* Documento 3: Tarjeta Propiedad */}
+              <div className={`border border-dashed p-3 rounded-xl flex flex-col items-center justify-center text-center transition-all relative overflow-hidden group ${tarjetaFile ? 'bg-indigo-950/20 border-indigo-500/50' : 'bg-[#131318]/80 border-white/10 hover:border-indigo-500/30'}`}>
+                {tarjetaFile ? <CheckCircle2 size={18} className="text-indigo-400 mb-1" /> : <UploadCloud size={18} className="text-zinc-500 group-hover:text-indigo-400 transition-colors mb-1" />}
+                <span className="text-[10px] font-mono font-bold text-zinc-300 truncate w-full">
                   {tarjetaFile ? tarjetaFile.name : "Tarjeta Propiedad"}
                 </span>
                 <span className="text-[8px] text-zinc-500 font-mono mt-0.5">{tarjetaFile ? `${(tarjetaFile.size / (1024 * 1024)).toFixed(2)} MB` : "(Máx 5MB)"}</span>
@@ -446,8 +433,8 @@ const RegisterIntermunicipal = () => {
         </form>
 
         <div className="mt-6 text-center">
-          <Link to="/register" className="text-[9px] font-mono text-slate-500 hover:text-indigo-400 uppercase tracking-widest transition-colors duration-300">
-            ← Abortar al Hub Principal
+          <Link to="/register" className="text-[9px] text-zinc-500 font-mono hover:text-white transition-colors uppercase tracking-widest text-decoration-none">
+            ← Cancelar y Seleccionar otro Perfil
           </Link>
         </div>
       </div>

@@ -1,12 +1,15 @@
-// Versión Arquitectura: V18.1 - Enrutador Protegido y Deduplicado de Pasajeros
+// Versión Arquitectura: V18.4 - Enrutador Protegido, Estandarizado y Deduplicado de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.routes.js
- * Misión: Exposición de endpoints para perfil, direcciones favoritas, historial y billetera virtual de pasajeros.
+ * Misión: Exposición de endpoints para perfil, direcciones favoritas, historial, registro y billetera virtual de pasajeros.
+ * Ajuste V18.4: Estandarización de rutas protegidas (/saldo, /perfil, /direcciones, /historial, /registro), preservación de middleware verificarToken/esAdmin y compatibilidad con controlador resiliente V18.4.
  */
 
 import { Router } from 'express';
 import { 
-    obtenerPasajeros, 
+    obtenerPasajeros,
+    registrarPasajero,
+    validarPasajeroUnico,
     obtenerPerfilPasajero, 
     actualizarPerfilPasajero, 
     agregarDireccionFavorita, 
@@ -21,6 +24,11 @@ const router = Router();
 
 // 📋 LECTURA GLOBAL DEDUPLICADA (ADMINISTRATIVA)
 router.get('/', verificarToken, esAdmin, obtenerPasajeros);
+
+// 📝 REGISTRO Y VALIDACIÓN DE UNICIDAD DE PASAJEROS
+router.post('/', registrarPasajero);
+router.post('/registro', registrarPasajero);
+router.post('/validar-unico', validarPasajeroUnico);
 
 // 💰 RUTAS DE SALDO Y BILLETERA (Definidas antes de parámetros dinámicos)
 router.get('/saldo/me', verificarToken, obtenerSaldoPasajero);

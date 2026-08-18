@@ -1,8 +1,8 @@
-// Versión Arquitectura: V18.3 - Restricción maxTimeMS(3000) y Resiliencia en Consulta de Saldo Pasajero
+// Versión Arquitectura: V18.4 - Control de Duplicidad E11000 y Resiliencia en Registro/Modificación de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
- * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos y operaciones de saldo/billetera.
- * Ajuste V18.3: Aplicación de maxTimeMS(3000) en consulta de saldo de pasajeros y manejo resiliente con fallback HTTP 200 { success: true, saldo: 0 }.
+ * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera y blindaje contra colisiones de duplicidad E11000/Firebase Auth en peticiones concurrentes.
+ * Ajuste V18.4: Envolver creación/registro/modificación en try/catch especializado. Captura de error.code === 11000 (Mongoose) y fallas de Firebase Auth con retorno HTTP 400 para evitar SYSTEM_FAULT (HTTP 500).
  */
 
 import mongoose from 'mongoose';
@@ -131,15 +131,135 @@ export const obtenerPasajeros = async (req, res) => {
 };
 
 /**
+ * 📝 Registrar / Crear Pasajero con Captura de Duplicidad E11000 y Resiliencia Firebase Auth
+ */
+export const registrarPasajero = async (req, res) => {
+    try {
+        const { nombre, email, telefono, telefonoMovil, password, uid, direccion, fotoPerfil } = req.body;
+        const telContacto = (telefonoMovil || telefono) ? String(telefonoMovil || telefono).trim() : null;
+        const emailSanitizado = email ? String(email).toLowerCase().trim() : null;
+
+        // 1. Validar campos requeridos mínimos
+        if (!nombre || (!emailSanitizado && !telContacto)) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_REQUIRED_FIELDS',
+                message: "⚠️ El nombre y al menos un método de contacto (correo o teléfono) son obligatorios."
+            });
+        }
+
+        // 2. Comprobar duplicados previos en MongoDB (Pasajero y Usuario)
+        const condiciones = [];
+        if (emailSanitizado) condiciones.push({ email: emailSanitizado });
+        if (telContacto) condiciones.push({ telefonoMovil: telContacto }, { telefono: telContacto });
+
+        if (condiciones.length > 0) {
+            const [existePasajero, existeUsuario] = await Promise.all([
+                Pasajero.findOne({ $or: condiciones }).lean(),
+                Usuario.findOne({ $or: condiciones }).lean()
+            ]);
+
+            if (existePasajero || existeUsuario) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'DUPLICATE_USER',
+                    message: "⚠️ El correo electrónico o número móvil ya pertenece a un usuario/pasajero registrado."
+                });
+            }
+        }
+
+        // 3. Crear el documento en MongoDB
+        const nuevoPasajero = new Pasajero({
+            nombre: String(nombre).trim(),
+            email: emailSanitizado || undefined,
+            telefonoMovil: telContacto || undefined,
+            telefono: telContacto || undefined,
+            uid: uid ? String(uid).trim() : undefined,
+            direccion: direccion ? String(direccion).trim() : '',
+            fotoPerfil: fotoPerfil || '',
+            rol: 'pasajero',
+            saldo: 0
+        });
+
+        await nuevoPasajero.save();
+
+        // 4. Réplica de perfil inicial en Firebase Firestore
+        try {
+            const docFirestoreId = nuevoPasajero.uid || nuevoPasajero._id.toString();
+            const coleccionUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
+            await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set({
+                id: docFirestoreId,
+                nombre: nuevoPasajero.nombre,
+                fullName: nuevoPasajero.nombre,
+                email: nuevoPasajero.email || '',
+                telefono: telContacto || '',
+                telefonoMovil: telContacto || '',
+                rol: 'pasajero',
+                saldo: 0,
+                balance: 0,
+                createdAt: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsErr) {
+            console.warn("⚠️ [CIMCO-PASAJERO-REG-FS-WARN] No se pudo replicar perfil inicial en Firestore:", fsErr.message);
+        }
+
+        return res.status(201).json({
+            success: true,
+            message: 'Pasajero registrado exitosamente.',
+            data: nuevoPasajero,
+            pasajero: nuevoPasajero
+        });
+
+    } catch (error) {
+        console.error("❌ [CIMCO-PASAJERO-REG-ERROR] Error en registro de pasajero:", error);
+
+        // Captura de error de índice único duplicado E11000 (Mongoose / MongoDB)
+        if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
+            const campoDuplicado = error.keyValue ? Object.keys(error.keyValue).join(', ') : 'correo o teléfono';
+            return res.status(400).json({
+                success: false,
+                code: 'DUPLICATE_KEY_E11000',
+                message: `⚠️ El ${campoDuplicado} ingresado ya se encuentra registrado por otro usuario.`
+            });
+        }
+
+        // Captura de errores provenientes de Firebase Auth
+        if (error.code && String(error.code).startsWith('auth/')) {
+            return res.status(400).json({
+                success: false,
+                code: error.code,
+                message: `⚠️ Error de autenticación en Firebase Auth: ${error.message}`
+            });
+        }
+
+        // Captura de errores de validación de esquema Mongoose
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({
+                success: false,
+                code: 'VALIDATION_ERROR',
+                message: `⚠️ Error en formato de datos: ${error.message}`
+            });
+        }
+
+        return res.status(500).json({
+            success: false,
+            code: 'SYSTEM_FAULT',
+            message: `SYSTEM_FAULT: ${error.message || 'Error interno del servidor al procesar el registro.'}`
+        });
+    }
+};
+
+/**
  * 🛡️ Middleware/Validación de Registro Único para Pasajeros
  */
 export const validarPasajeroUnico = async (req, res, next) => {
     try {
         const { email, telefono, telefonoMovil } = req.body;
-        const telContacto = telefono || telefonoMovil;
+        const telContacto = (telefono || telefonoMovil) ? String(telefono || telefonoMovil).trim() : null;
+        const emailSanitizado = email ? String(email).toLowerCase().trim() : null;
 
         const condicionesPasajero = [];
-        if (email) condicionesPasajero.push({ email: email.toLowerCase().trim() });
+        if (emailSanitizado) condicionesPasajero.push({ email: emailSanitizado });
         if (telContacto) condicionesPasajero.push({ telefonoMovil: telContacto }, { telefono: telContacto });
 
         if (condicionesPasajero.length > 0) {
@@ -152,12 +272,20 @@ export const validarPasajeroUnico = async (req, res, next) => {
             if (existeEnPasajeros || existeEnUsuarios) {
                 return res.status(400).json({
                     success: false,
+                    code: 'DUPLICATE_USER',
                     message: "⚠️ El número de teléfono o correo ya pertenece a un usuario/pasajero registrado."
                 });
             }
         }
         next();
     } catch (error) {
+        if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
+            return res.status(400).json({
+                success: false,
+                code: 'DUPLICATE_KEY_E11000',
+                message: "⚠️ El número de teléfono o correo ya pertenece a un usuario/pasajero registrado."
+            });
+        }
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -240,6 +368,14 @@ export const actualizarPerfilPasajero = async (req, res) => {
 
         return res.status(200).json({ success: true, message: 'Perfil actualizado con éxito', data: pasajero, pasajero });
     } catch (error) {
+        if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
+            const campoDuplicado = error.keyValue ? Object.keys(error.keyValue).join(', ') : 'correo o teléfono';
+            return res.status(400).json({
+                success: false,
+                code: 'DUPLICATE_KEY_E11000',
+                message: `⚠️ El ${campoDuplicado} ingresado ya está asignado a otro usuario.`
+            });
+        }
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -541,6 +677,7 @@ export const recargarSaldoPasajero = async (req, res) => {
 
 export default {
     obtenerPasajeros,
+    registrarPasajero,
     validarPasajeroUnico,
     obtenerPerfilPasajero,
     actualizarPerfilPasajero,

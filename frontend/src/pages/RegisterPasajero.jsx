@@ -1,10 +1,10 @@
-// Versión Arquitectura: V12.8 - Diagnóstico de Endpoint /auth/check-phone y Control de Flujo Progresivo
+// Versión Arquitectura: V12.9 - Verificación de Línea Móvil con Mapeo Dual (disponible: true / existe: false) y Control de Flujo Progresivo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Yellow Accent).
  * Misión: Capturar identidad para PASAJEROS con verificación de celular en Step 1.
- *         Si el número NO está registrado (existe: false), el sistema despliega automáticamente la Fase 2 (Perfil).
- *         Si la ruta del backend no existe (404 ROUTE-MISS), expone de forma directa y limpia el error de arquitectura.
+ * Soporta respuesta dual del backend (/auth/check-phone) validando tanto existe: false como disponible: true para avanzar a Step 2.
+ * Fase 2 (Perfil): Formulación de credenciales, datos personales y carga de imagen de perfil binaria.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -104,12 +104,19 @@ const RegisterPasajero = () => {
                 { signal: checkPhoneControllerRef.current.signal }
             );
             
-            if (res?.data?.success && res?.data?.existe) {
+            // 🔍 DUAL CHECK: Verificación por 'disponible' (true) o 'existe' (false)
+            const payload = res?.data || {};
+            const yaExiste = payload.existe === true || payload.disponible === false;
+            const estaDisponible = payload.disponible === true || payload.existe === false || payload.success === true;
+
+            if (yaExiste) {
                 setError('Este terminal ya posee una identidad indexada. Redirigiendo...');
                 setTimeout(() => navigate('/login', { replace: true }), 2500);
-            } else {
-                // ✅ Si el número NO existe, el sistema habilita el formulario de registro (Fase 2)
+            } else if (estaDisponible) {
+                // ✅ Si el número NO existe / está disponible, se habilita el formulario de registro (Fase 2)
                 setStep(2);
+            } else {
+                setError('No se pudo verificar la disponibilidad del número. Intente de nuevo.');
             }
         } catch (err) {
             if (err?.name !== 'CanceledError' && err?.code !== 'ERR_CANCELED') {

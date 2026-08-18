@@ -1,8 +1,9 @@
-// Versión Arquitectura: V24.0 - Sincronización de Rutas QR a Slugs Planos y Rediseño Dark Glassmorphism Premium
+// Versión Arquitectura: V24.1 - Sincronización de Navegación Maestro con Slugs Planos /register-pasajero, /register-moto, /register-intermunicipal, /register-despachador
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Register.jsx
  * Misión: Enrutador maestro de roles con interceptor de códigos QR, protección de sesión activa,
- *         rutas estandarizadas con guion (/register-...) y estética Dark Glassmorphism Premium (CIMCO-UI V9.3).
+ * rutas estandarizadas con guion plano (/register-pasajero, /register-moto, /register-intermunicipal, /register-despachador)
+ * y estética Dark Glassmorphism Premium (CIMCO-UI V9.3).
  */
 
 import React, { useEffect } from 'react';
@@ -24,128 +25,144 @@ const Register = () => {
     useEffect(() => {
         if (loading) return;
 
-        // 1️⃣ CASO A: EL USUARIO YA TIENE SESIÓN ABIERTA -> Redirige a raíz para que RoleRedirect lo ubique sin bucles
+        // 1️⃣ Si el usuario ya cuenta con sesión activa, redirige a su panel correspondiente
         if (user) {
-            navigate('/', { replace: true });
+            const userRole = (user.rol || user.role || '').toLowerCase();
+            if (userRole === 'conductor' || userRole === 'moto' || userRole === 'mototaxi') {
+                navigate('/conductor/dashboard', { replace: true });
+            } else if (userRole === 'despachador') {
+                navigate('/despachador/dashboard', { replace: true });
+            } else if (userRole === 'admin') {
+                navigate('/admin/dashboard', { replace: true });
+            } else {
+                navigate('/pasajero/dashboard', { replace: true });
+            }
             return;
         }
 
-        // 2️⃣ CASO B: LECTURA DE CÓDIGO QR CON REDIRECCIÓN A RUTAS NORMALIZADAS CON GUION (/register-...)
+        // 2️⃣ Intercepción de parámetros por QR/Enlace Externo con Slugs Planos Clean
         if (targetRole) {
-            const normalizedRole = String(targetRole).toLowerCase().trim();
+            const cleanRole = String(targetRole).toLowerCase().trim();
             
-            // Matriz de roles homologados
-            const isPasajero = normalizedRole === 'pasajero';
-            const isMoto = ['mototaxi', 'motoparrillero', 'motocarga', 'moto'].includes(normalizedRole);
-            const isIntermunicipal = normalizedRole === 'intermunicipal';
-            const isDespachador = normalizedRole === 'despachador';
-
-            if (isPasajero) {
+            if (cleanRole === 'pasajero' || cleanRole === 'pasajeros') {
                 navigate('/register-pasajero', { replace: true });
-            } else if (isMoto) {
-                navigate(`/register-moto?role=${normalizedRole}`, { replace: true });
-            } else if (isIntermunicipal) {
+            } else if (cleanRole === 'moto' || cleanRole === 'mototaxi' || cleanRole === 'motocarga' || cleanRole === 'motopasajero') {
+                navigate('/register-moto', { replace: true });
+            } else if (cleanRole === 'intermunicipal' || cleanRole === 'bus' || cleanRole === 'cooperativa') {
                 navigate('/register-intermunicipal', { replace: true });
-            } else if (isDespachador) {
+            } else if (cleanRole === 'despachador' || cleanRole === 'terminal') {
                 navigate('/register-despachador', { replace: true });
-            } else {
-                console.warn(`⚠️ [CIMCO-QR] Parámetro ?role="${targetRole}" no válido. Aplicando fallback a registro de pasajero.`);
-                navigate('/register-pasajero', { replace: true });
             }
         }
     }, [user, loading, targetRole, navigate]);
 
-    // 🗂️ Mapeo con Rutas Corregidas (/register-...) y Psicología del Color CIMCO-UI V9.3 Glassmorphism
-    const roles = [
+    // Matriz de Opciones de Registro con Slugs Planos Estandarizados
+    const opcionesRegistro = [
         {
             id: 'pasajero',
-            title: 'Pasajero',
-            badge: 'Viajes Instantáneos',
-            desc: 'Solicita transporte seguro, rastrea tu viaje en tiempo real y gestiona tus pagos.',
-            path: '/register-pasajero',
-            icon: <User size={26} className="text-[#3b82f6]" />,
-            borderColor: 'hover:border-[#3b82f6]/50 hover:shadow-[0_0_25px_rgba(59,130,246,0.2)]',
-            badgeBg: 'bg-[#3b82f6]/10 text-[#3b82f6] border-[#3b82f6]/20'
+            titulo: 'Pasajero Urbano',
+            subtitulo: 'Movilidad & Envíos Directos',
+            desc: 'Solicita viajes en mototaxi, motocarga o servicios urbanos con tarifa justa e itinerario en tiempo real.',
+            icono: User,
+            color: 'from-amber-500/20 to-amber-600/5',
+            borderColor: 'group-hover:border-amber-500/50',
+            iconColor: 'text-amber-400',
+            badge: 'Acceso Directo',
+            badgeBg: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+            ruta: '/register-pasajero'
         },
         {
             id: 'moto',
-            title: 'Escuadrón Moto',
-            badge: 'Mototaxi / Parrillero / Carga',
-            desc: 'Operación ágil de transporte motorizado urbano con verificación en línea.',
-            path: '/register-moto',
-            icon: <Bike size={26} className="text-[#10b981]" />,
-            borderColor: 'hover:border-[#10b981]/50 hover:shadow-[0_0_25px_rgba(16,185,129,0.2)]',
-            badgeBg: 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20'
+            titulo: 'Escuadrón Moto',
+            subtitulo: 'Mototaxi / Motocarga / Pasajero',
+            desc: 'Inscribe tu unidad vehicular, sube tus documentos obligatorios y genera ingresos de forma independiente.',
+            icono: Bike,
+            color: 'from-teal-500/20 to-teal-600/5',
+            borderColor: 'group-hover:border-teal-500/50',
+            iconColor: 'text-teal-400',
+            badge: 'Requiere Validación',
+            badgeBg: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
+            ruta: '/register-moto'
         },
         {
             id: 'intermunicipal',
-            title: 'Intermunicipal',
-            badge: 'Rutas Regionales',
-            desc: 'Conductores de cooperativas y rutas de mediano y largo alcance.',
-            path: '/register-intermunicipal',
-            icon: <Bus size={26} className="text-[#f59e0b]" />,
-            borderColor: 'hover:border-[#f59e0b]/50 hover:shadow-[0_0_25px_rgba(245,158,11,0.2)]',
-            badgeBg: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/20'
+            titulo: 'Operador Intermunicipal',
+            subtitulo: 'Rutas Regionales & Cooperativas',
+            desc: 'Vinculación para conductores de rutas intermunicipales afiliados a empresas o cooperativas autorizadas.',
+            icono: Bus,
+            color: 'from-indigo-500/20 to-indigo-600/5',
+            borderColor: 'group-hover:border-indigo-500/50',
+            iconColor: 'text-indigo-400',
+            badge: 'Afiliación Flota',
+            badgeBg: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+            ruta: '/register-intermunicipal'
         },
         {
             id: 'despachador',
-            title: 'Despachador de Nodo',
-            badge: 'Gestión de Terminal',
-            desc: 'Control de despachos, asignación de turnos y taquilla operativa.',
-            path: '/register-despachador',
-            icon: <Terminal size={26} className="text-[#f59e0b]" />,
-            borderColor: 'hover:border-[#f59e0b]/50 hover:shadow-[0_0_25px_rgba(245,158,11,0.2)]',
-            badgeBg: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/20'
+            titulo: 'Terminal / Despachador',
+            subtitulo: 'Central de Control Operativo',
+            desc: 'Gestión de salidas, asignación de giros y control de despacho para terminales de transporte.',
+            icono: Terminal,
+            color: 'from-amber-600/20 to-orange-600/5',
+            borderColor: 'group-hover:border-orange-500/50',
+            iconColor: 'text-orange-400',
+            badge: 'Gobernanza Level 3',
+            badgeBg: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+            ruta: '/register-despachador'
         }
     ];
 
-    // Pantalla de carga Glassmorphism mientras useAuth() valida las credenciales
     if (loading) {
         return (
-            <div className="min-h-screen bg-[#0a0f1d] flex flex-col items-center justify-center p-4">
-                <Loader size={36} className="animate-spin text-[#3b82f6] mb-3" />
-                <p className="text-xs text-slate-400 font-mono uppercase tracking-widest">Sincronizando con la red de transporte CIMCO...</p>
+            <div className="min-h-screen bg-[#0a0a0c] flex items-center justify-center p-4">
+                <div className="flex flex-col items-center gap-4 bg-[#121214]/80 backdrop-blur-md border border-white/5 p-8 rounded-3xl shadow-2xl">
+                    <Loader className="w-8 h-8 text-amber-500 animate-spin" />
+                    <p className="text-xs font-mono text-slate-400 uppercase tracking-widest">
+                        Validando Perfil de Seguridad...
+                    </p>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-[#0a0f1d] flex items-center justify-center p-4 selection:bg-[#3b82f6]/30 relative overflow-hidden font-sans">
-            {/* Ambient Background Lights */}
-            <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#3b82f6]/10 rounded-full blur-[120px] pointer-events-none" />
-            <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-[#10b981]/10 rounded-full blur-[120px] pointer-events-none" />
+        <div className="min-h-screen bg-[#0a0a0c] text-slate-100 flex items-center justify-center p-4 sm:p-6 relative overflow-hidden font-sans">
+            {/* Luces de Fondo Glassmorphism */}
+            <div className="absolute top-1/4 -left-20 w-96 h-96 bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute bottom-1/4 -right-20 w-96 h-96 bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none" />
 
-            <div className="w-full max-w-4xl backdrop-blur-2xl bg-[#0a0f1d]/90 border border-slate-800/80 rounded-3xl p-6 sm:p-10 shadow-[0_0_60px_rgba(0,0,0,0.8)] relative z-10">
+            <div className="w-full max-w-4xl bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-3xl p-6 sm:p-10 shadow-2xl relative z-10">
                 
                 {/* Header */}
-                <div className="text-center mb-10">
-                    <div className="inline-flex items-center gap-2 bg-slate-900/90 px-4 py-1.5 rounded-full border border-slate-700/60 text-[10px] text-[#3b82f6] font-mono tracking-widest uppercase mb-4 shadow-inner">
-                        <ShieldCheck size={14} className="text-[#3b82f6]" /> Sistema Oficial TAXIA CIMCO
+                <div className="text-center max-w-2xl mx-auto mb-10">
+                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.03] border border-white/10 text-amber-400 text-xs font-mono mb-4 shadow-inner">
+                        <ShieldCheck size={14} />
+                        <span className="uppercase tracking-widest font-semibold">Plataforma Global TAXIA CIMCO</span>
                     </div>
-                    <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">
-                        Crear Cuenta Operativa
+                    <h1 className="text-2xl sm:text-4xl font-black text-white uppercase tracking-wider mb-3">
+                        Selecciona tu Perfil de Operación
                     </h1>
-                    <p className="text-xs text-slate-400 font-mono tracking-wide mt-2 max-w-lg mx-auto">
-                        Selecciona tu rol en la plataforma para iniciar la vinculación con el sistema satelital de movilidad.
+                    <p className="text-slate-400 text-xs sm:text-sm font-normal leading-relaxed">
+                        Elige la modalidad correspondiente para iniciar el proceso de vinculación y registro en el nodo central.
                     </p>
                 </div>
 
-                {/* Grid de Selección de Roles */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {roles && roles.map((rol) => (
-                        <Link 
+                {/* Grid de Opciones de Registro */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {opcionesRegistro.map((rol) => (
+                        <Link
                             key={rol?.id || Math.random()}
-                            to={rol?.path || '/register'}
-                            className={`flex flex-col justify-between p-6 rounded-2xl bg-slate-900/50 border border-slate-800/80 transition-all duration-300 group text-decoration-none relative overflow-hidden ${rol?.borderColor || ''}`}
+                            to={rol?.ruta || '/register'}
+                            className={`group relative rounded-2xl p-6 bg-gradient-to-br ${rol?.color || ''} bg-black/40 border border-white/5 ${rol?.borderColor || ''} transition-all duration-300 hover:-translate-y-1 hover:shadow-xl text-left block text-decoration-none overflow-hidden`}
                         >
-                            <div className="flex items-start gap-4 mb-3">
-                                <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 group-hover:scale-110 transition-transform shrink-0 shadow-lg">
-                                    {rol?.icon}
+                            <div className="flex items-start gap-4 relative z-10">
+                                <div className={`p-3.5 rounded-xl bg-black/60 border border-white/10 ${rol?.iconColor || 'text-white'} group-hover:scale-110 transition-transform duration-300`}>
+                                    {rol?.icono && <rol.icono size={24} />}
                                 </div>
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <h3 className="text-white font-bold tracking-wide uppercase text-sm group-hover:text-white transition-colors">
-                                            {rol?.title || 'Indefinido'}
+                                <div className="flex-1">
+                                    <div className="flex items-center justify-between gap-2 mb-1">
+                                        <h3 className="text-base font-bold text-white group-hover:text-amber-300 transition-colors">
+                                            {rol?.titulo || 'Perfil'}
                                         </h3>
                                     </div>
                                     <span className={`inline-block text-[9px] font-mono px-2 py-0.5 rounded-md border ${rol?.badgeBg || ''} font-bold uppercase mb-2`}>

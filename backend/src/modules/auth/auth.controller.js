@@ -1,9 +1,10 @@
-// Versión Arquitectura: V21.27 - Fusión Atómica de Login Dual, Anti-Doble Hashing y Flujo de Recuperación OTP
+// Versión Arquitectura: V21.28 - Intercepción E11000 y Aislamiento de Sincronización Firestore
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword) y validaciones perimetrales.
+ * Ajuste V21.28: Intercepción de excepciones error.code === 11000 en el catch para retornar HTTP 400 y aislamiento defensivo de la sincronización con Firebase Firestore.
  */
 
 import jwt from 'jsonwebtoken';
@@ -119,7 +120,7 @@ export const register = async (req, res) => {
         const doc_tarjeta = getFilePath('doc_tarjeta');
         const doc_identificacion = getFilePath('doc_identificacion');
 
-        // 🛡️ VALIDACIÓN DE DUPLICADOS EN TODAS LAS COLECCIONES (CONCURRENTE)
+        // 🛡️ VALIDACIÓN PREVIA DE DUPLICADOS EN TODAS LAS COLECCIONES (CONCURRENTE)
         const [uExist, cExist, pExist] = await Promise.all([
             Usuario.findOne({ email: emailLimpio }),
             Conductor.findOne({ email: emailLimpio }),
@@ -243,9 +244,10 @@ export const register = async (req, res) => {
             });
         }
 
+        // Persistencia primaria en MongoDB Atlas
         await nuevoUsuario.save();
 
-        // Sincronización hacia Firebase Firestore con Denormalización Saneada
+        // 🛡️ SINCRONIZACIÓN HACIA FIREBASE FIRESTORE AISLADA EN TRY/CATCH SECUNDARIO (SIN ABORTAR MONGO)
         if (dbFirestore) {
             try {
                 const coleccionFirestore = esPasajero 
@@ -295,7 +297,7 @@ export const register = async (req, res) => {
                 });
 
             } catch (firestoreError) {
-                console.warn("⚠️ [CIMCO-AUTH-SYNC-WARN] Falló el espejo en Firebase Firestore:", firestoreError.message);
+                console.warn("⚠️ [CIMCO-AUTH-SYNC-WARN] Falló el espejo en Firebase Firestore (Persistencia MongoDB exitosa):", firestoreError.message);
             }
         }
 
@@ -336,6 +338,20 @@ export const register = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-AUTH-REGISTER-FATAL] Error en el registro de usuarios:", error);
+
+        // 🛑 INTERCEPCIÓN DE CLAVE DUPLICADA EN MONGO (code 11000)
+        if (error.code === 11000 || error.code === '11000') {
+            const campoDuplicado = Object.keys(error.keyPattern || error.keyValue || {})[0];
+            const mensajeDuplicado = campoDuplicado 
+                ? `El campo '${campoDuplicado}' ya se encuentra registrado en el sistema.` 
+                : "El correo, teléfono o datos de identificación ya están vinculados a otra cuenta.";
+            return res.status(400).json({ 
+                success: false, 
+                message: mensajeDuplicado,
+                error: "DATO_DUPLICADO"
+            });
+        }
+
         return res.status(500).json({ success: false, message: "Error interno del servidor al procesar el registro." });
     }
 };
@@ -372,18 +388,11 @@ export const login = async (req, res) => {
             queryConditions.push({ telefonoMovil: digitsOnly });
             queryConditions.push({ telefono: `57${digitsOnly}` });
             queryConditions.push({ telefonoMovil: `57${digitsOnly}` });
-
-            // Si el input viene con prefijo '57' de 12 dígitos, busca también la versión local de 10 dígitos
-            if (digitsOnly.startsWith('57') && digitsOnly.length === 12) {
-                const localDigits = digitsOnly.substring(2);
-                queryConditions.push({ telefono: localDigits });
-                queryConditions.push({ telefonoMovil: localDigits });
-            }
         }
 
         const consulta = { $or: queryConditions };
 
-        // Ejecución Concurrente con inclusión explícita del hash criptográfico (+password)
+        // Búsqueda concurrente polimórfica
         const [usuarioAdmin, usuarioConductor, usuarioPasajero] = await Promise.all([
             Usuario.findOne(consulta).select('+password +passwordHash'),
             Conductor.findOne(consulta).select('+password +passwordHash'),
@@ -406,16 +415,20 @@ export const login = async (req, res) => {
         const estadoAdmin = cuentaEncontrada.estadoAdministrativo ? String(cuentaEncontrada.estadoAdministrativo).toUpperCase() : '';
 
         if (estadoEvaluado === 'PENDIENTE' || estadoAdmin === 'PENDIENTE') {
-            return res.status(403).json({
-                success: false,
+            return res.status(403).json({ 
+                success: false, 
                 code: 'ACCOUNT_PENDING_APPROVAL',
-                message: "Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación."
+                message: "Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación." 
             });
         }
 
         const estaActivo = cuentaEncontrada.isActive !== undefined ? cuentaEncontrada.isActive : (['activo', 'APROBADO', 'active'].includes(cuentaEncontrada.estado));
+
         if (!estaActivo) {
-            return res.status(403).json({ success: false, message: "Esta cuenta se encuentra inactiva o suspendida. Contacte soporte administrativo." });
+            return res.status(403).json({ 
+                success: false, 
+                message: "Esta cuenta se encuentra inactiva o suspendida. Contacte soporte administrativo." 
+            });
         }
 
         // 🛡️ COMPUERTA DEFENSIVA ANTI-CRASH: Verificar existencia de la hash de la clave
@@ -429,58 +442,57 @@ export const login = async (req, res) => {
             });
         }
 
-        // 2️⃣ VALIDACIÓN 2: Clave de acceso errada
-        const passwordValido = await bcrypt.compare(String(password), hashAlmacenada);
-        if (!passwordValido) {
+        // 2️⃣ VALIDACIÓN 2: Verificación de Contraseña
+        const passwordMatch = await bcrypt.compare(String(password), hashAlmacenada);
+
+        if (!passwordMatch) {
             return res.status(401).json({ 
                 success: false, 
-                code: 'WRONG_PASSWORD',
-                message: "La clave de acceso es incorrecta. Por favor verifícala e intenta de nuevo." 
+                code: 'INVALID_PASSWORD',
+                message: "La contraseña ingresada es incorrecta." 
             });
         }
 
-        // Generación del Token JWT Operativo de TAXIA CIMCO
-        const token = jwt.sign(
-            { 
-                id: cuentaEncontrada._id,
-                _id: cuentaEncontrada._id,
-                rol: cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero'
-            },
-            JWT_SECRET,
-            { expiresIn: '24h' }
-        );
+        // 3️⃣ GENERACIÓN DE TOKEN JWT DE PRODUCCIÓN
+        const rolFinal = cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero';
+
+        const tokenPayload = {
+            id: String(cuentaEncontrada._id),
+            uid: String(cuentaEncontrada._id),
+            email: cuentaEncontrada.email,
+            rol: rolFinal,
+            subrol: cuentaEncontrada.subrol || null,
+            terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa || null
+        };
+
+        const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '7d' });
 
         return res.status(200).json({
             success: true,
-            message: "Inicio de sesión exitoso",
+            message: "Autenticación exitosa.",
             token,
             user: {
                 id: cuentaEncontrada._id,
-                nombre: cuentaEncontrada.nombre,
+                nombre: cuentaEncontrada.nombre || cuentaEncontrada.fullName,
                 email: cuentaEncontrada.email,
-                rol: cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero',
+                telefono: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono,
+                rol: rolFinal,
+                subrol: cuentaEncontrada.subrol || null,
                 estado: cuentaEncontrada.estado,
-                telefono: cuentaEncontrada.telefono || cuentaEncontrada.telefonoMovil || "",
-                telefonoMovil: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono || "",
-                cooperativa: cuentaEncontrada.cooperativa || cuentaEncontrada.empresa || "",
-                terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa || "",
-                access_level: cuentaEncontrada.access_level || 1,
+                isActive: cuentaEncontrada.isActive,
+                terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa,
                 foto_perfil: cuentaEncontrada.foto_perfil || null
             }
         });
 
     } catch (error) {
-        console.error("🚨 [CIMCO-AUTH-LOGIN-FATAL] Error en el proceso de autenticación:", error);
-        return res.status(500).json({ 
-            success: false, 
-            code: 'SERVER_ERROR',
-            message: error.message || "Error interno del servidor durante el inicio de sesión." 
-        });
+        console.error("🚨 [CIMCO-AUTH-LOGIN-FATAL] Error crítico durante el inicio de sesión:", error);
+        return res.status(500).json({ success: false, message: "Error interno en el servidor de autenticación." });
     }
 };
 
 /**
- * 📡 SOLICITUD DE OTP / RECUPERACIÓN DE CLAVE (FORGOT-PASSWORD)
+ * 📲 SOLICITUD DE CÓDIGO OTP (RECUPERACIÓN DE CONTRASEÑA)
  */
 export const solicitarOTP = async (req, res) => {
     try {
@@ -488,7 +500,10 @@ export const solicitarOTP = async (req, res) => {
         const loginInput = body.loginInput || body.identifier || body.email || body.telefono;
 
         if (!loginInput) {
-            return res.status(400).json({ success: false, message: "El identificador (correo o teléfono celular) es requerido." });
+            return res.status(400).json({ 
+                success: false, 
+                message: "El identificador (correo o teléfono celular) es requerido." 
+            });
         }
 
         const cleanInput = String(loginInput).trim().toLowerCase();
@@ -519,14 +534,17 @@ export const solicitarOTP = async (req, res) => {
         const usuarioExistente = u || c || p;
 
         if (!usuarioExistente) {
-            return res.status(404).json({ success: false, message: "No se localizó ninguna cuenta asociada a dicho identificador." });
+            return res.status(404).json({ 
+                success: false, 
+                message: "No se localizó ninguna cuenta asociada a dicho identificador." 
+            });
         }
 
         const telefonoContacto = usuarioExistente.telefono || usuarioExistente.telefonoMovil || cleanInput;
 
         // Generación de código numérico de 6 dígitos
         const codigoOTP = Math.floor(100000 + Math.random() * 900000).toString();
-        
+
         // Registrar OTP en la bóveda volátil con tiempo de expiración (15 minutos)
         otpStore.set(telefonoContacto, {
             codigo: codigoOTP,
@@ -534,34 +552,37 @@ export const solicitarOTP = async (req, res) => {
             usuarioId: usuarioExistente._id
         });
 
-        console.log(`🔑 [CIMCO-OTP-GATEWAY] Código generado para ${telefonoContacto}: [ ${codigoOTP} ] (Válido por 15 minutos)`);
+        console.log(`🔑 [CIMCO-OTP] Código generado para ${telefonoContacto}: ${codigoOTP}`);
 
-        return res.status(200).json({ 
-            success: true, 
-            message: "Código de verificación y restablecimiento enviado con éxito.",
-            debugOtp: process.env.NODE_ENV !== 'production' ? codigoOTP : undefined
+        return res.status(200).json({
+            success: true,
+            message: "Código de recuperación generado correctamente.",
+            codigoDesarrollo: process.env.NODE_ENV === 'development' ? codigoOTP : undefined
         });
 
     } catch (error) {
-        console.error("🚨 [CIMCO-AUTH-OTP-FATAL] Fallo en la pasarela de recuperación OTP:", error);
-        return res.status(500).json({ success: false, message: "Error interno al gestionar la recuperación de acceso." });
+        console.error("🚨 [CIMCO-OTP-SOLICITAR-FATAL] Error generando OTP:", error);
+        return res.status(500).json({ success: false, message: "Error interno al procesar la solicitud de OTP." });
     }
 };
 
 export const forgotPassword = solicitarOTP;
 
 /**
- * 🛠️ VERIFICACIÓN DE OTP Y RESTABLECIMIENTO DE CLAVE (RESET-PASSWORD)
+ * 🔒 VERIFICACIÓN DE OTP Y RESTABLECIMIENTO DE CONTRASEÑA
  */
 export const verificarOTPyRestablecer = async (req, res) => {
     try {
         const body = req.body || {};
         const loginInput = body.loginInput || body.identifier || body.email || body.telefono;
-        const codigo = body.codigo || body.otp || body.token;
+        const codigo = body.codigo || body.otp;
         const nuevaPassword = body.nuevaPassword || body.password || body.newPassword;
 
         if (!loginInput || !codigo || !nuevaPassword) {
-            return res.status(400).json({ success: false, message: "Faltan parámetros requeridos (identificador, código u OTP, y nueva contraseña)." });
+            return res.status(400).json({ 
+                success: false, 
+                message: "El identificador, el código OTP y la nueva contraseña son requeridos." 
+            });
         }
 
         const cleanInput = String(loginInput).trim().toLowerCase();
@@ -592,77 +613,72 @@ export const verificarOTPyRestablecer = async (req, res) => {
         const usuario = u || c || p;
 
         if (!usuario) {
-            return res.status(404).json({ success: false, message: "Identificador de cuenta inválido." });
+            return res.status(404).json({ 
+                success: false, 
+                message: "Identificador de cuenta inválido." 
+            });
         }
 
         const telefonoContacto = usuario.telefono || usuario.telefonoMovil || cleanInput;
         const registroOTP = otpStore.get(telefonoContacto);
 
         if (!registroOTP) {
-            return res.status(400).json({ success: false, message: "No se ha solicitado ningún código para esta cuenta o ya expiró." });
+            return res.status(400).json({ 
+                success: false, 
+                message: "No se ha solicitado ningún código para esta cuenta o ya expiró." 
+            });
         }
 
         if (Date.now() > registroOTP.expira) {
             otpStore.delete(telefonoContacto);
-            return res.status(400).json({ success: false, message: "El código de verificación ha expirado. Solicite uno nuevo." });
+            return res.status(400).json({ 
+                success: false, 
+                message: "El código de verificación ha expirado. Solicite uno nuevo." 
+            });
         }
 
         if (registroOTP.codigo !== String(codigo).trim()) {
-            return res.status(400).json({ success: false, message: "Código de verificación o OTP incorrecto." });
+            return res.status(400).json({ 
+                success: false, 
+                message: "Código de verificación o OTP incorrecto." 
+            });
         }
 
-        // Reescritura usando .save() para activar hooks o hash explícito
+        // Reescritura usando .save() para activar hooks pre-save de hash
         usuario.password = String(nuevaPassword);
         if (usuario.passwordHash !== undefined) {
             usuario.passwordHash = String(nuevaPassword);
         }
 
         await usuario.save();
-
         otpStore.delete(telefonoContacto);
+
         console.log(`🔒 [CIMCO-SECURITY] Credenciales actualizadas correctamente para: ${telefonoContacto}`);
 
-        return res.status(200).json({ success: true, message: "Contraseña restablecida correctamente." });
+        return res.status(200).json({
+            success: true,
+            message: "Contraseña restablecida exitosamente. Ya puede iniciar sesión."
+        });
 
     } catch (error) {
-        console.error("🚨 [CIMCO-AUTH-RESET-FATAL] Error en reescritura de credenciales:", error);
-        return res.status(500).json({ success: false, message: "Error interno al reescribir la contraseña." });
+        console.error("🚨 [CIMCO-RESET-PASSWORD-FATAL] Error restableciendo contraseña:", error);
+
+        if (error.code === 11000 || error.code === '11000') {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Error de duplicidad al actualizar las credenciales.",
+                error: "DATO_DUPLICADO"
+            });
+        }
+
+        return res.status(500).json({ success: false, message: "Error interno al procesar el restablecimiento de contraseña." });
     }
 };
 
 export const resetPassword = verificarOTPyRestablecer;
 
 /**
- * 📡 VERIFICACIÓN DE DISPONIBILIDAD TELEFÓNICA (RETROCOMPATIBILIDAD)
- */
-export const verificarTelefono = async (req, res) => {
-    try {
-        if (!req.body || (!req.body.telefono && !req.body.telefonoMovil)) {
-            return res.status(400).json({ success: false, message: "Número telefónico no suministrado." });
-        }
-        
-        const telBusqueda = String(req.body.telefono || req.body.telefonoMovil).trim();
-        const consultaTel = { $or: [{ telefonoMovil: telBusqueda }, { telefono: telBusqueda }] };
-
-        const [u, c, p] = await Promise.all([
-            Usuario.findOne(consultaTel),
-            Conductor.findOne(consultaTel),
-            Pasajero.findOne(consultaTel)
-        ]);
-
-        if (u || c || p) {
-            return res.status(200).json({ success: true, disponible: false, existe: true, message: "El teléfono ya se encuentra en uso." });
-        }
-
-        return res.status(200).json({ success: true, disponible: true, existe: false, message: "Teléfono apto para vinculación." });
-    } catch (error) {
-        console.error("🚨 [CIMCO-VALIDATION-FATAL] Error en escaneo de red:", error);
-        return res.status(500).json({ success: false, message: "Error de validación interna." });
-    }
-};
-
-/**
- * 📡 CONSULTA DE REGISTRO TELEFÓNICO (CHECK-PHONE / SUBRUTA /check-phone)
+ * 📱 COMPROBACIÓN DE DISPONIBILIDAD DE TELÉFONO (CHECK-PHONE)
  */
 export const checkPhone = async (req, res) => {
     try {
@@ -691,7 +707,7 @@ export const checkPhone = async (req, res) => {
             return res.json({ 
                 success: true, 
                 existe: true, 
-                disponible: false,
+                disponible: false, 
                 message: 'El teléfono ya se encuentra registrado.' 
             });
         }
@@ -699,15 +715,13 @@ export const checkPhone = async (req, res) => {
         return res.json({ 
             success: true, 
             existe: false, 
-            disponible: true,
+            disponible: true, 
             message: 'Línea disponible para registro.' 
         });
+
     } catch (error) {
         console.error("❌ [CIMCO-AUTH-ERROR] Error en check-phone:", error);
-        return res.status(500).json({ 
-            success: false, 
-            message: 'Error interno en el servidor de autenticación.' 
-        });
+        return res.status(500).json({ success: false, message: 'Error interno en el servidor de autenticación.' });
     }
 };
 
@@ -724,45 +738,24 @@ export const updateProfile = async (req, res) => {
         }
 
         const { nombre, telefonoMovil, cooperativa, empresa, terminal_sede } = req.body || {};
-        const nombreLimpio = nombre ? String(nombre).trim() : undefined;
-        const telefonoLimpio = telefonoMovil ? String(telefonoMovil).trim() : undefined;
-        const terminalAsignada = terminal_sede || cooperativa || empresa || undefined;
-
-        let modeloTarget;
-        let esPasajero = false;
-        let esConductor = false;
-
-        const rolNormalizado = rolExtraido ? String(rolExtraido).toLowerCase().trim() : '';
-
-        // Mapeo preciso de selección de modelo
-        if (rolNormalizado === 'pasajero') {
-            modeloTarget = Pasajero;
-            esPasajero = true;
-        } else if (ROLES_CONDUCTORES.includes(rolNormalizado)) {
-            modeloTarget = Conductor;
-            esConductor = true;
-        } else {
-            // Usuarios del sistema: Despachadores, Admins, CEOs y roles generales
-            modeloTarget = Usuario;
-        }
 
         const updateData = {};
-        if (nombreLimpio) {
-            updateData.nombre = nombreLimpio;
-            updateData.fullName = nombreLimpio;
+        if (nombre) {
+            updateData.nombre = String(nombre).trim();
+            updateData.fullName = String(nombre).trim();
         }
-        if (telefonoLimpio) {
-            updateData.telefonoMovil = telefonoLimpio;
-            updateData.telefono = telefonoLimpio;
-        }
-        
-        if (terminalAsignada) {
-            updateData.cooperativa = terminalAsignada;
-            updateData.empresa = terminalAsignada;
-            updateData.terminal_sede = terminalAsignada;
+        if (telefonoMovil) {
+            updateData.telefonoMovil = String(telefonoMovil).trim();
+            updateData.telefono = String(telefonoMovil).trim();
         }
 
-        // Extracción de fotos o documentos si vienen en updateProfile vía multipart
+        const sedeFinal = terminal_sede || cooperativa || empresa;
+        if (sedeFinal) {
+            updateData.cooperativa = String(sedeFinal).trim();
+            updateData.empresa = String(sedeFinal).trim();
+            updateData.terminal_sede = String(sedeFinal).trim();
+        }
+
         if (req.files) {
             const getFilePath = (fieldName) => {
                 let fileObj = null;
@@ -787,72 +780,53 @@ export const updateProfile = async (req, res) => {
             if (docId) updateData.doc_identificacion = docId;
         }
 
+        // Selección del modelo según el rol
+        const rolNormalizado = rolExtraido ? String(rolExtraido).toLowerCase().trim() : '';
+        let modeloTarget = Usuario;
+
+        if (rolNormalizado === 'pasajero') {
+            modeloTarget = Pasajero;
+        } else if (ROLES_CONDUCTORES.includes(rolNormalizado)) {
+            modeloTarget = Conductor;
+        }
+
         let usuarioActualizado = await modeloTarget.findByIdAndUpdate(
             userId,
             { $set: updateData },
             { new: true }
         );
 
-        // Fallback Seguro Polimórfico en caso de que el rol suministrado difiera de la colección real
+        // Fallback Seguro Polimórfico en caso de que el rol suministrado no coincida con la colección real
         if (!usuarioActualizado) {
-            const [uFallback, cFallback, pFallback] = await Promise.all([
-                Usuario.findById(userId),
-                Conductor.findById(userId),
-                Pasajero.findById(userId)
-            ]);
-            
-            if (uFallback) { 
-                usuarioActualizado = await Usuario.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); 
-                esPasajero = false; esConductor = false; 
-            } else if (cFallback) { 
-                usuarioActualizado = await Conductor.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); 
-                esPasajero = false; esConductor = true; 
-            } else if (pFallback) { 
-                usuarioActualizado = await Pasajero.findByIdAndUpdate(userId, { $set: updateData }, { new: true }); 
-                esPasajero = true; esConductor = false; 
-            }
+            usuarioActualizado = await Usuario.findByIdAndUpdate(userId, { $set: updateData }, { new: true }) ||
+                                 await Conductor.findByIdAndUpdate(userId, { $set: updateData }, { new: true }) ||
+                                 await Pasajero.findByIdAndUpdate(userId, { $set: updateData }, { new: true });
         }
 
         if (!usuarioActualizado) {
-            return res.status(404).json({ success: false, message: "El usuario no fue localizado en el núcleo de base de datos." });
+            return res.status(404).json({ success: false, message: "No se encontró la cuenta de usuario para actualizar." });
         }
 
-        // Reflejo en Firebase Firestore
+        // Sincronización secundaria hacia Firebase Firestore (Aislada en Try/Catch)
         if (dbFirestore) {
             try {
-                const coleccionTarget = esPasajero 
+                const esPasajero = usuarioActualizado.rol === 'pasajero' || usuarioActualizado.role === 'pasajero';
+                const esConductor = ROLES_CONDUCTORES.includes(usuarioActualizado.rol) || ROLES_CONDUCTORES.includes(usuarioActualizado.role);
+
+                const coleccionFirestore = esPasajero 
                     ? (FIRESTORE_PATHS?.users || 'usuarios') 
                     : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
 
-                const firestoreUpdate = {};
-                if (nombreLimpio) {
-                    firestoreUpdate.nombre = nombreLimpio;
-                    firestoreUpdate.fullName = nombreLimpio;
-                }
-                if (telefonoLimpio) {
-                    firestoreUpdate.telefono = telefonoLimpio;
-                    firestoreUpdate.telefonoMovil = telefonoLimpio;
-                }
-                
-                if (terminalAsignada) {
-                    firestoreUpdate.cooperativa = terminalAsignada;
-                    firestoreUpdate.empresa = terminalAsignada;
-                    firestoreUpdate.terminal_sede = terminalAsignada;
-                }
-
-                if (updateData.foto_perfil) {
-                    firestoreUpdate.foto_perfil = updateData.foto_perfil;
-                }
-
-                await dbFirestore.collection(coleccionTarget).doc(String(userId)).set(firestoreUpdate, { merge: true });
-
-                if (nombreLimpio) {
-                    const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-                    await dbFirestore.collection(pathBilleteras).doc(String(userId)).set({
-                        nombreUsuario: nombreLimpio,
-                        ultimaActualizacion: new Date().toISOString()
-                    }, { merge: true });
-                }
+                await dbFirestore.collection(coleccionFirestore).doc(String(usuarioActualizado._id)).set({
+                    nombre: usuarioActualizado.nombre,
+                    fullName: usuarioActualizado.nombre,
+                    telefono: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono,
+                    cooperativa: usuarioActualizado.cooperativa || 'Particular',
+                    empresa: usuarioActualizado.empresa || 'Particular',
+                    terminal_sede: usuarioActualizado.terminal_sede || 'Particular',
+                    ...(usuarioActualizado.foto_perfil ? { foto_perfil: usuarioActualizado.foto_perfil } : {}),
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
 
             } catch (firestoreErr) {
                 console.warn(`⚠️ [CIMCO-UPDATE-SYNC-WARN] Error de replicación en Firebase: ${firestoreErr.message}`);
@@ -876,6 +850,15 @@ export const updateProfile = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-PROFILE-UPDATE-FATAL] Error crítico en la pasarela de actualización:", error);
+
+        if (error.code === 11000 || error.code === '11000') {
+            return res.status(400).json({ 
+                success: false, 
+                message: "El correo o teléfono ingresado ya está en uso por otra cuenta.",
+                error: "DATO_DUPLICADO"
+            });
+        }
+
         return res.status(500).json({ success: false, message: "Error interno al procesar los ajustes de perfil." });
     }
 };
@@ -887,7 +870,6 @@ export default {
     forgotPassword,
     verificarOTPyRestablecer,
     resetPassword,
-    verificarTelefono,
     checkPhone,
     updateProfile
 };

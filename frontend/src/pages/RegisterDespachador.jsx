@@ -1,9 +1,10 @@
-// Versión Arquitectura: V1.9 - Refuerzo de Validaciones Estrictas para Celular Colombiano y Correo Electrónico con Gobernanza Level 3
+// Versión Arquitectura: V2.0 - Alineación Estricta de Claves Binary/Multipart Multer y Gobernanza Level 3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterDespachador.jsx
  * Misión: Registro de Despachadores con validación de Empresa Matriz, Terminal / Sede, Sección de Asignación de Sede Operativa,
- *         refuerzo estricto de campos de contacto obligatorios (Teléfono Celular Colombiano y Correo Electrónico),
- *         y sincronización explícita de navegación de retorno a la selección de rol central (/register).
+ * refuerzo estricto de campos de contacto obligatorios (Teléfono Celular Colombiano y Correo Electrónico),
+ * Alineación de llaves binarias/multipart con la especificación exacta del middleware Multer (doc_identificacion, foto_perfil)
+ * y sincronización explícita de navegación de retorno a la selección de rol central (/register).
  * Regla de Negocio: Recibe solicitudes de Pasajeros y gestiona despachos hacia Intermunicipales (Gobernanza Access Level 3).
  * Estilo: CIMCO-UI V9.3 Glassmorphism (Amber Theme).
  */
@@ -19,372 +20,351 @@ const MAX_FILE_SIZE_MB = 5;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 
+const PHONE_REGEX = /^(3\d{9})$/;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const RegisterDespachador = () => {
   const navigate = useNavigate();
 
-  // 📡 ESTADOS CORE
-  const [nombre, setNombre] = useState('');
-  const [celular, setCelular] = useState('');
-  const [correo, setCorreo] = useState('');
-  const [clave, setClave] = useState('');
-  
-  // 🏢 REQUISITOS OPERATIVOS ACCESS LEVEL 3 (Sede, Empresa y Asignación Operativa)
-  const [empresa, setEmpresa] = useState('');
-  const [terminalSede, setTerminalSede] = useState('');
-  const [codigoTaquilla, setCodigoTaquilla] = useState('');
-  const [turnoAsignado, setTurnoAsignado] = useState('');
+  const [formData, setFormData] = useState({
+    nombre: '',
+    email: '',
+    telefono: '',
+    password: '',
+    empresa: '',
+    terminal_sede: ''
+  });
 
-  // 📁 DOCUMENTACIÓN ADICIONAL / OPCIONAL (Preparación para FormData)
   const [docIdentidadFile, setDocIdentidadFile] = useState(null);
-
-  const [error, setError] = useState('');
+  const [fotoPerfilFile, setFotoPerfilFile] = useState(null);
+  
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
 
-  // Helper de validación de archivos opcionales
-  const validateFile = (file, fileLabel) => {
-    if (!file) return null;
-
-    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
-      return `El archivo "${fileLabel}" tiene un formato no válido. Usa imágenes (.jpg, .png, .webp) o PDF.`;
-    }
-
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      return `El archivo "${fileLabel}" excede el límite máximo permitido de ${MAX_FILE_SIZE_MB}MB.`;
-    }
-
-    return null;
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    if (error) setError(null);
   };
 
-  const handleFileChange = (e, setFile, label) => {
-    setError('');
-    if (e?.target?.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      const validationError = validateFile(selectedFile, label);
-
-      if (validationError) {
-        setError(validationError);
-        e.target.value = '';
-        setFile(null);
-        return;
-      }
-
-      setFile(selectedFile);
+  const handleFileChange = (e, setFileState, labelDoc) => {
+    const selectedFile = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+    
+    if (!selectedFile) {
+      setFileState(null);
+      return;
     }
+
+    if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
+      setError(`⚠️ El archivo de ${labelDoc} supera el límite de ${MAX_FILE_SIZE_MB}MB.`);
+      e.target.value = '';
+      setFileState(null);
+      return;
+    }
+
+    if (!ALLOWED_MIME_TYPES.includes(selectedFile.type)) {
+      setError(`⚠️ Formato no permitido para ${labelDoc}. Solo JPG, PNG, WEBP o PDF.`);
+      e.target.value = '';
+      setFileState(null);
+      return;
+    }
+
+    setError(null);
+    setFileState(selectedFile);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-
-    // 🛡️ GUARDA DE SEGURIDAD ESTRICTA PARA ACCESS_LEVEL 3
-    if (!nombre?.trim() || !celular?.trim() || !correo?.trim() || !clave?.trim()) {
-      setError("Todos los campos personales de acceso son obligatorios.");
-      return;
-    }
-
-    // Validar celular colombiano (10 dígitos iniciando en 3)
-    const phoneRegex = /^3\d{9}$/;
-    if (!phoneRegex.test(celular.trim())) {
-      setError("Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567).");
-      return;
-    }
-
-    // Validar formato estricto de correo electrónico
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(correo.trim())) {
-      setError("Ingrese un correo electrónico válido para habilitar notificaciones y recuperación.");
-      return;
-    }
-
-    if (!empresa?.trim() || !terminalSede?.trim()) {
-      setError("⚠️ Error de Gobernanza Level 3: Se requiere especificar Empresa Matriz y Sede/Terminal de Operación.");
-      return;
-    }
-
-    if (docIdentidadFile) {
-      const errDoc = validateFile(docIdentidadFile, 'Documento de Identificación');
-      if (errDoc) {
-        setError(errDoc);
-        return;
-      }
-    }
-
     setLoading(true);
+    setError(null);
+
+    // 🛡️ Guardas de Seguridad Anti-Undefined y Sanitización
+    const nombreClean = (formData.nombre || '').trim();
+    const emailClean = (formData.email || '').trim().toLowerCase();
+    const telefonoClean = (formData.telefono || '').trim().replace(/\D/g, '');
+    const passwordClean = formData.password || '';
+    const empresaClean = (formData.empresa || '').trim();
+    const terminalClean = (formData.terminal_sede || '').trim();
+
+    if (!nombreClean || !emailClean || !telefonoClean || !passwordClean || !empresaClean || !terminalClean) {
+      setError("⚠️ Todos los campos operativos marcados con asterisco son estrictamente obligatorios.");
+      setLoading(false);
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(emailClean)) {
+      setError("⚠️ Estructura de correo electrónico inválida.");
+      setLoading(false);
+      return;
+    }
+
+    if (!PHONE_REGEX.test(telefonoClean)) {
+      setError("⚠️ El teléfono debe ser un número celular colombiano válido de 10 dígitos (iniciando en 3).");
+      setLoading(false);
+      return;
+    }
+
+    if (passwordClean.length < 6) {
+      setError("⚠️ La contraseña debe contener un mínimo de 6 caracteres.");
+      setLoading(false);
+      return;
+    }
 
     try {
-      const targetRole = ROLES?.DESPACHADOR || 'despachador';
-      const accessLevel = DEFAULT_ACCESS_LEVELS?.[targetRole] ?? 3;
+      const payloadData = new FormData();
+      payloadData.append('nombre', nombreClean);
+      payloadData.append('email', emailClean);
+      payloadData.append('telefono', telefonoClean);
+      payloadData.append('telefonoMovil', telefonoClean);
+      payloadData.append('password', passwordClean);
+      payloadData.append('rol', ROLES?.DESPACHADOR || 'despachador');
+      payloadData.append('empresa', empresaClean);
+      payloadData.append('cooperativa', empresaClean);
+      payloadData.append('terminal_sede', terminalClean);
+      payloadData.append('access_level', DEFAULT_ACCESS_LEVELS?.DESPACHADOR || 3);
 
-      let requestData;
-      let requestHeaders = {};
-
-      // 🔄 MIGRACIÓN DINÁMICA: Si adjunta documento, usa multipart/form-data; si no, envía JSON.
+      // 🎯 ALINEACIÓN CON MULTER BACKEND
       if (docIdentidadFile) {
-        const formDataPayload = new FormData();
-        formDataPayload.append('nombre', nombre.trim());
-        formDataPayload.append('telefono', celular.trim());
-        formDataPayload.append('email', correo.toLowerCase().trim());
-        formDataPayload.append('password', clave);
-        formDataPayload.append('empresa', empresa.trim());
-        formDataPayload.append('terminal_sede', terminalSede.trim());
-        formDataPayload.append('codigo_taquilla', codigoTaquilla?.trim() || '');
-        formDataPayload.append('turno_asignado', turnoAsignado?.trim() || '');
-        formDataPayload.append('role', targetRole);
-        formDataPayload.append('access_level', String(accessLevel));
-
-        if (docIdentidadFile instanceof File) {
-          formDataPayload.append('doc_identificacion', docIdentidadFile);
-        }
-
-        requestData = formDataPayload;
-        requestHeaders = { 'Content-Type': 'multipart/form-data' };
-      } else {
-        requestData = {
-          nombre: nombre.trim(),
-          telefono: celular.trim(),
-          email: correo.toLowerCase().trim(),
-          password: clave,
-          empresa: empresa.trim(),
-          terminal_sede: terminalSede.trim(),
-          codigo_taquilla: codigoTaquilla?.trim() || '',
-          turno_asignado: turnoAsignado?.trim() || '',
-          role: targetRole,
-          access_level: accessLevel
-        };
+        payloadData.append('doc_identificacion', docIdentidadFile);
+      }
+      if (fotoPerfilFile) {
+        payloadData.append('foto_perfil', fotoPerfilFile);
       }
 
-      const res = await api.post('/api/auth/register', requestData, {
-        headers: requestHeaders
+      const response = await api.post('/auth/register', payloadData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
       });
 
-      if (res?.data?.success || res?.status === 200 || res?.status === 201) {
-        navigate('/login');
+      if (response && response.data && (response.data.success || response.data.user || response.data.token)) {
+        setSuccess(true);
+        setTimeout(() => {
+          navigate('/login', { 
+            state: { message: '✅ Registro de Despachador exitoso. Inicie sesión para acceder a la central.' } 
+          });
+        }, 2000);
       } else {
-        setError(res?.data?.message || "Rechazo del nodo central al vincular el despachador.");
+        throw new Error((response && response.data && response.data.message) || "Error al registrar nodo despachador.");
       }
+
     } catch (err) {
-      console.error("🚨 [CIMCO-DESPACHO-AUTH] Error de registro:", err);
-      setError(err?.response?.data?.message || "Error en el canal de comunicación con el nodo de despacho.");
+      console.error("🚨 [DESPACHADOR-REGISTER-ERROR]:", err);
+      const apiMessage = err?.response?.data?.message || err?.message || "Ocurrió un error inesperado al procesar la vinculación.";
+      setError(apiMessage);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0a0a0c] p-4 transition-colors duration-500 font-sans selection:bg-amber-500/30 relative overflow-hidden">
-      {/* Fondo estético CIMCO-UI */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-zinc-900/20 via-black to-black z-0" />
+    <div className="min-h-screen bg-[#0a0a0c] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans">
+      
+      {/* Luces Ambientales de Fondo */}
+      <div className="absolute top-1/4 -left-20 w-80 h-80 bg-amber-600/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-1/4 -right-20 w-80 h-80 bg-orange-600/10 rounded-full blur-[120px] pointer-events-none" />
 
-      <div className="w-full max-w-xl backdrop-blur-md bg-[#121214]/80 border border-white/5 p-6 sm:p-8 rounded-3xl shadow-2xl shadow-black/60 relative z-10 transition-all duration-500 my-8">
+      <div className="w-full max-w-xl bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-3xl p-6 sm:p-10 shadow-2xl relative z-10">
         
-        {/* Botón de Retorno Explícito a Selección de Rol */}
-        <Link 
+        {/* Cabecera de Navegación y Título */}
+        <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/5">
+          <Link 
             to="/register" 
-            className="inline-flex items-center gap-2 text-slate-400 hover:text-white font-mono text-xs uppercase tracking-wider transition-colors mb-6 text-decoration-none"
-        > 
-            <ArrowLeft size={16} /> Volver a Selección de Rol
-        </Link>
-
-        <div className="mb-6 text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/[0.06] border border-amber-500/20 rounded-full mb-3">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-            <span className="text-[10px] font-mono tracking-[0.15em] text-amber-400 uppercase font-bold">Enrutador Logístico Principal (Level 3)</span>
+            className="flex items-center gap-2 text-xs font-mono text-slate-400 hover:text-amber-400 transition-colors uppercase tracking-wider group"
+          >
+            <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
+            <span>Volver a Roles</span>
+          </Link>
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-mono font-bold uppercase tracking-widest">
+            <ShieldCheck size={12} /> Level 3 Access
           </div>
-          <h2 className="text-white font-black text-2xl tracking-tight bg-clip-text text-transparent bg-gradient-to-b from-white to-zinc-400 uppercase">Registro Despachador</h2>
-          <p className="text-slate-400 font-mono text-[10px] tracking-wide mt-1 uppercase font-semibold">Recepción de Pasajeros y Asignación de Rutas</p>
         </div>
 
+        <div className="mb-8">
+          <h1 className="text-2xl sm:text-3xl font-black text-white uppercase tracking-wider flex items-center gap-3">
+            <UserCheck className="text-amber-500" size={28} />
+            Registro Despachador
+          </h1>
+          <p className="text-xs text-slate-400 mt-2 font-mono">
+            Vincule la central operativa con la red de despacho intermunicipal y terminales de transporte.
+          </p>
+        </div>
+
+        {/* Notificaciones de Estado */}
         {error && (
-          <div className="mb-6 text-red-400 bg-red-950/30 p-3.5 rounded-xl border border-red-500/20 text-xs font-mono flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-            <AlertTriangle size={14} className="shrink-0" />
+          <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-mono flex items-start gap-3">
+            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono flex items-center gap-3">
+            <CheckCircle2 size={18} className="shrink-0" />
+            <span>¡Sede operativamente vinculada! Redirigiendo a la pantalla de entrada...</span>
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
           
-          {/* SECCIÓN 1: DATOS DE OPERADOR */}
-          <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
-            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
-              <UserCheck size={12} className="text-amber-400" />
-              Sección 1: Información de Operador y Acceso
+          {/* Nombre Completo */}
+          <div>
+            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2">
+              Nombre Completo del Operador *
+            </label>
+            <input 
+              type="text" 
+              name="nombre"
+              value={formData.nombre} 
+              onChange={handleInputChange} 
+              placeholder="Ej: Carlos Mario Fuentes" 
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-sans"
+              required 
+            />
+          </div>
+
+          {/* Email y Teléfono */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2">
+                Correo Institucional *
+              </label>
+              <input 
+                type="email" 
+                name="email"
+                value={formData.email} 
+                onChange={handleInputChange} 
+                placeholder="despacho@empresa.com" 
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-sans"
+                required 
+              />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Nombre del Operador / Encargado *</label>
+            <div>
+              <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2">
+                Celular Corporativo (10 dígitos) *
+              </label>
+              <input 
+                type="tel" 
+                name="telefono"
+                value={formData.telefono} 
+                onChange={handleInputChange} 
+                placeholder="3001234567" 
+                maxLength={10}
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-mono"
+                required 
+              />
+            </div>
+          </div>
+
+          {/* Contraseña */}
+          <div>
+            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2">
+              Clave de Acceso a Central *
+            </label>
+            <input 
+              type="password" 
+              name="password"
+              value={formData.password} 
+              onChange={handleInputChange} 
+              placeholder="••••••••" 
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-sans"
+              required 
+            />
+          </div>
+
+          {/* Empresa Matriz y Terminal / Sede */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <Building2 size={12} className="text-amber-500" /> Empresa / Cooperativa *
+              </label>
               <input 
                 type="text" 
-                name="nombre"
-                placeholder="Ej. Carlos Despacho Norte" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono" 
-                value={nombre} 
-                onChange={(e) => setNombre(e.target.value)} 
-                disabled={loading}
+                name="empresa"
+                value={formData.empresa} 
+                onChange={handleInputChange} 
+                placeholder="Ej: Cootragua / Taxia" 
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-sans"
                 required 
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Teléfono Celular (10 dígitos en Colombia) */}
-              <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">
-                  Teléfono Celular (WhatsApp / Llamadas) *
-                </label>
-                <input 
-                  type="tel" 
-                  name="telefono"
-                  required
-                  pattern="[3][0-9]{9}"
-                  maxLength={10}
-                  placeholder="Ej. 3101234567" 
-                  title="Ingrese un número de celular colombiano válido de 10 dígitos (Ej. 3101234567)"
-                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono" 
-                  value={celular} 
-                  onChange={(e) => setCelular(e.target.value.replace(/\D/g, ''))} 
-                  disabled={loading}
-                />
-              </div>
-
-              {/* Correo Electrónico Obligatorio */}
-              <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">
-                  Correo Electrónico (Para Recuperación y Factura) *
-                </label>
-                <input 
-                  type="email" 
-                  name="email"
-                  required
-                  placeholder="usuario@dominio.com" 
-                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono" 
-                  value={correo} 
-                  onChange={(e) => setCorreo(e.target.value)} 
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Clave de Acceso Central *</label>
-              <input 
-                type="password" 
-                name="password"
-                placeholder="Mínimo 6 caracteres" 
-                className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all tracking-widest text-xs" 
-                value={clave} 
-                onChange={(e) => setClave(e.target.value)} 
-                disabled={loading}
-                required 
-              />
-            </div>
-          </div>
-
-          {/* 🏢 SECCIÓN 2: EMPRESA MATRIZ, TERMINAL / SEDE */}
-          <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
-            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
-              <Building2 size={12} className="text-amber-400" />
-              Sección 2: Entidad Matriz e Infraestructura
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-amber-400 font-mono text-[10px] uppercase tracking-widest font-bold flex items-center gap-1">
-                  <Building2 size={12} /> Empresa Matriz *
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="Ej. Cootransbol" 
-                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono uppercase" 
-                  value={empresa} 
-                  onChange={(e) => setEmpresa(e.target.value)} 
-                  disabled={loading}
-                  required 
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-amber-400 font-mono text-[10px] uppercase tracking-widest font-bold flex items-center gap-1">
-                  <MapPin size={12} /> Terminal / Sede *
-                </label>
-                <input 
-                  type="text" 
-                  placeholder="Ej. Terminal Central - Sede Norte" 
-                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono uppercase" 
-                  value={terminalSede} 
-                  onChange={(e) => setTerminalSede(e.target.value)} 
-                  disabled={loading}
-                  required 
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* 🗺️ SECCIÓN 3: ASIGNACIÓN DE SEDE OPERATIVA */}
-          <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-4">
-            <div className="text-[10px] text-zinc-400 uppercase tracking-widest font-mono font-bold border-b border-white/5 pb-2 flex items-center gap-2">
-              <ShieldCheck size={12} className="text-amber-400" />
-              Sección 3: Asignación de Sede Operativa
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Código de Taquilla / Módulo</label>
-                <input 
-                  type="text" 
-                  placeholder="Ej. TQ-04" 
-                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono uppercase" 
-                  value={codigoTaquilla} 
-                  onChange={(e) => setCodigoTaquilla(e.target.value)} 
-                  disabled={loading}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-slate-400 font-mono text-[10px] uppercase tracking-widest font-bold">Turno / Franja Operativa</label>
-                <input 
-                  type="text" 
-                  placeholder="Ej. Diurno (06:00 - 14:00)" 
-                  className="w-full bg-[#131318]/90 border border-white/[0.06] p-3 rounded-xl text-white focus:border-amber-500/50 outline-none transition-all text-xs font-mono" 
-                  value={turnoAsignado} 
-                  onChange={(e) => setTurnoAsignado(e.target.value)} 
-                  disabled={loading}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* 📂 SOPORTE DOCUMENTAL OPCIONAL */}
-          <div className="bg-[#18181b]/40 border border-white/5 rounded-2xl p-4 space-y-2">
-            <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <label className="text-zinc-400 font-mono text-[10px] uppercase tracking-widest font-bold flex items-center gap-1.5">
-                <FileText size={12} className="text-amber-400" /> Documento de Identificación / Credencial (Opcional)
+            <div>
+              <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <MapPin size={12} className="text-amber-500" /> Terminal / Sede Operativa *
               </label>
-              <span className="text-[9px] font-mono font-bold bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded-md uppercase">
-                Máx. {MAX_FILE_SIZE_MB} MB
-              </span>
+              <input 
+                type="text" 
+                name="terminal_sede"
+                value={formData.terminal_sede} 
+                onChange={handleInputChange} 
+                placeholder="Ej: Terminal Central La Jagua" 
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-sans"
+                required 
+              />
             </div>
-            
-            <div className={`border p-3 rounded-xl flex items-center justify-between relative transition-colors cursor-pointer ${docIdentidadFile ? 'bg-amber-950/20 border-amber-500/40' : 'bg-black/40 border-white/5 hover:border-amber-500/20'}`}>
-              <div className="flex items-center gap-2.5 truncate">
-                {docIdentidadFile ? <CheckCircle2 size={16} className="text-amber-400" /> : <UploadCloud size={16} className="text-zinc-500" />}
-                <span className="text-[10px] font-mono text-zinc-300 truncate">
-                  {docIdentidadFile ? docIdentidadFile.name : "Adjuntar PDF o Imagen de Credencial"}
-                </span>
+          </div>
+
+          {/* Carga Documental Adjunta (Opcional pero preparada para Multipart) */}
+          <div className="pt-4 border-t border-white/5 space-y-4">
+            <h3 className="text-xs font-mono uppercase text-slate-400 tracking-wider">
+              Documentación Digital de Soporte
+            </h3>
+
+            {/* Foto de Perfil / Carnet Operativo */}
+            <div className="bg-black/20 border border-white/5 rounded-2xl p-4 flex items-center justify-between relative overflow-hidden group hover:border-amber-500/30 transition-all">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                  <UploadCloud size={18} />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-slate-200">Foto de Perfil / Carnet</p>
+                  <p className="text-[10px] font-mono text-slate-500">JPG, PNG o WEBP (Máx 5MB)</p>
+                </div>
               </div>
-              <span className="text-[8px] font-mono text-zinc-500">
-                {docIdentidadFile ? `${(docIdentidadFile.size / (1024 * 1024)).toFixed(2)} MB` : "(Opcional)"}
+              <span className="text-[10px] font-mono text-amber-400 font-bold bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+                {fotoPerfilFile ? fotoPerfilFile.name : 'Adjuntar'}
               </span>
               <input 
                 type="file" 
-                accept="image/jpeg,image/png,image/webp,application/pdf" 
-                className="absolute inset-0 opacity-0 cursor-pointer" 
-                onChange={(e) => handleFileChange(e, setDocIdentidadFile, 'Documento de Identificación')} 
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => handleFileChange(e, setFotoPerfilFile, 'Foto de Perfil')}
+                className="absolute inset-0 opacity-0 cursor-pointer"
+              />
+            </div>
+
+            {/* Documento de Identificación */}
+            <div className="bg-black/20 border border-white/5 rounded-2xl p-4 flex items-center justify-between relative overflow-hidden group hover:border-amber-500/30 transition-all">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                  <FileText size={18} />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-slate-200">Cédula / Documento de Identidad</p>
+                  <p className="text-[10px] font-mono text-slate-500">PDF o Imagen (Máx 5MB)</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono text-amber-400 font-bold bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+                {docIdentidadFile ? docIdentidadFile.name : 'Adjuntar'}
+              </span>
+              <input 
+                type="file" 
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                onChange={(e) => handleFileChange(e, setDocIdentidadFile, 'Documento de Identificación')}
+                className="absolute inset-0 opacity-0 cursor-pointer"
               />
             </div>
           </div>
 
+          {/* Botón de Envió Submit */}
           <button 
             type="submit" 
-            disabled={loading} 
+            disabled={loading || success} 
             className="w-full mt-6 py-4 text-xs font-mono uppercase tracking-[0.25em] rounded-xl font-bold bg-amber-600 text-white hover:bg-amber-500 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_15px_rgba(217,119,6,0.2)]"
           >
             {loading ? "VINCULANDO_NODO..." : "VINCULAR DESPACHADOR"}
@@ -392,10 +372,11 @@ const RegisterDespachador = () => {
         </form>
 
         <div className="mt-6 text-center">
-          <Link to="/register" className="text-amber-400 hover:text-amber-300 font-mono text-xs font-bold transition-colors">
-            ← Regresar a Selección de Rol
+          <Link to="/login" className="text-[10px] font-mono text-slate-500 hover:text-amber-400 uppercase tracking-widest transition-colors">
+            ¿Ya posee acreditación de central? <span className="text-amber-500 font-bold underline ml-1">Ingresar</span>
           </Link>
         </div>
+
       </div>
     </div>
   );
