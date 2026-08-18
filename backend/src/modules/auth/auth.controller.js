@@ -1,10 +1,12 @@
-// Versión Arquitectura: V21.29 - Extracción Polimórfica Defensiva de Parámetros de Login
+// Versión Arquitectura: V21.30 - Integración Quirúrgica Método checkPhone y Búsqueda Polimórfica Dual
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
- * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword) y validaciones perimetrales.
- * Ajuste V21.29: Ampliación de la extracción polimórfica en req.body para capturar cualquier alias de entrada (loginInput, identifier, email, phone, telefono, celular) y prevenir falsos positivos de MISSING_FIELDS.
+ * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
+ * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono) y actualización segura de perfiles.
+ * Ajuste V21.30: Integración quirúrgica del método checkPhone preservando la compatibilidad de módulos ES, consulta
+ * multitabla polimórfica concurrente y tolerancia de payloads híbridos (ok/success, mensaje/message, telefono/phone/telefonoMovil).
  */
 
 import jwt from 'jsonwebtoken';
@@ -678,52 +680,81 @@ export const verificarOTPyRestablecer = async (req, res) => {
 export const resetPassword = verificarOTPyRestablecer;
 
 /**
- * 📱 COMPROBACIÓN DE DISPONIBILIDAD DE TELÉFONO (CHECK-PHONE)
+ * 📱 COMPROBACIÓN DE DISPONIBILIDAD DE TELÉFONO (CHECK-PHONE / VERIFICAR-TELEFONO)
+ * Verifica si un número telefónico ya está registrado en el sistema (Usuarios, Conductores, Pasajeros).
  */
 export const checkPhone = async (req, res) => {
     try {
         const body = req.body || {};
-        const telefonoInput = body.telefono || body.telefonoMovil;
+        const telefonoInput = body.telefono || body.phone || body.telefonoMovil;
 
         if (!telefonoInput) {
             return res.status(400).json({ 
+                ok: false,
                 success: false, 
-                message: 'El número de teléfono es requerido.' 
+                message: 'El número de teléfono es requerido.',
+                mensaje: 'El número de teléfono es requerido.' 
             });
         }
 
         const telBusqueda = String(telefonoInput).trim();
-        const consultaTel = { $or: [{ telefonoMovil: telBusqueda }, { telefono: telBusqueda }] };
+        const digitsOnly = telBusqueda.replace(/\D/g, '');
 
-        const [u, c, p] = await Promise.all([
+        const queryConditions = [
+            { telefono: telBusqueda },
+            { telefonoMovil: telBusqueda }
+        ];
+
+        if (digitsOnly) {
+            queryConditions.push({ telefono: digitsOnly });
+            queryConditions.push({ telefonoMovil: digitsOnly });
+            queryConditions.push({ telefono: `57${digitsOnly}` });
+            queryConditions.push({ telefonoMovil: `57${digitsOnly}` });
+        }
+
+        const consultaTel = { $or: queryConditions };
+
+        // Búsqueda polimórfica concurrente en las tres colecciones
+        const [uExistente, cExistente, pExistente] = await Promise.all([
             Usuario.findOne(consultaTel),
             Conductor.findOne(consultaTel),
             Pasajero.findOne(consultaTel)
         ]);
 
-        const usuarioExistente = u || c || p;
+        const usuarioExistente = uExistente || cExistente || pExistente;
 
         if (usuarioExistente) {
-            return res.json({ 
+            return res.status(400).json({ 
+                ok: false,
                 success: true, 
                 existe: true, 
                 disponible: false, 
-                message: 'El teléfono ya se encuentra registrado.' 
+                message: 'El número de celular ya se encuentra registrado.',
+                mensaje: 'El número de celular ya se encuentra registrado.' 
             });
         }
 
-        return res.json({ 
+        return res.status(200).json({ 
+            ok: true,
             success: true, 
             existe: false, 
             disponible: true, 
-            message: 'Línea disponible para registro.' 
+            message: 'Número disponible para registro.',
+            mensaje: 'Número disponible para registro.' 
         });
 
     } catch (error) {
-        console.error("❌ [CIMCO-AUTH-ERROR] Error en check-phone:", error);
-        return res.status(500).json({ success: false, message: 'Error interno en el servidor de autenticación.' });
+        console.error("❌ [CIMCO-AUTH-ERROR] Error en checkPhone:", error);
+        return res.status(500).json({ 
+            ok: false,
+            success: false, 
+            message: 'Error interno al validar el número telefónico.',
+            mensaje: 'Error interno al validar el número telefónico.' 
+        });
     }
 };
+
+export const verificarTelefono = checkPhone;
 
 /**
  * 🔄 ACTUALIZACIÓN DE DATOS DE PERFIL (POLIMÓRFICO CONCURRENTE CORREGIDO)
@@ -871,5 +902,6 @@ export default {
     verificarOTPyRestablecer,
     resetPassword,
     checkPhone,
+    verificarTelefono,
     updateProfile
 };

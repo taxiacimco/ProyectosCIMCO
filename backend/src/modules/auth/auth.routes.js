@@ -1,9 +1,9 @@
-// Versión Arquitectura: V21.29 - Mapeo Multicamino POST /api/auth e Interceptor de Carga Híbrida Multer (Sincronización de Llaves)
+// Versión Arquitectura: V21.30 - Integración Perimetral del Endpoint /check-phone y Verificación Telefónica Dual
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
  * Misión: Enrutador perimetral de autenticación con mapeo completo de subrutas HTTP POST y PUT/PATCH bajo el prefijo /api/auth.
- * Integridad: Garantiza la coexistencia limpia de los aliases estándar (/forgot-password, /reset-password) con los endpoints
- * preexistentes (/solicitar-otp, /restablecer), preservando el middleware de carga híbrida Multipart/Multer alineado
+ * Integridad: Garantiza la coexistencia limpia de los aliases estándar (/forgot-password, /reset-password, /check-phone) con los endpoints
+ * preexistentes (/solicitar-otp, /restablecer, /verificar-telefono), preservando el middleware de carga híbrida Multipart/Multer alineado
  * con las llaves requeridas por el cliente (documento_cedula, documento_licencia, doc_tarjeta, doc_identificacion, foto_perfil),
  * la validación de payloads, la trazabilidad de peticiones y las guardas anti-crash ESM.
  */
@@ -98,7 +98,7 @@ if (typeof restablecerHandler === 'function') {
 }
 
 /**
- * 📡 VALIDACIONES EN CALIENTE (REGISTRO DINÁMICO)
+ * 📡 VALIDACIONES EN CALIENTE (REGISTRO DINÁMICO & DISPONIBILIDAD)
  */
 if (typeof verificarTelefonoHandler === 'function') {
     router.post('/verificar-telefono', verificarTelefonoHandler);
