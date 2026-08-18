@@ -1,10 +1,10 @@
-// Versión Arquitectura: V13.0 - Rediseño UI Light Glassmorphism con Verificación Telefónica Backend /check-phone y Carga Híbrida Multipart
+// Versión Arquitectura: V13.1 - Corrección de Endpoints /auth y Optimización UX de Redirección a Login
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
  * Misión: Flujo de Registro de Pasajeros en 2 pasos con alta legibilidad visual (Light Glassmorphism),
  * psicología de color enfocada en Seguridad SSL (Esmeralda), Confianza (Índigo) y Agilidad (Ámbar),
- * verificación previa de línea móvil contra el backend (/auth/check-phone), carga de foto de perfil
- * y login automático posregistro.
+ * verificación previa de línea móvil contra el backend (/auth/check-phone), carga de foto de perfil,
+ * mejorada la UX de redirección a Login si la línea móvil ya existe y login automático posregistro.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -24,7 +24,8 @@ import {
   AlertTriangle, 
   Sparkles,
   Check,
-  Camera
+  Camera,
+  LogIn
 } from 'lucide-react';
 
 const RegisterPasajero = () => {
@@ -36,6 +37,7 @@ const RegisterPasajero = () => {
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [telefonoExiste, setTelefonoExiste] = useState(false);
 
     // 📝 PASO 1: LÍNEA MÓVIL
     const [celular, setCelular] = useState('');
@@ -82,10 +84,11 @@ const RegisterPasajero = () => {
         setPreviewFoto(URL.createObjectURL(file));
     };
 
-    // 🛡️ PASO 1: VERIFICACIÓN TELEFÓNICA CON EL BACKEND (/check-phone)
+    // 🛡️ PASO 1: VERIFICACIÓN TELEFÓNICA CON EL BACKEND (/auth/check-phone)
     const handleVerificarTelefono = async (e) => {
         e.preventDefault();
         setError('');
+        setTelefonoExiste(false);
 
         const phoneRegex = /^3\d{9}$/;
         const telefonoLimpio = celular?.trim();
@@ -98,7 +101,7 @@ const RegisterPasajero = () => {
         setLoading(true);
 
         try {
-            const res = await api.post('/api/auth/check-phone', { telefono: telefonoLimpio });
+            const res = await api.post('/auth/check-phone', { telefono: telefonoLimpio });
             const data = res?.data || {};
 
             // Validación flexible de disponibilidad (existe === false OR disponible === true)
@@ -107,13 +110,17 @@ const RegisterPasajero = () => {
             if (noExiste) {
                 setStep(2);
             } else {
-                setError(data.message || "Este número de celular ya se encuentra registrado en el sistema.");
+                setTelefonoExiste(true);
+                setError(data.message || "Esta línea celular ya está registrada en TAXIA CIMCO. Inicia sesión para continuar.");
             }
         } catch (err) {
             console.error("🚨 [CIMCO-CHECK-PHONE] Error al consultar disponibilidad:", err);
             
             if (err?.response?.status === 404) {
-                setError("⚠️ Error de enrutamiento en el servidor (/api/auth/check-phone). Contacte a soporte técnico.");
+                setError("⚠️ Error de enrutamiento en el servidor (/auth/check-phone). Contacte a soporte técnico.");
+            } else if (err?.response?.status === 400 || err?.response?.data?.existe === true) {
+                setTelefonoExiste(true);
+                setError(err?.response?.data?.message || "Esta línea celular ya está registrada en TAXIA CIMCO. Inicia sesión para continuar.");
             } else {
                 setError(err?.response?.data?.message || "No se pudo verificar la línea telefónica. Intente nuevamente.");
             }
@@ -167,7 +174,7 @@ const RegisterPasajero = () => {
                 formData.append('foto_perfil', fotoPerfil);
             }
 
-            const res = await api.post('/api/auth/register', formData, {
+            const res = await api.post('/auth/register', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
 
@@ -254,11 +261,22 @@ const RegisterPasajero = () => {
                     </div>
                 </div>
 
-                {/* Banner de Mensaje de Error */}
+                {/* Banner de Mensaje de Error y Acción Directa a Login */}
                 {error && (
-                    <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 p-3.5 rounded-2xl text-xs font-mono font-medium flex items-center gap-2.5 animate-in fade-in">
-                        <AlertTriangle size={16} className="shrink-0 text-rose-500" />
-                        <span>{error}</span>
+                    <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 p-3.5 rounded-2xl text-xs font-mono font-medium flex flex-col gap-2.5 animate-in fade-in">
+                        <div className="flex items-center gap-2.5">
+                            <AlertTriangle size={16} className="shrink-0 text-rose-500" />
+                            <span>{error}</span>
+                        </div>
+
+                        {telefonoExiste && (
+                            <Link 
+                                to="/login" 
+                                className="mt-1 inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 px-4 rounded-xl text-xs font-mono font-bold uppercase transition-all shadow-md shadow-indigo-500/20 text-decoration-none"
+                            >
+                                <LogIn size={15} /> Iniciar Sesión Ahora
+                            </Link>
+                        )}
                     </div>
                 )}
 
@@ -277,7 +295,11 @@ const RegisterPasajero = () => {
                                     placeholder="Ej. 3157654321" 
                                     className="w-full bg-slate-50/80 border border-slate-200 pl-10 pr-4 py-3.5 rounded-xl text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all text-sm font-mono font-semibold shadow-sm disabled:opacity-50" 
                                     value={celular} 
-                                    onChange={(e) => setCelular(e.target.value.replace(/\D/g, ''))} 
+                                    onChange={(e) => {
+                                        setCelular(e.target.value.replace(/\D/g, ''));
+                                        if (error) setError('');
+                                        if (telefonoExiste) setTelefonoExiste(false);
+                                    }} 
                                     disabled={loading}
                                     autoFocus
                                     required 

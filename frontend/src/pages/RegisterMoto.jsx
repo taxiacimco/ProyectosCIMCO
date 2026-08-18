@@ -1,4 +1,4 @@
-// Versión Arquitectura: V9.5 - Rediseño UI Light Glassmorphism para Escuadrón Motorizado
+// Versión Arquitectura: V9.6 - Corrección de Endpoint /auth/register para Evitar Duplicidad de Prefijo API
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterMoto.jsx
  * Misión: Registro de Unidades Motorizadas con interfaz clara de alta legibilidad,
@@ -123,7 +123,7 @@ const RegisterMoto = () => {
       payload.append('documento_licencia', licenciaFile);
       payload.append('doc_tarjeta', tarjetaFile);
 
-      const res = await api.post('/api/auth/register', payload, {
+      const res = await api.post('/auth/register', payload, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 

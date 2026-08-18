@@ -1,9 +1,9 @@
-// Versión Arquitectura: V24.1 - Sincronización de Navegación Maestro con Slugs Planos /register-pasajero, /register-moto, /register-intermunicipal, /register-despachador
+// Versión Arquitectura: V24.2 - Unificación de Rutas de Redirección de Sesión (/pasajero/home, /conductor/home)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Register.jsx
  * Misión: Enrutador maestro de roles con interceptor de códigos QR, protección de sesión activa,
- * rutas estandarizadas con guion plano (/register-pasajero, /register-moto, /register-intermunicipal, /register-despachador)
- * y estética Dark Glassmorphism Premium (CIMCO-UI V9.3).
+ * rutas estandarizadas de sesión (/pasajero/home, /conductor/home) y slugs planos (/register-pasajero, /register-moto, /register-intermunicipal, /register-despachador)
+ * bajo la estética Dark Glassmorphism Premium (CIMCO-UI V9.3).
  */
 
 import React, { useEffect } from 'react';
@@ -25,17 +25,17 @@ const Register = () => {
     useEffect(() => {
         if (loading) return;
 
-        // 1️⃣ Si el usuario ya cuenta con sesión activa, redirige a su panel correspondiente
+        // 1️⃣ Si el usuario ya cuenta con sesión activa, redirige a su panel correspondiente (/pasajero/home, /conductor/home)
         if (user) {
             const userRole = (user.rol || user.role || '').toLowerCase();
             if (userRole === 'conductor' || userRole === 'moto' || userRole === 'mototaxi') {
-                navigate('/conductor/dashboard', { replace: true });
+                navigate('/conductor/home', { replace: true });
             } else if (userRole === 'despachador') {
                 navigate('/despachador/dashboard', { replace: true });
             } else if (userRole === 'admin') {
                 navigate('/admin/dashboard', { replace: true });
             } else {
-                navigate('/pasajero/dashboard', { replace: true });
+                navigate('/pasajero/home', { replace: true });
             }
             return;
         }

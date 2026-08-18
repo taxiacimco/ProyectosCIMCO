@@ -1,14 +1,29 @@
-// Versión Arquitectura: V21.33 - Módulo Integrado de Recuperación Dual (Celular SMS / Correo) Glassmorphism
+// Versión Arquitectura: V21.34 - Integración Backend Real OTP/Reset y Temporizador de Reenvío SMS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\ForgotPassword.jsx
  * Misión: Implementar la recuperación de contraseña flexible por Número de Celular (Código SMS/WhatsApp) 
- *         o Correo Electrónico con soporte para Firestore/Firebase Auth y API Central CIMCO.
+ *         o Correo Electrónico con conexión real al backend de API Central CIMCO / Firebase,
+ *         e incorporación de temporizador defensivo de reenvío de OTP.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Phone, Mail, ArrowLeft, ShieldCheck, KeyRound, CheckCircle2, ShieldAlert, Smartphone } from 'lucide-react';
+import api from '@/config/api';
+import { auth } from '@/config/firebase';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { 
+  Phone, 
+  Mail, 
+  ArrowLeft, 
+  ShieldCheck, 
+  KeyRound, 
+  CheckCircle2, 
+  ShieldAlert, 
+  Smartphone,
+  RotateCcw,
+  Clock
+} from 'lucide-react';
 
 const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -21,6 +36,7 @@ const ForgotPassword = () => {
   const [identifier, setIdentifier] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [step, setStep] = useState(1); // 1: Solicitud, 2: Verificación de Código/SMS (para celular), 3: Éxito
 
   // Estados para validación de código SMS / WhatsApp
@@ -28,8 +44,24 @@ const ForgotPassword = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  // Temporizador de reenvío de código (en segundos)
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Efecto para controlar la cuenta regresiva del temporizador
+  useEffect(() => {
+    let timer;
+    if (resendCooldown > 0) {
+      timer = setInterval(() => {
+        setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [resendCooldown]);
+
   const handleIdentifierChange = (e) => {
-    const rawVal = e.target.value || '';
+    const rawVal = e?.target?.value || '';
     if (method === 'phone') {
       const phoneOnly = rawVal.replace(/(?!^\+)[^\d]/g, '');
       setIdentifier(phoneOnly);
@@ -41,6 +73,7 @@ const ForgotPassword = () => {
   const handleSendResetRequest = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccessMsg('');
 
     const valorLimpio = identifier?.trim() || '';
 
@@ -65,16 +98,48 @@ const ForgotPassword = () => {
 
     try {
       if (method === 'phone') {
-        // Petición al Backend/Firebase para envío de SMS OTP
-        // await api.post('/auth/forgot-password-sms', { phone: valorLimpio });
+        // Petición real al Backend Central CIMCO para envío de SMS/WhatsApp OTP
+        await api.post('/auth/forgot-password-sms', { phone: valorLimpio, celular: valorLimpio });
         setStep(2); // Avanza a la pantalla de verificación de código SMS
+        setResendCooldown(60); // Inicia temporizador de 60 segundos
       } else {
-        // Petición al Backend/Firebase para correo de restablecimiento
-        // await sendPasswordResetEmail(auth, valorLimpio);
+        // Intentar envío vía Backend API o en su defecto mediante Firebase Auth
+        try {
+          await api.post('/auth/forgot-password', { email: valorLimpio.toLowerCase() });
+        } catch (backendErr) {
+          console.warn('⚠️ [RECOVERY-FALLBACK] Backend falló, intentando Firebase Auth:', backendErr);
+          if (auth) {
+            await sendPasswordResetEmail(auth, valorLimpio.toLowerCase());
+          } else {
+            throw backendErr;
+          }
+        }
         setStep(3); // Avanza a confirmación de correo enviado
       }
     } catch (err) {
-      setError(err?.response?.data?.message || err?.message || 'Error al procesar la solicitud. Verifique los datos.');
+      console.error('🚨 [RECOVERY-ERROR] Error en solicitud de recuperación:', err);
+      const errMsg = err?.response?.data?.message || err?.data?.message || err?.message || 'Error al procesar la solicitud. Verifique los datos.';
+      setError(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    if (resendCooldown > 0 || loading) return;
+
+    setError('');
+    setSuccessMsg('');
+    setLoading(true);
+
+    try {
+      await api.post('/auth/forgot-password-sms', { phone: identifier, celular: identifier });
+      setSuccessMsg('✅ Nuevo código reenviado exitosamente.');
+      setResendCooldown(60); // Reiniciar temporizador
+    } catch (err) {
+      console.error('🚨 [RESEND-ERROR] Error reexpidiendo OTP:', err);
+      const errMsg = err?.response?.data?.message || err?.data?.message || err?.message || 'No se pudo reenviar el código. Intente de nuevo más tarde.';
+      setError(errMsg);
     } finally {
       setLoading(false);
     }
@@ -83,8 +148,11 @@ const ForgotPassword = () => {
   const handleVerifyOtpAndReset = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccessMsg('');
 
-    if (!otpCode || otpCode.trim().length < 4) {
+    const cleanOtp = otpCode?.trim() || '';
+
+    if (!cleanOtp || cleanOtp.length < 4) {
       setError('Ingrese un código de verificación válido.');
       return;
     }
@@ -102,11 +170,19 @@ const ForgotPassword = () => {
     setLoading(true);
 
     try {
-      // Petición al Backend/Firebase para validar OTP y actualizar la contraseña
-      // await api.post('/auth/reset-password-sms', { phone: identifier, code: otpCode, newPassword });
+      // Petición real al Backend Central CIMCO para validar OTP y actualizar la contraseña
+      await api.post('/auth/reset-password-sms', { 
+        phone: identifier, 
+        celular: identifier, 
+        code: cleanOtp, 
+        otp: cleanOtp,
+        newPassword 
+      });
       setStep(3); // Éxito
     } catch (err) {
-      setError(err?.response?.data?.message || err?.message || 'Código de verificación incorrecto o expirado.');
+      console.error('🚨 [RESET-ERROR] Error al restablecer clave con OTP:', err);
+      const errMsg = err?.response?.data?.message || err?.data?.message || err?.message || 'Código de verificación incorrecto o expirado.';
+      setError(errMsg);
     } finally {
       setLoading(false);
     }
@@ -143,6 +219,14 @@ const ForgotPassword = () => {
           </div>
         )}
 
+        {/* Banner de Mensaje de Éxito / Estado */}
+        {successMsg && (
+          <div className="mb-5 flex items-start gap-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3.5 text-xs text-emerald-200">
+            <CheckCircle2 size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+            <div className="font-semibold">{successMsg}</div>
+          </div>
+        )}
+
         {/* PASO 1: SELECCIÓN DE MÉTODO Y SOLICITUD */}
         {step === 1 && (
           <form onSubmit={handleSendResetRequest} className="space-y-5">
@@ -151,8 +235,8 @@ const ForgotPassword = () => {
             <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-1.5 rounded-2xl border border-slate-800">
               <button
                 type="button"
-                onClick={() => { setMethod('phone'); setError(''); setIdentifier(''); }}
-                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                onClick={() => { setMethod('phone'); setError(''); setSuccessMsg(''); setIdentifier(''); }}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   method === 'phone'
                     ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
                     : 'text-slate-400 hover:text-white'
@@ -164,8 +248,8 @@ const ForgotPassword = () => {
 
               <button
                 type="button"
-                onClick={() => { setMethod('email'); setError(''); setIdentifier(''); }}
-                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                onClick={() => { setMethod('email'); setError(''); setSuccessMsg(''); setIdentifier(''); }}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   method === 'email'
                     ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
                     : 'text-slate-400 hover:text-white'
@@ -237,8 +321,31 @@ const ForgotPassword = () => {
                 />
               </div>
 
+              {/* Temporizador y Botón de Reenvío */}
+              <div className="flex justify-between items-center pt-1 px-1">
+                <span className="text-[10px] text-slate-400 font-mono">¿No recibiste el código?</span>
+                <button
+                  type="button"
+                  onClick={handleResendCode}
+                  disabled={resendCooldown > 0 || loading}
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold font-mono text-cyan-400 hover:text-cyan-300 disabled:text-slate-500 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                >
+                  {resendCooldown > 0 ? (
+                    <>
+                      <Clock size={12} className="animate-spin text-slate-500" />
+                      <span>Reenviar en {resendCooldown}s</span>
+                    </>
+                  ) : (
+                    <>
+                      <RotateCcw size={12} />
+                      <span>Reenviar código</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
               <div>
-                <label className="block text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">
+                <label className="block text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1 mt-2">
                   NUEVA CLAVE DE ACCESO
                 </label>
                 <input
@@ -269,7 +376,7 @@ const ForgotPassword = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
             >
               {loading ? 'ACTUALIZANDO...' : 'GUARDAR NUEVA CLAVE Y ENTRAR'}
             </button>
@@ -296,7 +403,7 @@ const ForgotPassword = () => {
             <button
               type="button"
               onClick={() => navigate('/login')}
-              className="w-full mt-2 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs uppercase tracking-wider rounded-xl transition-all"
+              className="w-full mt-2 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer"
             >
               IR AL INICIO DE SESIÓN
             </button>

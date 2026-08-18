@@ -1,11 +1,12 @@
-// Versión Arquitectura: V9.8 - Sanitización de Parámetros, Captura Defensiva HTTP 400 & Firma Unificada de loginLocal
+// Versión Arquitectura: V9.9 - Unificación de Redirecciones Maestro y Eliminación de Redundancia LocalStorage
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
  * Misión: Pantalla de Autenticación de Usuarios y Central Operativa con interfaz luminosa Light Glassmorphism,
  * psicología de color basada en Confianza (Azul/Slate) y Agilidad Operativa (Naranja/Ámbar),
  * corrección de contraste en insignias y etiquetas (text-amber-950, bg-amber-100, border-amber-300, text-slate-800, text-slate-600),
  * sanitización inteligente de prefijo +57, preservación del guardián anti-loop, integración resiliente con useAuth (loginLocal),
- * desestructuración segura de respuestas y enrutamiento dinámico por rol o parámetro de búsqueda.
+ * eliminación de escritura manual redundante en localStorage (delegada a AuthProvider),
+ * desestructuración segura de respuestas y enrutamiento dinámico unificado por rol con Register.jsx.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -48,22 +49,24 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 🛡️ GUARDIÁN ANTI-LOOP: Redirección Inteligente si ya existe sesión activa
+  // 🛡️ GUARDIÁN ANTI-LOOP: Redirección Inteligente Sincronizada con Register.jsx
   useEffect(() => {
     if (authLoading) return;
 
     if (user) {
-      const activeRole = user?.rol || user?.role || 'pasajero';
+      const activeRole = (user?.rol || user?.role || 'pasajero').toLowerCase();
       console.log(`📡 [CIMCO-GUARD] Sesión activa detectada para [${user?.email || user?.nombre}]. Rol: ${activeRole}`);
 
-      if (activeRole === 'pasajero') {
-        navigate('/pasajero/home', { replace: true });
-      } else if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(activeRole)) {
+      if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(activeRole)) {
         navigate('/conductor/home', { replace: true });
-      } else if (['admin', 'superadmin', 'despachador', 'central'].includes(activeRole)) {
+      } else if (activeRole === 'despachador') {
+        navigate('/despachador/dashboard', { replace: true });
+      } else if (['admin', 'superadmin'].includes(activeRole)) {
+        navigate('/admin/dashboard', { replace: true });
+      } else if (activeRole === 'central') {
         navigate('/central/dashboard', { replace: true });
       } else {
-        navigate('/dashboard', { replace: true });
+        navigate('/pasajero/home', { replace: true });
       }
     }
   }, [user, authLoading, navigate]);
@@ -123,26 +126,20 @@ const Login = () => {
       }
 
       if (resData?.token || resData?.success) {
-        const token = resData.token || resData.data?.token;
         const userData = resData.user || resData.data?.user || {};
+        const userRole = (userData?.rol || userData?.role || roleParam || 'pasajero').toLowerCase();
 
-        if (token) {
-          localStorage.setItem('cimco_token', token);
-        }
-        if (userData && Object.keys(userData).length > 0) {
-          localStorage.setItem('cimco_user', JSON.stringify(userData));
-        }
-
-        const userRole = userData?.rol || userData?.role || roleParam || 'pasajero';
-
-        if (userRole === 'pasajero') {
-          navigate('/pasajero/home');
-        } else if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(userRole)) {
+        // Redirección centralizada unificada
+        if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(userRole)) {
           navigate('/conductor/home');
-        } else if (['admin', 'superadmin', 'despachador', 'central'].includes(userRole)) {
+        } else if (userRole === 'despachador') {
+          navigate('/despachador/dashboard');
+        } else if (['admin', 'superadmin'].includes(userRole)) {
+          navigate('/admin/dashboard');
+        } else if (userRole === 'central') {
           navigate('/central/dashboard');
         } else {
-          navigate('/dashboard');
+          navigate('/pasajero/home');
         }
       } else {
         setError(resData?.message || 'Error al validar credenciales en la central.');

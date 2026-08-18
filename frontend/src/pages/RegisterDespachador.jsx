@@ -1,4 +1,4 @@
-// Versión Arquitectura: V9.5 - Rediseño UI Light Glassmorphism para Registro de Despachador
+// Versión Arquitectura: V9.6 - Corrección de Endpoint /auth/register para Evitar Duplicidad de Prefijo API
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterDespachador.jsx
  * Misión: Vinculación de Operadores y Despachadores de Terminal con interfaz clara,
@@ -114,7 +114,7 @@ const RegisterDespachador = () => {
       payload.append('foto_perfil', fotoFile);
       payload.append('documento_cedula', cedulaFile);
 
-      const res = await api.post('/api/auth/register', payload, {
+      const res = await api.post('/auth/register', payload, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 

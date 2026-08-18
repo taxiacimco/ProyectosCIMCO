@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.3 - Code Splitting con Lazy Loading y Supresión de Credenciales
+// Versión Arquitectura: V12.4 - Sincronización de Enrutamiento de Endpoint Auth (/auth/register)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterAdmin.jsx
  * Misión: Sembrar los perfiles de Alta Gerencia y Operaciones en entorno local de forma segura.
@@ -55,7 +55,7 @@ const RegisterAdmin = () => {
         };
       }
 
-      await api.post('/api/auth/register', payload);
+      await api.post('/auth/register', payload);
       
       setLog(`✅ Perfil [${perfil}] indexado con éxito en el clúster local: ${correoInyeccion}`);
       setCorreoInyeccion('');
@@ -79,7 +79,7 @@ const RegisterAdmin = () => {
           </div>
           <h1 className="text-red-500 font-black text-2xl tracking-widest uppercase mb-2">Acceso Restringido</h1>
           <p className="text-zinc-400 font-mono text-xs tracking-wider mb-8 leading-relaxed">
-            El entorno de inyección de cuentas está estrictamente deshabilitado en producción.
+            El entorno de inyección de cuentas está strictly deshabilitado en producción.
           </p>
           <Link to="/login" className="inline-block px-8 py-3 bg-red-950/40 text-red-400 border border-red-500/20 hover:bg-red-900/50 hover:text-red-300 font-mono text-[10px] uppercase tracking-[0.2em] rounded-xl transition-all">
             Retornar a Zona Segura
