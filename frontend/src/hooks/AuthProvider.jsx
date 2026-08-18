@@ -1,7 +1,7 @@
-// Versión Arquitectura: V22.4 - Sincronización Global de Sesión, Exposición de RefreshToken y Deslogueo Anti-401
+// Versión Arquitectura: V22.5 - Sanitización Telco +57, Normalización Payload Defensivo y Sincronización HTTP 400
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
- * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO con soporte para auto-cleanup y refresco de tokens.
+ * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO con soporte para auto-cleanup, refresco de tokens y sanitización de entrada.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -161,16 +161,28 @@ export const AuthProvider = ({ children }) => {
     const loginLocal = async (identifierInput, password) => {
         try {
             setLoading(true);
-            const limpio = identifierInput ? String(identifierInput).trim() : '';
             
-            // Envío con redundancia táctica para garantizar compatibilidad con cualquier controlador backend
-            const respuesta = await api.post('/auth/login', { 
+            // 1. Sanitización Telco: Limpiar espacios y remover prefijos +57 o 57 cuando corresponda
+            let limpio = String(identifierInput || '').trim().replace(/\s+/g, '');
+
+            if (limpio.startsWith('+57')) {
+                limpio = limpio.slice(3);
+            } else if (limpio.startsWith('57') && limpio.length === 12) {
+                limpio = limpio.slice(2);
+            }
+
+            // 2. Construcción del payload defensivo con redundancia polimórfica
+            const payload = {
+                loginInput: limpio,
                 identifier: limpio,
                 email: limpio,
                 telefono: limpio,
                 celular: limpio,
-                password: password 
-            });
+                password: password
+            };
+
+            // 3. Petición POST al endpoint de autenticación sin duplicar /api
+            const respuesta = await api.post('/auth/login', payload);
             
             if (respuesta.data && (respuesta.data.success || respuesta.data.token)) {
                 const token = respuesta.data.token || respuesta.data.data?.token;
@@ -203,7 +215,7 @@ export const AuthProvider = ({ children }) => {
                 return { success: true, user: userData, data: respuesta.data };
             }
             
-            // Si la respuesta HTTP fue 200 pero la carga útil no confirma éxito, instanciar y lanzar error explicito
+            // Si la respuesta HTTP fue 200 pero la carga útil no confirma éxito, instanciar y lanzar error explícito
             const mensajeError = respuesta.data?.message || "Credenciales incorrectas o usuario no encontrado.";
             const errorRespuesta = new Error(mensajeError);
             errorRespuesta.response = respuesta;

@@ -1,10 +1,10 @@
-// Versión Arquitectura: V21.28 - Intercepción E11000 y Aislamiento de Sincronización Firestore
+// Versión Arquitectura: V21.29 - Extracción Polimórfica Defensiva de Parámetros de Login
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword) y validaciones perimetrales.
- * Ajuste V21.28: Intercepción de excepciones error.code === 11000 en el catch para retornar HTTP 400 y aislamiento defensivo de la sincronización con Firebase Firestore.
+ * Ajuste V21.29: Ampliación de la extracción polimórfica en req.body para capturar cualquier alias de entrada (loginInput, identifier, email, phone, telefono, celular) y prevenir falsos positivos de MISSING_FIELDS.
  */
 
 import jwt from 'jsonwebtoken';
@@ -362,7 +362,7 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
     try {
         const body = req.body || {};
-        const loginInput = body.loginInput || body.identifier;
+        const loginInput = body.loginInput || body.identifier || body.email || body.phone || body.telefono || body.celular;
         const password = body.password;
 
         if (!loginInput || !password) {

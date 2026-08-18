@@ -1,4 +1,4 @@
-// Versión Arquitectura: V9.7 - Diagnóstico de Contraste, Claridad en Celular (Sin +57) & Fusión Atómica Anti-Loop
+// Versión Arquitectura: V9.8 - Sanitización de Parámetros, Captura Defensiva HTTP 400 & Firma Unificada de loginLocal
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
  * Misión: Pantalla de Autenticación de Usuarios y Central Operativa con interfaz luminosa Light Glassmorphism,
@@ -72,14 +72,19 @@ const Login = () => {
     e.preventDefault();
     setError('');
 
-    let cleanIdentifier = identifier ? identifier.trim() : '';
+    let cleanIdentifier = identifier ? String(identifier).trim() : '';
+    let cleanPassword = password ? String(password) : '';
 
     // 💡 Sanitización inteligente: Si el usuario escribe +57 o 57 al inicio del número de 10 dígitos, se remueve automáticamente
     if (/^\+?573\d{9}$/.test(cleanIdentifier)) {
       cleanIdentifier = cleanIdentifier.replace(/^\+?57/, '');
+    } else if (cleanIdentifier.startsWith('+57')) {
+      cleanIdentifier = cleanIdentifier.slice(3).trim();
+    } else if (cleanIdentifier.startsWith('57') && cleanIdentifier.length === 12) {
+      cleanIdentifier = cleanIdentifier.slice(2).trim();
     }
 
-    if (!cleanIdentifier || !password.trim()) {
+    if (!cleanIdentifier || !cleanPassword.trim()) {
       setError('Por favor ingresa tu correo/celular y tu contraseña.');
       return;
     }
@@ -103,23 +108,28 @@ const Login = () => {
       let resData = null;
 
       if (typeof loginLocal === 'function') {
-        resData = await loginLocal({ identifier: cleanIdentifier, password });
+        // Invocación con parámetros limpios desestructurados para alineación exacta con AuthProvider
+        resData = await loginLocal(cleanIdentifier, cleanPassword);
       } else {
-        const response = await api.post('/api/auth/login', {
+        const response = await api.post('/auth/login', {
+          loginInput: cleanIdentifier,
           identifier: cleanIdentifier,
-          password: password
+          email: cleanIdentifier,
+          telefono: cleanIdentifier,
+          celular: cleanIdentifier,
+          password: cleanPassword
         });
         resData = response?.data;
       }
 
       if (resData?.token || resData?.success) {
-        const token = resData.token;
-        const userData = resData.user || {};
+        const token = resData.token || resData.data?.token;
+        const userData = resData.user || resData.data?.user || {};
 
         if (token) {
           localStorage.setItem('cimco_token', token);
         }
-        if (resData.user) {
+        if (userData && Object.keys(userData).length > 0) {
           localStorage.setItem('cimco_user', JSON.stringify(userData));
         }
 
@@ -139,7 +149,13 @@ const Login = () => {
       }
     } catch (err) {
       console.error('🚨 [CIMCO-LOGIN] Error en proceso de autenticación:', err);
-      setError(err?.response?.data?.message || err?.message || 'No se pudo conectar con la central de control.');
+      // Captura exhaustiva de mensajes de error de la API (HTTP 400, MISSING_FIELDS, credenciales inválidas)
+      const mensajeServidor = 
+        err?.response?.data?.message || 
+        err?.data?.message || 
+        err?.message || 
+        'No se pudo conectar con la central de control.';
+      setError(mensajeServidor);
     } finally {
       setLoading(false);
     }
