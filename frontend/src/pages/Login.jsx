@@ -1,15 +1,32 @@
-// Versión Arquitectura: V21.34 - Autenticación Dual (Email / Celular +57) con Normalización Anti-Sufijo y Guardián Anti-Loop
+// Versión Arquitectura: V9.7 - Diagnóstico de Contraste, Claridad en Celular (Sin +57) & Fusión Atómica Anti-Loop
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Componente de Inicio de Sesión con consulta dual (Correo Electrónico o Celular Colombiano),
- * normalización automática del prefijo telefónico (+57 / 57), guardián de autenticación activa (Anti-Loop),
- * pantalla de recuperación de clave y estética Dark Glassmorphism Premium (CIMCO-UI V9.3).
+ * Misión: Pantalla de Autenticación de Usuarios y Central Operativa con interfaz luminosa Light Glassmorphism,
+ * psicología de color basada en Confianza (Azul/Slate) y Agilidad Operativa (Naranja/Ámbar),
+ * corrección de contraste en insignias y etiquetas (text-amber-950, bg-amber-100, border-amber-300, text-slate-800, text-slate-600),
+ * sanitización inteligente de prefijo +57, preservación del guardián anti-loop, integración resiliente con useAuth (loginLocal),
+ * desestructuración segura de respuestas y enrutamiento dinámico por rol o parámetro de búsqueda.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Eye, EyeOff, ShieldAlert, KeyRound, UserPlus, HelpCircle, Phone, Mail, LogIn, Lock } from 'lucide-react';
+import api from '@/config/api';
+import { 
+  Lock, 
+  Mail, 
+  Phone, 
+  Eye, 
+  EyeOff, 
+  UserPlus, 
+  KeyRound, 
+  ShieldCheck, 
+  ArrowRight, 
+  AlertTriangle,
+  ShieldAlert,
+  LogIn,
+  Info
+} from 'lucide-react';
 
 const PHONE_REGEX = /^(\+?57)?(3\d{9})$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -27,106 +44,102 @@ const Login = () => {
   
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  // 🛡️ GUARDIÁN DE AUTENTICACIÓN (ANTI-LOOP): Si ya hay sesión activa, redirige según el rol
+  // 🛡️ GUARDIÁN ANTI-LOOP: Redirección Inteligente si ya existe sesión activa
   useEffect(() => {
     if (authLoading) return;
 
     if (user) {
-      const userRole = (user.rol || user.role || '').toLowerCase();
-      if (userRole === 'conductor' || userRole === 'moto' || userRole === 'mototaxi') {
-        navigate('/conductor/dashboard', { replace: true });
-      } else if (userRole === 'despachador') {
-        navigate('/despachador/dashboard', { replace: true });
-      } else if (userRole === 'admin') {
-        navigate('/admin/dashboard', { replace: true });
+      const activeRole = user?.rol || user?.role || 'pasajero';
+      console.log(`📡 [CIMCO-GUARD] Sesión activa detectada para [${user?.email || user?.nombre}]. Rol: ${activeRole}`);
+
+      if (activeRole === 'pasajero') {
+        navigate('/pasajero/home', { replace: true });
+      } else if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(activeRole)) {
+        navigate('/conductor/home', { replace: true });
+      } else if (['admin', 'superadmin', 'despachador', 'central'].includes(activeRole)) {
+        navigate('/central/dashboard', { replace: true });
       } else {
-        navigate('/pasajero/dashboard', { replace: true });
+        navigate('/dashboard', { replace: true });
       }
     }
   }, [user, authLoading, navigate]);
 
-  // 🎯 NORMALIZACIÓN DUAL DE IDENTIFICADOR (CORREO O CELULAR +57)
-  const sanitizeIdentifier = (rawInput) => {
-    const cleaned = (rawInput || '').trim();
-
-    if (EMAIL_REGEX.test(cleaned.toLowerCase())) {
-      return { type: 'email', value: cleaned.toLowerCase() };
-    }
-
-    // Normalización de número celular (remueve espacios, guiones y corchetes)
-    const digitsOnly = cleaned.replace(/\D/g, '');
-
-    // Si tiene 10 dígitos y empieza por 3 (Ej: 3001234567) -> normaliza a +57
-    if (digitsOnly.length === 10 && digitsOnly.startsWith('3')) {
-      return { type: 'phone', value: `+57${digitsOnly}`, rawPhone: digitsOnly };
-    }
-
-    // Si tiene 12 dígitos y empieza por 573 (Ej: 573001234567) -> normaliza a +57
-    if (digitsOnly.length === 12 && digitsOnly.startsWith('573')) {
-      return { type: 'phone', value: `+${digitsOnly}`, rawPhone: digitsOnly.slice(2) };
-    }
-
-    return { type: 'unknown', value: cleaned };
-  };
-
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    setError(null);
+    setError('');
 
-    const cleanPassword = password || '';
-    if (!identifier || !cleanPassword) {
-      setError('⚠️ Por favor ingresa tus credenciales de acceso.');
+    let cleanIdentifier = identifier ? identifier.trim() : '';
+
+    // 💡 Sanitización inteligente: Si el usuario escribe +57 o 57 al inicio del número de 10 dígitos, se remueve automáticamente
+    if (/^\+?573\d{9}$/.test(cleanIdentifier)) {
+      cleanIdentifier = cleanIdentifier.replace(/^\+?57/, '');
+    }
+
+    if (!cleanIdentifier || !password.trim()) {
+      setError('Por favor ingresa tu correo/celular y tu contraseña.');
       return;
     }
 
-    const processedId = sanitizeIdentifier(identifier);
-
-    if (processedId.type === 'unknown') {
-      setError('⚠️ Ingresa un correo electrónico válido o un número celular colombiano (10 dígitos).');
-      return;
+    // Validaciones sintácticas suaves
+    if (cleanIdentifier.includes('@')) {
+      if (!EMAIL_REGEX.test(cleanIdentifier)) {
+        setError('El formato del correo electrónico es inválido.');
+        return;
+      }
+    } else if (/^\d+$/.test(cleanIdentifier)) {
+      if (!/^[3]\d{9}$/.test(cleanIdentifier)) {
+        setError('El número celular debe contener exactamente 10 dígitos (comenzando en 3, sin +57).');
+        return;
+      }
     }
 
     setLoading(true);
 
     try {
-      const payload = {
-        login: processedId.value,
-        identifier: processedId.value,
-        email: processedId.type === 'email' ? processedId.value : undefined,
-        telefono: processedId.type === 'phone' ? processedId.value : undefined,
-        password: cleanPassword
-      };
+      let resData = null;
 
       if (typeof loginLocal === 'function') {
-        const result = await loginLocal(payload);
-        
-        if (result && result.success) {
-          const loggedUser = result.user || user;
-          const userRole = (loggedUser?.rol || loggedUser?.role || '').toLowerCase();
+        resData = await loginLocal({ identifier: cleanIdentifier, password });
+      } else {
+        const response = await api.post('/api/auth/login', {
+          identifier: cleanIdentifier,
+          password: password
+        });
+        resData = response?.data;
+      }
 
-          if (userRole === 'conductor' || userRole === 'moto' || userRole === 'mototaxi') {
-            navigate('/conductor/dashboard', { replace: true });
-          } else if (userRole === 'despachador') {
-            navigate('/despachador/dashboard', { replace: true });
-          } else if (userRole === 'admin') {
-            navigate('/admin/dashboard', { replace: true });
-          } else {
-            navigate('/pasajero/dashboard', { replace: true });
-          }
+      if (resData?.token || resData?.success) {
+        const token = resData.token;
+        const userData = resData.user || {};
+
+        if (token) {
+          localStorage.setItem('cimco_token', token);
+        }
+        if (resData.user) {
+          localStorage.setItem('cimco_user', JSON.stringify(userData));
+        }
+
+        const userRole = userData?.rol || userData?.role || roleParam || 'pasajero';
+
+        if (userRole === 'pasajero') {
+          navigate('/pasajero/home');
+        } else if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(userRole)) {
+          navigate('/conductor/home');
+        } else if (['admin', 'superadmin', 'despachador', 'central'].includes(userRole)) {
+          navigate('/central/dashboard');
         } else {
-          setError(result?.message || 'Credenciales incorrectas o cuenta inactiva.');
+          navigate('/dashboard');
         }
       } else {
-        throw new Error('Servicio de autenticación no inicializado correctamente.');
+        setError(resData?.message || 'Error al validar credenciales en la central.');
       }
     } catch (err) {
-      console.error('🚨 [LOGIN-ERROR]:', err);
-      const apiMsg = err?.response?.data?.message || err?.message || 'Error al conectar con la central de autenticación.';
-      setError(apiMsg);
+      console.error('🚨 [CIMCO-LOGIN] Error en proceso de autenticación:', err);
+      setError(err?.response?.data?.message || err?.message || 'No se pudo conectar con la central de control.');
     } finally {
       setLoading(false);
     }
@@ -134,130 +147,133 @@ const Login = () => {
 
   const handleRegisterRedirect = () => {
     if (roleParam) {
-      const cleanRole = roleParam.toLowerCase();
-      if (cleanRole === 'pasajero') {
-        navigate('/register-pasajero');
-      } else if (cleanRole === 'moto' || cleanRole === 'mototaxi') {
-        navigate('/register-moto');
-      } else if (cleanRole === 'intermunicipal') {
-        navigate('/register-intermunicipal');
-      } else if (cleanRole === 'despachador') {
-        navigate('/register-despachador');
-      } else {
-        navigate('/register');
-      }
+      navigate(`/register?role=${roleParam}`);
     } else {
       navigate('/register');
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0c] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-      
-      {/* Ambientes de Luz Posterior (CIMCO-UI V9.3 Glassmorphism) */}
-      <div className="absolute top-1/4 -left-20 w-80 h-80 bg-amber-500/10 rounded-full blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-1/4 -right-20 w-80 h-80 bg-cyan-500/10 rounded-full blur-[120px] pointer-events-none" />
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-blue-50/50 to-amber-50/30 flex items-center justify-center p-4 font-sans relative overflow-hidden">
+      <div className="absolute top-[-10%] right-[-5%] w-96 h-96 bg-amber-200/30 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-[-10%] left-[-5%] w-96 h-96 bg-blue-200/40 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="w-full max-w-md bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10">
+      <div className="w-full max-w-md bg-white/85 backdrop-blur-xl border border-slate-200/80 p-8 sm:p-10 rounded-3xl shadow-2xl shadow-indigo-950/10 relative z-10 transition-all duration-300">
         
-        {/* Logo / Encabezado */}
+        {/* Encabezado */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500/20 to-cyan-500/20 border border-white/10 mb-3 shadow-inner">
-            <Lock className="text-amber-400" size={22} />
+          <div className="inline-flex items-center justify-center w-14 h-14 bg-amber-50 border border-amber-200/80 rounded-2xl mb-4 text-amber-600 shadow-sm">
+            <Lock size={26} />
           </div>
-          <h1 className="text-2xl font-black uppercase tracking-wider text-white">
-            TAXIA <span className="text-amber-400">CIMCO</span>
+          
+          <h1 className="text-slate-900 font-black text-3xl tracking-tight uppercase flex items-center justify-center gap-1.5">
+            TAXIA <span className="text-amber-500 font-black">CIMCO</span>
           </h1>
-          <p className="text-[11px] font-mono text-slate-400 uppercase tracking-widest mt-1">
+          
+          <p className="text-slate-500 font-mono text-[10px] tracking-widest uppercase mt-1 font-bold">
             Central de Control & Autenticación
           </p>
         </div>
 
-        {/* Notificación de Error */}
         {error && (
-          <div className="mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-mono flex items-start gap-3">
-            <ShieldAlert size={18} className="shrink-0 mt-0.5" />
+          <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-2xl text-xs font-mono font-medium flex items-center gap-3 animate-in fade-in">
+            <AlertTriangle size={16} className="shrink-0 text-rose-500" />
             <span>{error}</span>
           </div>
         )}
 
-        {/* Formulario de Autenticación Dual */}
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleLogin} className="space-y-5">
           
-          {/* Identificador: Correo o Teléfono */}
-          <div>
-            <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-              <Mail size={12} className="text-amber-400" />
-              <Phone size={12} className="text-cyan-400" />
-              <span>Correo o Celular (+57)</span>
-            </label>
+          {/* Identificador: Correo o Celular (Alto Contraste) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-slate-800 font-mono text-[11px] uppercase tracking-wider font-black flex items-center gap-1.5">
+                <Mail size={13} className="text-amber-600 shrink-0" /> Correo o Celular
+              </label>
+              <span className="text-[10px] font-mono font-black text-amber-950 bg-amber-100 border border-amber-300/90 px-2 py-0.5 rounded-md shadow-sm">
+                10 dígitos (Sin +57)
+              </span>
+            </div>
+
             <div className="relative">
-              <input
-                type="text"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                placeholder="Ej: usuario@cimco.co o 3001234567"
-                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-sans"
-                required
+              <input 
+                type="text" 
+                placeholder="usuario@cimco.co o 3001234567" 
+                className="w-full bg-slate-50 border border-slate-300 px-4 py-3.5 rounded-xl text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none transition-all text-xs font-mono shadow-sm" 
+                value={identifier} 
+                onChange={(e) => setIdentifier(e.target.value)} 
+                required 
               />
             </div>
+            
+            <p className="text-[10px] text-slate-600 font-mono font-semibold flex items-center gap-1 pt-0.5">
+              <Info size={12} className="text-amber-600 shrink-0" />
+              <span>Para celular ingresa directamente los 10 números sin el prefijo +57.</span>
+            </p>
           </div>
 
-          {/* Clave de Acceso */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-[10px] font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                <KeyRound size={12} className="text-amber-400" />
-                <span>Contraseña</span>
-              </label>
-            </div>
+          {/* Contraseña */}
+          <div className="space-y-1.5">
+            <label className="text-slate-700 font-mono text-[10px] uppercase tracking-wider font-extrabold flex items-center gap-1.5">
+              <ShieldCheck size={12} className="text-amber-600" /> Contraseña
+            </label>
             <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 transition-all font-sans pr-10"
-                required
+              <input 
+                type={showPassword ? 'text' : 'password'} 
+                placeholder="••••••••" 
+                className="w-full bg-slate-50/80 border border-slate-200 pl-4 pr-11 py-3.5 rounded-xl text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 outline-none transition-all text-xs shadow-sm" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                required 
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+              <button 
+                type="button" 
+                onClick={() => setShowPassword(!showPassword)} 
+                className="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
               >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
 
-          {/* Botón Submit */}
-          <button
-            type="submit"
-            disabled={loading || authLoading}
-            className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-mono font-bold text-xs uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-amber-500/20 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-2"
+          {/* Botón CTA */}
+          <button 
+            type="submit" 
+            disabled={loading || authLoading} 
+            className="w-full py-4 text-xs font-mono uppercase tracking-[0.2em] rounded-xl font-black text-white bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-600 shadow-xl shadow-orange-500/20 active:scale-[0.99] transition-all duration-200 disabled:opacity-50 disabled:cursor-wait cursor-pointer flex items-center justify-center gap-2 mt-2"
           >
-            <LogIn size={16} />
-            <span>{loading ? 'Sincronizando...' : 'Iniciar Sesión'}</span>
+            {loading ? (
+              "AUTENTICANDO..."
+            ) : (
+              <>
+                <span>INICIAR SESIÓN</span>
+                <ArrowRight size={16} />
+              </>
+            )}
           </button>
         </form>
 
-        {/* Acciones Secundarias */}
-        <div className="grid grid-cols-2 gap-3 mt-8 pt-6 border-t border-white/5 relative z-10">
-          <button
+        {/* Accesos Secundarios */}
+        <div className="grid grid-cols-2 gap-3 mt-8 pt-6 border-t border-slate-200/80">
+          <button 
             type="button"
-            onClick={handleRegisterRedirect}
-            className="flex flex-col items-center justify-center gap-2 py-2.5 px-3 bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 rounded-xl text-xs font-medium text-slate-300 hover:text-white transition-colors cursor-pointer outline-none group"
+            onClick={handleRegisterRedirect} 
+            className="flex flex-col items-center justify-center p-3 bg-slate-50/80 hover:bg-amber-50/60 border border-slate-200 rounded-xl group transition-all text-decoration-none cursor-pointer outline-none"
           >
-            <UserPlus size={16} className="text-cyan-400 group-hover:scale-110 transition-transform" />
-            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-300 group-hover:text-cyan-300 transition-colors">Crear Cuenta</span>
+            <UserPlus size={18} className="text-slate-500 group-hover:text-amber-600 transition-colors mb-1" />
+            <span className="text-[10px] font-mono font-bold text-slate-700 uppercase tracking-wider">
+              Crear Cuenta
+            </span>
           </button>
 
-          <Link
-            to="/forgot-password"
-            className="flex flex-col items-center justify-center gap-2 py-2.5 px-3 bg-white/[0.02] hover:bg-white/[0.05] border border-white/5 rounded-xl text-xs font-medium text-slate-300 hover:text-white transition-colors text-decoration-none group"
+          <Link 
+            to="/forgot-password" 
+            className="flex flex-col items-center justify-center p-3 bg-slate-50/80 hover:bg-amber-50/60 border border-slate-200 rounded-xl group transition-all text-decoration-none"
           >
-            <HelpCircle size={16} className="text-amber-400 group-hover:scale-110 transition-transform" />
-            <span className="text-[10px] font-mono uppercase tracking-wider text-slate-300 group-hover:text-amber-300 transition-colors">Recuperar Clave</span>
+            <KeyRound size={18} className="text-slate-500 group-hover:text-amber-600 transition-colors mb-1" />
+            <span className="text-[10px] font-mono font-bold text-slate-700 uppercase tracking-wider">
+              Recuperar Clave
+            </span>
           </Link>
         </div>
 
