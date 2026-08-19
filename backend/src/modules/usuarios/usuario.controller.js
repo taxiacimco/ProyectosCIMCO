@@ -1,7 +1,7 @@
-// Versión Arquitectura: V19.3 - Búsqueda Polimórfica Multi-Colección con Integración Atómica de Billetera Global
+// Versión Arquitectura: V19.5 - Inyección Sincrónica de UID Firebase Auth y Protección Sparse E11000 en Registro
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
- * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado, flujo financiero sin mutaciones dobles de saldo y ajuste polimórfico multi-colección.
+ * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado, inyección sincrónica de UID Firebase Auth, blindaje del atributo UID contra colisiones de índice sparse (E11000), flujo financiero sin mutaciones dobles de saldo y ajuste polimórfico multi-colección.
  */
 
 import mongoose from 'mongoose';
@@ -9,7 +9,7 @@ import Usuario from '../../models/Usuario.js';
 import Conductor from '../../models/Conductor.js';
 import Pasajero from '../../models/Pasajero.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
-import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
+import admin, { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 import { FieldValue } from 'firebase-admin/firestore';
 
 /**
@@ -126,27 +126,186 @@ export const obtenerUsuarios = async (req, res) => {
  */
 export const validarRegistroUnico = async (req, res, next) => {
     try {
-        const { email, telefono, telefonoMovil } = req.body;
+        const { email, telefono, telefonoMovil, uid } = req.body;
         const telContacto = telefono || telefonoMovil;
 
         const condiciones = [];
-        if (email) condiciones.push({ email: email.toLowerCase().trim() });
-        if (telContacto) condiciones.push({ telefono: telContacto }, { telefonoMovil: telContacto });
+        if (email) condiciones.push({ email: String(email).toLowerCase().trim() });
+        if (telContacto) condiciones.push({ telefono: String(telContacto).trim() }, { telefonoMovil: String(telContacto).trim() });
+        if (uid && String(uid).trim() !== '' && uid !== 'null' && uid !== 'undefined') {
+            condiciones.push({ uid: String(uid).trim() });
+        }
 
         if (condiciones.length > 0) {
             const usuarioExistente = await Usuario.findOne({ $or: condiciones }).lean();
             if (usuarioExistente) {
                 return res.status(400).json({
                     success: false,
-                    message: "⚠️ El correo electrónico o número de teléfono ya está registrado en el sistema."
+                    code: 'DUPLICATE_USER',
+                    message: "⚠️ El correo electrónico, número de teléfono o UID ya está registrado en el sistema."
                 });
             }
         }
         next();
     } catch (error) {
+        if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
+            return res.status(400).json({
+                success: false,
+                code: 'DUPLICATE_KEY_E11000',
+                message: "⚠️ El correo, teléfono o UID ingresado ya pertenece a otro usuario."
+            });
+        }
         return res.status(500).json({ success: false, message: error.message });
     }
 };
+
+/**
+ * 📝 Registrar / Crear Usuario (Admin, Secretaría, Despachador, Staff)
+ * Inyección sincrónica de UID mediante Firebase Auth y blindaje contra colisiones de índice sparse E11000 por 'uid: null'
+ */
+export const registrarUsuario = async (req, res) => {
+    try {
+        const { nombre, email, telefono, telefonoMovil, password, uid, rol, role, subrol, terminal_id, codigoDespachador } = req.body;
+        const telContacto = (telefonoMovil || telefono) ? String(telefonoMovil || telefono).trim() : undefined;
+        const emailSanitizado = email ? String(email).toLowerCase().trim() : undefined;
+        const rolFinal = String(rol || role || 'despachador').toLowerCase().trim();
+
+        // 1. Validar campos obligatorios mínimos
+        if (!nombre || (!emailSanitizado && !telContacto)) {
+            return res.status(400).json({
+                success: false,
+                code: 'MISSING_REQUIRED_FIELDS',
+                message: "⚠️ El nombre y al menos un método de contacto (correo o teléfono) son obligatorios."
+            });
+        }
+
+        // 2. Sanitizar UID: Garantizar omisión limpia (undefined) si no se proporciona para permitir operar al índice sparse
+        let targetUid = (uid && typeof uid === 'string' && uid.trim() !== '' && uid !== 'null' && uid !== 'undefined')
+            ? uid.trim()
+            : undefined;
+
+        // 3. Comprobar duplicados previos en MongoDB
+        const condiciones = [];
+        if (emailSanitizado) condiciones.push({ email: emailSanitizado });
+        if (telContacto) condiciones.push({ telefono: telContacto }, { telefonoMovil: telContacto });
+
+        if (condiciones.length > 0) {
+            const existeUsuario = await Usuario.findOne({ $or: condiciones }).lean();
+            if (existeUsuario) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'DUPLICATE_USER',
+                    message: "⚠️ El correo electrónico o número móvil ya pertenece a un usuario registrado."
+                });
+            }
+        }
+
+        // 4. Inyección sincrónica de UID con Firebase Auth si no viene proporcionado
+        if (!targetUid && emailSanitizado && password) {
+            try {
+                // Formateo defensivo de teléfono a E.164 (+57 Colombia) si existe
+                const telefonoE164 = telContacto ? `+57${telContacto.replace(/\D/g, '').slice(-10)}` : undefined;
+
+                const userRecord = await admin.auth().createUser({
+                    email: emailSanitizado,
+                    password: String(password),
+                    phoneNumber: telefonoE164,
+                    displayName: String(nombre).trim()
+                });
+
+                targetUid = userRecord.uid;
+            } catch (authErr) {
+                console.error("❌ Error al crear credenciales en Firebase Auth:", authErr);
+                return res.status(400).json({
+                    success: false,
+                    code: 'FIREBASE_AUTH_ERROR',
+                    message: `No se pudo crear la cuenta en Firebase Auth: ${authErr.message}`
+                });
+            }
+        }
+
+        // 5. Construir objeto de usuario sin atributos null explícitos en campos indexados
+        const usuarioData = {
+            nombre: String(nombre).trim(),
+            email: emailSanitizado,
+            telefono: telContacto,
+            telefonoMovil: telContacto,
+            rol: rolFinal,
+            subrol: subrol || 'general',
+            saldo: 0,
+            saldoWallet: 0
+        };
+
+        if (targetUid) {
+            usuarioData.uid = targetUid;
+        }
+
+        if (password) {
+            usuarioData.password = password;
+        }
+
+        if (terminal_id) {
+            usuarioData.terminal_id = terminal_id;
+        }
+
+        if (codigoDespachador) {
+            usuarioData.codigoDespachador = codigoDespachador;
+        }
+
+        const nuevoUsuario = new Usuario(usuarioData);
+        await nuevoUsuario.save();
+
+        // 6. Réplica inicial en Firebase Firestore
+        try {
+            const docFirestoreId = nuevoUsuario.uid || nuevoUsuario._id.toString();
+            const coleccionUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
+            await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set({
+                id: docFirestoreId,
+                nombre: nuevoUsuario.nombre,
+                email: nuevoUsuario.email || '',
+                telefono: telContacto || '',
+                telefonoMovil: telContacto || '',
+                rol: nuevoUsuario.rol,
+                subrol: nuevoUsuario.subrol || 'general',
+                saldo: 0,
+                saldoWallet: 0,
+                createdAt: new Date().toISOString()
+            }, { merge: true });
+        } catch (fsErr) {
+            console.warn("⚠️ [CIMCO-USUARIO-REG-FS-WARN] No se pudo replicar perfil inicial en Firestore:", fsErr.message);
+        }
+
+        return res.status(201).json({
+            success: true,
+            message: 'Usuario registrado exitosamente.',
+            data: nuevoUsuario,
+            usuario: nuevoUsuario
+        });
+
+    } catch (error) {
+        console.error("❌ [CIMCO-USUARIO-REG-ERROR] Error en registro de usuario:", error);
+
+        if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
+            const campoDuplicado = error.keyValue ? Object.keys(error.keyValue).join(', ') : 'correo, teléfono o UID';
+            return res.status(400).json({
+                success: false,
+                code: 'DUPLICATE_KEY_E11000',
+                message: `⚠️ El ${campoDuplicado} ingresado ya se encuentra registrado por otro usuario.`
+            });
+        }
+
+        return res.status(500).json({
+            success: false,
+            code: 'SYSTEM_FAULT',
+            message: `SYSTEM_FAULT: ${error.message || 'Error interno del servidor al procesar el registro.'}`
+        });
+    }
+};
+
+/**
+ * Alias explícito de creación para compatibilidad con rutas legacy / API
+ */
+export const crearUsuario = registrarUsuario;
 
 /**
  * 👤 Obtener usuario por ID, UID o desde la sesión activa (req.user)
@@ -176,7 +335,7 @@ export const obtenerUsuarioPorId = async (req, res) => {
 };
 
 /**
- * 🔄 Actualizar datos de usuario con sincronización a Firestore
+ * 🔄 Actualizar datos de usuario con sincronización a Firestore y saneamiento de UID
  */
 export const actualizarUsuario = async (req, res) => {
     try {
@@ -187,6 +346,15 @@ export const actualizarUsuario = async (req, res) => {
 
         const updateData = { ...req.body };
         delete updateData.password; // Prevenir mutación directa de credenciales sin hash
+
+        // Sanitización de UID en actualizaciones para evitar inyección de null / cadenas vacías que alteren índices sparse
+        if (updateData.uid !== undefined) {
+            if (!updateData.uid || updateData.uid === 'null' || updateData.uid === 'undefined' || String(updateData.uid).trim() === '') {
+                delete updateData.uid;
+            } else {
+                updateData.uid = String(updateData.uid).trim();
+            }
+        }
 
         const usuario = await Usuario.findOneAndUpdate(
             {
@@ -221,6 +389,14 @@ export const actualizarUsuario = async (req, res) => {
 
         return res.status(200).json({ success: true, message: 'Usuario actualizado correctamente', data: usuario, usuario });
     } catch (error) {
+        if (error.code === 11000 || (error.name === 'MongoServerError' && error.code === 11000)) {
+            const campoDuplicado = error.keyValue ? Object.keys(error.keyValue).join(', ') : 'correo, teléfono o UID';
+            return res.status(400).json({
+                success: false,
+                code: 'DUPLICATE_KEY_E11000',
+                message: `⚠️ El ${campoDuplicado} ingresado ya está asignado a otro usuario.`
+            });
+        }
         return res.status(500).json({ success: false, message: error.message });
     }
 };
@@ -689,4 +865,21 @@ export const recargarSaldo = async (req, res) => {
         console.error("❌ Error en recargarSaldo:", error);
         return res.status(500).json({ success: false, message: error.message });
     }
+};
+
+export default {
+    obtenerDirectorioGlobal,
+    obtenerUsuarios,
+    validarRegistroUnico,
+    registrarUsuario,
+    crearUsuario,
+    obtenerUsuarioPorId,
+    actualizarUsuario,
+    eliminarUsuario,
+    obtenerDespachadores,
+    asignarTerminalDespachador,
+    obtenerSaldoDespachador,
+    recargarSaldoDespachador,
+    ajustarSaldoBilletera,
+    recargarSaldo
 };

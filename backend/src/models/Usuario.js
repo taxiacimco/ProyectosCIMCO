@@ -1,9 +1,10 @@
-// Versión Arquitectura: V17.4 - Verificación y Blindaje del Hook Pre-Save de Bcrypt contra Doble Hashing
+// Versión Arquitectura: V17.5 - Reconfiguración del Atributo UID con Índice Disperso y Unicidad Criptográfica
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva la sincronización bidireccional (rol ↔ role, saldo ↔ balance), persistencia estricta,
  * indices GeoJSON y encriptación bcrypt única en el hook pre-save controlando isModified('password').
+ * Ajuste V17.5: Eliminación de 'default: null' en 'uid' e inyección de unicidad dispersa (unique: true, sparse: true) para prevenir desbordamientos E11000.
  */
 
 import mongoose from 'mongoose';
@@ -76,7 +77,8 @@ const usuarioSchema = new mongoose.Schema({
     },
     uid: {
         type: String,
-        default: null
+        unique: true,
+        sparse: true
     },
     estado: {
         type: String,

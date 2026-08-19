@@ -1,9 +1,8 @@
-// Versión Arquitectura: V21.34 - Integración Backend Real OTP/Reset y Temporizador de Reenvío SMS
+// Versión Arquitectura: V21.35 - Recuperación de Clave por Correo Gratuita (Firebase Auth Standard)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\ForgotPassword.jsx
- * Misión: Implementar la recuperación de contraseña flexible por Número de Celular (Código SMS/WhatsApp) 
- *         o Correo Electrónico con conexión real al backend de API Central CIMCO / Firebase,
- *         e incorporación de temporizador defensivo de reenvío de OTP.
+ * Misión: Restablecimiento seguro y sin costos de facturación mediante Firebase Auth (sendPasswordResetEmail),
+ *         seleccionado por defecto para evitar tarifas de mensajería SMS, manteniendo el método secundario de SMS.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -22,7 +21,8 @@ import {
   ShieldAlert, 
   Smartphone,
   RotateCcw,
-  Clock
+  Clock,
+  Zap
 } from 'lucide-react';
 
 const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
@@ -31,13 +31,13 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ForgotPassword = () => {
   const navigate = useNavigate();
 
-  // Estados de entrada y navegación interna
-  const [method, setMethod] = useState('phone'); // 'phone' | 'email'
+  // Estados de entrada y navegación interna (Correo predeterminado por costo $0)
+  const [method, setMethod] = useState('email'); // 'email' | 'phone'
   const [identifier, setIdentifier] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [step, setStep] = useState(1); // 1: Solicitud, 2: Verificación de Código/SMS (para celular), 3: Éxito
+  const [step, setStep] = useState(1); // 1: Solicitud, 2: Verificación de Código/SMS, 3: Éxito
 
   // Estados para validación de código SMS / WhatsApp
   const [otpCode, setOtpCode] = useState('');
@@ -82,14 +82,14 @@ const ForgotPassword = () => {
       return;
     }
 
-    if (method === 'phone') {
-      if (!PHONE_REGEX.test(valorLimpio)) {
-        setError('Número de celular inválido. Ingrese un número válido de 10 dígitos (ej: 3001234567).');
+    if (method === 'email') {
+      if (!EMAIL_REGEX.test(valorLimpio.toLowerCase())) {
+        setError('Correo electrónico con formato incorrecto.');
         return;
       }
     } else {
-      if (!EMAIL_REGEX.test(valorLimpio.toLowerCase())) {
-        setError('Correo electrónico con formato incorrecto.');
+      if (!PHONE_REGEX.test(valorLimpio)) {
+        setError('Número de celular inválido. Ingrese un número válido de 10 dígitos (ej: 3001234567).');
         return;
       }
     }
@@ -97,28 +97,39 @@ const ForgotPassword = () => {
     setLoading(true);
 
     try {
-      if (method === 'phone') {
-        // Petición real al Backend Central CIMCO para envío de SMS/WhatsApp OTP
+      if (method === 'email') {
+        // ⚡ MÉTODO GRATUITO $0 COSTOS: Firebase Auth NATIVO
+        if (auth) {
+          await sendPasswordResetEmail(auth, valorLimpio.toLowerCase());
+          setStep(3); // Avanza a confirmación de correo enviado
+        } else {
+          // Fallback a API Backend si el SDK de Firebase Auth client no estuviera cargado
+          await api.post('/auth/forgot-password', { email: valorLimpio.toLowerCase() });
+          setStep(3);
+        }
+      } else {
+        // Petición al Backend Central CIMCO para envío de SMS/WhatsApp OTP
         await api.post('/auth/forgot-password-sms', { phone: valorLimpio, celular: valorLimpio });
         setStep(2); // Avanza a la pantalla de verificación de código SMS
         setResendCooldown(60); // Inicia temporizador de 60 segundos
-      } else {
-        // Intentar envío vía Backend API o en su defecto mediante Firebase Auth
-        try {
-          await api.post('/auth/forgot-password', { email: valorLimpio.toLowerCase() });
-        } catch (backendErr) {
-          console.warn('⚠️ [RECOVERY-FALLBACK] Backend falló, intentando Firebase Auth:', backendErr);
-          if (auth) {
-            await sendPasswordResetEmail(auth, valorLimpio.toLowerCase());
-          } else {
-            throw backendErr;
-          }
-        }
-        setStep(3); // Avanza a confirmación de correo enviado
       }
     } catch (err) {
       console.error('🚨 [RECOVERY-ERROR] Error en solicitud de recuperación:', err);
-      const errMsg = err?.response?.data?.message || err?.data?.message || err?.message || 'Error al procesar la solicitud. Verifique los datos.';
+      
+      let errMsg = 'Error al procesar la solicitud. Verifique los datos.';
+      
+      if (err?.code === 'auth/user-not-found') {
+        errMsg = 'No se encontró ningún usuario registrado con este correo electrónico.';
+      } else if (err?.code === 'auth/invalid-email') {
+        errMsg = 'El correo electrónico ingresado no tiene un formato válido.';
+      } else if (err?.code === 'auth/too-many-requests') {
+        errMsg = 'Demasiadas solicitudes en poco tiempo. Por favor espere unos minutos.';
+      } else if (err?.response?.data?.message) {
+        errMsg = err.response.data.message;
+      } else if (err?.message) {
+        errMsg = err.message;
+      }
+
       setError(errMsg);
     } finally {
       setLoading(false);
@@ -231,21 +242,8 @@ const ForgotPassword = () => {
         {step === 1 && (
           <form onSubmit={handleSendResetRequest} className="space-y-5">
             
-            {/* Pestañas para elegir Celular o Correo */}
+            {/* Pestañas para elegir Correo (Predeterminado $0) o Celular */}
             <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-1.5 rounded-2xl border border-slate-800">
-              <button
-                type="button"
-                onClick={() => { setMethod('phone'); setError(''); setSuccessMsg(''); setIdentifier(''); }}
-                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  method === 'phone'
-                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Smartphone size={14} />
-                <span>POR CELULAR</span>
-              </button>
-
               <button
                 type="button"
                 onClick={() => { setMethod('email'); setError(''); setSuccessMsg(''); setIdentifier(''); }}
@@ -258,29 +256,49 @@ const ForgotPassword = () => {
                 <Mail size={14} />
                 <span>POR CORREO</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => { setMethod('phone'); setError(''); setSuccessMsg(''); setIdentifier(''); }}
+                className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  method === 'phone'
+                    ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Smartphone size={14} />
+                <span>POR CELULAR</span>
+              </button>
             </div>
 
             {/* Panel del Campo de Entrada */}
             <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4 space-y-3">
-              <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                {method === 'phone' ? <Phone size={14} className="text-cyan-400" /> : <Mail size={14} className="text-cyan-400" />}
-                <span>{method === 'phone' ? 'NÚMERO DE CELULAR REGISTRADO' : 'CORREO ELECTRÓNICO REGISTRADO'}</span>
+              <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  {method === 'email' ? <Mail size={14} className="text-cyan-400" /> : <Phone size={14} className="text-cyan-400" />}
+                  {method === 'email' ? 'CORREO ELECTRÓNICO REGISTRADO' : 'NÚMERO DE CELULAR REGISTRADO'}
+                </span>
+                {method === 'email' && (
+                  <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-mono font-bold flex items-center gap-1">
+                    <Zap size={10} /> SIN COSTO
+                  </span>
+                )}
               </label>
 
               <input
-                type={method === 'phone' ? 'tel' : 'email'}
+                type={method === 'email' ? 'email' : 'tel'}
                 required
                 disabled={loading}
                 value={identifier}
                 onChange={handleIdentifierChange}
-                placeholder={method === 'phone' ? 'EJ: 3001234567' : 'EJ: OPERADOR@TAXICIMCO.COM'}
+                placeholder={method === 'email' ? 'EJ: OPERADOR@TAXICIMCO.COM' : 'EJ: 3001234567'}
                 className="w-full py-3.5 px-4 bg-slate-950/70 border border-slate-700/60 rounded-xl text-slate-100 placeholder-slate-500 text-xs font-mono tracking-wider focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition-all disabled:opacity-50"
               />
 
               <p className="text-[10px] text-slate-400 leading-relaxed pt-1">
-                {method === 'phone'
-                  ? 'Transmitiremos un código de verificación por SMS o WhatsApp a su teléfono registrado para crear una nueva clave inmediatamente.'
-                  : 'Transmitiremos un enlace seguro y temporal a su correo para restablecer sus credenciales.'}
+                {method === 'email'
+                  ? 'Transmitiremos un enlace seguro y gratuito mediante Firebase Auth a su correo para restablecer sus credenciales al instante.'
+                  : 'Transmitiremos un código de verificación por SMS o WhatsApp a su teléfono registrado para crear una nueva clave inmediatamente.'}
               </p>
             </div>
 
@@ -295,7 +313,7 @@ const ForgotPassword = () => {
               ) : (
                 <>
                   <ShieldCheck size={16} />
-                  <span>{method === 'phone' ? 'ENVIAR CÓDIGO SMS' : 'TRANSMITIR ENLACE SEGURO'}</span>
+                  <span>{method === 'email' ? 'TRANSMITIR ENLACE SEGURO' : 'ENVIAR CÓDIGO SMS'}</span>
                 </>
               )}
             </button>
@@ -391,13 +409,13 @@ const ForgotPassword = () => {
             </div>
 
             <h3 className="text-lg font-bold text-white uppercase tracking-wide">
-              {method === 'phone' ? '¡CLAVE RESTABLECIDA!' : '¡ENLACE TRANSMITIDO!'}
+              {method === 'email' ? '¡ENLACE TRANSMITIDO!' : '¡CLAVE RESTABLECIDA!'}
             </h3>
 
             <p className="text-xs text-slate-300 leading-relaxed font-sans">
-              {method === 'phone'
-                ? 'Su contraseña ha sido actualizada exitosamente. Ya puede acceder al sistema con su nuevo código.'
-                : `Se ha enviado un correo a ${identifier} con las instrucciones exactas para redefinir su clave.`}
+              {method === 'email'
+                ? `Se ha enviado un correo electrónico a ${identifier} con un enlace directo y seguro de Firebase Authentication para redefinir su contraseña sin costo.`
+                : 'Su contraseña ha sido actualizada exitosamente. Ya puede acceder al sistema con su nuevo código.'}
             </p>
 
             <button

@@ -1,10 +1,11 @@
-// Versión Arquitectura: V21.28 - Verificación y Protección Anti-Doble Hashing en Pre-Save Hook Pasajero
+// Versión Arquitectura: V21.29 - Reconfiguración del Atributo UID con Unicidad y Dispersión Unificada
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva cifrado Bcrypt con guarda anti-doble hashing (isModified('password')
  * y detección de prefijo hash $2a$/$2b$), esquema de direcciones favoritas, soporte GeoJSON 2dsphere,
- * aprobación automática inmediata e inyecta soporte para la URL de foto_perfil y normalización de variables.
+ * aprobación automática inmediata, URL de foto_perfil y normalización de variables.
+ * Ajuste V21.29: Homologación del atributo 'uid' con { type: String, unique: true, sparse: true } para prevenir desbordamientos E11000.
  */
 
 import mongoose from 'mongoose';
@@ -99,6 +100,7 @@ const pasajeroSchema = new mongoose.Schema({
     },
     uid: {
         type: String,
+        unique: true,
         sparse: true
     },
     direccionesFavoritas: [direccionFavoritaSchema],

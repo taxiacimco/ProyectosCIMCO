@@ -1,15 +1,15 @@
-// Versión Arquitectura: V19.3 - Integración Quirúrgica: Agregación Global Dinámica de Capital Circulante
+// Versión Arquitectura: V19.4 - Integración Quirúrgica: Aprovisionamiento Explícito de UID Firebase en Registro
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
  * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, telemetría GPS, recargas atómicas y métricas de capital circulante.
- * Ajuste V19.3: Actualización de la pipeline de agregación en obtenerCapitalCirculante para calcular dinámicamente el saldo sobre la colección global Usuario, preservando la respuesta HTTP y la compatibilidad de respuesta.
+ * Ajuste V19.4: Importación de admin desde firebase.js y aprovisionamiento/validación explícita de UID de Firebase antes de instanciar la entidad Conductor para garantizar la coherencia de identidad Auth-NoSQL.
  */
 
 import mongoose from 'mongoose';
 import Conductor from '../../models/Conductor.js';
 import Usuario from '../../models/Usuario.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
-import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js'; 
+import admin, { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js'; 
 import { FieldValue } from 'firebase-admin/firestore'; 
 
 /**
@@ -251,6 +251,37 @@ export const registrarConductor = async (req, res) => {
             payloadSanitizado.estado = 'PENDIENTE';
             payloadSanitizado.estadoAdministrativo = 'PENDIENTE';
             payloadSanitizado.isActive = false;
+        }
+
+        // 🛡️ Aprovisionamiento y validación explícita del UID de Firebase antes de la instanciación
+        let targetUid = payloadSanitizado.uid || req.body?.uid;
+
+        if (!targetUid && payloadSanitizado.email && admin && admin.auth) {
+            try {
+                const emailLimpio = String(payloadSanitizado.email).toLowerCase().trim();
+                const userRecord = await admin.auth().getUserByEmail(emailLimpio);
+                targetUid = userRecord.uid;
+            } catch (authErr) {
+                if (authErr.code === 'auth/user-not-found') {
+                    try {
+                        const nuevoUsuarioAuth = await admin.auth().createUser({
+                            email: String(payloadSanitizado.email).toLowerCase().trim(),
+                            displayName: payloadSanitizado.nombre || 'Conductor CIMCO',
+                            phoneNumber: payloadSanitizado.telefonoMovil || payloadSanitizado.telefono || undefined,
+                            disabled: false
+                        });
+                        targetUid = nuevoUsuarioAuth.uid;
+                    } catch (createErr) {
+                        console.warn("⚠️ [FIREBASE-AUTH-CREATE-WARN] No se pudo aprovisionar usuario en Firebase Auth:", createErr.message);
+                    }
+                } else {
+                    console.warn("⚠️ [FIREBASE-AUTH-FETCH-WARN] Error consultando Firebase Auth por email:", authErr.message);
+                }
+            }
+        }
+
+        if (targetUid) {
+            payloadSanitizado.uid = targetUid;
         }
 
         const nuevoConductor = new Conductor(payloadSanitizado);

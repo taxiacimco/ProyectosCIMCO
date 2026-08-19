@@ -1,10 +1,10 @@
-// Versión Arquitectura: V21.29 - Integración Cifrado Bcrypt Anti-Doble Hashing en Pre-Save Hook Conductor
+// Versión Arquitectura: V21.30 - Reconfiguración del Atributo UID con Índice Disperso y Unicidad Criptográfica
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
- * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales) e inyecta
- * cifrado de contraseñas Bcrypt con guarda de seguridad anti-doble hashing (isModified('password') y expresión regular $2a$/$2b$/$2y$).
+ * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales, cifrado Bcrypt anti-doble hashing)
+ * e inyecta la definición estricta de 'uid' con unicidad dispersa (unique: true, sparse: true) para prevenir desbordamientos E11000.
  */
 
 import mongoose from 'mongoose';
@@ -135,7 +135,9 @@ const ConductorSchema = new mongoose.Schema({
         default: false 
     },
     uid: { 
-        type: String 
+        type: String,
+        unique: true,
+        sparse: true
     },
     flota_id: { 
         type: String, 

@@ -1,8 +1,8 @@
-// Versión Arquitectura: V18.4 - Control de Duplicidad E11000 y Resiliencia en Registro/Modificación de Pasajeros
+// Versión Arquitectura: V19.4 - Sincronización Explícita y Aprovisionamiento Firebase Auth en Registro de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
  * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera y blindaje contra colisiones de duplicidad E11000/Firebase Auth en peticiones concurrentes.
- * Ajuste V18.4: Envolver creación/registro/modificación en try/catch especializado. Captura de error.code === 11000 (Mongoose) y fallas de Firebase Auth con retorno HTTP 400 para evitar SYSTEM_FAULT (HTTP 500).
+ * Ajuste V19.4: Importación de admin desde firebase.js y aprovisionamiento explícito de UID vía Firebase Auth (getUserByEmail/createUser) si la petición nace desde el backend sin UID previo del frontend.
  */
 
 import mongoose from 'mongoose';
@@ -10,7 +10,7 @@ import Pasajero from '../../models/Pasajero.js';
 import Usuario from '../../models/Usuario.js';
 import Viaje from '../../models/Viaje.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
-import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
+import admin, { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 import { FieldValue } from 'firebase-admin/firestore';
 
 /**
@@ -168,13 +168,60 @@ export const registrarPasajero = async (req, res) => {
             }
         }
 
-        // 3. Crear el documento en MongoDB
+        // 3. Aprovisionamiento y sincronización explícita con Firebase Auth si no viene desde el cliente
+        let targetUid = uid ? String(uid).trim() : undefined;
+
+        if (!targetUid && admin && admin.auth) {
+            if (emailSanitizado) {
+                try {
+                    const userRecord = await admin.auth().getUserByEmail(emailSanitizado);
+                    targetUid = userRecord.uid;
+                } catch (authErr) {
+                    if (authErr.code === 'auth/user-not-found') {
+                        try {
+                            const nuevoUsuarioAuth = await admin.auth().createUser({
+                                email: emailSanitizado,
+                                displayName: String(nombre).trim(),
+                                phoneNumber: (telContacto && telContacto.startsWith('+')) ? telContacto : undefined,
+                                password: password || undefined,
+                                disabled: false
+                            });
+                            targetUid = nuevoUsuarioAuth.uid;
+                        } catch (createErr) {
+                            console.warn("⚠️ [FIREBASE-AUTH-CREATE-WARN] No se pudo aprovisionar usuario en Firebase Auth:", createErr.message);
+                        }
+                    } else {
+                        console.warn("⚠️ [FIREBASE-AUTH-FETCH-WARN] Error consultando Firebase Auth por email:", authErr.message);
+                    }
+                }
+            } else if (telContacto && telContacto.startsWith('+')) {
+                try {
+                    const userRecord = await admin.auth().getUserByPhoneNumber(telContacto);
+                    targetUid = userRecord.uid;
+                } catch (authErr) {
+                    if (authErr.code === 'auth/user-not-found') {
+                        try {
+                            const nuevoUsuarioAuth = await admin.auth().createUser({
+                                displayName: String(nombre).trim(),
+                                phoneNumber: telContacto,
+                                disabled: false
+                            });
+                            targetUid = nuevoUsuarioAuth.uid;
+                        } catch (createErr) {
+                            console.warn("⚠️ [FIREBASE-AUTH-CREATE-WARN] No se pudo aprovisionar usuario en Firebase Auth por teléfono:", createErr.message);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Crear el documento en MongoDB
         const nuevoPasajero = new Pasajero({
             nombre: String(nombre).trim(),
             email: emailSanitizado || undefined,
             telefonoMovil: telContacto || undefined,
             telefono: telContacto || undefined,
-            uid: uid ? String(uid).trim() : undefined,
+            uid: targetUid,
             direccion: direccion ? String(direccion).trim() : '',
             fotoPerfil: fotoPerfil || '',
             rol: 'pasajero',
@@ -183,7 +230,7 @@ export const registrarPasajero = async (req, res) => {
 
         await nuevoPasajero.save();
 
-        // 4. Réplica de perfil inicial en Firebase Firestore
+        // 5. Réplica de perfil inicial en Firebase Firestore
         try {
             const docFirestoreId = nuevoPasajero.uid || nuevoPasajero._id.toString();
             const coleccionUsuarios = FIRESTORE_PATHS?.users || 'usuarios';

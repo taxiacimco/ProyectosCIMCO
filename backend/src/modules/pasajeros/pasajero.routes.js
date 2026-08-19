@@ -1,8 +1,8 @@
-// Versión Arquitectura: V18.4 - Enrutador Protegido, Estandarizado y Deduplicado de Pasajeros
+// Versión Arquitectura: V19.4 - Canalización con Middleware Anti-Duplicados Unificado para Registro de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.routes.js
  * Misión: Exposición de endpoints para perfil, direcciones favoritas, historial, registro y billetera virtual de pasajeros.
- * Ajuste V18.4: Estandarización de rutas protegidas (/saldo, /perfil, /direcciones, /historial, /registro), preservación de middleware verificarToken/esAdmin y compatibilidad con controlador resiliente V18.4.
+ * Ajuste V19.4: Incorporación obligatoria del middleware `validarPasajeroUnico` previo a `registrarPasajero` en las rutas de registro ('/', '/registro', '/registrar') para prevenir colisiones de datos personales y duplicados en DB/Firebase.
  */
 
 import { Router } from 'express';
@@ -26,8 +26,9 @@ const router = Router();
 router.get('/', verificarToken, esAdmin, obtenerPasajeros);
 
 // 📝 REGISTRO Y VALIDACIÓN DE UNICIDAD DE PASAJEROS
-router.post('/', registrarPasajero);
-router.post('/registro', registrarPasajero);
+router.post('/', validarPasajeroUnico, registrarPasajero);
+router.post('/registro', validarPasajeroUnico, registrarPasajero);
+router.post('/registrar', validarPasajeroUnico, registrarPasajero);
 router.post('/validar-unico', validarPasajeroUnico);
 
 // 💰 RUTAS DE SALDO Y BILLETERA (Definidas antes de parámetros dinámicos)

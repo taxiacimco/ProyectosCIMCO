@@ -1,12 +1,12 @@
-// Versión Arquitectura: V21.30 - Integración Quirúrgica Método checkPhone y Búsqueda Polimórfica Dual
+// Versión Arquitectura: V21.32 - Corrección de Importación ESM en Firebase Admin SDK y Aprovisionamiento UID
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
  * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono) y actualización segura de perfiles.
- * Ajuste V21.30: Integración quirúrgica del método checkPhone preservando la compatibilidad de módulos ES, consulta
- * multitabla polimórfica concurrente y tolerancia de payloads híbridos (ok/success, mensaje/message, telefono/phone/telefonoMovil).
+ * Ajuste V21.32: Corrección de la firma de importación ESM de Firebase Admin SDK (resolviendo named export undefined error)
+ * y preservación del aprovisionamiento automático de 'uid' vía Firebase Admin SDK (createUser).
  */
 
 import jwt from 'jsonwebtoken';
@@ -15,7 +15,9 @@ import bcrypt from 'bcryptjs';
 import Conductor from '../../models/Conductor.js';
 import Usuario from '../../models/Usuario.js';
 import Pasajero from '../../models/Pasajero.js';
-import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
+import admin, { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
+
+const firebaseAdmin = admin?.default || admin;
 
 // 🔒 BLINDAJE DE FIRMA: Si la variable de entorno no está definida, el servidor aborta
 if (!process.env.JWT_SECRET) {
@@ -45,11 +47,13 @@ setInterval(() => {
 /**
  * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO
  * Lógica anti-doble hashing: Se delega el cifrado al middleware pre('save') del modelo Mongoose.
+ * Inyección Aprovisionada de UID Firebase Admin SDK.
  */
 export const register = async (req, res) => {
     try {
         const body = req.body || {};
         const { 
+            uid: bodyUid,
             email, 
             telefono,
             telefonoMovil,
@@ -147,6 +151,54 @@ export const register = async (req, res) => {
         // 🛡️ SIN DOBLE HASHING: Se pasa la contraseña plana para que el Hook pre('save') la encripte
         const plainPassword = String(password);
 
+        // 🔑 APROVISIONAMIENTO Y VINCULACIÓN DE UID FIREBASE ADMIN SDK
+        let finalUid = bodyUid ? String(bodyUid).trim() : null;
+
+        if (!finalUid && firebaseAdmin && typeof firebaseAdmin.auth === 'function') {
+            try {
+                const createOptions = {
+                    email: emailLimpio,
+                    password: plainPassword,
+                    displayName: nombreFinal
+                };
+
+                const cleanDigits = telFinal.replace(/\D/g, '');
+                if (cleanDigits.length >= 10) {
+                    createOptions.phoneNumber = cleanDigits.startsWith('57') ? `+${cleanDigits}` : `+57${cleanDigits}`;
+                }
+
+                const userRecord = await firebaseAdmin.auth().createUser(createOptions);
+                if (userRecord && userRecord.uid) {
+                    finalUid = userRecord.uid;
+                }
+            } catch (fbAuthErr) {
+                if (fbAuthErr.code === 'auth/email-already-exists') {
+                    try {
+                        const existingFbUser = await firebaseAdmin.auth().getUserByEmail(emailLimpio);
+                        if (existingFbUser && existingFbUser.uid) {
+                            finalUid = existingFbUser.uid;
+                        }
+                    } catch (getErr) {
+                        console.warn("⚠️ [CIMCO-AUTH-WARN] No se pudo consultar usuario existente por email en Firebase Auth:", getErr.message);
+                    }
+                } else if (fbAuthErr.code === 'auth/phone-number-already-exists') {
+                    try {
+                        const formattedPhone = telFinal.replace(/\D/g, '').startsWith('57') 
+                            ? `+${telFinal.replace(/\D/g, '')}` 
+                            : `+57${telFinal.replace(/\D/g, '')}`;
+                        const existingFbUser = await firebaseAdmin.auth().getUserByPhoneNumber(formattedPhone);
+                        if (existingFbUser && existingFbUser.uid) {
+                            finalUid = existingFbUser.uid;
+                        }
+                    } catch (getErr) {
+                        console.warn("⚠️ [CIMCO-AUTH-WARN] No se pudo consultar teléfono existente en Firebase Auth:", getErr.message);
+                    }
+                } else {
+                    console.warn("⚠️ [CIMCO-AUTH-WARN] Creación de usuario en Firebase Auth omitida/fallida:", fbAuthErr.message);
+                }
+            }
+        }
+
         let nuevoUsuario;
         let esPasajero = false;
         let esConductor = false;
@@ -154,6 +206,7 @@ export const register = async (req, res) => {
         // 🟢 ROL: PASAJERO (Aprobación e Ingreso Inmediato)
         if (rolNormalizado === 'pasajero') {
             nuevoUsuario = new Pasajero({
+                ...(finalUid ? { uid: finalUid } : {}),
                 nombre: nombreFinal,
                 fullName: nombreFinal,
                 email: emailLimpio,
@@ -185,6 +238,7 @@ export const register = async (req, res) => {
             }
 
             nuevoUsuario = new Conductor({
+                ...(finalUid ? { uid: finalUid } : {}),
                 nombre: nombreFinal,
                 fullName: nombreFinal,
                 email: emailLimpio,
@@ -224,6 +278,7 @@ export const register = async (req, res) => {
             const nivelPredeterminado = (rolNormalizado === 'admin' || rolNormalizado === 'ceo') ? 99 : (rolNormalizado === 'staff' ? 50 : (rolNormalizado === 'despachador' ? 30 : 10));
 
             nuevoUsuario = new Usuario({
+                ...(finalUid ? { uid: finalUid } : {}),
                 nombre: nombreFinal,
                 fullName: nombreFinal,
                 email: emailLimpio,
@@ -252,12 +307,13 @@ export const register = async (req, res) => {
         // 🛡️ SINCRONIZACIÓN HACIA FIREBASE FIRESTORE AISLADA EN TRY/CATCH SECUNDARIO (SIN ABORTAR MONGO)
         if (dbFirestore) {
             try {
+                const targetUid = nuevoUsuario.uid || finalUid || String(nuevoUsuario._id);
                 const coleccionFirestore = esPasajero 
                     ? (FIRESTORE_PATHS?.users || 'usuarios') 
                     : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
 
                 const payloadFirestore = {
-                    uid: String(nuevoUsuario._id),
+                    uid: targetUid,
                     email: nuevoUsuario.email,
                     nombre: nuevoUsuario.nombre,
                     fullName: nuevoUsuario.nombre,
@@ -285,12 +341,12 @@ export const register = async (req, res) => {
                     payloadFirestore.doc_identificacion = doc_identificacion || null;
                 }
 
-                await dbFirestore.collection(coleccionFirestore).doc(String(nuevoUsuario._id)).set(payloadFirestore);
+                await dbFirestore.collection(coleccionFirestore).doc(targetUid).set(payloadFirestore);
 
                 // Denormalización de Billetera/Wallet en Firestore
                 const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-                await dbFirestore.collection(pathBilleteras).doc(String(nuevoUsuario._id)).set({
-                    id: String(nuevoUsuario._id),
+                await dbFirestore.collection(pathBilleteras).doc(targetUid).set({
+                    id: targetUid,
                     nombreUsuario: nuevoUsuario.nombre,
                     rolUsuario: nuevoUsuario.rol,
                     balance: 0,
@@ -310,6 +366,7 @@ export const register = async (req, res) => {
                 message: "Registro recibido. Su cuenta está en revisión por la administración.",
                 data: {
                     id: nuevoUsuario._id,
+                    uid: nuevoUsuario.uid || finalUid || nuevoUsuario._id,
                     nombre: nuevoUsuario.nombre,
                     email: nuevoUsuario.email,
                     telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
@@ -327,6 +384,7 @@ export const register = async (req, res) => {
             message: "Registro e ingreso completado con éxito.",
             data: {
                 id: nuevoUsuario._id,
+                uid: nuevoUsuario.uid || finalUid || nuevoUsuario._id,
                 nombre: nuevoUsuario.nombre,
                 email: nuevoUsuario.email,
                 telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
@@ -460,7 +518,7 @@ export const login = async (req, res) => {
 
         const tokenPayload = {
             id: String(cuentaEncontrada._id),
-            uid: String(cuentaEncontrada._id),
+            uid: String(cuentaEncontrada.uid || cuentaEncontrada._id),
             email: cuentaEncontrada.email,
             rol: rolFinal,
             subrol: cuentaEncontrada.subrol || null,
@@ -475,6 +533,7 @@ export const login = async (req, res) => {
             token,
             user: {
                 id: cuentaEncontrada._id,
+                uid: cuentaEncontrada.uid || cuentaEncontrada._id,
                 nombre: cuentaEncontrada.nombre || cuentaEncontrada.fullName,
                 email: cuentaEncontrada.email,
                 telefono: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono,
@@ -841,6 +900,7 @@ export const updateProfile = async (req, res) => {
         // Sincronización secundaria hacia Firebase Firestore (Aislada en Try/Catch)
         if (dbFirestore) {
             try {
+                const targetUid = usuarioActualizado.uid || String(usuarioActualizado._id);
                 const esPasajero = usuarioActualizado.rol === 'pasajero' || usuarioActualizado.role === 'pasajero';
                 const esConductor = ROLES_CONDUCTORES.includes(usuarioActualizado.rol) || ROLES_CONDUCTORES.includes(usuarioActualizado.role);
 
@@ -848,7 +908,7 @@ export const updateProfile = async (req, res) => {
                     ? (FIRESTORE_PATHS?.users || 'usuarios') 
                     : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
 
-                await dbFirestore.collection(coleccionFirestore).doc(String(usuarioActualizado._id)).set({
+                await dbFirestore.collection(coleccionFirestore).doc(targetUid).set({
                     nombre: usuarioActualizado.nombre,
                     fullName: usuarioActualizado.nombre,
                     telefono: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono,
@@ -869,6 +929,7 @@ export const updateProfile = async (req, res) => {
             message: "Perfil de central actualizado con éxito en todos los nodos de datos.",
             user: {
                 id: usuarioActualizado._id,
+                uid: usuarioActualizado.uid || usuarioActualizado._id,
                 nombre: usuarioActualizado.nombre,
                 email: usuarioActualizado.email,
                 rol: usuarioActualizado.rol || usuarioActualizado.role || rolNormalizado,
