@@ -1,7 +1,7 @@
-/* Versión Arquitectura: V11.1 - Ajuste de Fondo Global a Slate Suave y Saneamiento de Tipografía Sans-Serif */
+/* Versión Arquitectura: V11.2 - Incorporación de Clase Utilidad .no-scrollbar y Preservación CIMCO-UI V9.3 */
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\index.css
- * Misión: Actualización del background core a Azul Noche/Slate profundo (#0F172A) manteniendo la tipografía moderna sans-serif y abstracciones CIMCO-UI V9.3.
+ * Misión: Actualización del background core a Azul Noche/Slate profundo (#0F172A) manteniendo la tipografía moderna sans-serif, abstracciones CIMCO-UI V9.3 y utilidad no-scrollbar para tabs/contenedores deslizables.
  */
 
 @import "tailwindcss";
@@ -65,6 +65,15 @@
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(34, 211, 238, 0.4); /* Brillo cian reactivo */
+  }
+
+  /* 🚫 Ocultar barra de scroll para contenedores deslizables (Header Tabs y Grillas) */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* Internet Explorer y Edge */
+    scrollbar-width: none;  /* Firefox */
   }
 }
 

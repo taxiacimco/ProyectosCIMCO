@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.4 - Corrección Ciclo de Vida Leaflet / React 18
+// Versión Arquitectura: V19.5 - Recalibración Automática invalidateSize y Muestreo Táctico Leaflet
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
- * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled y prevención 
- *         de colisiones de contenedor en React 18 / React-Leaflet.
+ * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled, prevención 
+ *         de colisiones de contenedor en React 18 / React-Leaflet y recalibración de tiles (invalidateSize).
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -59,12 +59,18 @@ const MapReferenceBinder = ({ onMapReady }) => {
         if (onMapReady) {
             onMapReady(map);
         }
+        const timer = setTimeout(() => {
+            if (map) {
+                map.invalidateSize();
+            }
+        }, 200);
+        return () => clearTimeout(timer);
     }, [map, onMapReady]);
 
     return null;
 };
 
-const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -73.34], zoom = 13 }) => {
+const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -73.34], zoom = 13, activeTab = null }) => {
     const [busqueda, setBusqueda] = useState('');
     const [loading, setLoading] = useState(true);
     const [errorServicio, setErrorServicio] = useState(null);
@@ -86,6 +92,18 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
             mapInstanceRef.current = null;
         };
     }, []);
+
+    // 🚀 RECALIBRACIÓN TÁCTICA DEL LIENZO: Asegura el ajuste correcto de mosaicos al conmutar pestaña o redimensionar
+    useEffect(() => {
+        if (mapInstanceRef.current) {
+            const timer = setTimeout(() => {
+                if (mapInstanceRef.current) {
+                    mapInstanceRef.current.invalidateSize();
+                }
+            }, 200);
+            return () => clearTimeout(timer);
+        }
+    }, [activeTab]);
 
     // Sincronización Firestore en Tiempo Real
     useEffect(() => {

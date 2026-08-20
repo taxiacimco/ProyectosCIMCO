@@ -1,7 +1,7 @@
-// Versión Arquitectura: V13.8 - Fix Integración de Iconos Lucide-React y Sanitización de Importaciones
+// Versión Arquitectura: V13.9 - Integración de Desplazamiento Horizontal Táctico (overflow-x-auto, no-scrollbar, whitespace-nowrap) en Bus de Navegación Header
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
- * Misión: Corregir SyntaxError de 'ReceiptCheck' en lucide-react reemplazándolo por 'Receipt', manteniendo el orquestador de dashboard CEO 100% funcional.
+ * Misión: Optimizar el bus de navegación superior integrando control de desbordamiento horizontal suave, supresión de scrollbars nativas y empaquetado sin salto de línea.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -185,7 +185,7 @@ const AdminDashboard = () => {
                 </div>
 
                 {/* Bus de Navegación: Pestañas Superiores Sanitizadas */}
-                <nav className="flex items-center bg-zinc-950/60 p-1 rounded-xl border border-white/5 max-w-full overflow-x-auto no-scrollbar">
+                <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar whitespace-nowrap py-2 px-1 bg-zinc-950/60 rounded-xl border border-white/5 max-w-full">
                     {pestañasPermitidas.map((tab) => {
                         const IconComponent = tab.icon;
                         const esActiva = pestanaActiva === tab.id;
