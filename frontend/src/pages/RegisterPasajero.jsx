@@ -1,10 +1,11 @@
-// Versión Arquitectura: V13.1 - Corrección de Endpoints /auth y Optimización UX de Redirección a Login
+// Versión Arquitectura: V13.2 - Transferencia de Línea Móvil a Login al Detectar Duplicado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterPasajero.jsx
  * Misión: Flujo de Registro de Pasajeros en 2 pasos con alta legibilidad visual (Light Glassmorphism),
  * psicología de color enfocada en Seguridad SSL (Esmeralda), Confianza (Índigo) y Agilidad (Ámbar),
  * verificación previa de línea móvil contra el backend (/auth/check-phone), carga de foto de perfil,
- * mejorada la UX de redirección a Login si la línea móvil ya existe y login automático posregistro.
+ * mejorada la UX de redirección a Login con transferencia del número de teléfono digitado en el state de navegación,
+ * e integración de login automático posregistro.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -188,7 +189,7 @@ const RegisterPasajero = () => {
                     loginLocal(token, userData);
                     navigate('/pasajero/dashboard');
                 } else {
-                    navigate('/login');
+                    navigate('/login', { state: { phone: telefonoLimpio } });
                 }
             } else {
                 setError(resData?.message || "Rechazo de la central al crear tu cuenta de pasajero.");
@@ -261,7 +262,7 @@ const RegisterPasajero = () => {
                     </div>
                 </div>
 
-                {/* Banner de Mensaje de Error y Acción Directa a Login */}
+                {/* Banner de Mensaje de Error y Acción Directa a Login con Estado */}
                 {error && (
                     <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 p-3.5 rounded-2xl text-xs font-mono font-medium flex flex-col gap-2.5 animate-in fade-in">
                         <div className="flex items-center gap-2.5">
@@ -270,12 +271,13 @@ const RegisterPasajero = () => {
                         </div>
 
                         {telefonoExiste && (
-                            <Link 
-                                to="/login" 
-                                className="mt-1 inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 px-4 rounded-xl text-xs font-mono font-bold uppercase transition-all shadow-md shadow-indigo-500/20 text-decoration-none"
+                            <button 
+                                type="button"
+                                onClick={() => navigate('/login', { state: { phone: celular?.trim() } })}
+                                className="mt-1 w-full inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 px-4 rounded-xl text-xs font-mono font-bold uppercase transition-all shadow-md shadow-indigo-500/20 cursor-pointer"
                             >
                                 <LogIn size={15} /> Iniciar Sesión Ahora
-                            </Link>
+                            </button>
                         )}
                     </div>
                 )}
@@ -436,9 +438,13 @@ const RegisterPasajero = () => {
                 {/* Footer / Login Link */}
                 <div className="mt-8 pt-4 border-t border-slate-200/60 text-center">
                     <span className="text-[11px] text-slate-500 font-mono">¿Ya tienes una cuenta activada? </span>
-                    <Link to="/login" className="text-[11px] font-mono font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-wide transition-colors">
+                    <button 
+                        type="button" 
+                        onClick={() => navigate('/login', { state: { phone: celular?.trim() } })}
+                        className="text-[11px] font-mono font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-wide transition-colors bg-transparent border-0 p-0 cursor-pointer inline"
+                    >
                         Loguear Entrada
-                    </Link>
+                    </button>
                 </div>
 
             </div>

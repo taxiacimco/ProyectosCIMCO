@@ -1,12 +1,12 @@
-// Versión Arquitectura: V21.32 - Corrección de Importación ESM en Firebase Admin SDK y Aprovisionamiento UID
+// Versión Arquitectura: V21.33 - Integración Quirúrgica de Sincronización Firebase Admin y Upsert de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
  * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono) y actualización segura de perfiles.
- * Ajuste V21.32: Corrección de la firma de importación ESM de Firebase Admin SDK (resolviendo named export undefined error)
- * y preservación del aprovisionamiento automático de 'uid' vía Firebase Admin SDK (createUser).
+ * Ajuste V21.33: Integración quirúrgica para sincronización previa con Firebase Authentication (getUserByEmail / createUser) 
+ * y vinculación atómica upsert de 'firebaseUid' en Pasajero para registros de pasajeros, preservando el ecosistema de 3 colecciones y validaciones previas.
  */
 
 import jwt from 'jsonwebtoken';
@@ -45,9 +45,9 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 /**
- * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO
+ * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO Y SINCRO FIREBASE AUTH
  * Lógica anti-doble hashing: Se delega el cifrado al middleware pre('save') del modelo Mongoose.
- * Inyección Aprovisionada de UID Firebase Admin SDK.
+ * Inyección Aprovisionada de UID / firebaseUid vía Firebase Admin SDK.
  */
 export const register = async (req, res) => {
     try {
@@ -152,49 +152,51 @@ export const register = async (req, res) => {
         const plainPassword = String(password);
 
         // 🔑 APROVISIONAMIENTO Y VINCULACIÓN DE UID FIREBASE ADMIN SDK
+        let firebaseUser;
         let finalUid = bodyUid ? String(bodyUid).trim() : null;
 
-        if (!finalUid && firebaseAdmin && typeof firebaseAdmin.auth === 'function') {
+        if (firebaseAdmin && typeof firebaseAdmin.auth === 'function') {
             try {
-                const createOptions = {
-                    email: emailLimpio,
-                    password: plainPassword,
-                    displayName: nombreFinal
-                };
+                // Paso 1: Asegurar que el usuario exista en Firebase Authentication
+                try {
+                    firebaseUser = await firebaseAdmin.auth().getUserByEmail(emailLimpio);
+                } catch (err) {
+                    if (err.code === 'auth/user-not-found') {
+                        const createOptions = {
+                            email: emailLimpio,
+                            password: plainPassword,
+                            displayName: nombreFinal,
+                        };
 
-                const cleanDigits = telFinal.replace(/\D/g, '');
-                if (cleanDigits.length >= 10) {
-                    createOptions.phoneNumber = cleanDigits.startsWith('57') ? `+${cleanDigits}` : `+57${cleanDigits}`;
+                        const cleanDigits = telFinal.replace(/\D/g, '');
+                        if (cleanDigits.length >= 10) {
+                            createOptions.phoneNumber = cleanDigits.startsWith('57') ? `+${cleanDigits}` : `+57${cleanDigits}`;
+                        }
+
+                        firebaseUser = await firebaseAdmin.auth().createUser(createOptions);
+                    } else {
+                        throw err;
+                    }
                 }
 
-                const userRecord = await firebaseAdmin.auth().createUser(createOptions);
-                if (userRecord && userRecord.uid) {
-                    finalUid = userRecord.uid;
+                if (firebaseUser && firebaseUser.uid) {
+                    finalUid = firebaseUser.uid;
                 }
             } catch (fbAuthErr) {
-                if (fbAuthErr.code === 'auth/email-already-exists') {
-                    try {
-                        const existingFbUser = await firebaseAdmin.auth().getUserByEmail(emailLimpio);
-                        if (existingFbUser && existingFbUser.uid) {
-                            finalUid = existingFbUser.uid;
-                        }
-                    } catch (getErr) {
-                        console.warn("⚠️ [CIMCO-AUTH-WARN] No se pudo consultar usuario existente por email en Firebase Auth:", getErr.message);
-                    }
-                } else if (fbAuthErr.code === 'auth/phone-number-already-exists') {
+                if (fbAuthErr.code === 'auth/phone-number-already-exists') {
                     try {
                         const formattedPhone = telFinal.replace(/\D/g, '').startsWith('57') 
                             ? `+${telFinal.replace(/\D/g, '')}` 
                             : `+57${telFinal.replace(/\D/g, '')}`;
-                        const existingFbUser = await firebaseAdmin.auth().getUserByPhoneNumber(formattedPhone);
-                        if (existingFbUser && existingFbUser.uid) {
-                            finalUid = existingFbUser.uid;
+                        firebaseUser = await firebaseAdmin.auth().getUserByPhoneNumber(formattedPhone);
+                        if (firebaseUser && firebaseUser.uid) {
+                            finalUid = firebaseUser.uid;
                         }
                     } catch (getErr) {
                         console.warn("⚠️ [CIMCO-AUTH-WARN] No se pudo consultar teléfono existente en Firebase Auth:", getErr.message);
                     }
                 } else {
-                    console.warn("⚠️ [CIMCO-AUTH-WARN] Creación de usuario en Firebase Auth omitida/fallida:", fbAuthErr.message);
+                    console.warn("⚠️ [CIMCO-AUTH-WARN] Error en proceso de registro/sincronización Firebase Auth:", fbAuthErr.message);
                 }
             }
         }
@@ -203,29 +205,40 @@ export const register = async (req, res) => {
         let esPasajero = false;
         let esConductor = false;
 
-        // 🟢 ROL: PASAJERO (Aprobación e Ingreso Inmediato)
+        // 🟢 ROL: PASAJERO (Aprobación e Ingreso Inmediato con Upsert Vinculado)
         if (rolNormalizado === 'pasajero') {
-            nuevoUsuario = new Pasajero({
-                ...(finalUid ? { uid: finalUid } : {}),
-                nombre: nombreFinal,
-                fullName: nombreFinal,
-                email: emailLimpio,
-                password: plainPassword,
-                telefonoMovil: telFinal,
-                telefono: telFinal,
-                rol: 'pasajero',
-                role: 'pasajero',
-                isActive: true,
-                estado: 'APROBADO',
-                cooperativa: terminalSedeFinal,
-                empresa: terminalSedeFinal,
-                terminal_sede: terminalSedeFinal,
-                saldo: 0,
-                foto_perfil,
-                doc_identificacion,
-                documento_cedula: documento_cedula || doc_identificacion,
-                access_level: parsedAccessLevel ?? 1
-            });
+            nuevoUsuario = await Pasajero.findOneAndUpdate(
+                { email: emailLimpio },
+                {
+                    nombre: nombreFinal,
+                    fullName: nombreFinal,
+                    email: emailLimpio,
+                    password: plainPassword,
+                    telefonoMovil: telFinal,
+                    telefono: telFinal,
+                    rol: 'pasajero',
+                    role: 'pasajero',
+                    firebaseUid: finalUid || undefined,
+                    uid: finalUid || undefined,
+                    estado: 'APROBADO',
+                    isActive: true,
+                    cooperativa: terminalSedeFinal,
+                    empresa: terminalSedeFinal,
+                    terminal_sede: terminalSedeFinal,
+                    saldo: 0,
+                    foto_perfil,
+                    doc_identificacion,
+                    documento_cedula: documento_cedula || doc_identificacion,
+                    access_level: parsedAccessLevel ?? 1
+                },
+                { upsert: true, new: true, runValidators: true }
+            );
+            
+            // Garantizar ejecución del hook de password o guardado directo si fue un documento instanciado
+            if (nuevoUsuario.isModified && nuevoUsuario.isModified('password')) {
+                await nuevoUsuario.save();
+            }
+
             esPasajero = true;
         } 
         // 🔴 ROL: CONDUCTOR (Requiere Aprobación Manual por Admin/Secretaría)
@@ -238,7 +251,7 @@ export const register = async (req, res) => {
             }
 
             nuevoUsuario = new Conductor({
-                ...(finalUid ? { uid: finalUid } : {}),
+                ...(finalUid ? { uid: finalUid, firebaseUid: finalUid } : {}),
                 nombre: nombreFinal,
                 fullName: nombreFinal,
                 email: emailLimpio,
@@ -271,6 +284,7 @@ export const register = async (req, res) => {
                 isOnline: false,
                 saldo: 0
             });
+            await nuevoUsuario.save();
             esConductor = true;
         } 
         // 🏢 OTROS ROLES DEL SISTEMA (Admins, Secretarías, Despachadores, Staff)
@@ -278,7 +292,7 @@ export const register = async (req, res) => {
             const nivelPredeterminado = (rolNormalizado === 'admin' || rolNormalizado === 'ceo') ? 99 : (rolNormalizado === 'staff' ? 50 : (rolNormalizado === 'despachador' ? 30 : 10));
 
             nuevoUsuario = new Usuario({
-                ...(finalUid ? { uid: finalUid } : {}),
+                ...(finalUid ? { uid: finalUid, firebaseUid: finalUid } : {}),
                 nombre: nombreFinal,
                 fullName: nombreFinal,
                 email: emailLimpio,
@@ -299,21 +313,20 @@ export const register = async (req, res) => {
                 documento_cedula: documento_cedula || doc_identificacion,
                 access_level: parsedAccessLevel ?? nivelPredeterminado
             });
+            await nuevoUsuario.save();
         }
-
-        // Persistencia primaria en MongoDB Atlas
-        await nuevoUsuario.save();
 
         // 🛡️ SINCRONIZACIÓN HACIA FIREBASE FIRESTORE AISLADA EN TRY/CATCH SECUNDARIO (SIN ABORTAR MONGO)
         if (dbFirestore) {
             try {
-                const targetUid = nuevoUsuario.uid || finalUid || String(nuevoUsuario._id);
+                const targetUid = nuevoUsuario.uid || nuevoUsuario.firebaseUid || finalUid || String(nuevoUsuario._id);
                 const coleccionFirestore = esPasajero 
                     ? (FIRESTORE_PATHS?.users || 'usuarios') 
                     : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
 
                 const payloadFirestore = {
                     uid: targetUid,
+                    firebaseUid: targetUid,
                     email: nuevoUsuario.email,
                     nombre: nuevoUsuario.nombre,
                     fullName: nuevoUsuario.nombre,
@@ -366,7 +379,7 @@ export const register = async (req, res) => {
                 message: "Registro recibido. Su cuenta está en revisión por la administración.",
                 data: {
                     id: nuevoUsuario._id,
-                    uid: nuevoUsuario.uid || finalUid || nuevoUsuario._id,
+                    uid: nuevoUsuario.uid || nuevoUsuario.firebaseUid || finalUid || nuevoUsuario._id,
                     nombre: nuevoUsuario.nombre,
                     email: nuevoUsuario.email,
                     telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
@@ -381,23 +394,12 @@ export const register = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: "Registro e ingreso completado con éxito.",
-            data: {
-                id: nuevoUsuario._id,
-                uid: nuevoUsuario.uid || finalUid || nuevoUsuario._id,
-                nombre: nuevoUsuario.nombre,
-                email: nuevoUsuario.email,
-                telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
-                rol: nuevoUsuario.rol,
-                estado: nuevoUsuario.estado,
-                isActive: nuevoUsuario.isActive,
-                terminal_sede: nuevoUsuario.terminal_sede || nuevoUsuario.cooperativa,
-                foto_perfil: nuevoUsuario.foto_perfil || null
-            }
+            message: "Usuario registrado y sincronizado en Firebase Auth.",
+            data: nuevoUsuario
         });
 
     } catch (error) {
-        console.error("🚨 [CIMCO-AUTH-REGISTER-FATAL] Error en el registro de usuarios:", error);
+        console.error("🚨 [CIMCO-AUTH-REGISTER-FATAL] Error en el proceso de registro/sincronización:", error);
 
         // 🛑 INTERCEPCIÓN DE CLAVE DUPLICADA EN MONGO (code 11000)
         if (error.code === 11000 || error.code === '11000') {
@@ -412,7 +414,7 @@ export const register = async (req, res) => {
             });
         }
 
-        return res.status(500).json({ success: false, message: "Error interno del servidor al procesar el registro." });
+        return res.status(500).json({ success: false, message: error.message || "Error interno del servidor al procesar el registro." });
     }
 };
 
@@ -518,7 +520,7 @@ export const login = async (req, res) => {
 
         const tokenPayload = {
             id: String(cuentaEncontrada._id),
-            uid: String(cuentaEncontrada.uid || cuentaEncontrada._id),
+            uid: String(cuentaEncontrada.uid || cuentaEncontrada.firebaseUid || cuentaEncontrada._id),
             email: cuentaEncontrada.email,
             rol: rolFinal,
             subrol: cuentaEncontrada.subrol || null,
@@ -533,7 +535,7 @@ export const login = async (req, res) => {
             token,
             user: {
                 id: cuentaEncontrada._id,
-                uid: cuentaEncontrada.uid || cuentaEncontrada._id,
+                uid: cuentaEncontrada.uid || cuentaEncontrada.firebaseUid || cuentaEncontrada._id,
                 nombre: cuentaEncontrada.nombre || cuentaEncontrada.fullName,
                 email: cuentaEncontrada.email,
                 telefono: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono,
@@ -900,7 +902,7 @@ export const updateProfile = async (req, res) => {
         // Sincronización secundaria hacia Firebase Firestore (Aislada en Try/Catch)
         if (dbFirestore) {
             try {
-                const targetUid = usuarioActualizado.uid || String(usuarioActualizado._id);
+                const targetUid = usuarioActualizado.uid || usuarioActualizado.firebaseUid || String(usuarioActualizado._id);
                 const esPasajero = usuarioActualizado.rol === 'pasajero' || usuarioActualizado.role === 'pasajero';
                 const esConductor = ROLES_CONDUCTORES.includes(usuarioActualizado.rol) || ROLES_CONDUCTORES.includes(usuarioActualizado.role);
 
@@ -929,7 +931,7 @@ export const updateProfile = async (req, res) => {
             message: "Perfil de central actualizado con éxito en todos los nodos de datos.",
             user: {
                 id: usuarioActualizado._id,
-                uid: usuarioActualizado.uid || usuarioActualizado._id,
+                uid: usuarioActualizado.uid || usuarioActualizado.firebaseUid || usuarioActualizado._id,
                 nombre: usuarioActualizado.nombre,
                 email: usuarioActualizado.email,
                 rol: usuarioActualizado.rol || usuarioActualizado.role || rolNormalizado,

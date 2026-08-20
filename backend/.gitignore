@@ -6,8 +6,10 @@ node_modules/
 
 # Credenciales y Secretos de Producción / Firebase Admin
 .env
+.env.*
 serviceAccountKey.json
 *.pem
+*.key
 
 # Logs de ejecución
 *-debug.log

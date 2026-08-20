@@ -8,6 +8,11 @@ dist-ssr/
 .vite/
 *.local
 
+# Credenciales y Claves Privadas (Prevención Accidental)
+serviceAccountKey.json
+*.pem
+*.key
+
 # Despliegue en Vercel
 .vercel/
 
@@ -16,7 +21,9 @@ dist-ssr/
 .env.local
 .env.development
 .env.production.local
+.env.*.local
 
 # Logs locales
 *-debug.log
 npm-debug.log*
+*.log

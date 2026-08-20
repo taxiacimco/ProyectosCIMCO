@@ -1,8 +1,9 @@
-// Versión Arquitectura: V9.9 - Unificación de Redirecciones Maestro y Eliminación de Redundancia LocalStorage
+// Versión Arquitectura: V10.0 - Integración de Captura de Estado de Redirección (location.state.phone)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
  * Misión: Pantalla de Autenticación de Usuarios y Central Operativa con interfaz luminosa Light Glassmorphism,
  * psicología de color basada en Confianza (Azul/Slate) y Agilidad Operativa (Naranja/Ámbar),
+ * autocompletado inteligente del identificador desde el estado de navegación (location.state.phone) al redirigir desde registros,
  * corrección de contraste en insignias y etiquetas (text-amber-950, bg-amber-100, border-amber-300, text-slate-800, text-slate-600),
  * sanitización inteligente de prefijo +57, preservación del guardián anti-loop, integración resiliente con useAuth (loginLocal),
  * eliminación de escritura manual redundante en localStorage (delegada a AuthProvider),
@@ -11,7 +12,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import api from '@/config/api';
 import { 
   Lock, 
@@ -39,11 +40,13 @@ const Login = () => {
   const authLoading = authContext.loading || false;
 
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   
   const roleParam = searchParams ? searchParams.get('role')?.trim()?.toLowerCase() : null;
   
-  const [identifier, setIdentifier] = useState('');
+  // Si viene transferido desde el flujo de registro, auto-completa el campo de celular/identificador; de lo contrario inicia vacío
+  const [identifier, setIdentifier] = useState(location.state?.phone || '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');

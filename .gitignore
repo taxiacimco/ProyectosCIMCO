@@ -19,13 +19,14 @@ dist/
 
 # 🔒 Blindaje de Entornos Locales y Secretos
 .env
-.env.local
-.env.development
-.env.*.local
+.env.*
+!.env.example
 
 # 🚀 Perímetro de Seguridad Crítico Backend
 backend/.env
 backend/serviceAccountKey.json
+*.pem
+*.key
 
 # 📋 Logs y Archivos Temporales de Depuración (Firebase, Vite, Node)
 *-debug.log
