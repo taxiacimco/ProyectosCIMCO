@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.4 - Sincronización de Enrutamiento de Endpoint Auth (/auth/register)
+// Versión Arquitectura: V12.5 - Validación Explícita de Longitud Mínima de Clave Operativa en JS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterAdmin.jsx
  * Misión: Sembrar los perfiles de Alta Gerencia y Operaciones en entorno local de forma segura.
@@ -28,6 +28,12 @@ const RegisterAdmin = () => {
 
     if (!correoInyeccion?.trim() || !claveInyeccion?.trim()) {
       setLog("❌ Error de Validación: Debe especificar un correo y clave operativa para la inyección.");
+      setLoading(false);
+      return;
+    }
+
+    if (claveInyeccion.trim().length < 6) {
+      setLog("❌ Error: La clave operativa debe tener al menos 6 caracteres.");
       setLoading(false);
       return;
     }

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V9.6 - Corrección de Endpoint /auth/register para Evitar Duplicidad de Prefijo API
+// Versión Arquitectura: V9.7 - Validación Explícita de Longitud de Contraseña en JS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterIntermunicipal.jsx
  * Misión: Registro de Flota y Conductores Intermunicipales con interfaz luminosa,
@@ -95,6 +95,11 @@ const RegisterIntermunicipal = () => {
 
     if (!nombre?.trim() || !celular?.trim() || !correo?.trim() || !clave?.trim() || !cooperativa?.trim() || !placa?.trim()) {
       setError("Por favor completa los campos requeridos marcados con asterisco (*).");
+      return;
+    }
+
+    if (clave.trim().length < 6) {
+      setError("La contraseña debe contener al menos 6 caracteres.");
       return;
     }
 

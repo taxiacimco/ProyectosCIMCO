@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.35 - Recuperación de Clave por Correo Gratuita (Firebase Auth Standard)
+// Versión Arquitectura: V21.36 - Estandarización de Expresión Regular Telefónica a 10 Dígitos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\ForgotPassword.jsx
  * Misión: Restablecimiento seguro y sin costos de facturación mediante Firebase Auth (sendPasswordResetEmail),
@@ -25,7 +25,7 @@ import {
   Zap
 } from 'lucide-react';
 
-const PHONE_REGEX = /^(\+?\d{1,4})?[3]\d{9}$|^(\+?\d{7,15})$/;
+const PHONE_REGEX = /^[3]\d{9}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const ForgotPassword = () => {

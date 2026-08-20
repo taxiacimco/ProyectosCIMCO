@@ -1,4 +1,4 @@
-// Versión Arquitectura: V9.6 - Corrección de Endpoint /auth/register para Evitar Duplicidad de Prefijo API
+// Versión Arquitectura: V9.7 - Validación Explícita de Longitud de Contraseña en JS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\RegisterDespachador.jsx
  * Misión: Vinculación de Operadores y Despachadores de Terminal con interfaz clara,
@@ -50,10 +50,10 @@ const RegisterDespachador = () => {
 
   const validateFile = (file, fileLabel) => {
     if (!file) return null;
-    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+    if (!ALLOWED_MIME_TYPES.includes(file?.type)) {
       return `El archivo "${fileLabel}" debe ser una imagen (JPG, PNG, WEBP) o PDF.`;
     }
-    if (file.size > MAX_FILE_SIZE_BYTES) {
+    if ((file?.size || 0) > MAX_FILE_SIZE_BYTES) {
       return `El archivo "${fileLabel}" excede el límite permitido de ${MAX_FILE_SIZE_MB}MB.`;
     }
     return null;
@@ -81,6 +81,11 @@ const RegisterDespachador = () => {
 
     if (!nombre?.trim() || !correo?.trim() || !celular?.trim() || !clave?.trim() || !cooperativa?.trim() || !terminal?.trim()) {
       setError("Por favor completa todos los campos marcados como obligatorios (*).");
+      return;
+    }
+
+    if (clave.trim().length < 6) {
+      setError("La contraseña debe contener al menos 6 caracteres.");
       return;
     }
 
