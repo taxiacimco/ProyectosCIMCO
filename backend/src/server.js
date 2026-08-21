@@ -1,9 +1,11 @@
-// Versión Arquitectura: V17.9 - Actualización Canónica CORS Vercel y Resiliencia Perimetral ESM
+// Versión Arquitectura: V18.0 - Integración Atómica CORS Vercel y Blindaje Perimetral Express
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte canónico
  * para frontend-opal-eight-58.vercel.app, orquestación de sockets e inyección de enrutadores del sistema.
- * Ajuste V17.9: Sincronización de dominio canónico de producción en lista blanca de CORS y Socket.IO.
+ * Ajuste V18.0: Fusión atómica de la regla CORS con callback dinámico, inclusión explícita del dominio
+ * 'https://frontend-opal-eight-58.vercel.app', persistencia de orígenes locales/ngrok/túneles y
+ * mantenimiento de la política perimetral sin romper rutas, websockets ni manejadores de errores.
  */
 
 import 'dotenv/config';
@@ -31,10 +33,10 @@ const logLocal = (msg) => {
 };
 
 // 🌐 ORIGENES PERMITIDOS PARA DESARROLLO LOCAL, RED LOCAL, NGROK, CLOUDFLARE TUNNEL Y PRODUCCIÓN VERCEL
-const allowedOrigins = [
+const origenesPermitidos = [
+  'http://localhost:5173',
   'https://frontend-opal-eight-58.vercel.app',
   'https://frontend-taxia-cimco.vercel.app',
-  'http://localhost:5173',
   'http://localhost:4173',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
@@ -48,18 +50,13 @@ const allowedOrigins = [
   process.env.CLOUDFLARE_TUNNEL_URL
 ].filter(Boolean);
 
-// 📡 EVALUADOR DE ORIGEN DINÁMICO CON VALIDACIÓN DE REGEX PARA PREVIEWS Y PRODUCCIÓN DE VERCEL
+// 📡 EVALUADOR DE ORIGEN DINÁMICO CON INTEGRACIÓN DE CALLBACK
 const isOriginAllowed = (origin, callback) => {
-    if (!origin) return callback(null, true);
-
-    const isAllowed = allowedOrigins.includes(origin) ||
-        /\.vercel\.app$/.test(origin) ||
-        process.env.NODE_ENV !== 'production';
-
-    if (isAllowed) {
+    // Permitir peticiones sin origen (como mobile apps, curl o Postman) o dentro de la lista / subdominios vercel
+    if (!origin || origenesPermitidos.includes(origin) || /\.vercel\.app$/.test(origin) || process.env.NODE_ENV !== 'production') {
         callback(null, true);
     } else {
-        callback(new Error(`Bloqueado por política de seguridad CORS CIMCO-Core: ${origin}`));
+        callback(new Error('Bloqueado por política CORS de CIMCO'));
     }
 };
 
@@ -202,7 +199,7 @@ app.use((err, req, res, next) => {
     logLocal(`🚨 [CIMCO-MANEJADOR-GLOBAL] Error no controlado interceptado: ${mensajeError}`);
     res.status(err?.status || 500).json({
         success: false,
-        error: "Error interno del servidor central controlado por la directriz de resiliencia CIMCO Core."
+        error: mensajeError.includes('CORS') ? mensajeError : "Error interno del servidor central controlado por la directriz de resiliencia CIMCO Core."
     });
 });
 
