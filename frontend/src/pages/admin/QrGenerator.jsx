@@ -1,7 +1,7 @@
-// Versión Arquitectura: V23.9 - Validación Avanzada de Payloads QR y Sincronización Entorno-Host
+// Versión Arquitectura: V24.0 - Corrección de Escaneo Vectorial, Dimensión de Logo y Exportación PNG
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
- * Misión: Generación de códigos QR con conmutación dinámica entre Entornos Locales (LAN/Túnel) y Producción (Vercel).
+ * Misión: Generación de códigos QR de alta legibilidad con conmutación entre Entornos Locales y Producción (Vercel).
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism.
  */
 
@@ -9,7 +9,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
-import { QrCode, Download, RefreshCw, Loader, AlertTriangle, Printer, Layers, Eye, Trash2, Calendar, UserPlus, Globe, Laptop } from 'lucide-react';
+import { Download, RefreshCw, Loader, AlertTriangle, Printer, Layers, Eye, Trash2, Calendar, UserPlus, Globe, Laptop, CheckCircle2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 
 const QrGenerator = () => {
@@ -75,7 +75,7 @@ const QrGenerator = () => {
             return parsedUrl.toString();
         } catch (err) {
             console.error("❌ URL Malformada detectada en generador QR:", rawUrl, err);
-            return `${URL_PRODUCCION}/login`;
+            return `${URL_PRODUCCION}/login?role=${encodeURIComponent(rolLimpio)}`;
         }
     };
 
@@ -149,8 +149,11 @@ const QrGenerator = () => {
     };
 
     const handleCargarDesdeHistorial = (registro) => {
-        if (registro && registro.entidadId && ROLES_CONTEXTO[registro.entidadId.toLowerCase()]) {
-            setRolSeleccionado(registro.entidadId.toLowerCase());
+        if (registro && registro.entidadId) {
+            const rolLower = registro.entidadId.toLowerCase();
+            if (ROLES_CONTEXTO[rolLower]) {
+                setRolSeleccionado(rolLower);
+            }
             if (registro.payloadUrl?.includes('vercel.app')) {
                 setEntorno('produccion');
             } else {
@@ -195,15 +198,15 @@ const QrGenerator = () => {
         }
     };
 
+    // 🎯 LOGO OPTIMIZADO PARA NO TRAMAR O BLOQUEAR LA LECTURA DEL CÓDIGO QR
     const buildCentralLogoDataUrl = () => {
         const tag = (rolSeleccionado || 'CIMCO').substring(0, 4).toUpperCase();
-        const modeTag = entorno === 'produccion' ? 'PROD' : 'DEV';
         const svgString = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="180" height="75" viewBox="0 0 180 75">
-                <rect width="100%" height="100%" fill="#121214" rx="12"/>
-                <rect width="100%" height="100%" fill="none" stroke="#eab308" stroke-width="3" rx="12"/>
-                <text x="50%" y="30" font-family="monospace" font-size="13" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">TAXIA CIMCO</text>
-                <text x="50%" y="56" font-family="monospace" font-size="14" font-weight="900" fill="#eab308" text-anchor="middle" letter-spacing="1">[${tag} - ${modeTag}]</text>
+            <svg xmlns="http://www.w3.org/2000/svg" width="120" height="50" viewBox="0 0 120 50">
+                <rect width="100%" height="100%" fill="#121214" rx="8"/>
+                <rect width="100%" height="100%" fill="none" stroke="#eab308" stroke-width="2" rx="8"/>
+                <text x="50%" y="22" font-family="Arial, sans-serif" font-size="10" font-weight="900" fill="#ffffff" text-anchor="middle">TAXIA</text>
+                <text x="50%" y="38" font-family="Arial, sans-serif" font-size="11" font-weight="900" fill="#eab308" text-anchor="middle">${tag}</text>
             </svg>
         `;
         return `data:image/svg+xml;utf8,${encodeURIComponent(svgString.trim())}`;
@@ -262,7 +265,7 @@ const QrGenerator = () => {
                                                 : 'bg-zinc-950/60 border-white/5 text-zinc-500 hover:text-zinc-300'
                                         }`}
                                     >
-                                        <Laptop size={12} /> Pruebas Locales (Túnel/LAN)
+                                        <Laptop size={12} /> Pruebas Locales (LAN)
                                     </button>
                                 </div>
                             </div>
@@ -283,15 +286,20 @@ const QrGenerator = () => {
                                 </select>
                             </div>
 
-                            <div className="bg-zinc-950/40 border border-white/5 p-3 rounded-xl">
+                            <div className="bg-zinc-950/40 border border-white/5 p-3 rounded-xl space-y-1">
                                 <p className="text-[10px] text-zinc-400 leading-relaxed font-medium">
                                     Generando QR para el rol <span className="text-yellow-500 font-bold uppercase">{rolSeleccionado}</span> en el entorno de <span className={entorno === 'produccion' ? 'text-yellow-400 font-bold uppercase' : 'text-blue-400 font-bold uppercase'}>{entorno}</span>.
                                 </p>
+                                {entorno === 'local' && (
+                                    <p className="text-[9px] text-blue-400/80 font-mono">
+                                        ⚠️ Nota: Los QR Locales requieren que el celular esté conectado a la misma red Wi-Fi. Para calcomanías impresas utiliza Producción.
+                                    </p>
+                                )}
                             </div>
 
                             <button type="submit" disabled={loading} className="w-full bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/20 text-yellow-500 font-bold uppercase text-[10px] tracking-widest py-3.5 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50">
                                 {loading ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                                Compilar Matriz [{entorno.toUpperCase()}]
+                                Generar Código QR [{entorno.toUpperCase()}]
                             </button>
                         </form>
                     </div>
@@ -301,36 +309,38 @@ const QrGenerator = () => {
                 <div className="flex-1 backdrop-blur-md bg-[#121214]/60 rounded-3xl p-6 border border-white/5 shadow-lg flex flex-col items-center justify-center gap-6 min-h-[350px]">
                     {qrGenerado ? (
                         <div className="flex flex-col items-center gap-4 w-full animate-in fade-in zoom-in-95 duration-200">
-                            <div ref={qrRef} className="p-4 bg-white rounded-2xl shadow-xl border border-white/10">
+                            <div ref={qrRef} className="p-4 bg-white rounded-2xl shadow-xl border border-white/10 flex items-center justify-center">
                                 <QRCodeSVG 
                                     value={targetUrlString}
-                                    size={220}
+                                    size={240}
                                     level="H" 
+                                    marginSize={2}
                                     imageSettings={{
                                         src: buildCentralLogoDataUrl(),
-                                        height: 44,
-                                        width: 100,
+                                        height: 24,
+                                        width: 54,
                                         excavate: true,
                                     }}
                                 />
                             </div>
                             <div className="text-center px-4 w-full">
                                 <div className="flex items-center justify-center gap-2 mb-1">
-                                    <span className={`text-[9px] px-2 py-0.5 rounded font-black uppercase ${entorno === 'produccion' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
-                                        ENTORNO: {entorno}
+                                    <span className={`text-[9px] px-2 py-0.5 rounded font-black uppercase flex items-center gap-1 ${entorno === 'produccion' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
+                                        <CheckCircle2 size={10} /> ENTORNO: {entorno}
                                     </span>
                                 </div>
                                 <h4 className="text-xs font-black text-white uppercase tracking-widest">PERFIL DESTINO: {(rolSeleccionado || '').toUpperCase()}</h4>
-                                <p className="text-[8px] text-zinc-500 font-mono break-all mt-1 bg-black/40 p-2 rounded-lg border border-white/5">{targetUrlString}</p>
+                                <p className="text-[8px] text-zinc-500 font-mono break-all mt-1 bg-black/40 p-2 rounded-lg border border-white/5 selection:bg-yellow-500 selection:text-black">{targetUrlString}</p>
                             </div>
-                            <button onClick={handleDescargarQr} className="flex items-center gap-2 bg-zinc-950 border border-white/5 px-5 py-2 rounded-xl text-[10px] font-bold text-zinc-300 uppercase tracking-widest transition-all hover:text-white cursor-pointer">
-                                <Download size={12} className="text-yellow-500" /> Guardar Calcomanía QR (PNG)
+                            <button onClick={handleDescargarQr} className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-400 text-black px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer shadow-lg shadow-yellow-500/10">
+                                <Download size={13} /> Guardar Calcomanía QR (PNG HD)
                             </button>
                         </div>
                     ) : (
                         <div className="text-center p-6 flex flex-col items-center gap-2 text-zinc-500">
                             <Printer className="animate-pulse" size={32} />
                             <h3 className="text-xs font-bold uppercase tracking-widest">Matriz de Rol en Espera</h3>
+                            <p className="text-[10px] text-zinc-600">Selecciona el rol y haz clic en Generar para visualizar el QR</p>
                         </div>
                     )}
                 </div>
