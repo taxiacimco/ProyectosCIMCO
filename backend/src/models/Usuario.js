@@ -1,10 +1,10 @@
-// Versión Arquitectura: V17.5 - Reconfiguración del Atributo UID con Índice Disperso y Unicidad Criptográfica
+// Versión Arquitectura: V17.6 - Depuración de Índices Duplicados sobre Atributo UID y Telemetría GeoJSON
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva la sincronización bidireccional (rol ↔ role, saldo ↔ balance), persistencia estricta,
  * indices GeoJSON y encriptación bcrypt única en el hook pre-save controlando isModified('password').
- * Ajuste V17.5: Eliminación de 'default: null' en 'uid' e inyección de unicidad dispersa (unique: true, sparse: true) para prevenir desbordamientos E11000.
+ * Ajuste V17.6: Depuración del índice duplicado en 'uid' para eliminar la advertencia Mongoose 'Duplicate schema index on {"uid":1}'.
  */
 
 import mongoose from 'mongoose';
@@ -142,7 +142,6 @@ const usuarioSchema = new mongoose.Schema({
 });
 
 // Índices optimizados
-usuarioSchema.index({ uid: 1 }, { sparse: true });
 usuarioSchema.index({ estado: 1, rol: 1, "coordenadas.coordinates": "2dsphere" }, { 
   name: "idx_usuarios_telemetria_geojson", 
   background: true 
