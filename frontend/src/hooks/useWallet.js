@@ -1,7 +1,7 @@
-// Versión Arquitectura: V8.4 - Timeout Resiliente HTTP (5s) y Fallback Anti-Desbordamiento
+// Versión Arquitectura: V24.1 - Integración Quirúrgica con Servicio Centralizado walletService
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
- * Misión: Sincronización exacta de saldo por rol con detención de bucles de re-renderizado, redundancia en tiempo real vía Firestore, timeout HTTP a 5s y resiliencia transaccional.
+ * Misión: Sincronización exacta de saldo por rol con detención de bucles de re-renderizado, redundancia en tiempo real vía Firestore, timeout HTTP a 5s y resiliencia transaccional mediante walletService.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -9,6 +9,7 @@ import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import api from '@/config/api';
+import walletService from '@/services/walletService';
 
 export const useWallet = () => {
     const { user, actualizarEstadoLocal } = useAuth();
@@ -55,26 +56,18 @@ export const useWallet = () => {
     })();
 
     /**
-     * 🌐 Consulta SSOT directa a la API REST de Node/MongoDB con enrutamiento dinámico por rol
+     * 🌐 Consulta SSOT directa a la API REST consumiendo el servicio walletService
      * Resiliente con timeout de 5000ms y fallback automático a $0 COP ante latencia o fallos de red.
      */
     const obtenerSaldoDesdeBackend = useCallback(async () => {
         if (!idDocumentoUnificado) return 0;
-        
-        // Determinación de la ruta API REST según el rol del usuario
-        let endpoint = `/conductores/${idDocumentoUnificado}`;
-        if (rolNormalizado === 'pasajero') {
-            endpoint = `/pasajeros/${idDocumentoUnificado}`;
-        } else if (rolNormalizado === 'admin' || rolNormalizado === 'usuario') {
-            endpoint = `/usuarios/${idDocumentoUnificado}`;
-        }
 
         try {
-            // Timeout de 5000ms (5 segundos) inquebrantable para prevenir congelamiento de la UI
-            const respuesta = await api.get(endpoint, { timeout: 5000 });
-            const datosBackend = respuesta?.data?.conductor || respuesta?.data?.pasajero || respuesta?.data?.usuario || respuesta?.data?.user || respuesta?.data;
+            // Consumo centralizado del servicio walletService
+            const respuestaBackend = await walletService.getSaldo();
+            const datosBackend = respuestaBackend?.conductor || respuestaBackend?.pasajero || respuestaBackend?.usuario || respuestaBackend?.user || respuestaBackend;
             
-            const saldoBackend = datosBackend?.saldoWallet ?? datosBackend?.saldo ?? datosBackend?.balance ?? datosBackend?.billetera?.saldo;
+            const saldoBackend = datosBackend?.saldoWallet ?? datosBackend?.saldo ?? datosBackend?.balance ?? datosBackend?.billetera?.saldo ?? respuestaBackend?.saldo;
 
             if (saldoBackend !== undefined && saldoBackend !== null) {
                 const saldoNumerico = Number(saldoBackend);
@@ -108,7 +101,7 @@ export const useWallet = () => {
         }
 
         return 0;
-    }, [idDocumentoUnificado, rolNormalizado]);
+    }, [idDocumentoUnificado]);
 
     useEffect(() => {
         if (!idDocumentoUnificado) {

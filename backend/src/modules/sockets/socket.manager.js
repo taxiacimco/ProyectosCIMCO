@@ -1,9 +1,10 @@
-// Versión Arquitectura: V18.0 - Filtro Espacial $near (5km) y Timeout Extendido de Despacho (60s) con Expiración
+// Versión Arquitectura: V19.0 - Segmentación por Salas (empresa/user) y Flujo de Subasta (registrar_socket, crear_solicitud, enviar_oferta, aceptar_oferta)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\sockets\socket.manager.js
- * Misión: Administrar el ciclo de vida de las conexiones, salas automáticas, telemetría GPS y despacho en tiempo real.
- * Ajuste V18.0: Integración de filtro espacial $near (5 km / 5000 m), timeout de despacho extendido a 60 s (60000 ms) 
- *              con gestión atómica de temporizadores de expiración y difusión de eventos 'viaje_expirado' y 'viaje_removido_radar'.
+ * Misión: Administrar el ciclo de vida de las conexiones, salas automáticas de aislamiento (empresa/usuario),
+ *          telemetría GPS y flujo completo de subasta/despacho en tiempo real.
+ * Ajuste V19.0: Incorporación atómica de manejadores 'registrar_socket', 'crear_solicitud' (filtrada por empresaId),
+ *              'enviar_oferta' y 'aceptar_oferta' (cierre de subasta) preservando telemetría y reglas de expiración.
  */
 
 import { socketAuthMiddleware } from '../../middleware/socketAuth.middleware.js';
@@ -59,7 +60,7 @@ export const inicializarSockets = (io) => {
     io.use(socketAuthMiddleware);
 
     io.on('connection', (socket) => {
-        const { usuarioId, rol } = socket;
+        const { usuarioId, rol, empresaId: empresaIdSocket, cooperativaId } = socket;
 
         // Guarda de Seguridad: Verificación inmediata de presencia del nodo de identidad
         if (!usuarioId) {
@@ -73,8 +74,16 @@ export const inicializarSockets = (io) => {
         // ==================================================
         // 1. AUTO-ASIGNACIÓN DE SALAS CRÍTICAS (ROOMS)
         // ==================================================
-        socket.join(usuarioId); // Sala privada por usuario
+        socket.join(usuarioId);            // Sala privada primaria
+        socket.join(`user_${usuarioId}`);  // Sala estructurada por usuario
         
+        const idEmpresaInicial = empresaIdSocket || cooperativaId;
+        if (idEmpresaInicial) {
+            socket.empresaId = idEmpresaInicial;
+            socket.join(`empresa_${idEmpresaInicial}`);
+            logSocket(`Asignación inicial a sala de empresa: empresa_${idEmpresaInicial}`);
+        }
+
         const rolLimpio = (rol || 'usuario').toLowerCase().trim();
         let nombreSalaRol = 'sala_usuarios';
 
@@ -92,6 +101,45 @@ export const inicializarSockets = (io) => {
         
         socket.join(nombreSalaRol);
         logSocket(`Asignación automatizada a salas completada: ${usuarioId} [Sala: ${nombreSalaRol}]`);
+
+        // ==================================================
+        // 1.1. REGISTRO DINÁMICO DE SALAS Y PERFIL ACTIVO
+        // ==================================================
+        socket.on('registrar_socket', (payload = {}) => {
+            try {
+                const uId = payload.userId || payload.usuarioId || socket.usuarioId;
+                const eId = payload.empresaId || payload.cooperativaId || socket.empresaId;
+                const rActivo = payload.rol || socket.rol;
+
+                if (uId) {
+                    socket.usuarioId = uId;
+                    socket.join(uId);
+                    socket.join(`user_${uId}`);
+                }
+
+                if (eId) {
+                    socket.empresaId = eId;
+                    socket.join(`empresa_${eId}`);
+                    logSocket(`Registro explícito en sala de empresa: empresa_${eId} | Socket: ${socket.id}`);
+                }
+
+                if (rActivo) {
+                    socket.rol = rActivo;
+                }
+
+                socket.emit('registro_confirmado', {
+                    status: 'OK',
+                    socketId: socket.id,
+                    usuarioId: uId,
+                    empresaId: eId,
+                    timestamp: new Date().toISOString()
+                });
+
+                logSocket(`Evento 'registrar_socket' procesado con éxito para UID: ${uId} | Empresa: ${eId || 'N/A'}`);
+            } catch (err) {
+                console.error(`[SOCKET-MGR-ERROR] Error en registrar_socket para ${socket.id}:`, err.message);
+            }
+        });
 
         // ==================================================
         // 2. TELEMETRÍA GPS Y DIFUSIÓN (DESACOPLADA)
@@ -116,18 +164,19 @@ export const inicializarSockets = (io) => {
                 }
 
                 const payloadUniversal = {
-                    id: usuarioId,
-                    conductorId: usuarioId,
-                    usuarioId,
+                    id: socket.usuarioId,
+                    conductorId: socket.usuarioId,
+                    usuarioId: socket.usuarioId,
                     lat,
                     lng,
                     latitud: lat,
                     longitud: lng,
                     accuracy: datos.accuracy || 0,
                     updatedAt: datos.updatedAt || new Date().toISOString(),
-                    rol: rolLimpio,
+                    rol: (socket.rol || rolLimpio),
                     subrol: datos.subrol || datos.rol || 'general',
-                    cooperativa: datos.cooperativa || datos.empresa || null,
+                    cooperativa: datos.cooperativa || datos.empresa || socket.empresaId || null,
+                    empresaId: datos.empresaId || socket.empresaId || null,
                     nombre: datos.nombre || datos.fullName || null,
                     placa: datos.placa || datos.vehiculo || null,
                     numeroInterno: datos.numeroInterno || datos.interno || null
@@ -140,13 +189,13 @@ export const inicializarSockets = (io) => {
                         lat,
                         lng,
                         subrol: payloadUniversal.subrol,
-                        conductorId: usuarioId
+                        conductorId: socket.usuarioId
                     });
                     
                     // 🚀 OPTIMIZACIÓN: Persistencia asíncrona sin await para evitar cuellos de botella en Sockets
                     if (typeof actualizarRadarUbicacion === 'function') {
-                        actualizarRadarUbicacion(usuarioId, lat, lng).catch(err => {
-                            console.error(`[SOCKET-MGR-ERROR] Error al persistir ubicación del conductor ${usuarioId}:`, err.message);
+                        actualizarRadarUbicacion(socket.usuarioId, lat, lng).catch(err => {
+                            console.error(`[SOCKET-MGR-ERROR] Error al persistir ubicación del conductor ${socket.usuarioId}:`, err.message);
                         });
                     }
 
@@ -158,7 +207,7 @@ export const inicializarSockets = (io) => {
                 socket.to('sala_despachadores').to('sala_admins').emit('actualizar_ubicacion', payloadUniversal);
 
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error procesando telemetría de ${usuarioId}:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error procesando telemetría de ${socket.usuarioId}:`, err.message);
             }
         };
 
@@ -166,23 +215,29 @@ export const inicializarSockets = (io) => {
         socket.on('actualizar_radar_gps', procesarTelemetriaGPS);
 
         // ==================================================
-        // 3. FLUJO DE VIAJES CON FILTRO SPATIAL Y TIMEOUT (60s)
+        // 3. FLUJO DE SUBASTA Y DESPACHO EN TIEMPO REAL
         // ==================================================
-        socket.on('solicitar_viaje', (datosViaje) => {
+
+        /**
+         * Manejador centralizado para la creación de solicitudes de viaje (Urbano e Intermunicipal / Despachador).
+         * Filtra la distribución según el empresaId si el servicio corresponde a una flota/cooperativa.
+         */
+        const procesarCrearSolicitud = (datosSolicitud = {}) => {
             try {
-                if (!socket.usuarioId) {
+                if (!socket.usuarioId && !datosSolicitud.usuarioId && !datosSolicitud.pasajeroId) {
                     emitirSesionExpirada(socket, 'nodo_inexistente');
                     return;
                 }
 
-                if (!datosViaje) return;
+                if (!datosSolicitud) return;
 
-                const viajeId = datosViaje.viajeId || datosViaje.id || datosViaje._id;
-                const pasajeroId = datosViaje.pasajeroId || usuarioId;
+                const viajeId = datosSolicitud.viajeId || datosSolicitud.solicitudId || datosSolicitud.id || datosSolicitud._id;
+                const pasajeroId = datosSolicitud.pasajeroId || datosSolicitud.usuarioId || socket.usuarioId;
+                const empresaId = datosSolicitud.empresaId || datosSolicitud.cooperativaId || socket.empresaId;
 
                 // Extraer coordenadas de origen con blindaje anti-undefined
-                const latOrigen = parseFloat(datosViaje.lat || datosViaje.latitud || datosViaje.origenLat || (datosViaje.origenCoords && datosViaje.origenCoords.lat));
-                const lngOrigen = parseFloat(datosViaje.lng || datosViaje.longitud || datosViaje.origenLng || (datosViaje.origenCoords && datosViaje.origenCoords.lng));
+                const latOrigen = parseFloat(datosSolicitud.lat || datosSolicitud.latitud || datosSolicitud.origenLat || (datosSolicitud.origenCoords && datosSolicitud.origenCoords.lat));
+                const lngOrigen = parseFloat(datosSolicitud.lng || datosSolicitud.longitud || datosSolicitud.origenLng || (datosSolicitud.origenCoords && datosSolicitud.origenCoords.lng));
 
                 // Configuración de filtro geoespacial $near ($5000\text{ m}$)
                 const filtroGeoespacial = (!isNaN(latOrigen) && !isNaN(lngOrigen)) ? {
@@ -192,46 +247,60 @@ export const inicializarSockets = (io) => {
                                 type: "Point",
                                 coordinates: [lngOrigen, latOrigen] // GEOJSON: [lng, lat]
                             },
-                            $maxDistance: RADIO_DESPACHO_MAX_METROS // 5000 metros
+                            $maxDistance: RADIO_DESPACHO_MAX_METROS
                         }
                     }
                 } : null;
 
                 const payloadDespacho = {
-                    ...datosViaje,
+                    ...datosSolicitud,
                     viajeId,
+                    solicitudId: viajeId,
                     pasajeroId,
+                    empresaId: empresaId || null,
                     radioMaximoMetros: RADIO_DESPACHO_MAX_METROS,
                     tiempoExpiracionMs: TIMEOUT_DESPACHO_MS,
                     filtroGeoespacial,
                     fechaSolicitud: new Date().toISOString()
                 };
 
-                // Limpiar cualquier temporizador previo si existe colisión de ID
                 if (viajeId) {
                     limpiarTemporizadorViaje(viajeId);
                 }
 
-                // Difusión radial del servicio
-                io.to('sala_conductores').emit('nuevo_viaje_disponible', payloadDespacho);
-                io.to('sala_despachadores').to('sala_admins').emit('auditoria_nuevo_viaje', payloadDespacho);
-                
-                logSocket(`Viaje [${viajeId || 'N/A'}] difundido en radio de ${RADIO_DESPACHO_MAX_METROS}m. Timeout: 60s.`);
+                // 🎯 SEGMENTACIÓN ESTRICTA DE SALA POR EMPRESA / COOPERATIVA
+                if (empresaId) {
+                    // Emitir la oferta ÚNICAMENTE a los conductores pertenecientes a la sala de la empresa
+                    io.to(`empresa_${empresaId}`).emit('nuevo_servicio_disponible', payloadDespacho);
+                    io.to(`empresa_${empresaId}`).emit('nuevo_viaje_disponible', payloadDespacho);
+                    logSocket(`Solicitud [${viajeId}] emitida EXCLUSIVAMENTE a sala: empresa_${empresaId}`);
+                } else {
+                    // Transmisión general radial urbana si no pertenece a una flota específica
+                    io.to('sala_conductores').emit('nuevo_servicio_disponible', payloadDespacho);
+                    io.to('sala_conductores').emit('nuevo_viaje_disponible', payloadDespacho);
+                    logSocket(`Solicitud urbana [${viajeId}] difundida a 'sala_conductores'.`);
+                }
 
-                // ⏱️ PROGRAMACIÓN DE EXPIRACIÓN AUTOMÁTICA (60 SEGUNDOS)
+                // Auditoría central para despachadores y administradores
+                io.to('sala_despachadores').to('sala_admins').emit('auditoria_nuevo_viaje', payloadDespacho);
+
+                // ⏱️ PROGRAMACIÓN DE EXPIRACIÓN AUTOMÁTICA DE SUBASTA (60 SEGUNDOS)
                 if (viajeId) {
                     const timerId = setTimeout(() => {
-                        logSocket(`⌛ [TIMEOUT] Viaje [${viajeId}] no fue capturado en 60s. Emitiendo expiración...`);
+                        logSocket(`⌛ [TIMEOUT] Solicitud/Viaje [${viajeId}] no fue adjudicado en 60s. Expirando...`);
                         
-                        // Notificar expiración al pasajero
-                        io.to(pasajeroId).emit('viaje_expirado', {
-                            viajeId,
-                            motivo: 'tiempo_limite_excedido',
-                            mensaje: 'No se encontraron conductores disponibles en el radio de 5 km en 60 segundos.'
-                        });
+                        // Notificar expiración directa al pasajero o creador
+                        if (pasajeroId) {
+                            io.to(`user_${pasajeroId}`).to(pasajeroId).emit('viaje_expirado', {
+                                viajeId,
+                                motivo: 'tiempo_limite_excedido',
+                                mensaje: 'No se recibieron ofertas o el tiempo tope de 60 segundos fue excedido.'
+                            });
+                        }
 
-                        // Remover la oferta del radar radial de la flota y paneles de control
-                        io.to('sala_conductores').to('sala_despachadores').to('sala_admins').emit('viaje_removido_radar', {
+                        // Remover la solicitud de las pantallas activas
+                        const canalRemocion = empresaId ? io.to(`empresa_${empresaId}`) : io.to('sala_conductores');
+                        canalRemocion.to('sala_despachadores').to('sala_admins').emit('viaje_removido_radar', {
                             viajeId,
                             motivo: 'expirado_timeout_60s'
                         });
@@ -243,11 +312,134 @@ export const inicializarSockets = (io) => {
                 }
 
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error en solicitar_viaje:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error en procesarCrearSolicitud:`, err.message);
+            }
+        };
+
+        socket.on('crear_solicitud', procesarCrearSolicitud);
+        socket.on('solicitar_viaje', procesarCrearSolicitud);
+
+        /**
+         * Manejador de recepción de contraofertas / pujas enviadas por conductores.
+         * Redirige la propuesta directamente al usuario o despachador que originó la solicitud.
+         */
+        socket.on('enviar_oferta', (datosOferta = {}) => {
+            try {
+                if (!socket.usuarioId && !datosOferta.conductorId) {
+                    emitirSesionExpirada(socket, 'nodo_inexistente');
+                    return;
+                }
+
+                if (!datosOferta) return;
+
+                const viajeId = datosOferta.viajeId || datosOferta.solicitudId;
+                const conductorId = datosOferta.conductorId || socket.usuarioId;
+                const pasajeroId = datosOferta.pasajeroId || datosOferta.usuarioId;
+                const despachadorId = datosOferta.despachadorId;
+                const empresaId = datosOferta.empresaId || socket.empresaId;
+                const montoOferta = datosOferta.monto || datosOferta.tarifa || datosOferta.valor || 0;
+
+                const payloadOferta = {
+                    ...datosOferta,
+                    viajeId,
+                    solicitudId: viajeId,
+                    conductorId,
+                    monto: parseFloat(montoOferta),
+                    tarifa: parseFloat(montoOferta),
+                    timestamp: new Date().toISOString()
+                };
+
+                // 📬 Redireccionar oferta a las salas específicas del solicitante
+                if (pasajeroId) {
+                    io.to(`user_${pasajeroId}`).to(pasajeroId).emit('nueva_oferta', payloadOferta);
+                }
+
+                if (despachadorId) {
+                    io.to(`user_${despachadorId}`).to(despachadorId).emit('nueva_oferta', payloadOferta);
+                }
+
+                // Notificar también al tablero de monitoreo de la empresa si está configurado
+                if (empresaId) {
+                    io.to(`empresa_${empresaId}`).emit('nueva_oferta_empresa', payloadOferta);
+                }
+
+                logSocket(`Oferta ($${montoOferta}) enviada por conductor [${conductorId}] para viaje [${viajeId}] a pasajero/despachador.`);
+            } catch (err) {
+                console.error(`[SOCKET-MGR-ERROR] Error en enviar_oferta:`, err.message);
             }
         });
 
-        socket.on('aceptar_viaje', (datosAceptacion) => {
+        /**
+         * Manejador de aceptación de oferta por parte del pasajero o despachador.
+         * Notifica al conductor ganador y cierra atómicamente la subasta para los demás participantes.
+         */
+        socket.on('aceptar_oferta', (datosAceptacion = {}) => {
+            try {
+                if (!socket.usuarioId) {
+                    emitirSesionExpirada(socket, 'nodo_inexistente');
+                    return;
+                }
+
+                if (!datosAceptacion) return;
+
+                const viajeId = datosAceptacion.viajeId || datosAceptacion.solicitudId || datosAceptacion.id;
+                const conductorId = datosAceptacion.conductorId || datosAceptacion.conductorSeleccionadoId;
+                const pasajeroId = datosAceptacion.pasajeroId || socket.usuarioId;
+                const empresaId = datosAceptacion.empresaId || socket.empresaId;
+
+                // 🛑 CANCELAR TEMPORIZADOR DE EXPIRACIÓN (Subasta adjudicada con éxito)
+                if (viajeId) {
+                    limpiarTemporizadorViaje(viajeId);
+                }
+
+                // 1. Notificar al conductor seleccionado que su puja fue aceptada
+                if (conductorId) {
+                    const payloadConductor = {
+                        viajeId,
+                        solicitudId: viajeId,
+                        conductorId,
+                        pasajeroId,
+                        datosAceptacion,
+                        mensaje: '¡Tu oferta ha sido aceptada! Inicia el traslado hacia la ubicación del cliente.',
+                        timestamp: new Date().toISOString()
+                    };
+
+                    io.to(`user_${conductorId}`).to(conductorId).emit('oferta_aceptada', payloadConductor);
+                    io.to(`user_${conductorId}`).to(conductorId).emit('viaje_accepted_por_conductor', payloadConductor);
+                }
+
+                // 2. Notificar el cierre de subasta a la sala de la empresa / resto de conductores
+                const payloadCierreSubasta = {
+                    viajeId,
+                    solicitudId: viajeId,
+                    conductorId,
+                    motivo: 'oferta_aceptada_cierre_subasta',
+                    timestamp: new Date().toISOString()
+                };
+
+                if (empresaId) {
+                    io.to(`empresa_${empresaId}`).emit('subasta_cerrada', payloadCierreSubasta);
+                    io.to(`empresa_${empresaId}`).emit('viaje_removido_radar', payloadCierreSubasta);
+                } else {
+                    io.to('sala_conductores').emit('viaje_removido_radar', payloadCierreSubasta);
+                }
+
+                // 3. Notificar auditoría a despachadores y admins
+                io.to('sala_despachadores').to('sala_admins').emit('auditoria_viaje_asignado', {
+                    viajeId,
+                    conductorId,
+                    pasajeroId,
+                    empresaId
+                });
+
+                logSocket(`Subasta del viaje [${viajeId}] CERRADA. Conductor adjudicado: [${conductorId}] | Pasajero: [${pasajeroId}].`);
+            } catch (err) {
+                console.error(`[SOCKET-MGR-ERROR] Error en aceptar_oferta:`, err.message);
+            }
+        });
+
+        // Mantenimiento de compatibilidad directa para eventos legados
+        socket.on('aceptar_viaje', (datosAceptacion = {}) => {
             try {
                 if (!socket.usuarioId) {
                     emitirSesionExpirada(socket, 'nodo_inexistente');
@@ -258,36 +450,34 @@ export const inicializarSockets = (io) => {
 
                 const viajeId = datosAceptacion.viajeId || datosAceptacion.id || datosAceptacion._id;
 
-                // 🛑 CANCELAR TEMPORIZADOR DE EXPIRACIÓN (Se adjudicó exitosamente dentro del ventana de 60s)
                 if (viajeId) {
                     limpiarTemporizadorViaje(viajeId);
                 }
                 
-                io.to(datosAceptacion.pasajeroId).emit('viaje_accepted_por_conductor', {
+                io.to(datosAceptacion.pasajeroId).to(`user_${datosAceptacion.pasajeroId}`).emit('viaje_accepted_por_conductor', {
                     viajeId,
-                    conductorId: usuarioId 
+                    conductorId: socket.usuarioId 
                 });
 
-                // Remover la oferta del radar para el resto de la flota
                 io.to('sala_conductores').emit('viaje_removido_radar', {
                     viajeId,
                     motivo: 'aceptado_por_conductor',
-                    conductorId: usuarioId
+                    conductorId: socket.usuarioId
                 });
 
                 io.to('sala_despachadores').to('sala_admins').emit('auditoria_viaje_asignado', {
                     viajeId,
-                    conductorId: usuarioId,
+                    conductorId: socket.usuarioId,
                     pasajeroId: datosAceptacion.pasajeroId
                 });
 
-                logSocket(`Conductor [${usuarioId}] asignado al viaje [${viajeId}] del pasajero [${datosAceptacion.pasajeroId}].`);
+                logSocket(`Conductor [${socket.usuarioId}] asignado al viaje [${viajeId}] del pasajero [${datosAceptacion.pasajeroId}].`);
             } catch (err) {
                 console.error(`[SOCKET-MGR-ERROR] Error en aceptar_viaje:`, err.message);
             }
         });
 
-        socket.on('cancelar_viaje', (datosCancelacion) => {
+        socket.on('cancelar_viaje', (datosCancelacion = {}) => {
             try {
                 if (!socket.usuarioId) {
                     emitirSesionExpirada(socket, 'nodo_inexistente');
@@ -296,14 +486,23 @@ export const inicializarSockets = (io) => {
 
                 if (!datosCancelacion) return;
                 const viajeId = datosCancelacion.viajeId || datosCancelacion.id;
+                const empresaId = datosCancelacion.empresaId || socket.empresaId;
 
                 if (viajeId) {
                     limpiarTemporizadorViaje(viajeId);
                     
-                    io.to('sala_conductores').to('sala_despachadores').to('sala_admins').emit('viaje_removido_radar', {
+                    const payloadCancelacion = {
                         viajeId,
                         motivo: datosCancelacion.motivo || 'cancelado_por_usuario'
-                    });
+                    };
+
+                    if (empresaId) {
+                        io.to(`empresa_${empresaId}`).emit('viaje_removido_radar', payloadCancelacion);
+                    } else {
+                        io.to('sala_conductores').emit('viaje_removido_radar', payloadCancelacion);
+                    }
+
+                    io.to('sala_despachadores').to('sala_admins').emit('viaje_removido_radar', payloadCancelacion);
 
                     logSocket(`Viaje [${viajeId}] cancelado. Temporizador purgado y removido del radar.`);
                 }
@@ -316,11 +515,11 @@ export const inicializarSockets = (io) => {
         // 4. CIERRE Y AUDITORÍA DE CONEXIÓN
         // ==================================================
         socket.on('disconnect', (reason) => {
-            logSocket(`Canal cerrado. UID: ${usuarioId} | Canal: ${socket.id} | Causa: ${reason}`);
+            logSocket(`Canal cerrado. UID: ${socket.usuarioId} | Canal: ${socket.id} | Causa: ${reason}`);
             
             // Notificar desconexión a la central si era un conductor activo
             if (['conductor', 'mototaxi', 'intermunicipal', 'motoparrillero', 'motocarga'].includes(rolLimpio)) {
-                socket.to('sala_despachadores').to('sala_admins').emit('conductor_desconectado', { conductorId: usuarioId });
+                socket.to('sala_despachadores').to('sala_admins').emit('conductor_desconectado', { conductorId: socket.usuarioId });
             }
         });
     });

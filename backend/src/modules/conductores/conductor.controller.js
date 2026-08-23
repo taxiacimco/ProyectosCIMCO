@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.4 - Integración Quirúrgica: Aprovisionamiento Explícito de UID Firebase en Registro
+// Versión Arquitectura: V21.34 - Delegación Centralizada de Excepciones a Middleware (next) y Persistencia Radárica Atómica
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
  * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, telemetría GPS, recargas atómicas y métricas de capital circulante.
- * Ajuste V19.4: Importación de admin desde firebase.js y aprovisionamiento/validación explícita de UID de Firebase antes de instanciar la entidad Conductor para garantizar la coherencia de identidad Auth-NoSQL.
+ * Ajuste V21.34: Refactorización integral de controladores asíncronos para delegar la captura de excepciones al middleware centralizado de errores mediante next(error).
  */
 
 import mongoose from 'mongoose';
@@ -80,7 +80,7 @@ export const verificarBypassDesarrollo = (req, res, next) => {
  */
 export const validarConductorUnico = async (req, res, next) => {
     try {
-        const { email, telefono, telefonoMovil, cedula, documentoIdentidad } = req.body;
+        const { email, telefono, telefonoMovil, cedula, documentoIdentidad } = req.body || {};
         const telContacto = telefono || telefonoMovil;
         const docId = cedula || documentoIdentidad;
 
@@ -104,7 +104,7 @@ export const validarConductorUnico = async (req, res, next) => {
         }
         next();
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -115,10 +115,10 @@ export const validarConductorUnico = async (req, res, next) => {
 /**
  * 🟢/🔴 CAMBIAR ESTADO DEL CONDUCTOR (Secretaría / Administración)
  */
-export const cambiarEstadoConductor = async (req, res) => {
+export const cambiarEstadoConductor = async (req, res, next) => {
     try {
-        const targetId = req.params.id || req.params.uid || req.body.conductorId;
-        const { nuevoEstado, estado } = req.body;
+        const targetId = req.params?.id || req.params?.uid || req.body?.conductorId;
+        const { nuevoEstado, estado } = req.body || {};
         
         const estadoFinal = String(nuevoEstado || estado || '').toUpperCase().trim();
 
@@ -197,14 +197,14 @@ export const cambiarEstadoConductor = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CONDUCTORES-CAMBIAR-ESTADO-FATAL]:", error);
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 📋 OBTENER TODOS LOS CONDUCTORES DEDUPLICADOS
  */
-export const obtenerTodosConductores = async (req, res) => {
+export const obtenerTodosConductores = async (req, res, next) => {
     try {
         const conductoresBrutos = await Conductor.find().sort({ createdAt: -1 }).lean();
 
@@ -233,13 +233,13 @@ export const obtenerTodosConductores = async (req, res) => {
         });
     } catch (error) {
         console.error("🚨 [CONDUCTORES-OBTENER-TODOS-FATAL]:", error);
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 export const obtenerConductores = obtenerTodosConductores;
 
-export const registrarConductor = async (req, res) => {
+export const registrarConductor = async (req, res, next) => {
     try {
         if (!req || !req.body) {
             return res.status(400).json({ success: false, message: "⚠️ Payload de registro ausente." });
@@ -317,11 +317,11 @@ export const registrarConductor = async (req, res) => {
         
         return res.status(201).json({ success: true, data: nuevoConductor });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
-export const obtenerConductorPorId = async (req, res) => {
+export const obtenerConductorPorId = async (req, res, next) => {
     try {
         if (!req || !req.params || (!req.params.id && !req.params.uid && !req.params.conductorId)) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
@@ -344,19 +344,19 @@ export const obtenerConductorPorId = async (req, res) => {
 
         return res.status(200).json({ success: true, data: conductor, conductor });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 export const obtenerPerfil = obtenerConductorPorId;
 
-export const actualizarConductor = async (req, res) => {
+export const actualizarConductor = async (req, res, next) => {
     try {
         if (!req || !req.body) {
             return res.status(400).json({ success: false, message: "⚠️ Datos ausentes." });
         }
         
-        const targetId = req.params.id || req.params.uid || req.params.conductorId || req.body.conductorId || req.body.id;
+        const targetId = req.params?.id || req.params?.uid || req.params?.conductorId || req.body?.conductorId || req.body?.id;
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
@@ -410,13 +410,13 @@ export const actualizarConductor = async (req, res) => {
             conductor: conductorActualizado 
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
-export const eliminarConductor = async (req, res) => {
+export const eliminarConductor = async (req, res, next) => {
     try {
-        const targetId = req.params.id || req.params.uid || req.params.conductorId;
+        const targetId = req.params?.id || req.params?.uid || req.params?.conductorId;
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
         }
@@ -444,11 +444,11 @@ export const eliminarConductor = async (req, res) => {
 
         return res.status(200).json({ success: true, message: 'Conductor eliminado correctamente', data: conductorEliminado });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
-export const obtenerConductoresDisponibles = async (req, res) => {
+export const obtenerConductoresDisponibles = async (req, res, next) => {
     try {
         const conductoresDisponibles = await Conductor.find({ 
             $and: [
@@ -468,11 +468,11 @@ export const obtenerConductoresDisponibles = async (req, res) => {
             data: dataLimpia
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
-export const obtenerCapitalCirculante = async (req, res) => {
+export const obtenerCapitalCirculante = async (req, res, next) => {
     try {
         const resultado = await Usuario.aggregate([
             { $match: { estado: 'activo' } },
@@ -493,11 +493,7 @@ export const obtenerCapitalCirculante = async (req, res) => {
         });
     } catch (error) {
         console.error("❌ Error calculando capital circulante:", error);
-        return res.status(500).json({ 
-            success: false, 
-            message: "Error interno calculando el capital circulante.",
-            error: 'Error al calcular capital circulante'
-        });
+        next(error);
     }
 };
 
@@ -505,12 +501,12 @@ export const obtenerCapitalCirculante = async (req, res) => {
 // 2. BILLETERA ATÓMICA CIMCO (RECARGAS, AJUSTES Y CONTABILIDAD AUDITADA)
 // ==================================================================
 
-export const recargarSaldoAdmin = async (req, res) => {
+export const recargarSaldoAdmin = async (req, res, next) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-        const targetId = req.params.id || req.params.uid || req.body.conductorId || req.body.id || req.body.uid;
-        const { monto, referencia, nota } = req.body;
+        const targetId = req.params?.id || req.params?.uid || req.body?.conductorId || req.body?.id || req.body?.uid;
+        const { monto, referencia, nota } = req.body || {};
         const montoNum = parseFloat(monto);
         const adminId = req.user?.id || req.user?._id || 'ADMIN_SYSTEM';
 
@@ -574,7 +570,7 @@ export const recargarSaldoAdmin = async (req, res) => {
             subrol: conductor.subrol || conductor.tipoVehiculo || 'mototaxi',
             monto: montoNum,
             saldoAnterior,
-            saldoNuevo: nuevoSaldo,
+            saldoNuevo,
             tipoOperacion: 'RECARGA',
             autorizadoPor: adminId,
             referencia: referencia || `ADM-${Date.now()}`
@@ -590,16 +586,16 @@ export const recargarSaldoAdmin = async (req, res) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 export const recargarBilleteraPorAdmin = recargarSaldoAdmin;
 
-export const ajustarSaldo = async (req, res) => {
+export const ajustarSaldo = async (req, res, next) => {
     try {
-        const targetId = req.params.uid || req.params.id || req.body.conductorId;
-        const { monto, operacion, nota } = req.body;
+        const targetId = req.params?.uid || req.params?.id || req.body?.conductorId;
+        const { monto, operacion, nota } = req.body || {};
         const adminId = req.user?.id || req.user?._id || 'ADMIN_SYSTEM';
 
         const montoNum = Number(monto);
@@ -658,11 +654,11 @@ export const ajustarSaldo = async (req, res) => {
         });
     } catch (error) {
         console.error('❌ Error ajustando saldo:', error);
-        return res.status(500).json({ success: false, message: 'Error al procesar el saldo' });
+        next(error);
     }
 };
 
-export const descontarComisionViaje = async (req, res) => {
+export const descontarComisionViaje = async (req, res, next) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
@@ -754,14 +750,14 @@ export const descontarComisionViaje = async (req, res) => {
         await session.abortTransaction();
         session.endSession();
         console.error("❌ Error al descontar comisión de viaje:", error);
-        return res.status(error.message.includes('insuficiente') ? 402 : 500).json({ 
-            success: false, 
-            message: error.message || "Error al procesar el débito de comisión." 
-        });
+        if (error.message?.includes('insuficiente')) {
+            error.statusCode = 402;
+        }
+        next(error);
     }
 };
 
-export const obtenerHistorialSaldos = async (req, res) => {
+export const obtenerHistorialSaldos = async (req, res, next) => {
     try {
         if (!req || !req.params) {
             return res.status(400).json({ success: false, message: "⚠️ Parámetros ausentes." });
@@ -787,7 +783,7 @@ export const obtenerHistorialSaldos = async (req, res) => {
 
         return res.status(200).json({ success: true, data: historial });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -797,14 +793,14 @@ export const obtenerHistorialConductor = obtenerHistorialSaldos;
 // 3. CONTROL DE ESTADO OPERATIVO (ENCENDIDO DE MALLA) Y RADAR
 // ==================================================================
 
-export const actualizarEstadoConductor = async (req, res) => {
+export const actualizarEstadoConductor = async (req, res, next) => {
     try {
         if (!req || !req.body) {
             return res.status(400).json({ success: false, message: "⚠️ Datos ausentes." });
         }
         
-        const id = req.params.id || req.params.uid || req.body.conductorId || req.body.id;
-        const { estado, isOnline } = req.body; 
+        const id = req.params?.id || req.params?.uid || req.body?.conductorId || req.body?.id;
+        const { estado, isOnline } = req.body || {}; 
 
         if (!id) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
@@ -857,11 +853,11 @@ export const actualizarEstadoConductor = async (req, res) => {
 
         return res.status(200).json({ success: true, message: `Estado operativo actualizado a ${estado}`, data: conductor });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
-export const obtenerConductoresCercanos = async (req, res) => {
+export const obtenerConductoresCercanos = async (req, res, next) => {
     try {
         if (!req || !req.query || !req.query.lat || !req.query.lng) {
             return res.status(400).json({ success: false, message: "⚠️ Coordenadas ausentes." });
@@ -905,7 +901,7 @@ export const obtenerConductoresCercanos = async (req, res) => {
             data: conductoresCercanos
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -973,14 +969,14 @@ export const actualizarRadarUbicacion = async (conductorId, lat, lng) => {
     }
 };
 
-export const actualizarUbicacionGPS = async (req, res) => {
+export const actualizarUbicacionGPS = async (req, res, next) => {
     try {
         if (!req || !req.body) {
             return res.status(400).json({ success: false, message: "⚠️ Payload de telemetría ausente." });
         }
         
-        const id = req.params.id || req.params.uid || req.body.conductorId || req.body.id;
-        const { lat, lng } = req.body;
+        const id = req.params?.id || req.params?.uid || req.body?.conductorId || req.body?.id;
+        const { lat, lng } = req.body || {};
 
         if (!id) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador ausente." });
@@ -993,7 +989,7 @@ export const actualizarUbicacionGPS = async (req, res) => {
 
         return res.status(200).json({ success: true, message: "Telemetría sincronizada correctamente." });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 

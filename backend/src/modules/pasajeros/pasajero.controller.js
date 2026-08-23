@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.4 - Sincronización Explícita y Aprovisionamiento Firebase Auth en Registro de Pasajeros
+// Versión Arquitectura: V19.5 - Delegación Centralizada de Excepciones a Middleware Error Handling (next) y Blindaje de Controladores
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
  * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera y blindaje contra colisiones de duplicidad E11000/Firebase Auth en peticiones concurrentes.
- * Ajuste V19.4: Importación de admin desde firebase.js y aprovisionamiento explícito de UID vía Firebase Auth (getUserByEmail/createUser) si la petición nace desde el backend sin UID previo del frontend.
+ * Ajuste V19.5: Refactorización de controladores asíncronos para delegar la captura y propagación de excepciones al Middleware Centralizado de Errores mediante next(error).
  */
 
 import mongoose from 'mongoose';
@@ -67,7 +67,7 @@ const registrarTransaccionFirestore = async ({
 /**
  * 📋 Obtener listado de pasajeros deduplicado en DB mediante Pipeline de Agregación
  */
-export const obtenerPasajeros = async (req, res) => {
+export const obtenerPasajeros = async (req, res, next) => {
     try {
         const listaLimpia = await Pasajero.aggregate([
             {
@@ -126,14 +126,14 @@ export const obtenerPasajeros = async (req, res) => {
             pasajeros: listaLimpia 
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 📝 Registrar / Crear Pasajero con Captura de Duplicidad E11000 y Resiliencia Firebase Auth
  */
-export const registrarPasajero = async (req, res) => {
+export const registrarPasajero = async (req, res, next) => {
     try {
         const { nombre, email, telefono, telefonoMovil, password, uid, direccion, fotoPerfil } = req.body;
         const telContacto = (telefonoMovil || telefono) ? String(telefonoMovil || telefono).trim() : null;
@@ -288,11 +288,7 @@ export const registrarPasajero = async (req, res) => {
             });
         }
 
-        return res.status(500).json({
-            success: false,
-            code: 'SYSTEM_FAULT',
-            message: `SYSTEM_FAULT: ${error.message || 'Error interno del servidor al procesar el registro.'}`
-        });
+        next(error);
     }
 };
 
@@ -333,14 +329,14 @@ export const validarPasajeroUnico = async (req, res, next) => {
                 message: "⚠️ El número de teléfono o correo ya pertenece a un usuario/pasajero registrado."
             });
         }
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 👤 Consulta de Perfil de Pasajero por ID o Token de Sesión
  */
-export const obtenerPerfilPasajero = async (req, res) => {
+export const obtenerPerfilPasajero = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
@@ -360,14 +356,14 @@ export const obtenerPerfilPasajero = async (req, res) => {
 
         return res.status(200).json({ success: true, data: pasajero, pasajero });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 🔄 Actualización de Perfil con Sincronización a Firestore
  */
-export const actualizarPerfilPasajero = async (req, res) => {
+export const actualizarPerfilPasajero = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
@@ -423,7 +419,7 @@ export const actualizarPerfilPasajero = async (req, res) => {
                 message: `⚠️ El ${campoDuplicado} ingresado ya está asignado a otro usuario.`
             });
         }
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -434,7 +430,7 @@ export const actualizarPerfilPasajero = async (req, res) => {
 /**
  * 📍 Guardar Dirección Favorita con Replicación a Firestore
  */
-export const agregarDireccionFavorita = async (req, res) => {
+export const agregarDireccionFavorita = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
         const { alias, direccion, latitud, longitud } = req.body;
@@ -482,14 +478,14 @@ export const agregarDireccionFavorita = async (req, res) => {
 
         return res.status(200).json({ success: true, message: 'Dirección guardada correctamente', data: pasajero });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 🗑️ Eliminar Dirección Favorita
  */
-export const eliminarDireccionFavorita = async (req, res) => {
+export const eliminarDireccionFavorita = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
         const { direccionId } = req.params;
@@ -527,14 +523,14 @@ export const eliminarDireccionFavorita = async (req, res) => {
 
         return res.status(200).json({ success: true, message: 'Dirección eliminada correctamente', data: pasajero });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 📜 Historial de Viajes del Pasajero
  */
-export const obtenerHistorialViajesPasajero = async (req, res) => {
+export const obtenerHistorialViajesPasajero = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
 
@@ -557,7 +553,7 @@ export const obtenerHistorialViajesPasajero = async (req, res) => {
 
         return res.status(200).json({ success: true, contador: viajes.length, data: viajes });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -568,7 +564,7 @@ export const obtenerHistorialViajesPasajero = async (req, res) => {
 /**
  * 💰 Consultar saldo del pasajero con timeout estricto de 3000ms y fallback resiliente $0 COP
  */
-export const obtenerSaldoPasajero = async (req, res) => {
+export const obtenerSaldoPasajero = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
@@ -615,7 +611,7 @@ export const obtenerSaldoPasajero = async (req, res) => {
 /**
  * 💳 Recargar saldo a Pasajero con incremento atómico ($inc) y auditoría
  */
-export const recargarSaldoPasajero = async (req, res) => {
+export const recargarSaldoPasajero = async (req, res, next) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
@@ -718,7 +714,7 @@ export const recargarSaldoPasajero = async (req, res) => {
             await session.abortTransaction();
         }
         session.endSession();
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 

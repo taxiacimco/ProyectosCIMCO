@@ -1,7 +1,7 @@
-// Versión Arquitectura: V19.5 - Inyección Sincrónica de UID Firebase Auth y Protección Sparse E11000 en Registro
+// Versión Arquitectura: V19.6 - Delegación Centralizada de Excepciones mediante next(error)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
- * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado, inyección sincrónica de UID Firebase Auth, blindaje del atributo UID contra colisiones de índice sparse (E11000), flujo financiero sin mutaciones dobles de saldo y ajuste polimórfico multi-colección.
+ * Misión: Control unificado de usuarios (Admin, Despachador, Pasajero, Staff), directorio global deduplicado, inyección sincrónica de UID Firebase Auth, blindaje del atributo UID contra colisiones de índice sparse (E11000), flujo financiero sin mutaciones dobles de saldo, ajuste polimórfico multi-colección y delegación centralizada de excepciones via next(error).
  */
 
 import mongoose from 'mongoose';
@@ -54,7 +54,7 @@ const registrarTransaccionFirestore = async ({
  * 🌐 Directorio Global Centralizado y Anti-Duplicados
  * Retorna todos los actores del sistema unificados y limpios por ID/Email/Teléfono
  */
-export const obtenerDirectorioGlobal = async (req, res) => {
+export const obtenerDirectorioGlobal = async (req, res, next) => {
     try {
         // Consultar la base de datos de usuarios excluyendo contraseñas
         const usuariosBrutos = await Usuario.find().select('-password').lean();
@@ -88,14 +88,14 @@ export const obtenerDirectorioGlobal = async (req, res) => {
         });
     } catch (error) {
         console.error("❌ Error en obtenerDirectorioGlobal:", error);
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 📋 Obtener listado de usuarios filtrado opcionalmente por rol
  */
-export const obtenerUsuarios = async (req, res) => {
+export const obtenerUsuarios = async (req, res, next) => {
     try {
         const { rol } = req.query;
         const filtro = {};
@@ -117,7 +117,7 @@ export const obtenerUsuarios = async (req, res) => {
 
         return res.status(200).json({ success: true, contador: listaFiltrada.length, data: listaFiltrada });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -155,7 +155,7 @@ export const validarRegistroUnico = async (req, res, next) => {
                 message: "⚠️ El correo, teléfono o UID ingresado ya pertenece a otro usuario."
             });
         }
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -163,7 +163,7 @@ export const validarRegistroUnico = async (req, res, next) => {
  * 📝 Registrar / Crear Usuario (Admin, Secretaría, Despachador, Staff)
  * Inyección sincrónica de UID mediante Firebase Auth y blindaje contra colisiones de índice sparse E11000 por 'uid: null'
  */
-export const registrarUsuario = async (req, res) => {
+export const registrarUsuario = async (req, res, next) => {
     try {
         const { nombre, email, telefono, telefonoMovil, password, uid, rol, role, subrol, terminal_id, codigoDespachador } = req.body;
         const telContacto = (telefonoMovil || telefono) ? String(telefonoMovil || telefono).trim() : undefined;
@@ -294,11 +294,7 @@ export const registrarUsuario = async (req, res) => {
             });
         }
 
-        return res.status(500).json({
-            success: false,
-            code: 'SYSTEM_FAULT',
-            message: `SYSTEM_FAULT: ${error.message || 'Error interno del servidor al procesar el registro.'}`
-        });
+        next(error);
     }
 };
 
@@ -310,7 +306,7 @@ export const crearUsuario = registrarUsuario;
 /**
  * 👤 Obtener usuario por ID, UID o desde la sesión activa (req.user)
  */
-export const obtenerUsuarioPorId = async (req, res) => {
+export const obtenerUsuarioPorId = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
@@ -330,14 +326,14 @@ export const obtenerUsuarioPorId = async (req, res) => {
 
         return res.status(200).json({ success: true, data: usuario, usuario });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 🔄 Actualizar datos de usuario con sincronización a Firestore y saneamiento de UID
  */
-export const actualizarUsuario = async (req, res) => {
+export const actualizarUsuario = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
@@ -397,14 +393,14 @@ export const actualizarUsuario = async (req, res) => {
                 message: `⚠️ El ${campoDuplicado} ingresado ya está asignado a otro usuario.`
             });
         }
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 🗑️ Eliminar usuario por ID o UID
  */
-export const eliminarUsuario = async (req, res) => {
+export const eliminarUsuario = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.params.uid;
         if (!targetId) {
@@ -424,7 +420,7 @@ export const eliminarUsuario = async (req, res) => {
 
         return res.status(200).json({ success: true, message: 'Usuario eliminado correctamente' });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -435,7 +431,7 @@ export const eliminarUsuario = async (req, res) => {
 /**
  * 🎧 Obtener todos los usuarios con rol de despachador
  */
-export const obtenerDespachadores = async (req, res) => {
+export const obtenerDespachadores = async (req, res, next) => {
     try {
         const despachadores = await Usuario.find({
             $or: [{ rol: 'despachador' }, { role: 'despachador' }]
@@ -443,14 +439,14 @@ export const obtenerDespachadores = async (req, res) => {
 
         return res.status(200).json({ success: true, contador: despachadores.length, data: despachadores });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 🏢 Asignar Terminal y Código Operativo a Despachador (con réplica a Firestore)
  */
-export const asignarTerminalDespachador = async (req, res) => {
+export const asignarTerminalDespachador = async (req, res, next) => {
     try {
         const { despachadorId, id, uid, terminal_id, codigoDespachador } = req.body;
         const targetId = despachadorId || id || uid;
@@ -501,7 +497,7 @@ export const asignarTerminalDespachador = async (req, res) => {
             data: usuario
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
@@ -512,7 +508,7 @@ export const asignarTerminalDespachador = async (req, res) => {
 /**
  * 💰 Consultar saldo del despachador
  */
-export const obtenerSaldoDespachador = async (req, res) => {
+export const obtenerSaldoDespachador = async (req, res, next) => {
     try {
         const targetId = req.params.id || req.user?.id || req.user?._id;
         if (!targetId) {
@@ -539,14 +535,14 @@ export const obtenerSaldoDespachador = async (req, res) => {
             data: usuario
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 💳 Recargar saldo a Despachador con incremento atómico ($inc) y auditoría en Firestore
  */
-export const recargarSaldoDespachador = async (req, res) => {
+export const recargarSaldoDespachador = async (req, res, next) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
@@ -641,14 +637,14 @@ export const recargarSaldoDespachador = async (req, res) => {
     } catch (error) {
         await session.abortTransaction();
         session.endSession();
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 /**
  * 💳 AJUSTE TRANSACCIONAL DE BILLETERA (Búsqueda Polimórfica Multi-Colección)
  */
-export const ajustarSaldoBilletera = async (req, res) => {
+export const ajustarSaldoBilletera = async (req, res, next) => {
     try {
         const { usuarioId, idTarget, monto, concepto, rol } = req.body;
         const targetId = usuarioId || idTarget || req.params.id;
@@ -736,7 +732,7 @@ export const ajustarSaldoBilletera = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-WALLET-FATAL] Error al ajustar saldo de billetera:", error);
-        return res.status(500).json({ success: false, message: "Error interno al procesar la transacción." });
+        next(error);
     }
 };
 
@@ -744,7 +740,7 @@ export const ajustarSaldoBilletera = async (req, res) => {
  * 💰 Ajuste Manual de Saldo (Abono / Débito - CEO)
  * Permite abonar saldo o realizar devoluciones/débitos a cualquier usuario mediante actualización atómica $inc de Mongoose.
  */
-export const recargarSaldo = async (req, res) => {
+export const recargarSaldo = async (req, res, next) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
@@ -863,7 +859,7 @@ export const recargarSaldo = async (req, res) => {
         await session.abortTransaction();
         session.endSession();
         console.error("❌ Error en recargarSaldo:", error);
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 

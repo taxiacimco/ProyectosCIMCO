@@ -1,9 +1,11 @@
-// Versión Arquitectura: V18.5 - Sincronización Canónica de Redirect URL de Pasarelas (Wompi/PSE) al Frontend Vercel
+// Versión Arquitectura: V19.1 - Delegación Centralizada de Excepciones a Middleware Global de Errores
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
  * Misión: Procesar flujos operativos, liquidación contable (10% comisión), transición de estados, cancelación,
  *         sincronización Firestore y gestión de pasarelas de pago con redirección canónica a Vercel.
- * Ajuste V18.5: Configuración y validación estricta de redirectUrl/redirect_url apuntando dinámicamente a ${process.env.FRONTEND_URL}/billetera.
+ * Ajuste V19.1: Refactorización de controladores para delegar la gestión de excepciones al Middleware Centralizado
+ *              de Errores mediante la incorporación de `next(error)` en todos los bloques catch asíncronos,
+ *              eliminando respuestas locales fragmentadas 500 y garantizando la trazabilidad unificada.
  */
 
 import crypto from 'crypto';
@@ -18,10 +20,53 @@ import { FieldValue } from 'firebase-admin/firestore';
 // Auxiliar de retardo con aleatoriedad (Jitter) para dispersar la ráfaga concurrentemente
 const esperarGarantizado = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * 🔄 HELPER DE TRANSMISIÓN DE ESTADOS A FIRESTORE
+ * Registra de forma idempotente y atómica las transiciones de estado del viaje en Firestore
+ * manteniendo historial de cambios y garantizando consistencia ante desconexiones de red/sockets.
+ *
+ * @param {string} viajeId - Identificador del viaje.
+ * @param {string} nuevoEstado - Estado canónico (SOLICITADO, OFERTADO, ASIGNADO, EN_RUTA, FINALIZADO, CANCELADO).
+ * @param {Object} datosAdicionales - Atributos complementarios (coordenadas, conductorId, etc.).
+ */
+export const actualizarEstadoFirestore = async (viajeId, nuevoEstado, datosAdicionales = {}) => {
+    if (!dbFirestore || !viajeId) return false;
+    try {
+        const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+        const viajeRef = dbFirestore.collection(coleccionViajes).doc(String(viajeId));
+        
+        const estadoNormalizado = String(nuevoEstado || '').toUpperCase();
+        const estadoMinusc = estadoNormalizado.toLowerCase();
+
+        const updatePayload = {
+            viajeId: String(viajeId),
+            estadoViaje: estadoNormalizado,
+            estado: estadoMinusc,
+            updatedAt: FieldValue.serverTimestamp(),
+            ...datosAdicionales
+        };
+
+        const registroHistorial = {
+            estado: estadoNormalizado,
+            fecha: new Date().toISOString()
+        };
+
+        await viajeRef.set({
+            ...updatePayload,
+            historialEstados: FieldValue.arrayUnion(registroHistorial)
+        }, { merge: true });
+
+        return true;
+    } catch (error) {
+        console.error(`🚨 [FIRESTORE-STATE-ERR] Fallo al actualizar estado [${nuevoEstado}] para viaje [${viajeId}]:`, error.message);
+        return false;
+    }
+};
+
 // ==================================================================
 // 0. CREACIÓN Y DESPACHO INMEDIATO (BLOQUEO TRANSACCIONAL DESDE ANDÉN)
 // ==================================================================
-export const crearYDespacharViajeAtomico = async (req, res) => {
+export const crearYDespacharViajeAtomico = async (req, res, next) => {
     if (!req || !req.body) {
         return res.status(400).json({ success: false, message: 'Payload de inyección logística corrupto o ausente.' });
     }
@@ -104,44 +149,35 @@ export const crearYDespacharViajeAtomico = async (req, res) => {
             tarifa: parseFloat(tarifaFinal),
             valor: parseFloat(tarifaFinal),
             metodoPago: metodoPago || 'EFECTIVO',
-            estado: 'aceptado', 
-            estadoViaje: 'aceptado'
+            estado: 'asignado', 
+            estadoViaje: 'ASIGNADO'
         }], { session });
 
         await session.commitTransaction();
         session.endSession();
 
+        // 🔄 SINCRONIZACIÓN ATÓMICA DE ESTADO EN FIRESTORE
+        await actualizarEstadoFirestore(String(idViajeFinal), 'ASIGNADO', {
+            pasajeroId: String(pasajeroId),
+            conductorId: String(conductorId),
+            despachadorId,
+            origen,
+            destino,
+            origenTexto,
+            destinoTexto,
+            tarifa: parseFloat(tarifaFinal),
+            valor: parseFloat(tarifaFinal),
+            metodoPago: metodoPago || 'EFECTIVO'
+        });
+
         if (dbFirestore) {
-            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
             const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-
-            const viajeRef = dbFirestore.collection(coleccionViajes).doc(String(idViajeFinal));
-            const conductorRef = dbFirestore.collection(coleccionConductores).doc(String(conductorId));
-
-            Promise.all([
-                viajeRef.set({
-                    viajeId: String(idViajeFinal),
-                    pasajeroId: String(pasajeroId),
-                    conductorId: String(conductorId),
-                    despachadorId: despachadorId,
-                    origen,
-                    destino,
-                    origenTexto,
-                    destinoTexto,
-                    tarifa: parseFloat(tarifaFinal),
-                    valor: parseFloat(tarifaFinal),
-                    metodoPago: metodoPago || 'EFECTIVO',
-                    estadoViaje: 'aceptado',
-                    createdAt: FieldValue.serverTimestamp(),
-                    updatedAt: FieldValue.serverTimestamp()
-                }),
-                conductorRef.update({
-                    estado: 'busy',
-                    estadoOperativo: 'OCUPADO',
-                    viajeActualId: String(idViajeFinal),
-                    updatedAt: FieldValue.serverTimestamp()
-                })
-            ]).catch(e => console.error("🚨 Error diferido Firestore en creación atómica:", e));
+            dbFirestore.collection(coleccionConductores).doc(String(conductorId)).update({
+                estado: 'busy',
+                estadoOperativo: 'OCUPADO',
+                viajeActualId: String(idViajeFinal),
+                updatedAt: FieldValue.serverTimestamp()
+            }).catch(e => console.error("🚨 Error diferido en actualización de Conductor Firestore:", e));
         }
 
         return res.status(201).json({
@@ -174,17 +210,14 @@ export const crearYDespacharViajeAtomico = async (req, res) => {
             });
         }
 
-        return res.status(500).json({ 
-            success: false, 
-            message: 'Fallo crítico transaccional al ejecutar el despacho en andén.' 
-        });
+        next(error);
     }
 };
 
 // ==================================================================
 // 1. SOLICITUD DE SERVICIO (RADAR RADIAL DE CERCANÍA)
 // ==================================================================
-export const solicitarViaje = async (req, res) => {
+export const solicitarViaje = async (req, res, next) => {
     try {
         if (!req || !req.body) {
             return res.status(400).json({ success: false, message: 'Payload de solicitud nulo o inválido.' });
@@ -222,26 +255,22 @@ export const solicitarViaje = async (req, res) => {
             valor: parseFloat(tarifaFinal),
             metodoPago: metodoPago || 'EFECTIVO',
             estado: 'solicitado',
-            estadoViaje: 'solicitado'
+            estadoViaje: 'SOLICITADO'
         });
 
-        if (dbFirestore) {
-            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
-            dbFirestore.collection(coleccionViajes).doc(String(nuevoViaje._id)).set({
-                viajeId: String(nuevoViaje._id),
-                pasajeroId: String(pasajeroId),
-                origen,
-                destino,
-                origenTexto,
-                destinoTexto,
-                tarifa: parseFloat(tarifaFinal),
-                valor: parseFloat(tarifaFinal),
-                metodoPago: metodoPago || 'EFECTIVO',
-                estadoViaje: 'solicitado',
-                conductorId: null,
-                createdAt: FieldValue.serverTimestamp()
-            }).catch(e => console.error("🚨 Error diferido Firestore en solicitarViaje:", e));
-        }
+        // 🔄 SINCRONIZACIÓN ATÓMICA DE ESTADO EN FIRESTORE
+        await actualizarEstadoFirestore(String(nuevoViaje._id), 'SOLICITADO', {
+            pasajeroId: String(pasajeroId),
+            origen,
+            destino,
+            origenTexto,
+            destinoTexto,
+            tarifa: parseFloat(tarifaFinal),
+            valor: parseFloat(tarifaFinal),
+            metodoPago: metodoPago || 'EFECTIVO',
+            conductorId: null,
+            createdAt: FieldValue.serverTimestamp()
+        });
 
         const conductoresCercanos = await Conductor.find({
             estadoOperativo: 'DISPONIBLE',
@@ -267,14 +296,14 @@ export const solicitarViaje = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-DESPACHO-ERR]:", error);
-        return res.status(500).json({ success: false, message: 'Fallo crítico al inicializar la orden radial.' });
+        next(error);
     }
 };
 
 // ==================================================================
 // 2. ASIGNACIÓN ATÓMICA CON LOCK ANTI-COLLISION (RACE CONDITION FIX 409)
 // ==================================================================
-export const aceptarViaje = async (req, res) => {
+export const aceptarViaje = async (req, res, next) => {
     if (!req || !req.body) {
         return res.status(400).json({ success: false, message: 'Payload de aceptación corrupto.' });
     }
@@ -318,13 +347,13 @@ export const aceptarViaje = async (req, res) => {
         const viajeAsignado = await Viaje.findOneAndUpdate(
             { 
                 _id: viajeId, 
-                estado: { $in: ['SOLICITADO', 'solicitado'] } 
+                estado: { $in: ['SOLICITADO', 'solicitado', 'OFERTADO', 'ofertado'] } 
             }, 
             { 
                 $set: { 
                     conductorId: conductorId, 
                     estado: 'aceptado', 
-                    estadoViaje: 'aceptado' 
+                    estadoViaje: 'ASIGNADO' 
                 } 
             },
             { new: true, session }
@@ -343,23 +372,19 @@ export const aceptarViaje = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        if (dbFirestore) {
-            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
-            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+        // 🔄 SINCRONIZACIÓN ATÓMICA DE ESTADO EN FIRESTORE
+        await actualizarEstadoFirestore(String(viajeId), 'ASIGNADO', {
+            conductorId: String(conductorId)
+        });
 
-            Promise.all([
-                dbFirestore.collection(coleccionViajes).doc(String(viajeId)).update({
-                    conductorId: String(conductorId),
-                    estadoViaje: 'aceptado',
-                    updatedAt: FieldValue.serverTimestamp()
-                }),
-                dbFirestore.collection(coleccionConductores).doc(String(conductorId)).update({
-                    estado: 'busy',
-                    estadoOperativo: 'OCUPADO',
-                    viajeActualId: String(viajeId),
-                    updatedAt: FieldValue.serverTimestamp()
-                })
-            ]).catch(e => console.error("🚨 Error diferido Firestore al actualizar asignación:", e));
+        if (dbFirestore) {
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+            dbFirestore.collection(coleccionConductores).doc(String(conductorId)).update({
+                estado: 'busy',
+                estadoOperativo: 'OCUPADO',
+                viajeActualId: String(viajeId),
+                updatedAt: FieldValue.serverTimestamp()
+            }).catch(e => console.error("🚨 Error diferido Firestore al actualizar conductor asignado:", e));
         }
 
         return res.status(200).json({
@@ -374,14 +399,14 @@ export const aceptarViaje = async (req, res) => {
         }
         session.endSession();
         console.error("🚨 [CIMCO-LOCK-ERR]: Fallo de concurrencia en hilos de base de datos:", error);
-        return res.status(500).json({ success: false, message: 'Fallo de concurrencia en hilos de base de datos de asignación.' });
+        next(error);
     }
 };
 
 // ==================================================================
-// 2.1 INICIO TRANSACCIONAL DEL RECORRIDO (TRANSICIÓN A 'EN_CURSO')
+// 2.1 INICIO TRANSACCIONAL DEL RECORRIDO (TRANSICIÓN A 'EN_RUTA')
 // ==================================================================
-export const iniciarViaje = async (req, res) => {
+export const iniciarViaje = async (req, res, next) => {
     if (!req || !req.body) {
         return res.status(400).json({ success: false, message: 'Payload de inicio de viaje inválido o ausente.' });
     }
@@ -400,12 +425,12 @@ export const iniciarViaje = async (req, res) => {
         const viaje = await Viaje.findOneAndUpdate(
             { 
                 _id: targetViajeId, 
-                estado: { $in: ['aceptado', 'asignado', 'solicitado'] } 
+                estado: { $in: ['aceptado', 'asignado', 'solicitado', 'ASIGNADO'] } 
             },
             { 
                 $set: { 
                     estado: 'en_curso', 
-                    estadoViaje: 'en_curso',
+                    estadoViaje: 'EN_RUTA',
                     fechaInicio: new Date()
                 } 
             },
@@ -425,18 +450,14 @@ export const iniciarViaje = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        if (dbFirestore) {
-            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
-            dbFirestore.collection(coleccionViajes).doc(String(targetViajeId)).update({
-                estadoViaje: 'en_curso',
-                fechaInicio: FieldValue.serverTimestamp(),
-                updatedAt: FieldValue.serverTimestamp()
-            }).catch(e => console.error("🚨 Error diferido Firestore en iniciarViaje:", e));
-        }
+        // 🔄 SINCRONIZACIÓN ATÓMICA DE ESTADO EN FIRESTORE
+        await actualizarEstadoFirestore(String(targetViajeId), 'EN_RUTA', {
+            fechaInicio: FieldValue.serverTimestamp()
+        });
 
         return res.status(200).json({
             success: true,
-            message: 'Recorrido iniciado oficialmente. Estado actualizado a EN_CURSO.',
+            message: 'Recorrido iniciado oficialmente. Estado actualizado a EN_RUTA.',
             data: viaje
         });
 
@@ -446,14 +467,14 @@ export const iniciarViaje = async (req, res) => {
         }
         session.endSession();
         console.error("🚨 [CIMCO-START-TRIP-ERR]:", error);
-        return res.status(500).json({ success: false, message: 'Error interno al procesar el inicio del recorrido.' });
+        next(error);
     }
 };
 
 // ==================================================================
 // 3. SUBSISTEMA DE LIQUIDACIÓN Y CIERRE DE SERVICIOS
 // ==================================================================
-export const completarViaje = async (req, res) => {
+export const completarViaje = async (req, res, next) => {
     const MAX_REINTENTOS = 8;
     let intento = 0;
     const tiempoInicio = Date.now();
@@ -477,7 +498,7 @@ export const completarViaje = async (req, res) => {
             if (!viaje) {
                 throw new Error('Servicio no encontrado en el historial.');
             }
-            if (viaje.estado === 'finalizado' || viaje.estadoViaje === 'completado') {
+            if (viaje.estado === 'finalizado' || viaje.estadoViaje === 'FINALIZADO' || viaje.estadoViaje === 'completado') {
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(200).json({
@@ -512,7 +533,7 @@ export const completarViaje = async (req, res) => {
             const saldoNuevo = saldoAnterior - comision;
 
             viaje.estado = 'finalizado';
-            viaje.estadoViaje = 'completado';
+            viaje.estadoViaje = 'FINALIZADO';
             await viaje.save({ session });
 
             await HistorialSaldo.create([{
@@ -534,11 +555,14 @@ export const completarViaje = async (req, res) => {
                 console.log(`📈 [CIMCO-PRODUCCION-AUDIT] Viaje ${viajeId} liquidado con éxito tras mitigar colisiones. Intentos: ${intento}. Latencia total: ${latenciaTotal}ms.`);
             }
 
-            // Sincronización diferida en Firestore: Ejecutada EXCLUSIVAMENTE fuera del bucle de reintentos
+            // 🔄 SINCRONIZACIÓN ATÓMICA DE ESTADO EN FIRESTORE
+            await actualizarEstadoFirestore(String(viajeId), 'FINALIZADO', {
+                comisionDebitada: comision,
+                fechaFinalizacion: FieldValue.serverTimestamp()
+            });
+
             if (dbFirestore) {
                 const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-                const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
-
                 dbFirestore.collection(coleccionConductores).doc(String(conductorId)).update({
                     saldo: FieldValue.increment(-comision),
                     balance: FieldValue.increment(-comision),
@@ -547,11 +571,6 @@ export const completarViaje = async (req, res) => {
                     viajeActualId: null,
                     updatedAt: FieldValue.serverTimestamp()
                 }).catch(e => console.error("🚨 Error diferido Firestore (Conductor):", e));
-
-                dbFirestore.collection(coleccionViajes).doc(String(viajeId)).update({
-                    estadoViaje: 'completado', 
-                    updatedAt: FieldValue.serverTimestamp()
-                }).catch(e => console.error("🚨 Error diferido Firestore (Viaje):", e));
             }
 
             return res.status(200).json({
@@ -583,8 +602,8 @@ export const completarViaje = async (req, res) => {
             }
 
             console.error("🚨 [CIMCO-FINANCE-ERR]: Transacción abortada definitivamente.", error.message);
-            const statusError = error.message.includes('insuficientes') ? 402 : 500;
-            return res.status(statusError).json({ success: false, message: error.message });
+            next(error);
+            return;
         }
     }
 };
@@ -592,7 +611,7 @@ export const completarViaje = async (req, res) => {
 // ==================================================================
 // 4. CANCELACIÓN ATÓMICA DE VIAJES
 // ==================================================================
-export const cancelarViaje = async (req, res) => {
+export const cancelarViaje = async (req, res, next) => {
     const { viajeId, motivo } = req.body || {};
     const targetId = viajeId || req.params.id;
 
@@ -611,14 +630,14 @@ export const cancelarViaje = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Viaje no encontrado.' });
         }
 
-        if (viaje.estado === 'cancelado' || viaje.estadoViaje === 'cancelado') {
+        if (viaje.estado === 'cancelado' || viaje.estadoViaje === 'CANCELADO') {
             await session.abortTransaction();
             session.endSession();
             return res.status(200).json({ success: true, message: 'El viaje ya se encontraba cancelado.' });
         }
 
         viaje.estado = 'cancelado';
-        viaje.estadoViaje = 'cancelado';
+        viaje.estadoViaje = 'CANCELADO';
         if (motivo) viaje.motivoCancelacion = motivo;
         await viaje.save({ session });
 
@@ -644,27 +663,24 @@ export const cancelarViaje = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
-        if (dbFirestore) {
-            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
-            dbFirestore.collection(coleccionViajes).doc(String(targetId)).update({
-                estadoViaje: 'cancelado',
-                updatedAt: FieldValue.serverTimestamp()
-            }).catch(e => console.error("🚨 Error actualizando cancelación en Firestore:", e));
-        }
+        // 🔄 SINCRONIZACIÓN ATÓMICA DE ESTADO EN FIRESTORE
+        await actualizarEstadoFirestore(String(targetId), 'CANCELADO', {
+            motivoCancelacion: motivo || 'cancelado_por_usuario'
+        });
 
         return res.status(200).json({ success: true, message: 'Viaje cancelado y recursos liberados correctamente.', data: viaje });
 
     } catch (error) {
         if (session.inTransaction()) await session.abortTransaction();
         session.endSession();
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 // ==================================================================
 // 5. CONSULTAS DE LECTURA E HISTORIAL DE VIAJES
 // ==================================================================
-export const obtenerViajes = async (req, res) => {
+export const obtenerViajes = async (req, res, next) => {
     try {
         const { estado, conductorId, pasajeroId, limit = 50 } = req.query;
         const filtro = {};
@@ -680,11 +696,11 @@ export const obtenerViajes = async (req, res) => {
 
         return res.status(200).json({ success: true, contador: viajes.length, data: viajes });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
-export const obtenerHistorialViajes = async (req, res) => {
+export const obtenerHistorialViajes = async (req, res, next) => {
     try {
         const usuarioLogueado = req.usuario || req.user;
         const { limit = 50, page = 1 } = req.query;
@@ -718,11 +734,11 @@ export const obtenerHistorialViajes = async (req, res) => {
             data: viajes
         });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
-export const obtenerViajePorId = async (req, res) => {
+export const obtenerViajePorId = async (req, res, next) => {
     try {
         const { id } = req.params;
         if (!id || !mongoose.Types.ObjectId.isValid(id)) {
@@ -737,18 +753,18 @@ export const obtenerViajePorId = async (req, res) => {
 
         return res.status(200).json({ success: true, data: viaje });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
-export const obtenerDetalleViaje = async (req, res) => {
-    return obtenerViajePorId(req, res);
+export const obtenerDetalleViaje = async (req, res, next) => {
+    return obtenerViajePorId(req, res, next);
 };
 
 // ==================================================================
 // 6. GESTIÓN DE PASARELAS DE PAGO Y WEBHOOK WOMPI (CANONICAL VERCEL REDIRECT)
 // ==================================================================
-export const prepararCheckoutPasarela = async (req, res) => {
+export const prepararCheckoutPasarela = async (req, res, next) => {
     try {
         const { monto, referencia, moneda = 'COP', descripcion } = req.body || {};
         
@@ -768,11 +784,11 @@ export const prepararCheckoutPasarela = async (req, res) => {
         });
     } catch (error) {
         console.error("🚨 [CIMCO-CHECKOUT-ERR]:", error);
-        return res.status(500).json({ success: false, message: 'Error interno al preparar checkout de pasarela de pagos.' });
+        next(error);
     }
 };
 
-export const recibirAlertaWompiLocal = async (req, res) => {
+export const recibirAlertaWompiLocal = async (req, res, next) => {
     try {
         if (!req || !req.body) {
             return res.status(200).json({ status: 'ignored', message: 'Payload vacío.' });
@@ -793,14 +809,14 @@ export const recibirAlertaWompiLocal = async (req, res) => {
         }
         return res.status(200).json({ success: true, status: 'processed' });
     } catch (error) {
-        return res.status(500).json({ success: false, message: error.message });
+        next(error);
     }
 };
 
 // ==================================================================
 // 7. DISTRIBUCIÓN LOGÍSTICA ATÓMICA BLINDADA
 // ==================================================================
-export const despacharViajeAtomico = async (req, res) => {
+export const despacharViajeAtomico = async (req, res, next) => {
     if (!req || !req.body) {
         return res.status(400).json({ success: false, message: 'Payload de despacho nulo o inválido.' });
     }
@@ -842,7 +858,7 @@ export const despacharViajeAtomico = async (req, res) => {
 
         const updateMongoViaje = { 
             estado: 'asignado', 
-            estadoViaje: 'asignado', 
+            estadoViaje: 'ASIGNADO', 
             conductorId, 
             despachadorId 
         };
@@ -854,7 +870,7 @@ export const despacharViajeAtomico = async (req, res) => {
         if (metodoPago !== undefined) updateMongoViaje.metodoPago = String(metodoPago);
 
         const viajeAsignado = await Viaje.findOneAndUpdate(
-            { _id: viajeId, estado: { $in: ['solicitado', 'pending', 'aceptado'] } },
+            { _id: viajeId, estado: { $in: ['solicitado', 'pending', 'aceptado', 'SOLICITADO', 'OFERTADO'] } },
             { $set: updateMongoViaje },
             { new: true, session }
         );
@@ -868,37 +884,30 @@ export const despacharViajeAtomico = async (req, res) => {
         await session.commitTransaction();
         session.endSession();
 
+        // 🔄 SINCRONIZACIÓN ATÓMICA DE ESTADO EN FIRESTORE
+        const datosExtras = {
+            conductorId: String(conductorId),
+            despachadorId: despachadorId,
+            asignadoEn: FieldValue.serverTimestamp()
+        };
+
+        if (tarifaFinal !== undefined) {
+            datosExtras.tarifa = parseFloat(tarifaFinal);
+            datosExtras.valor = parseFloat(tarifaFinal);
+        }
+        if (metodoPago !== undefined) datosExtras.metodoPago = String(metodoPago);
+
+        await actualizarEstadoFirestore(String(viajeId), 'ASIGNADO', datosExtras);
+
         if (dbFirestore) {
-            const coleccionViajes = FIRESTORE_PATHS?.viajes || 'viajes';
             const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-
-            const viajeRef = dbFirestore.collection(coleccionViajes).doc(String(viajeId));
-            const conductorRef = dbFirestore.collection(coleccionConductores).doc(String(conductorId));
-
-            const actualizacionViajeFirebase = {
-                estadoViaje: 'asignado',
-                conductorId: String(conductorId),
-                despachadorId: despachadorId,
-                asignadoEn: FieldValue.serverTimestamp(),
+            dbFirestore.collection(coleccionConductores).doc(String(conductorId)).update({
+                estado: 'busy',
+                estadoOperativo: 'OCUPADO',
+                viajeActualId: String(viajeId),
                 updatedAt: FieldValue.serverTimestamp()
-            };
-
-            if (tarifaFinal !== undefined) {
-                actualizacionViajeFirebase.tarifa = parseFloat(tarifaFinal);
-                actualizacionViajeFirebase.valor = parseFloat(tarifaFinal);
-            }
-            if (metodoPago !== undefined) actualizacionViajeFirebase.metodoPago = String(metodoPago);
-
-            Promise.all([
-                viajeRef.set(actualizacionViajeFirebase, { merge: true }),
-                conductorRef.update({
-                    estado: 'busy',
-                    estadoOperativo: 'OCUPADO',
-                    viajeActualId: String(viajeId),
-                    updatedAt: FieldValue.serverTimestamp()
-                })
-            ]).catch(firebaseError => {
-                console.error("🚨 Error diferido de sincronización en Firebase Firestore:", firebaseError.message);
+            }).catch(firebaseError => {
+                console.error("🚨 Error diferido de actualización de Conductor en Firebase Firestore:", firebaseError.message);
             });
         }
 
@@ -914,11 +923,12 @@ export const despacharViajeAtomico = async (req, res) => {
         }
         session.endSession();
         console.error("❌ [CIMCO-ATOMIC-DISPATCH-ERR]:", error.message);
-        return res.status(500).json({ success: false, message: 'Fallo crítico transaccional al ejecutar el despacho en andén.' });
+        next(error);
     }
 };
 
 export default {
+    actualizarEstadoFirestore,
     crearYDespacharViajeAtomico,
     solicitarViaje,
     aceptarViaje,

@@ -1,19 +1,20 @@
-// Versión Arquitectura: V10.0 - Integración de Captura de Estado de Redirección (location.state.phone)
+// Versión Arquitectura: V11.0 - Delegación de Autenticación a authService e Implementación de AbortController en Ciclo de Vida
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
  * Misión: Pantalla de Autenticación de Usuarios y Central Operativa con interfaz luminosa Light Glassmorphism,
  * psicología de color basada en Confianza (Azul/Slate) y Agilidad Operativa (Naranja/Ámbar),
+ * delegación atómica de la autenticación al servicio authService.login(),
+ * control de cancelación de peticiones asíncronas con AbortController en el ciclo de vida (useEffect),
  * autocompletado inteligente del identificador desde el estado de navegación (location.state.phone) al redirigir desde registros,
  * corrección de contraste en insignias y etiquetas (text-amber-950, bg-amber-100, border-amber-300, text-slate-800, text-slate-600),
- * sanitización inteligente de prefijo +57, preservación del guardián anti-loop, integración resiliente con useAuth (loginLocal),
- * eliminación de escritura manual redundante en localStorage (delegada a AuthProvider),
+ * sanitización inteligente de prefijo +57, preservación del guardián anti-loop,
  * desestructuración segura de respuestas y enrutamiento dinámico unificado por rol con Register.jsx.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
-import api from '@/config/api';
+import authService from '@/services/authService';
 import { 
   Lock, 
   Mail, 
@@ -52,26 +53,38 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // 🛡️ GUARDIÁN ANTI-LOOP: Redirección Inteligente Sincronizada con Register.jsx
+  // Referencia para cancelar solicitudes en ejecución al desmontar el componente
+  const abortControllerRef = useRef(null);
+
+  // 🛡️ GUARDIÁN ANTI-LOOP Y CANCELACIÓN ASÍNCRONA VÍA ABORTCONTROLLER
   useEffect(() => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     if (authLoading) return;
 
     if (user) {
       const activeRole = (user?.rol || user?.role || 'pasajero').toLowerCase();
       console.log(`📡 [CIMCO-GUARD] Sesión activa detectada para [${user?.email || user?.nombre}]. Rol: ${activeRole}`);
 
-      if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(activeRole)) {
-        navigate('/conductor/home', { replace: true });
-      } else if (activeRole === 'despachador') {
-        navigate('/despachador/dashboard', { replace: true });
-      } else if (['admin', 'superadmin'].includes(activeRole)) {
-        navigate('/admin/dashboard', { replace: true });
-      } else if (activeRole === 'central') {
-        navigate('/central/dashboard', { replace: true });
-      } else {
-        navigate('/pasajero/home', { replace: true });
+      if (!controller.signal.aborted) {
+        if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(activeRole)) {
+          navigate('/conductor/home', { replace: true });
+        } else if (activeRole === 'despachador') {
+          navigate('/despachador/dashboard', { replace: true });
+        } else if (['admin', 'superadmin'].includes(activeRole)) {
+          navigate('/admin/dashboard', { replace: true });
+        } else if (activeRole === 'central') {
+          navigate('/central/dashboard', { replace: true });
+        } else {
+          navigate('/pasajero/home', { replace: true });
+        }
       }
     }
+
+    return () => {
+      controller.abort();
+    };
   }, [user, authLoading, navigate]);
 
   const handleLogin = async (e) => {
@@ -114,21 +127,16 @@ const Login = () => {
       let resData = null;
 
       if (typeof loginLocal === 'function') {
-        // Invocación con parámetros limpios desestructurados para alineación exacta con AuthProvider
+        // Delegación con contexto global sincronizado de autenticación
         resData = await loginLocal(cleanIdentifier, cleanPassword);
+      } else if (authService && typeof authService.login === 'function') {
+        // Delegación directa a authService centralizado
+        resData = await authService.login(cleanIdentifier, cleanPassword);
       } else {
-        const response = await api.post('/auth/login', {
-          loginInput: cleanIdentifier,
-          identifier: cleanIdentifier,
-          email: cleanIdentifier,
-          telefono: cleanIdentifier,
-          celular: cleanIdentifier,
-          password: cleanPassword
-        });
-        resData = response?.data;
+        throw new Error('El servicio de autenticación no está disponible en este entorno.');
       }
 
-      if (resData?.token || resData?.success) {
+      if (resData?.token || resData?.success || resData?.user) {
         const userData = resData.user || resData.data?.user || {};
         const userRole = (userData?.rol || userData?.role || roleParam || 'pasajero').toLowerCase();
 
@@ -148,8 +156,12 @@ const Login = () => {
         setError(resData?.message || 'Error al validar credenciales en la central.');
       }
     } catch (err) {
+      if (err.name === 'AbortError') {
+        console.warn('⚠️ [CIMCO-LOGIN] Petición cancelada por el usuario o desmontado de componente.');
+        return;
+      }
       console.error('🚨 [CIMCO-LOGIN] Error en proceso de autenticación:', err);
-      // Captura exhaustiva de mensajes de error de la API (HTTP 400, MISSING_FIELDS, credenciales inválidas)
+      // Captura exhaustiva de mensajes de error de la API
       const mensajeServidor = 
         err?.response?.data?.message || 
         err?.data?.message || 

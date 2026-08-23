@@ -1,12 +1,11 @@
-// Versión Arquitectura: V21.33 - Integración Quirúrgica de Sincronización Firebase Admin y Upsert de Pasajeros
+// Versión Arquitectura: V21.34 - Delegación Centralizada de Excepciones a Middleware (next) y Preservación de Sincronización Firebase
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
  * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono) y actualización segura de perfiles.
- * Ajuste V21.33: Integración quirúrgica para sincronización previa con Firebase Authentication (getUserByEmail / createUser) 
- * y vinculación atómica upsert de 'firebaseUid' en Pasajero para registros de pasajeros, preservando el ecosistema de 3 colecciones y validaciones previas.
+ * Ajuste V21.34: Delegación estricta de captura de excepciones al middleware centralizado de errores mediante next(error) en todos los bloques catch.
  */
 
 import jwt from 'jsonwebtoken';
@@ -49,7 +48,7 @@ setInterval(() => {
  * Lógica anti-doble hashing: Se delega el cifrado al middleware pre('save') del modelo Mongoose.
  * Inyección Aprovisionada de UID / firebaseUid vía Firebase Admin SDK.
  */
-export const register = async (req, res) => {
+export const register = async (req, res, next) => {
     try {
         const body = req.body || {};
         const { 
@@ -400,28 +399,14 @@ export const register = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-AUTH-REGISTER-FATAL] Error en el proceso de registro/sincronización:", error);
-
-        // 🛑 INTERCEPCIÓN DE CLAVE DUPLICADA EN MONGO (code 11000)
-        if (error.code === 11000 || error.code === '11000') {
-            const campoDuplicado = Object.keys(error.keyPattern || error.keyValue || {})[0];
-            const mensajeDuplicado = campoDuplicado 
-                ? `El campo '${campoDuplicado}' ya se encuentra registrado en el sistema.` 
-                : "El correo, teléfono o datos de identificación ya están vinculados a otra cuenta.";
-            return res.status(400).json({ 
-                success: false, 
-                message: mensajeDuplicado,
-                error: "DATO_DUPLICADO"
-            });
-        }
-
-        return res.status(500).json({ success: false, message: error.message || "Error interno del servidor al procesar el registro." });
+        next(error);
     }
 };
 
 /**
  * 🔑 INICIO DE SESIÓN DUAL (CORREO O CELULAR) CON TRIPLE COMPROBACIÓN Y SELECT('+PASSWORD')
  */
-export const login = async (req, res) => {
+export const login = async (req, res, next) => {
     try {
         const body = req.body || {};
         const loginInput = body.loginInput || body.identifier || body.email || body.phone || body.telefono || body.celular;
@@ -550,14 +535,14 @@ export const login = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-AUTH-LOGIN-FATAL] Error crítico durante el inicio de sesión:", error);
-        return res.status(500).json({ success: false, message: "Error interno en el servidor de autenticación." });
+        next(error);
     }
 };
 
 /**
  * 📲 SOLICITUD DE CÓDIGO OTP (RECUPERACIÓN DE CONTRASEÑA)
  */
-export const solicitarOTP = async (req, res) => {
+export const solicitarOTP = async (req, res, next) => {
     try {
         const body = req.body || {};
         const loginInput = body.loginInput || body.identifier || body.email || body.telefono;
@@ -625,7 +610,7 @@ export const solicitarOTP = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-OTP-SOLICITAR-FATAL] Error generando OTP:", error);
-        return res.status(500).json({ success: false, message: "Error interno al procesar la solicitud de OTP." });
+        next(error);
     }
 };
 
@@ -634,7 +619,7 @@ export const forgotPassword = solicitarOTP;
 /**
  * 🔒 VERIFICACIÓN DE OTP Y RESTABLECIMIENTO DE CONTRASEÑA
  */
-export const verificarOTPyRestablecer = async (req, res) => {
+export const verificarOTPyRestablecer = async (req, res, next) => {
     try {
         const body = req.body || {};
         const loginInput = body.loginInput || body.identifier || body.email || body.telefono;
@@ -725,16 +710,7 @@ export const verificarOTPyRestablecer = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-RESET-PASSWORD-FATAL] Error restableciendo contraseña:", error);
-
-        if (error.code === 11000 || error.code === '11000') {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Error de duplicidad al actualizar las credenciales.",
-                error: "DATO_DUPLICADO"
-            });
-        }
-
-        return res.status(500).json({ success: false, message: "Error interno al procesar el restablecimiento de contraseña." });
+        next(error);
     }
 };
 
@@ -744,7 +720,7 @@ export const resetPassword = verificarOTPyRestablecer;
  * 📱 COMPROBACIÓN DE DISPONIBILIDAD DE TELÉFONO (CHECK-PHONE / VERIFICAR-TELEFONO)
  * Verifica si un número telefónico ya está registrado en el sistema (Usuarios, Conductores, Pasajeros).
  */
-export const checkPhone = async (req, res) => {
+export const checkPhone = async (req, res, next) => {
     try {
         const body = req.body || {};
         const telefonoInput = body.telefono || body.phone || body.telefonoMovil;
@@ -806,12 +782,7 @@ export const checkPhone = async (req, res) => {
 
     } catch (error) {
         console.error("❌ [CIMCO-AUTH-ERROR] Error en checkPhone:", error);
-        return res.status(500).json({ 
-            ok: false,
-            success: false, 
-            message: 'Error interno al validar el número telefónico.',
-            mensaje: 'Error interno al validar el número telefónico.' 
-        });
+        next(error);
     }
 };
 
@@ -820,7 +791,7 @@ export const verificarTelefono = checkPhone;
 /**
  * 🔄 ACTUALIZACIÓN DE DATOS DE PERFIL (POLIMÓRFICO CONCURRENTE CORREGIDO)
  */
-export const updateProfile = async (req, res) => {
+export const updateProfile = async (req, res, next) => {
     try {
         const userId = req.user?.id || req.user?._id || req.user?.uid || req.body?.id || req.body?.userId;
         const rolExtraido = req.user?.rol || req.body?.rol;
@@ -944,16 +915,7 @@ export const updateProfile = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 [CIMCO-PROFILE-UPDATE-FATAL] Error crítico en la pasarela de actualización:", error);
-
-        if (error.code === 11000 || error.code === '11000') {
-            return res.status(400).json({ 
-                success: false, 
-                message: "El correo o teléfono ingresado ya está en uso por otra cuenta.",
-                error: "DATO_DUPLICADO"
-            });
-        }
-
-        return res.status(500).json({ success: false, message: "Error interno al procesar los ajustes de perfil." });
+        next(error);
     }
 };
 

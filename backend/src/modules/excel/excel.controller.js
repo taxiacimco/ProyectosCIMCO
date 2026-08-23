@@ -1,9 +1,16 @@
+// Versión Arquitectura: V10.01 - Delegación Centralizada de Excepciones a Middleware (next) y Generación de Excel
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\excel\excel.controller.js
+ * Misión: Exportar directorio global de usuarios, conductores y pasajeros en formato Excel (.xlsx).
+ * Ajuste V10.01: Refactorización de controladores asíncronos para delegar la captura de excepciones al middleware centralizado de errores mediante next(error).
+ */
+
 import ExcelJS from 'exceljs';
 import Usuario from '../../models/Usuario.js';
 import Conductor from '../../models/Conductor.js';
 import Pasajero from '../../models/Pasajero.js';
 
-export const exportarDirectorioExcel = async (req, res) => {
+export const exportarDirectorioExcel = async (req, res, next) => {
     try {
         const workbook = new ExcelJS.Workbook();
         
@@ -33,7 +40,8 @@ export const exportarDirectorioExcel = async (req, res) => {
             { header: 'Doc Tarjeta Prop. (URL)', key: 'doc_tarjeta', width: 30 }
         ];
 
-        conductores.forEach(c => {
+        (conductores || []).forEach(c => {
+            if (!c) return;
             sheetConductores.addRow({
                 ...c,
                 telefono: c.telefonoMovil || c.telefono || 'N/A',
@@ -57,7 +65,8 @@ export const exportarDirectorioExcel = async (req, res) => {
             { header: 'Foto Perfil (URL)', key: 'foto_perfil', width: 30 }
         ];
 
-        usuarios.forEach(u => {
+        (usuarios || []).forEach(u => {
+            if (!u) return;
             sheetStaff.addRow({
                 ...u,
                 terminal_sede: u.terminal_sede || u.terminal_id || u.cooperativa || 'N/A',
@@ -75,7 +84,8 @@ export const exportarDirectorioExcel = async (req, res) => {
             { header: 'Foto Perfil (URL)', key: 'foto_perfil', width: 30 }
         ];
 
-        pasajeros.forEach(p => {
+        (pasajeros || []).forEach(p => {
+            if (!p) return;
             sheetPasajeros.addRow({
                 ...p,
                 nombre: p.fullName || p.nombre || 'N/A'
@@ -97,6 +107,10 @@ export const exportarDirectorioExcel = async (req, res) => {
 
     } catch (error) {
         console.error("🚨 Error al generar archivo Excel:", error);
-        res.status(500).json({ success: false, message: "Error al generar reporte Excel." });
+        next(error);
     }
+};
+
+export default {
+    exportarDirectorioExcel
 };

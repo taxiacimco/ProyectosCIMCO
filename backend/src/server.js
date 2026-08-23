@@ -1,11 +1,9 @@
-// Versión Arquitectura: V18.0 - Integración Atómica CORS Vercel y Blindaje Perimetral Express
+// Versión Arquitectura: V19.2 - Integración Resiliente Anti-Crash del Error Middleware y Servidor HTTP
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte canónico
- * para frontend-opal-eight-58.vercel.app, orquestación de sockets e inyección de enrutadores del sistema.
- * Ajuste V18.0: Fusión atómica de la regla CORS con callback dinámico, inclusión explícita del dominio
- * 'https://frontend-opal-eight-58.vercel.app', persistencia de orígenes locales/ngrok/túneles y
- * mantenimiento de la política perimetral sin romper rutas, websockets ni manejadores de errores.
+ * para frontend-opal-eight-58.vercel.app, orquestación de sockets, inyección de enrutadores del sistema y registro resiliente del middleware centralizado de errores.
+ * Ajuste V19.2: Implementación de carga dinámica resiliente para error.middleware.js evitando quiebres de servidor por ERR_MODULE_NOT_FOUND cuando el archivo aún no está presente en disco.
  */
 
 import 'dotenv/config';
@@ -25,7 +23,20 @@ import cooperativaRoutes from './modules/cooperativas/cooperativa.routes.js';
 import excelRoutes from './modules/excel/excel.routes.js';
 import { inicializarSockets } from '#modules/sockets/socket.manager.js';
 
+// 🛡️ CARGA RESILIENTE DEL MIDDLEWARE DE ERRORES (ANTI-CRASH)
+let errorHandler = null;
+try {
+    const errorModule = await import('./middlewares/error.middleware.js').catch(() => 
+        import('#middlewares/error.middleware.js').catch(() => null)
+    );
+    errorHandler = errorModule?.default || errorModule?.errorHandler || null;
+} catch (importErr) {
+    console.warn("⚠️ [CIMCO-NUCLEO] error.middleware.js no detectado en disco. Operando con manejador inline de resiliencia.");
+}
+
 const app = express();
+
+// 1. ENVOLTURAS EXPLÍCITAS DEL SERVIDOR HTTP
 const httpServer = http.createServer(app);
 
 const logLocal = (msg) => {
@@ -45,6 +56,7 @@ const origenesPermitidos = [
   'http://192.168.100.34:4173',
   'http://192.168.100.34:3000',
   'https://globosely-appreciative-zander.ngrok-free.dev',
+  process.env.CLIENT_ORIGIN,
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
   process.env.CLOUDFLARE_TUNNEL_URL
@@ -175,16 +187,32 @@ app.use('/api/cooperativas', cooperativaRoutes);
 app.use('/api/excel', excelRoutes);
 app.use('/api/admin', adminRoutes);
 
-// ⚡ SINCRONIZACIÓN DE CORS Y TRANSPORTE PARA WEBSOCKETS (SOCKET.IO)
+// ==================================================================\\
+// ⚡ INSTANCIACIÓN DE SOCKET.IO Y EXPORTACIÓN E INVOCACIÓN DE SOCKET MANAGER
+// ==================================================================\\
 const io = new Server(httpServer, {
-    cors: corsOptions,
+    cors: {
+        origin: isOriginAllowed,
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        credentials: true
+    },
     transports: ['websocket', 'polling'],
     pingTimeout: 60000,
     pingInterval: 25000
 });
 
+// Invocación de la función inicializadora pasándole la instancia global io
 inicializarSockets(io);
 
+// ==================================================================\\
+// 🛡️ CAPA DE ERRORES CENTRALIZADA Y CONTROL DE RUTAS NO ENCONTRADAS
+// ==================================================================\\
+// 1. Registro condicional del middleware centralizado de errores si fue cargado exitosamente
+if (typeof errorHandler === 'function') {
+    app.use(errorHandler);
+}
+
+// 2. Controladores de errores de resiliencia y concurrencia (Fallback Ininterrumpido)
 app.use((err, req, res, next) => {
     if (err && (err.name === 'MongoServerError' || err.code === 112 || (err.message && err.message.includes('WriteConflict')))) {
         logLocal(`💥 [CIMCO-CONCURRENCIA] Conflicto de escritura detectado bajo ráfaga masiva: ${err.message}`);

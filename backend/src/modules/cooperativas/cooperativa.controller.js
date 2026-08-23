@@ -1,8 +1,9 @@
-// Versión Arquitectura: V17.00 - Propagación Transaccional en Cascada para Desactivación de Flota
+// Versión Arquitectura: V17.01 - Delegación Centralizada de Excepciones a Middleware (next) y Propagación Transaccional en Cascada
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\cooperativas\cooperativa.controller.js
  * Misión: Administrar entidades de cooperativas, asignaciones de flota, estados operativos
  * e inyección de suspensión en cascada sobre los conductores vinculados mediante sesión ACID y espejo Firebase.
+ * Ajuste V17.01: Refactorización de controladores asíncronos para delegar la gestión de excepciones al middleware centralizado mediante next(error).
  */
 
 import mongoose from 'mongoose';
@@ -16,7 +17,7 @@ const ESTADOS_PERMITIDOS = ['activa', 'inactiva', 'suspendida'];
 /**
  * 📋 Obtener todas las cooperativas con sus despachadores y conductores poblados
  */
-export const obtenerCooperativas = async (req, res) => {
+export const obtenerCooperativas = async (req, res, next) => {
   try {
     const cooperativas = await Cooperativa.find()
       .populate('despachadores', 'nombre email telefonoMovil rol')
@@ -31,21 +32,18 @@ export const obtenerCooperativas = async (req, res) => {
     });
   } catch (error) {
     console.error('🚨 [CIMCO-COOPERATIVAS-ERR]:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Error interno al consultar la lista de cooperativas.'
-    });
+    next(error);
   }
 };
 
 /**
  * 🔍 Obtener cooperativa por ID
  */
-export const obtenerCooperativaPorId = async (req, res) => {
+export const obtenerCooperativaPorId = async (req, res, next) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params || {};
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: 'Identificador BSON de cooperativa inválido.' });
     }
 
@@ -64,17 +62,14 @@ export const obtenerCooperativaPorId = async (req, res) => {
     });
   } catch (error) {
     console.error('🚨 [CIMCO-OBTENER-COOPERATIVA-ERR]:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Error interno al consultar el detalle de la cooperativa.'
-    });
+    next(error);
   }
 };
 
 /**
  * ➕ Registrar nueva cooperativa
  */
-export const crearCooperativa = async (req, res) => {
+export const crearCooperativa = async (req, res, next) => {
   try {
     const { nombre, nit, telefono, ciudad, limiteFlota, limiteVehiculos } = req.body || {};
 
@@ -114,31 +109,28 @@ export const crearCooperativa = async (req, res) => {
     });
   } catch (error) {
     console.error('🚨 [CIMCO-CREAR-COOPERATIVA-ERR]:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Error interno al crear la cooperativa.'
-    });
+    next(error);
   }
 };
 
 /**
  * 🔄 Cambiar estado (activa, inactiva, suspendida) con Propagación en Cascada sobre Conductores
  */
-export const cambiarEstadoCooperativa = async (req, res) => {
+export const cambiarEstadoCooperativa = async (req, res, next) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const { id } = req.params;
+    const { id } = req.params || {};
     const { estado } = req.body || {};
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({ success: false, error: 'Identificador BSON de cooperativa inválido.' });
     }
 
-    const estadoNormalizado = String(estado).toLowerCase().trim();
+    const estadoNormalizado = String(estado || '').toLowerCase().trim();
     if (!ESTADOS_PERMITIDOS.includes(estadoNormalizado)) {
       await session.abortTransaction();
       session.endSession();
@@ -234,17 +226,17 @@ export const cambiarEstadoCooperativa = async (req, res) => {
     await session.abortTransaction();
     session.endSession();
     console.error('🚨 [CIMCO-ESTADO-COOPERATIVA-ERR]:', error);
-    return res.status(500).json({ success: false, error: 'Error al actualizar estado de la cooperativa y su flota.' });
+    next(error);
   }
 };
 
 /**
  * 🛠️ Actualización completa / parcial de datos de la cooperativa
  */
-export const actualizarCooperativa = async (req, res) => {
+export const actualizarCooperativa = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    const { id } = req.params || {};
+    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ success: false, error: 'Identificador BSON de cooperativa inválido.' });
     }
 
@@ -275,7 +267,7 @@ export const actualizarCooperativa = async (req, res) => {
     });
   } catch (error) {
     console.error('🚨 [CIMCO-UPDATE-COOPERATIVA-ERR]:', error);
-    return res.status(500).json({ success: false, error: 'Error al actualizar los datos de la cooperativa.' });
+    next(error);
   }
 };
 

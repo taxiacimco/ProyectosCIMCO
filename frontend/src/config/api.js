@@ -1,7 +1,7 @@
-// Versión Arquitectura: V16.2 - Sanitización de Prefijos y Prevención de Duplicación /api
+// Versión Arquitectura: V24.1 - Refactorización de Cliente HTTP Centralizado (Axios Interceptors & Error Gateway)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
- * Misión: Centralización de Axios, inyección de cabeceras anti-caché e interceptores JWT con resiliencia y auto-cleanup anti-401.
+ * Misión: Centralización de Axios, inyección de cabeceras anti-caché, interceptores JWT multi-capa y gestión global de errores HTTP (401, 429, 500).
  */
 
 import axios from 'axios';
@@ -30,7 +30,7 @@ export const API_FUNCTIONS_URL = import.meta.env.PROD
 
 export const api = axios.create({
     baseURL: API_CORE_URL,
-    timeout: 15000,
+    timeout: 10000,
     headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -80,7 +80,7 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA, PURGA DE SESIÓN Y NOTIFICACIÓN GLOBAL ANTI-401
+// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA, PURGA DE SESIÓN Y MANEJO GLOBAL DE ERRORES (401, 429, 500)
 api.interceptors.response.use(
     (response) => {
         try {
@@ -104,8 +104,10 @@ api.interceptors.response.use(
     async (error) => {
         if (error && error.response) {
             const status = error.response.status;
+            const message = error.response.data?.message || 'Error en la solicitud al servidor';
             console.error(`🚨 [CIMCO-NEXUS-RESPONSE] Error de Servidor [${status}]:`, error.response.data);
-            
+
+            // 401 / 403: No Autorizado / Prohibido - Expiración o invalidez de credenciales
             if (status === 401 || status === 403) {
                 try {
                     if (typeof window !== 'undefined' && window.localStorage) {
@@ -114,7 +116,6 @@ api.interceptors.response.use(
                         localStorage.removeItem('cimco_user');
                     }
 
-                    // Notificación global a la app mediante evento personalizado
                     if (typeof window !== 'undefined') {
                         window.dispatchEvent(new CustomEvent('cimco:auth_expired', { 
                             detail: { 
@@ -123,13 +124,30 @@ api.interceptors.response.use(
                             } 
                         }));
 
-                        // Redirección defensiva si no se encuentra en la vista de inicio de sesión
                         if (window.location.pathname !== '/login') {
                             window.location.href = '/login';
                         }
                     }
                 } catch (cleanupErr) {
                     console.error('🚨 [CIMCO-NEXUS-AUTH-CLEANUP] Error durante purga de credenciales:', cleanupErr);
+                }
+            }
+
+            // 429: Demasiadas Peticiones (Rate Limit Exceeded)
+            if (status === 429) {
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('cimco:rate_limit', {
+                        detail: { status, message: message || 'Exceso de solicitudes al servidor. Por favor, espere un momento.' }
+                    }));
+                }
+            }
+
+            // 500 / 502 / 503 / 504: Alertas de Servidor / Fallo Interno
+            if (status >= 500) {
+                if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('cimco:server_error', {
+                        detail: { status, message: message || 'Error interno en el servidor central. Intente más tarde.' }
+                    }));
                 }
             }
         } else if (error && error.request) {

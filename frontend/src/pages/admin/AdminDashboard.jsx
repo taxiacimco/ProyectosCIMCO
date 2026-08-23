@@ -1,7 +1,7 @@
-// Versión Arquitectura: V13.9 - Integración de Desplazamiento Horizontal Táctico (overflow-x-auto, no-scrollbar, whitespace-nowrap) en Bus de Navegación Header
+// Versión Arquitectura: V14.0 - Integración de AbortController en useEffect de Métricas y Cancelación de Peticiones Asíncronas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
- * Misión: Optimizar el bus de navegación superior integrando control de desbordamiento horizontal suave, supresión de scrollbars nativas y empaquetado sin salto de línea.
+ * Misión: Optimizar el ciclo de vida del componente mediante AbortController en useEffect para cancelar peticiones HTTP pendientes al desmontar o cambiar de pestaña.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -85,51 +85,70 @@ const AdminDashboard = () => {
         return token || '';
     };
 
-    // Cargar métricas en tiempo real
-    const fetchMetrics = async () => {
-        try {
-            const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-            const cleanBaseUrl = rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
-            const token = await getAuthToken();
-
-            const [resUsers, resCapital] = await Promise.allSettled([
-                fetch(`${cleanBaseUrl}/api/admin/usuarios`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                }),
-                fetch(`${cleanBaseUrl}/api/conductores/metricas/capital-circulante`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                })
-            ]);
-
-            let totalUsers = metrics.usuarios;
-            let totalCreds = metrics.credenciales;
-            let capitalVal = metrics.capitalCirculante;
-
-            if (resUsers.status === 'fulfilled' && resUsers.value.ok) {
-                const dataUsers = await resUsers.value.json();
-                const list = Array.isArray(dataUsers) ? dataUsers : (dataUsers?.data || []);
-                totalUsers = list.length;
-                totalCreds = list.filter(u => ['admin', 'oficina', 'despachador', 'ceo'].includes(u?.role || u?.rol)).length || 5;
-            }
-
-            if (resCapital.status === 'fulfilled' && resCapital.value.ok) {
-                const dataCap = await resCapital.value.json();
-                capitalVal = dataCap?.capitalCirculante ?? dataCap?.total ?? 80000;
-            }
-
-            setMetrics(prev => ({
-                ...prev,
-                usuarios: totalUsers,
-                credenciales: totalCreds,
-                capitalCirculante: capitalVal
-            }));
-        } catch (err) {
-            console.error('❌ Error actualizando métricas del dashboard:', err);
-        }
-    };
-
+    // 📡 CONSUMO DE MÉTRICAS CON ABORTCONTROLLER PARA CANCELACIÓN DE PETICIONES PENDIENTES
     useEffect(() => {
+        const controller = new AbortController();
+        const signal = controller.signal;
+
+        const fetchMetrics = async () => {
+            try {
+                const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+                const cleanBaseUrl = rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
+                const token = await getAuthToken();
+
+                if (signal.aborted) return;
+
+                const [resUsers, resCapital] = await Promise.allSettled([
+                    fetch(`${cleanBaseUrl}/api/admin/usuarios`, {
+                        headers: { 'Authorization': `Bearer ${token}` },
+                        signal
+                    }),
+                    fetch(`${cleanBaseUrl}/api/conductores/metricas/capital-circulante`, {
+                        headers: { 'Authorization': `Bearer ${token}` },
+                        signal
+                    })
+                ]);
+
+                if (signal.aborted) return;
+
+                let totalUsers = metrics.usuarios;
+                let totalCreds = metrics.credenciales;
+                let capitalVal = metrics.capitalCirculante;
+
+                if (resUsers.status === 'fulfilled' && resUsers.value?.ok) {
+                    const dataUsers = await resUsers.value.json();
+                    const list = Array.isArray(dataUsers) ? dataUsers : (dataUsers?.data || []);
+                    totalUsers = list.length;
+                    totalCreds = list.filter(u => ['admin', 'oficina', 'despachador', 'ceo'].includes(u?.role || u?.rol)).length || 5;
+                }
+
+                if (resCapital.status === 'fulfilled' && resCapital.value?.ok) {
+                    const dataCap = await resCapital.value.json();
+                    capitalVal = dataCap?.capitalCirculante ?? dataCap?.total ?? 80000;
+                }
+
+                if (!signal.aborted) {
+                    setMetrics(prev => ({
+                        ...prev,
+                        usuarios: totalUsers,
+                        credenciales: totalCreds,
+                        capitalCirculante: capitalVal
+                    }));
+                }
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    // Petición cancelada por cambio de vista o desmontado, omitir log de error
+                    return;
+                }
+                console.error('❌ Error actualizando métricas del dashboard:', err);
+            }
+        };
+
         fetchMetrics();
+
+        return () => {
+            controller.abort();
+        };
     }, [pestanaActiva]);
 
     // Cambiar pestaña activa y sincronizar querystring

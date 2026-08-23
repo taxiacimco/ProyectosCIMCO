@@ -1,15 +1,15 @@
-// Versión Arquitectura: V2.3 - Resiliencia de Malla CEO, Fallback de Índices Firestore y Telemetría Contable
+// Versión Arquitectura: V24.1 - Integración Quirúrgica con Servicios Centralizados (userService, viajeService)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useAdminMonitor.js
- * Misión: Abstraer suscripciones en tiempo real a los nodos críticos de Firestore con tolerancia a fallos por falta de índices.
- * Ajuste V2.3: Implementación de Fallback Atómico contra errores FAILED_PRECONDITION / missing index. Ordenación local en JS en caso de quiebre.
+ * Misión: Abstraer suscripciones en tiempo real a los nodos críticos de Firestore con tolerancia a fallos por falta de índices e integración centralizada a userService y viajeService.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
-// 🛡️ IMPORTANTE: Importación del helper de deduplicación de entidades
-import { deduplicarEntidades } from '../utils/deduplicar';
+import { deduplicarEntidades } from '@/utils/deduplicar';
+import userService from '@/services/userService';
+import viajeService from '@/services/viajeService';
 
 export const useAdminMonitor = () => {
     const [conductores, setConductores] = useState([]);
@@ -17,6 +17,36 @@ export const useAdminMonitor = () => {
     const [transacciones, setTransacciones] = useState([]); // ⚡ NODO: Stream financiero unificado
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    /**
+     * 🌐 Consulta SSOT de Respaldo/Sincronización Inicial desde Servicios Centralizados
+     */
+    const cargarDatosServiciosCentrales = useCallback(async () => {
+        try {
+            // Carga paralela defensiva desde servicios centralizados
+            const [respuestaConductores, respuestaViajes] = await Promise.allSettled([
+                userService?.getConductores ? userService.getConductores() : Promise.resolve(null),
+                viajeService?.getViajesActivos ? viajeService.getViajesActivos() : (viajeService?.getViajes ? viajeService.getViajes() : Promise.resolve(null))
+            ]);
+
+            if (respuestaConductores.status === 'fulfilled' && respuestaConductores.value) {
+                const listaCondsRaw = respuestaConductores.value?.conductores || respuestaConductores.value?.data || (Array.isArray(respuestaConductores.value) ? respuestaConductores.value : []);
+                if (Array.isArray(listaCondsRaw) && listaCondsRaw.length > 0) {
+                    const depurada = typeof deduplicarEntidades === 'function' ? deduplicarEntidades(listaCondsRaw) : listaCondsRaw;
+                    setConductores(prev => prev.length === 0 ? depurada : prev);
+                }
+            }
+
+            if (respuestaViajes.status === 'fulfilled' && respuestaViajes.value) {
+                const listaViajesRaw = respuestaViajes.value?.viajes || respuestaViajes.value?.data || (Array.isArray(respuestaViajes.value) ? respuestaViajes.value : []);
+                if (Array.isArray(listaViajesRaw) && listaViajesRaw.length > 0) {
+                    setViajes(prev => prev.length === 0 ? listaViajesRaw : prev);
+                }
+            }
+        } catch (errCentral) {
+            console.warn("⚠️ [CIMCO-MONITOR] Sincronización secundaria vía servicios falló o no está disponible:", errCentral?.message);
+        }
+    }, []);
 
     useEffect(() => {
         let unsubCond = () => {};
@@ -28,6 +58,9 @@ export const useAdminMonitor = () => {
             if (!FIRESTORE_PATHS) {
                 throw new Error("Gobernanza de Rutas Violada: FIRESTORE_PATHS no está definido en el archivo de configuración.");
             }
+
+            // Ejecución preventiva de carga de respaldo desde la API Centralizada
+            cargarDatosServiciosCentrales();
 
             // 1. 🛡️ Suscripción a Conductores (Flota completa activa con filtrado de deduplicación)
             const pathConductores = FIRESTORE_PATHS.conductores || 'conductores';
@@ -149,7 +182,16 @@ export const useAdminMonitor = () => {
             if (typeof unsubViajes === 'function') unsubViajes();
             if (typeof unsubTrans === 'function') unsubTrans();
         };
-    }, []);
+    }, [cargarDatosServiciosCentrales]);
 
-    return { conductores, viajes, transacciones, loading, error };
+    return { 
+        conductores, 
+        viajes, 
+        transacciones, 
+        loading, 
+        error,
+        refetchMetricas: cargarDatosServiciosCentrales
+    };
 };
+
+export default useAdminMonitor;

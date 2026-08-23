@@ -1,9 +1,12 @@
-// Versión Arquitectura: V16.3 - Integración de Parámetros Operativos Intermunicipales (Empresa, Terminal, Número Interno) y Gestión de Perfil Operativo
+// Versión Arquitectura: V19.3 - Integración de Filtro por Empresa/Cooperativa, Caja de Contraoferta y Emisión de Ofertas en Tiempo Real
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V16.3: Integración de campos operativos intermunicipales (Empresa, Terminal, Número Interno)
- *               en la gestión de perfil con sincronización NoSQL/Firestore y REST backend central.
+ * Ajuste V19.3: 
+ *   1. Filtrado riguroso de eventos 'nuevo_servicio_disponible', 'nuevo_viaje' y 'servidor:nueva_solicitud' 
+ *      verificando coincidencia de empresaId/cooperativa con el perfil del conductor.
+ *   2. Implementación de caja de entrada para monto de contraoferta.
+ *   3. Conexión directa del botón de la notificación con el emisor 'enviarOferta' (Socket/Context).
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -15,7 +18,7 @@ import api from '@/config/api';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Bus, MapPin, CheckCircle, AlertTriangle, XCircle, Bell, User, Phone, FileText, Building2 } from 'lucide-react';
+import { Bus, MapPin, CheckCircle, AlertTriangle, XCircle, Bell, User, Phone, FileText, Building2, Send, DollarSign } from 'lucide-react';
 
 // Corrección de Iconos Leaflet para despliegue intermunicipal
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -36,11 +39,15 @@ const AutoCenter = ({ position }) => {
 
 const HomeIntermunicipal = () => {
     // 🛡️ Guardas de Seguridad y Contextos Centralizados
-    const authContext = useAuth();
+    const authContext = useAuth ? useAuth() : {};
     const user = authContext?.user || null;
     const token = authContext?.token || localStorage.getItem('token') || user?.token || "";
     
-    const { socket, isConnected } = useSocket();
+    // 📡 Consumo Resiliente del Socket Centralizado (Canal de Empresa y Pujas)
+    const socketContext = useSocket ? useSocket() : {};
+    const socket = socketContext?.socket || null;
+    const isConnected = socketContext?.isConnected ?? Boolean(socket?.connected);
+    const enviarOfertaSocket = socketContext?.enviarOferta || null;
 
     const idConductor = user?.id || user?._id || user?.uid || "";
 
@@ -56,6 +63,7 @@ const HomeIntermunicipal = () => {
         nombre: '',
         telefono: '',
         empresa: '',
+        empresaId: '',
         terminal: '',
         placaVehiculo: '',
         numeroInterno: ''
@@ -65,8 +73,10 @@ const HomeIntermunicipal = () => {
     const [posicionActual, setPosicionActual] = useState([9.3244, -73.3321]);
     const [gpsActivo, setGpsActivo] = useState(false);
 
-    // 🔔 ESTADO PARA NOTIFICACIONES FLUIDAS
+    // 🔔 ESTADOS PARA NOTIFICACIONES FLUIDAS Y PUJAS / CONTRAOFERTAS
     const [notificacionUI, setNotificacionUI] = useState(null);
+    const [montoOfertaInput, setMontoOfertaInput] = useState("");
+    const [enviandoOferta, setEnviandoOferta] = useState(false);
 
     // 🛡️ REFERENCIAS MUTABLES Anti-Bucle y Throttling de Socket Telemetría
     const viajesAsignadosRef = useRef(viajesAsignados);
@@ -77,13 +87,22 @@ const HomeIntermunicipal = () => {
     const ultimaActualizacionGpsRef = useRef(0);
     const ENFRIAMIENTO_SOCKET_GPS_MS = 5000; // Throttling controlled de 5s para emisión de sockets
 
+    // Auto-completar el monto con el valor sugerido cuando se dispara una notificación nueva
+    useEffect(() => {
+        if (notificacionUI?.valorBase) {
+            setMontoOfertaInput(String(notificacionUI.valorBase));
+        } else {
+            setMontoOfertaInput("");
+        }
+    }, [notificacionUI]);
+
     // ==================================================================
     // 1. ESCUCHA REACTIVA DE IDENTIDAD DEL CONDUCTOR EN FIRESTORE / REST
     // ==================================================================
     useEffect(() => {
         if (!user?.uid) return;
 
-        const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
+        const pathUsuarios = FIRESTORE_PATHS?.usuarios || FIRESTORE_PATHS?.users || 'usuarios';
         const conductorRef = doc(db, pathUsuarios, user.uid);
 
         const unsubscribe = onSnapshot(conductorRef, (docSnap) => {
@@ -97,7 +116,8 @@ const HomeIntermunicipal = () => {
                 setDatosPerfil({
                     nombre: nombreCompleto || user?.nombre || '',
                     telefono: data?.telefono || data?.telefonoMovil || user?.telefono || '',
-                    empresa: data?.empresa || data?.empresaTransporte || data?.cooperativa || user?.empresa || '',
+                    empresa: data?.empresa || data?.empresaTransporte || data?.cooperativa || user?.empresa || user?.cooperativa || '',
+                    empresaId: data?.empresaId || data?.empresa_id || user?.empresaId || user?.empresa_id || '',
                     terminal: data?.terminal || data?.terminalOrigen || user?.terminal || '',
                     placaVehiculo: data?.placaVehiculo || data?.placa || data?.vehiculo?.placa || user?.placaVehiculo || '',
                     numeroInterno: data?.numeroInterno || data?.vehiculo?.interno || user?.numeroInterno || ''
@@ -130,6 +150,7 @@ const HomeIntermunicipal = () => {
                 telefonoMovil: datosPerfil.telefono,
                 empresa: datosPerfil.empresa,
                 empresaTransporte: datosPerfil.empresa,
+                empresaId: datosPerfil.empresaId,
                 terminal: datosPerfil.terminal,
                 terminalOrigen: datosPerfil.terminal,
                 placaVehiculo: datosPerfil.placaVehiculo.toUpperCase(),
@@ -145,7 +166,7 @@ const HomeIntermunicipal = () => {
 
             // Sincronización secundaria en Firestore
             if (user?.uid) {
-                const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
+                const pathUsuarios = FIRESTORE_PATHS?.usuarios || FIRESTORE_PATHS?.users || 'usuarios';
                 const conductorRef = doc(db, pathUsuarios, user.uid);
                 await updateDoc(conductorRef, {
                     ...payloadPerfil,
@@ -164,7 +185,7 @@ const HomeIntermunicipal = () => {
     };
 
     // ==================================================================
-    // 3. EVENTOS DE SOCKETS Y SUSCRIPCIÓN A SALAS (Instancia Unificada)
+    // 3. EVENTOS DE SOCKETS Y SUSCRIPCIÓN CON FILTRO POR EMPRESA
     // ==================================================================
     useEffect(() => {
         if (!socket) return;
@@ -178,41 +199,122 @@ const HomeIntermunicipal = () => {
         }
 
         const handleNuevoViaje = (data) => {
-            console.log("🔔 Despacho capturado en segmento Cooperativa:", data);
+            console.log("🔔 Despacho/Servicio capturado:", data);
 
-            const payloadData = data?.payload || data?.viaje || data;
+            const payloadData = data?.payload || data?.viaje || data?.solicitud || data;
+            if (!payloadData) return;
+
+            // 🛡️ REGLA CRÍTICA DE FILTRADO POR EMPRESA_ID / COOPERATIVA
+            const targetEmpresaId = String(payloadData?.empresaId || payloadData?.empresa_id || "").trim();
+            const targetEmpresaNombre = String(payloadData?.empresa || payloadData?.cooperativa || "").trim().toUpperCase();
+            
+            const miEmpresaId = String(user?.empresaId || user?.empresa_id || datosPerfil.empresaId || "").trim();
+            const miEmpresaNombre = String(datosPerfil.empresa || user?.empresa || user?.cooperativa || "").trim().toUpperCase();
+
+            // Si la solicitud incluye identificadores de empresa, verificar que coincidan
+            const coincideId = targetEmpresaId && miEmpresaId && targetEmpresaId === miEmpresaId;
+            const coincideNombre = targetEmpresaNombre && miEmpresaNombre && targetEmpresaNombre === miEmpresaNombre;
+
+            // Si la solicitud especifica una empresa y NO coincide ni por ID ni por Nombre, descartar la alerta
+            if ((targetEmpresaId || targetEmpresaNombre) && !coincideId && !coincideNombre) {
+                console.warn("⛔ [SOLICITUD DESCARTADA] Pertenece a otra cooperativa o flota:", {
+                    solicitudEmpresaId: targetEmpresaId,
+                    solicitudEmpresa: targetEmpresaNombre,
+                    conductorEmpresaId: miEmpresaId,
+                    conductorEmpresa: miEmpresaNombre
+                });
+                return;
+            }
+
             const targetConductorId = payloadData?.conductorId || payloadData?.conductor;
 
-            // Filtrar si la solicitud va dirigida específicamente a este conductor
+            // Filtrar si la solicitud va dirigida explícitamente a otro conductor determinado
             if (targetConductorId && String(targetConductorId) !== String(idConductor) && String(targetConductorId) !== String(user?.uid)) {
                 return;
             }
 
             const origen = payloadData?.origen || payloadData?.origenNombre || 'Terminal Central';
             const destino = payloadData?.destino || payloadData?.destinoNombre || 'Dársena de Destino';
-            const valorRuta = payloadData?.valorPasaje || payloadData?.tarifa 
-                ? `$${Number(payloadData.valorPasaje || payloadData.tarifa).toLocaleString('es-CO')}` 
-                : 'Tarifa Estándar Cooperativa';
+            const valorRuta = payloadData?.valorPasaje || payloadData?.tarifa || payloadData?.valor || 0;
+            const viajeId = payloadData?.viajeId || payloadData?.solicitudId || payloadData?._id || payloadData?.id || 'N/A';
 
             setNotificacionUI({
                 origen,
                 destino,
-                tarifa: valorRuta,
-                viajeId: payloadData?.viajeId || payloadData?._id || payloadData?.id || 'N/A'
+                tarifa: valorRuta ? `$${Number(valorRuta).toLocaleString('es-CO')}` : 'Tarifa Estándar Cooperativa',
+                valorBase: Number(valorRuta) || 0,
+                viajeId,
+                empresaId: targetEmpresaId || miEmpresaId,
+                payloadRaw: payloadData
             });
         };
 
         socket.on('nuevo_viaje', handleNuevoViaje);
         socket.on('servidor:nueva_solicitud', handleNuevoViaje);
+        socket.on('nuevo_servicio_disponible', handleNuevoViaje);
 
         return () => {
             socket.off('nuevo_viaje', handleNuevoViaje);
             socket.off('servidor:nueva_solicitud', handleNuevoViaje);
+            socket.off('nuevo_servicio_disponible', handleNuevoViaje);
         };
-    }, [socket, isConnected, idConductor, user?.uid]);
+    }, [socket, isConnected, idConductor, user, datosPerfil.empresa, datosPerfil.empresaId]);
 
     // ==================================================================
-    // 4. MOTOR DE RASTREO SATELITAL (SOCKET TELEMETRÍA EXCLUSIVO - CERO WRITES EN FIRESTORE)
+    // 4. EMISIÓN DE CONTRAOFERTA EN TIEMPO REAL
+    // ==================================================================
+    const handleEnviarOferta = async (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        
+        if (!notificacionUI || !montoOfertaInput || Number(montoOfertaInput) <= 0) {
+            alert("Por favor ingrese un valor de contraoferta válido.");
+            return;
+        }
+
+        setEnviandoOferta(true);
+        const montoNumerico = Number(montoOfertaInput);
+
+        const payloadOferta = {
+            viajeId: notificacionUI.viajeId,
+            solicitudId: notificacionUI.viajeId,
+            conductorId: idConductor,
+            conductor: idConductor,
+            nombreConductor: nombreConductor,
+            placaVehiculo: datosPerfil.placaVehiculo,
+            placa: datosPerfil.placaVehiculo,
+            numeroInterno: datosPerfil.numeroInterno,
+            monto: montoNumerico,
+            valor: montoNumerico,
+            tarifa: montoNumerico,
+            empresaId: String(user?.empresaId || user?.empresa_id || datosPerfil.empresaId || ""),
+            empresa: datosPerfil.empresa || user?.empresa || "",
+            origen: notificacionUI.origen,
+            destino: notificacionUI.destino,
+            timestamp: new Date().toISOString()
+        };
+
+        try {
+            // Invocar método del contexto de sockets si existe
+            if (typeof enviarOfertaSocket === 'function') {
+                enviarOfertaSocket(payloadOferta);
+            } else if (socket && isConnected) {
+                socket.emit('enviar_oferta', payloadOferta);
+                socket.emit('oferta_servicio', payloadOferta);
+            }
+
+            alert(`✅ Contraoferta de $${montoNumerico.toLocaleString('es-CO')} COP transmitida a la central.`);
+            setNotificacionUI(null);
+            setMontoOfertaInput("");
+        } catch (err) {
+            console.error("🚨 Error al transmitir la propuesta de tarifa:", err);
+            alert("No se pudo enviar la propuesta. Compruebe la conexión.");
+        } finally {
+            setEnviandoOferta(false);
+        }
+    };
+
+    // ==================================================================
+    // 5. MOTOR DE RASTREO SATELITAL (SOCKET TELEMETRÍA EXCLUSIVO - CERO WRITES EN FIRESTORE)
     // ==================================================================
     useEffect(() => {
         if (!idConductor) return;
@@ -253,7 +355,7 @@ const HomeIntermunicipal = () => {
     }, [idConductor, socket, isConnected]);
 
     // ==================================================================
-    // 5. SUSCRIPCIÓN REACTIVA A VIAJES ASIGNADOS EN RAMPA DE SALIDA
+    // 6. SUSCRIPCIÓN REACTIVA A VIAJES ASIGNADOS EN RAMPA DE SALIDA
     // ==================================================================
     useEffect(() => {
         if (!user?.uid && !idConductor) return;
@@ -277,7 +379,7 @@ const HomeIntermunicipal = () => {
     }, [user?.uid, idConductor]);
 
     // ==================================================================
-    // 6. CONFIRMACIÓN DE SALIDA DE TERMINAL / EN RUTA
+    // 7. CONFIRMACIÓN DE SALIDA DE TERMINAL / EN RUTA
     // ==================================================================
     const confirmarViaje = async (idViaje) => {
         if (!idViaje) return;
@@ -349,23 +451,69 @@ const HomeIntermunicipal = () => {
                 </div>
             </div>
 
-            {/* 🚨 TOAST NOTIFICACIÓN DE NUEVO DESPACHO */}
+            {/* 🚨 TOAST NOTIFICACIÓN DE NUEVO SERVICIO / DESPACHO CON CONTRAOFERTA */}
             {notificacionUI && (
                 <div className="fixed top-24 left-4 right-4 md:left-auto md:right-6 md:w-[420px] backdrop-blur-xl bg-[#121214]/95 border-2 border-yellow-500/30 rounded-2xl p-5 shadow-[0_10px_40px_rgba(234,179,8,0.15)] z-[9999] animate-in slide-in-from-top-4 duration-300">
                     <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-3">
                         <div className="flex items-center gap-2 text-yellow-400 font-black text-xs uppercase tracking-widest">
                             <Bell size={14} className="animate-bounce" />
-                            <span>¡Nuevo Despacho Asignado!</span>
+                            <span>¡Nuevo Servicio Disponible!</span>
                         </div>
                         <button onClick={() => setNotificacionUI(null)} className="text-zinc-500 hover:text-white transition-colors cursor-pointer">
                             <XCircle size={16} />
                         </button>
                     </div>
-                    <div className="space-y-2 text-xs uppercase text-zinc-300">
+                    
+                    <div className="space-y-1.5 text-xs uppercase text-zinc-300">
                         <p><strong className="text-zinc-500">Origen:</strong> {notificacionUI.origen}</p>
                         <p><strong className="text-zinc-500">Destino:</strong> {notificacionUI.destino}</p>
-                        <p className="pt-1"><strong className="text-zinc-500">Valor Pasaje:</strong> <span className="text-emerald-400 font-black">{notificacionUI.tarifa}</span></p>
+                        <p className="pt-0.5"><strong className="text-zinc-500">Tarifa Sugerida:</strong> <span className="text-emerald-400 font-black">{notificacionUI.tarifa}</span></p>
                     </div>
+
+                    {/* 💵 CAJA DE CONTRAOFERTA Y ACCIONES DE PUJA */}
+                    <form onSubmit={handleEnviarOferta} className="mt-4 pt-3 border-t border-white/5 space-y-3">
+                        <div>
+                            <label className="block text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                                Propuesta de Tarifas / Contraoferta (COP)
+                            </label>
+                            <div className="relative flex items-center">
+                                <span className="absolute left-3 text-emerald-400 font-black text-xs">$</span>
+                                <input 
+                                    type="number"
+                                    required
+                                    min="1000"
+                                    step="500"
+                                    value={montoOfertaInput}
+                                    onChange={(e) => setMontoOfertaInput(e.target.value)}
+                                    placeholder="Ej. 25000"
+                                    className="w-full bg-zinc-950 border border-white/10 rounded-xl pl-7 pr-3 py-2 text-xs font-mono text-emerald-400 font-bold focus:outline-none focus:border-yellow-500/50 transition-all"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                            <button
+                                type="submit"
+                                disabled={enviandoOferta || !montoOfertaInput || Number(montoOfertaInput) <= 0}
+                                className="flex-1 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 text-black font-black uppercase text-[10px] tracking-wider py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                                <Send size={12} />
+                                {enviandoOferta ? "Transmitiendo..." : "Enviar Oferta"}
+                            </button>
+                            {notificacionUI.viajeId && (
+                                <button
+                                    type="button"
+                                    onClick={() => confirmarViaje(notificacionUI.viajeId)}
+                                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] tracking-wider px-3 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                    title="Aceptar viaje tarifa directa"
+                                >
+                                    <CheckCircle size={12} />
+                                    Aceptar
+                                </button>
+                            )}
+                        </div>
+                    </form>
+
                     <p className="text-[9px] text-zinc-500 mt-3 font-sans lowercase">Sincronizado de forma atómica con la central de despachos.</p>
                 </div>
             )}

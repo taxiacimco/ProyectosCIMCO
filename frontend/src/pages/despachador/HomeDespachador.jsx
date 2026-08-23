@@ -1,10 +1,10 @@
-// Versión Arquitectura: V16.3 - Integración de Parámetros Operativos Intermunicipales (Empresa, Terminal, Número Interno) y Gestión Unificada de Perfil
+// Versión Arquitectura: V19.2 - Integración de Canal de Empresa, Inyección de Solicitudes y Módulo de Pujas en Tiempo Real
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
- * Misión: Registro manual de solicitudes, inyección de asignaciones, calcomanía QR de autogestión,
- * monitoreo de saldo operativo y despliegue del radar satelital en tiempo real para las unidades de la cooperativa autorizada.
- * Ajuste V16.3: Integración fluida de parámetros operativos (Empresa, Terminal, Número Interno)
- *               con sincronización NoSQL/Firestore y REST API unificada para prevenir desincronizaciones de perfil.
+ * Misión: Registro manual de solicitudes, inyección de asignaciones con empresaId, calcomanía QR de autogestión,
+ * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
+ * Ajuste V19.2: Vinculación explícita del empresaId al emitir 'crearSolicitud', consumo reactivo de 'ofertas' desde el
+ *               contexto de sockets y renderizado del panel de pujas en tiempo real con botón de asignación.
  */
 
 import React, { useEffect, useState } from "react";
@@ -14,7 +14,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { useSocket } from "@/hooks/useSocket"; 
 import { useWallet } from "@/hooks/useWallet";
 import api, { VIAJES_ENDPOINTS } from "@/config/api"; 
-import { Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, QrCode, Download, Map, Settings, Wallet, Building2, User, Phone, FileText } from "lucide-react";
+import { 
+  Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, 
+  QrCode, Download, Map, Settings, Wallet, Building2, User, Phone, FileText, 
+  Gavel, DollarSign, Clock 
+} from "lucide-react";
 import { formatHoraColombia } from "@/utils/dateFormatter";
 import { QRCodeSVG } from "qrcode.react"; 
 
@@ -29,12 +33,15 @@ const HomeDespachador = () => {
   const setUser = authContext?.setUser || null;
   const token = authContext?.token || localStorage.getItem("token") || user?.token || "";
   
-  // 📡 Consumo Resiliente del Socket Centralizado
+  // 📡 Consumo Resiliente del Socket Centralizado (Canal de Empresa y Pujas)
   const socketContext = useSocket ? useSocket() : {};
   const socket = socketContext?.socket || null;
   const isConnected = socketContext?.isConnected ?? Boolean(socket?.connected);
+  const ofertas = socketContext?.ofertas || [];
+  const crearSolicitud = socketContext?.crearSolicitud || null;
+  const aceptarOferta = socketContext?.aceptarOferta || null;
 
-  // 💳 CONSUMO DEL HOOK UNIFICADO USEWALLET (Centraliza el estado financiero y previene listeners duplicados NoSQL)
+  // 💳 CONSUMO DEL HOOK UNIFICADO USEWALLET
   const walletContext = useWallet ? useWallet() : {};
   const wallet = walletContext?.wallet || null;
   const saldo = walletContext?.saldo ?? walletContext?.balance ?? 0;
@@ -45,6 +52,7 @@ const HomeDespachador = () => {
   const [loadingConductores, setLoadingConductores] = useState(true);
   const [errorConductores, setErrorConductores] = useState(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [loadingAceptarId, setLoadingAceptarId] = useState(null);
 
   // 🎫 ESTADOS DE FORMULARIO DE RUTA (INYECCIÓN DE VIAJES MANUALES)
   const [origen, setOrigen] = useState("");
@@ -64,12 +72,13 @@ const HomeDespachador = () => {
     numeroInterno: ""
   });
 
-  // 🛠️ Normalización atómica de metadatos de la Cooperativa para evitar quiebres por Undefined
+  // 🛠️ Normalización atómica de metadatos de la Cooperativa/Empresa para evitar quiebres por Undefined
   const idOperadorLogistico = user?.id || user?._id || user?.uid || "";
   const cooperativaDespachador = datosOperativos.empresa || user?.cooperativa || user?.empresa || "";
+  const empresaId = user?.empresaId || user?.empresa_id || user?.empresa || cooperativaDespachador || "";
   const terminalDespachador = datosOperativos.terminal || user?.terminal || user?.terminalOrigen || "";
 
-  // 1. ESCUCHA REACTIVA DE PERFIL Y PARÁMETROS EN FIRESTORE / REST
+  // 1. ESCUCHA REACTIVA DE PERFIL Y PARÁMETROS EN FIRESTORE
   useEffect(() => {
     if (!user?.uid && !idOperadorLogistico) return;
 
@@ -118,7 +127,6 @@ const HomeDespachador = () => {
 
     const pathUsuarios = FIRESTORE_PATHS?.users || FIRESTORE_PATHS?.usuarios || "usuarios";
     
-    // Consulta indexada segura basada en cooperativa y rol operativo
     const q = query(
       collection(db, pathUsuarios),
       where("cooperativa", "==", cooperativaDespachador),
@@ -154,7 +162,7 @@ const HomeDespachador = () => {
     return () => unsubscribe();
   }, [cooperativaDespachador]);
 
-  // 🚀 DISPARADOR TRANSACCIONAL: Registro centralizado e inyección del viaje en el pool logístico
+  // 🚀 DISPARADOR TRANSACCIONAL: Registro centralizado e inyección del viaje en el pool logístico con empresaId
   const handleRegistrarYDistribuirViaje = async (conductorSeleccionado) => {
     if (!conductorSeleccionado || !origen.trim() || !destino.trim() || !valorPasaje) {
       setMensajeError("Verifique los parámetros de la ruta. Faltan datos obligatorios.");
@@ -165,12 +173,14 @@ const HomeDespachador = () => {
     setMensajeExito("");
     setMensajeError("");
 
-    // 🛡️ Payload estandardizado para sincronización fluida con viajeController.js
+    // 🛡️ Payload estandardizado inyectando explícitamente empresaId y canal operativo
     const payloadInyeccion = {
       conductorId: conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "",
       conductor: conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "",
       despachadorId: idOperadorLogistico,
       despachador: idOperadorLogistico,
+      empresaId: String(empresaId),
+      empresa: cooperativaDespachador,
       origen: origen.trim().toUpperCase(),
       destino: destino.trim().toUpperCase(),
       valorPasaje: Number(valorPasaje),
@@ -182,42 +192,47 @@ const HomeDespachador = () => {
       estado: "asignado"
     };
 
-    // Configuración con Guardas de Seguridad para envío del Bearer Token si la ruta lo requiere
     const axiosConfig = token ? {
       headers: { Authorization: `Bearer ${token}` }
     } : {};
 
     try {
+      // 1. Invocar wrapper de socket si existe en el contexto para emitir al canal de la empresa
+      if (typeof crearSolicitud === 'function') {
+        crearSolicitud(payloadInyeccion);
+      } else if (socket && isConnected) {
+        socket.emit("crear_solicitud", payloadInyeccion);
+      }
+
+      // 2. Persistencia REST de respaldo
       const endpoint = VIAJES_ENDPOINTS?.crear || "/api/viajes/crear";
       const response = await api.post(endpoint, payloadInyeccion, axiosConfig);
 
       if (response?.data?.success || response?.data?.viaje || response?.status === 200 || response?.status === 201) {
         const viajeCreado = response?.data?.viaje || response?.data?.data || response?.data;
 
-        // 📡 Emisión WebSocket para sincronización en caliente del radar operativo mediante el canal centralizado
         if (socket && isConnected) {
           socket.emit("nuevo_viaje", {
             viaje: viajeCreado,
             payload: payloadInyeccion,
             cooperativa: cooperativaDespachador,
+            empresaId: String(empresaId),
             timestamp: new Date().toISOString()
           });
 
-          // Notificación / Alerta global de despacho radial
           socket.emit("alerta_despacho_central", {
             mensaje: `Nueva ruta asignada a la unidad ${conductorSeleccionado?.placaVehiculo || ''}`,
             cooperativa: cooperativaDespachador,
+            empresaId: String(empresaId),
             conductorId: conductorSeleccionado?.id
           });
         }
 
         setMensajeExito(`¡Ruta asignada con éxito al conductor ${conductorSeleccionado.fullName}!`);
-        // Limpiar el formulario para evitar duplicados accidentales
         setOrigen("");
         setDestino("");
         setValorPasaje("");
         
-        // Desvanecer el banner de éxito de forma fluida
         setTimeout(() => setMensajeExito(""), 5000);
       } else {
         setMensajeError(response?.data?.message || "La compuerta central denegó la inyección de la ruta.");
@@ -230,10 +245,46 @@ const HomeDespachador = () => {
     }
   };
 
+  // 🔨 ASIGNACIÓN DE OFERTA / PUJA DESDE LA TABLA EN TIEMPO REAL
+  const handleAceptarOfertaPuja = async (ofertaItem) => {
+    if (!ofertaItem) return;
+    const ofertaId = ofertaItem?.id || ofertaItem?._id || ofertaItem?.ofertaId;
+    
+    setLoadingAceptarId(ofertaId);
+    setMensajeExito("");
+    setMensajeError("");
+
+    try {
+      const payloadAceptacion = {
+        ofertaId: ofertaId,
+        viajeId: ofertaItem?.viajeId || ofertaItem?.solicitudId,
+        conductorId: ofertaItem?.conductorId || ofertaItem?.conductor?.id || ofertaItem?.uid,
+        despachadorId: idOperadorLogistico,
+        empresaId: String(empresaId),
+        monto: ofertaItem?.monto || ofertaItem?.valor || ofertaItem?.tarifa,
+        timestamp: new Date().toISOString()
+      };
+
+      if (typeof aceptarOferta === "function") {
+        aceptarOferta(payloadAceptacion);
+      } else if (socket && isConnected) {
+        socket.emit("aceptar_oferta", payloadAceptacion);
+      }
+
+      setMensajeExito(`¡Oferta de $${Number(payloadAceptacion.monto || 0).toLocaleString('es-CO')} asignada exitosamente!`);
+      setTimeout(() => setMensajeExito(""), 5000);
+    } catch (err) {
+      console.error("🚨 Error al procesar asignación de oferta:", err);
+      setMensajeError("No se pudo completar la asignación de la oferta.");
+    } finally {
+      setLoadingAceptarId(null);
+    }
+  };
+
   const isFormInvalid = !origen.trim() || !destino.trim() || !valorPasaje || Number(valorPasaje) <= 0;
 
   // 📄 CADENA DE AUTOGESTIÓN: Payload vectorizado para la calcomanía QR impresa en la central
-  const urlCalcomaniaAutogestion = `https://taxiacimco.com/register?cooperativa=${encodeURIComponent(cooperativaDespachador)}&role=conductor`;
+  const urlCalcomaniaAutogestion = `https://taxiacimco.com/register?cooperativa=${encodeURIComponent(cooperativaDespachador)}&empresaId=${encodeURIComponent(empresaId)}&role=conductor`;
 
   const handleDescargarQR = () => {
     const svgElement = document.getElementById("qr-cooperativa-svg");
@@ -256,6 +307,13 @@ const HomeDespachador = () => {
     }
   };
 
+  // Filtrado resiliente de ofertas asociadas a la empresa del despachador
+  const ofertasFiltradas = ofertas.filter((o) => {
+    if (!empresaId) return true;
+    const targetEmpresa = o?.empresaId || o?.empresa_id || o?.empresa || o?.cooperativa || "";
+    return !targetEmpresa || targetEmpresa === empresaId || targetEmpresa === cooperativaDespachador;
+  });
+
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 p-4 md:p-8 font-sans antialiased selection:bg-orange-500 selection:text-zinc-950">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -271,13 +329,13 @@ const HomeDespachador = () => {
                 Módulo Central de Despacho Intermunicipal
               </h1>
               <p className="text-[10px] text-zinc-500 font-mono mt-0.5 uppercase tracking-wider">
-                COOPERATIVA: {cooperativaDespachador || "Flota Asignada"} | TERMINAL: {terminalDespachador || "N/A"} | ID: {String(idOperadorLogistico).substring(0, 8)}
+                EMPRESA: {cooperativaDespachador || "Flota Asignada"} | EMPRESA_ID: {empresaId || "N/A"} | TERMINAL: {terminalDespachador || "N/A"}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
-            {/* 💳 BANDEROLA DE SALDO OPERATIVO UNIFICADO (Vía useWallet) */}
+            {/* 💳 BANDEROLA DE SALDO OPERATIVO UNIFICADO */}
             <div className="flex items-center gap-2 font-mono text-[10px] uppercase bg-zinc-950/50 border border-white/5 px-3 py-2 rounded-xl text-zinc-400">
               <Wallet size={13} className="text-emerald-400 shrink-0" />
               <span>
@@ -419,22 +477,86 @@ const HomeDespachador = () => {
 
           </div>
 
-          {/* COLUMNA 2 Y 3: RADAR SATELITAL Y MALLA DE SELECCIÓN */}
+          {/* COLUMNA 2 Y 3: RADAR SATELITAL, MALLA DE SELECCIÓN Y TABLA DE PUJAS EN TIEMPO REAL */}
           <div className="lg:col-span-2 space-y-6">
             
-            {/* COMPONENTE: RADAR OPERATIVO CON FILTRADO EN CALIENTE */}
+            {/* RADAR OPERATIVO CON FILTRADO EN CALIENTE */}
             <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-2 shadow-xl overflow-hidden relative">
               <div className="absolute top-4 left-4 z-[1000] bg-zinc-950/80 backdrop-blur-md border border-white/5 px-3 py-1.5 rounded-xl flex items-center gap-2">
                 <Map size={12} className="text-orange-400 animate-pulse" />
                 <span className="text-[9px] font-black tracking-widest uppercase text-white">Radar Satelital de Cooperativa</span>
               </div>
               
-              <div className="h-[280px] w-full rounded-2xl overflow-hidden">
+              <div className="h-[260px] w-full rounded-2xl overflow-hidden">
                 <MapaOperativo filtroCooperativa={cooperativaDespachador} />
               </div>
             </div>
 
-            {/* COMPONENTE: MALLA DE CONDUCTORES DISPONIBLES EN CENTRAL */}
+            {/* TABLA DE PUJAS Y OFERTAS EN TIEMPO REAL (SOCKET STATE) */}
+            <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                <div className="flex items-center gap-2">
+                  <Gavel size={16} className="text-orange-400" />
+                  <h2 className="text-[11px] font-black tracking-widest uppercase text-zinc-200">
+                    Pujas y Ofertas en Tiempo Real ({ofertasFiltradas.length})
+                  </h2>
+                </div>
+                <div className="flex items-center gap-1.5 text-[8px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono px-2 py-1 rounded-lg uppercase tracking-wider">
+                  <Clock size={10} className="animate-spin" />
+                  Canal Duplex Activo
+                </div>
+              </div>
+
+              {ofertasFiltradas.length === 0 ? (
+                <div className="py-6 text-center border border-dashed border-white/5 rounded-2xl bg-zinc-950/20">
+                  <DollarSign size={20} className="text-zinc-700 mx-auto mb-1" />
+                  <p className="text-[10px] text-zinc-500 font-black uppercase tracking-wider">Sin pujas pendientes en el canal</p>
+                  <p className="text-[8px] text-zinc-600 font-mono mt-0.5 uppercase">Las ofertas emitidas por los conductores de la empresa aparecerán aquí automáticamente.</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800">
+                  {ofertasFiltradas.map((oferta) => {
+                    const idOferta = oferta?.id || oferta?._id || oferta?.ofertaId;
+                    const conductorNombre = oferta?.nombreConductor || oferta?.conductorName || oferta?.conductor?.fullName || "Conductor";
+                    const placa = oferta?.placa || oferta?.placaVehiculo || oferta?.conductor?.placaVehiculo || "N/A";
+                    const monto = oferta?.monto || oferta?.valor || oferta?.tarifa || 0;
+
+                    return (
+                      <div 
+                        key={idOferta || Math.random()} 
+                        className="bg-zinc-950/60 border border-white/5 hover:border-orange-500/20 p-3 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 transition-all"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center font-mono text-orange-400">
+                            <DollarSign size={16} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black text-white uppercase">{conductorNombre}</span>
+                              <span className="text-[9px] font-mono text-orange-400 bg-orange-500/10 px-1.5 py-0.5 rounded border border-orange-500/20">{placa}</span>
+                            </div>
+                            <p className="text-[9px] text-zinc-500 font-mono mt-0.5">
+                              Oferta: <strong className="text-emerald-400 font-bold">${Number(monto).toLocaleString('es-CO')} COP</strong> | Trayecto: {oferta?.origen || 'N/A'} ➔ {oferta?.destino || 'N/A'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleAceptarOfertaPuja(oferta)}
+                          disabled={loadingAceptarId === idOferta}
+                          className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-4 py-2 font-black text-[9px] uppercase rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+                        >
+                          <CheckCircle size={12} />
+                          {loadingAceptarId === idOferta ? "Asignando..." : "Asignar Puja"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* MALLA DE CONDUCTORES DISPONIBLES EN CENTRAL */}
             <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-6 shadow-xl space-y-4">
               <div className="flex items-center justify-between border-b border-white/5 pb-3">
                 <div className="flex items-center gap-2">
@@ -467,7 +589,7 @@ const HomeDespachador = () => {
                   <p className="text-[9px] text-zinc-600 font-mono mt-0.5 uppercase px-6">Imprima la calcomanía QR lateral para que los operadores se vinculen a su canal central.</p>
                 </div>
               ) : (
-                <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800">
+                <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800">
                   {conductores.map((conductor) => (
                     <div 
                       key={conductor.id} 
@@ -475,7 +597,7 @@ const HomeDespachador = () => {
                     >
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full sm:w-auto">
                         
-                        {/* FILA 1: IDENTIFICACIÓN DEL MÓVIL */}
+                        {/* IDENTIFICACIÓN DEL MÓVIL */}
                         <div className="flex items-center gap-3">
                           <div className="w-12 h-10 rounded-xl bg-zinc-900 border border-white/5 flex flex-col items-center justify-center font-mono shadow-inner">
                             <span className="text-[8px] text-zinc-600 font-bold uppercase tracking-widest">NÚMERO</span>
@@ -494,7 +616,7 @@ const HomeDespachador = () => {
                           </div>
                         </div>
 
-                        {/* FILA 2: DATOS DEL OPERADOR DEL VEHÍCULO */}
+                        {/* DATOS DEL OPERADOR */}
                         <div>
                           <p className="text-[11px] text-zinc-300 font-black uppercase tracking-wide">
                             CONDUCTOR: <span className="text-white">{conductor.fullName || conductor.nombre || 'Desconocido'}</span>
@@ -550,6 +672,7 @@ const HomeDespachador = () => {
                 role: updatedUser?.role || prev?.role,
                 cooperativa: updatedUser?.cooperativa || updatedUser?.empresa || prev?.cooperativa,
                 empresa: updatedUser?.empresa || updatedUser?.cooperativa || prev?.empresa,
+                empresaId: updatedUser?.empresaId || updatedUser?.empresa_id || prev?.empresaId,
                 terminal: updatedUser?.terminal || updatedUser?.terminalOrigen || prev?.terminal
               }));
             }

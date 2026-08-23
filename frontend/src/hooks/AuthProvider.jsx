@@ -1,11 +1,12 @@
-// Versión Arquitectura: V22.5 - Sanitización Telco +57, Normalización Payload Defensivo y Sincronización HTTP 400
+// Versión Arquitectura: V24.1 - Integración Quirúrgica con Servicio Centralizado authService
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
- * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO con soporte para auto-cleanup, refresco de tokens y sanitización de entrada.
+ * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO con soporte para auto-cleanup, refresco de tokens, sanitización de entrada y consumo centralizado de authService.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '@/config/api';
+import authService from '@/services/authService';
 import { ROLES, DEFAULT_ACCESS_LEVELS } from '@/config/constants';
 import { auth } from '@/config/firebase';
 import { signInAnonymously, signOut, sendPasswordResetEmail } from 'firebase/auth'; 
@@ -32,6 +33,12 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         
         try {
+            await authService.logout();
+        } catch (authSvcError) {
+            console.warn("⚠️ [CIMCO-AUTH] Notificación de logout al servidor ejecutada o no disponible:", authSvcError?.message);
+        }
+
+        try {
             if (auth && auth.currentUser) {
                 await signOut(auth);
                 console.log("🧹 [CIMCO-AUTH] Canal satelital Firebase cerrado de forma segura.");
@@ -53,10 +60,10 @@ export const AuthProvider = ({ children }) => {
                 return { success: false, message: 'No hay token activo para verificar.' };
             }
 
-            // Intento de re-validación de identidad contra el backend central
-            const respuesta = await api.get('/auth/me');
-            if (respuesta && respuesta.data && (respuesta.data.success || respuesta.data.user || respuesta.data.usuario)) {
-                const userData = respuesta.data.user || respuesta.data.usuario || respuesta.data.data?.user;
+            // Intento de re-validación de identidad contra el backend central consumiendo authService
+            const respuestaData = await authService.getProfile();
+            if (respuestaData && (respuestaData.success || respuestaData.user || respuestaData.usuario)) {
+                const userData = respuestaData.user || respuestaData.usuario || respuestaData.data?.user;
                 if (userData) {
                     userData.uid = userData._id || userData.id || userData.uid || userData.conductorId;
                     userData._id = userData._id || userData.uid || userData.id || userData.conductorId;
@@ -65,7 +72,7 @@ export const AuthProvider = ({ children }) => {
                         localStorage.setItem('cimco_user', JSON.stringify(userData));
                     }
                 }
-                return { success: true, user: userData, data: respuesta.data };
+                return { success: true, user: userData, data: respuestaData };
             } else {
                 await logout();
                 return { success: false, message: 'Nodo de identidad no válido o expirado.' };
@@ -181,12 +188,12 @@ export const AuthProvider = ({ children }) => {
                 password: password
             };
 
-            // 3. Petición POST al endpoint de autenticación sin duplicar /api
-            const respuesta = await api.post('/auth/login', payload);
+            // 3. Petición POST al endpoint de autenticación consumiendo authService
+            const respuestaData = await authService.login(payload);
             
-            if (respuesta.data && (respuesta.data.success || respuesta.data.token)) {
-                const token = respuesta.data.token || respuesta.data.data?.token;
-                const userData = respuesta.data.user || respuesta.data.data?.user;
+            if (respuestaData && (respuestaData.success || respuestaData.token)) {
+                const token = respuestaData.token || respuestaData.data?.token;
+                const userData = respuestaData.user || respuestaData.data?.user;
                 
                 if (userData) {
                     userData.uid = userData._id || userData.id || userData.uid || userData.conductorId;
@@ -212,14 +219,13 @@ export const AuthProvider = ({ children }) => {
                     console.warn("⚠️ [CIMCO-AUTH-WARNING] El puente satelital Firebase falló de forma no fatal:", fbError.message);
                 }
 
-                return { success: true, user: userData, data: respuesta.data };
+                return { success: true, user: userData, data: respuestaData };
             }
             
-            // Si la respuesta HTTP fue 200 pero la carga útil no confirma éxito, instanciar y lanzar error explícito
-            const mensajeError = respuesta.data?.message || "Credenciales incorrectas o usuario no encontrado.";
+            // Si la respuesta HTTP no confirma éxito, instanciar y lanzar error explícito
+            const mensajeError = respuestaData?.message || "Credenciales incorrectas o usuario no encontrado.";
             const errorRespuesta = new Error(mensajeError);
-            errorRespuesta.response = respuesta;
-            errorRespuesta.data = respuesta.data;
+            errorRespuesta.data = respuestaData;
             throw errorRespuesta;
 
         } catch (error) {
@@ -234,16 +240,16 @@ export const AuthProvider = ({ children }) => {
     const registerCentral = async (payload) => {
         try {
             setLoading(true);
-            const respuesta = await api.post('/auth/register', payload);
-            if (respuesta.data && respuesta.data.success) {
-                return { success: true, data: respuesta.data };
+            const respuestaData = await authService.register(payload);
+            if (respuestaData && respuestaData.success) {
+                return { success: true, data: respuestaData };
             }
-            return { success: false, message: respuesta.data?.message || "No se pudo completar el registro central." };
+            return { success: false, message: respuestaData?.message || "No se pudo completar el registro central." };
         } catch (error) {
             console.error("❌ [CIMCO-AUTH] Falla perimetral en método registerCentral:", error);
             return { 
                 success: false, 
-                message: error.response?.data?.message || "Error de red al intentar persistir el nodo de identidad." 
+                message: error.response?.data?.message || error.message || "Error de red al intentar persistir el nodo de identidad." 
             };
         } finally {
             setLoading(false);
