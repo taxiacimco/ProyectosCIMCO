@@ -1,9 +1,10 @@
-// Versión Arquitectura: V21.42 - Punto de Recogida Texto Libre y Recalibración GPS
+// Versión Arquitectura: V21.43 - Subasta Dinámica, Categorización de Trayecto y Gestión de Ofertas WebSocket
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (CartoDB Voyager),
  *         integración atómica de telemetría, sockets, billetera smart, selector dinámico de flota (4 modalidades + Cooperativas < 5km),
- *         monitoreo de hardware GPS, entrada de dirección editable con botón de recalibración GPS y paleta CIMCO-UI V9.3.
+ *         monitoreo de hardware GPS, entrada de dirección editable con botón de recalibración GPS, subasta dinámica
+ *         de ofertas en tiempo real vía WebSockets/Firestore y paleta CIMCO-UI V9.3.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -44,7 +45,9 @@ import {
   CreditCard,
   Crosshair,
   AlertTriangle,
-  Bus
+  Bus,
+  Check,
+  Tag
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ModalCalificacion from '@/components/ModalCalificacion';
@@ -134,6 +137,9 @@ export default function HomePasajero() {
   const [coordenadas, setCoordenadas] = useState(LA_JAGUA_COORDS);
   const [conductoresActivos, setConductoresActivos] = useState([]);
   
+  // 🤝 Matriz para Subasta Dinámica de Ofertas Recibidas
+  const [ofertas, setOfertas] = useState([]);
+
   // 🚕 Modalidades: 'mototaxi' | 'motoparrillero' | 'motocarga' | 'intermunicipal'
   const [tipoServicio, setTipoServicio] = useState('mototaxi');
   const [cooperativaSeleccionada, setCooperativaSeleccionada] = useState('');
@@ -183,7 +189,7 @@ export default function HomePasajero() {
     }))
     .filter((coop) => coop.distancia <= 5);
 
-  // 📡 Gestión de Eventos del Hook Unificado de Socket
+  // 📡 Gestión de Eventos del Hook Unificado de Socket (Ubicación + Subasta + Estados)
   useEffect(() => {
     if (!socket || !isConnected) return;
 
@@ -212,6 +218,7 @@ export default function HomePasajero() {
         if (data.conductor) {
           setDatosConductor(data.conductor);
         }
+        setOfertas([]);
       }
     };
 
@@ -219,17 +226,38 @@ export default function HomePasajero() {
       if (!data?.viajeId || data.viajeId === rideId) {
         setEstadoViaje('EXPIRADO');
         setMensajeExpirado("⚠️ Ningún conductor aceptó tu solicitud tras 60 segundos. Por favor intenta de nuevo.");
+        setOfertas([]);
       }
+    };
+
+    // 🤝 Suscripción a Negociación por Subasta en Tiempo Real
+    const handleNuevaOferta = (oferta) => {
+      if (!oferta || !oferta.conductorId) return;
+      console.log("📥 [SUBASTA] Nueva oferta recibida:", oferta);
+      setOfertas((prev) => [
+        ...prev.filter((o) => o.conductorId !== oferta.conductorId),
+        oferta
+      ]);
+    };
+
+    const handleOfertaRetirada = (data) => {
+      if (!data || !data.conductorId) return;
+      console.log("🗑️ [SUBASTA] Oferta retirada por conductor:", data.conductorId);
+      setOfertas((prev) => prev.filter((o) => o.conductorId !== data.conductorId));
     };
 
     socket.on('ubicacion_conductor_actualizada', handleActualizacionUbicacion);
     socket.on('viaje_aceptado', handleViajeAceptado);
     socket.on('viaje_expirado', handleViajeExpirado);
+    socket.on('nueva_oferta', handleNuevaOferta);
+    socket.on('oferta_retirada', handleOfertaRetirada);
 
     return () => {
       socket.off('ubicacion_conductor_actualizada', handleActualizacionUbicacion);
       socket.off('viaje_aceptado', handleViajeAceptado);
       socket.off('viaje_expirado', handleViajeExpirado);
+      socket.off('nueva_oferta', handleNuevaOferta);
+      socket.off('oferta_retirada', handleOfertaRetirada);
     };
   }, [socket, isConnected, rideId]);
 
@@ -314,9 +342,11 @@ export default function HomePasajero() {
           }
           if (data.estado === 'FINALIZADO') {
             setMostrarModalCalificacion(true);
+            setOfertas([]);
           }
           if (data.estado === 'EXPIRADO') {
             setMensajeExpirado("⚠️ Ningún conductor aceptó tu solicitud tras 60 segundos. Por favor intenta de nuevo.");
+            setOfertas([]);
           }
         }
       }
@@ -418,6 +448,7 @@ export default function HomePasajero() {
     }
   };
 
+  // 🚀 Lanzamiento e Inserción Atómica de Petición con Clasificación de Trayecto
   const handleSolicitarServicio = async (e) => {
     if (e) e.preventDefault();
     if (procesandoPeticion) return;
@@ -433,6 +464,7 @@ export default function HomePasajero() {
     setProcesandoPeticion(true);
     setErrorInterno('');
     setMensajeExpirado('');
+    setOfertas([]);
 
     try {
       let coordsActuales = coordenadas;
@@ -443,12 +475,15 @@ export default function HomePasajero() {
         console.warn("⚠️ [GPS-FALLBACK] Usando última posición conocida:", gpsErr.message);
       }
 
+      const esIntermunicipal = tipoServicio === 'intermunicipal';
       const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+      
       const payload = {
         pasajeroId: uidUsuario,
         nombrePasajero: perfilFirestore.nombre,
-        tipoServicio,
-        cooperativa: tipoServicio === 'intermunicipal' ? cooperativaSeleccionada : null,
+        tipoServicio, // 'mototaxi' | 'motoparrillero' | 'motocarga' | 'intermunicipal'
+        tipoTrayecto: esIntermunicipal ? 'INTERMUNICIPAL' : 'URBANO',
+        cooperativa: esIntermunicipal ? cooperativaSeleccionada : null,
         metodoPago,
         origen: origenText.trim() || 'Ubicación actual (GPS)',
         destino: destinoText.trim(),
@@ -498,6 +533,46 @@ export default function HomePasajero() {
     }
   };
 
+  // 🤝 Selección y Confirmación de Propuesta de Conductor en Subasta
+  const handleAceptarOferta = async (oferta) => {
+    if (!oferta || !rideId) return;
+    try {
+      if (socket && isConnected) {
+        socket.emit('aceptar_oferta', {
+          viajeId: rideId,
+          conductorId: oferta.conductorId,
+          tarifaAcordada: oferta.tarifa
+        });
+      }
+
+      const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+      const docRef = doc(db, pathViajes, rideId);
+      
+      const conductorAsignado = oferta.conductor || {
+        id: oferta.conductorId,
+        nombre: oferta.nombre || 'Conductor',
+        placa: oferta.placa || oferta.vehiculo || 'N/A',
+        telefono: oferta.telefono || 'N/A',
+        calificacion: oferta.calificacion || 5.0
+      };
+
+      await updateDoc(docRef, {
+        estado: 'ACEPTADO',
+        conductor: conductorAsignado,
+        valorTarifa: oferta.tarifa,
+        fechaAceptacion: serverTimestamp()
+      });
+
+      setDatosConductor(conductorAsignado);
+      setEstadoViaje('ACEPTADO');
+      setOfertas([]);
+      console.log("✅ [SUBASTA] Oferta aceptada atómicamente. Conductor asignado:", oferta.conductorId);
+    } catch (err) {
+      console.error("❌ [SUBASTA-ERROR] No se pudo procesar la aceptación de la oferta:", err);
+      setErrorInterno("No se pudo procesar la aceptación de la oferta.");
+    }
+  };
+
   const handleCancelarViaje = async () => {
     if (!rideId) return;
     try {
@@ -515,6 +590,7 @@ export default function HomePasajero() {
       setRideId(null);
       setDatosConductor(null);
       setMensajeExpirado('');
+      setOfertas([]);
     } catch (err) {
       console.error("❌ [LOGISTICS-ERROR] No se pudo revocar el servicio activo:", err);
     }
@@ -525,6 +601,7 @@ export default function HomePasajero() {
     setRideId(null);
     setDatosConductor(null);
     setMensajeExpirado('');
+    setOfertas([]);
   };
 
   const handleCierreCalificacion = () => {
@@ -534,6 +611,7 @@ export default function HomePasajero() {
     setDatosConductor(null);
     setDestinoText('');
     setMensajeExpirado('');
+    setOfertas([]);
   };
 
   const handleLogoutSeguro = async () => {
@@ -839,22 +917,72 @@ export default function HomePasajero() {
                 </>
               )}
 
-              {/* BÚSQUEDA EN CURSO */}
+              {/* BÚSQUEDA Y PANEL DE SUBASTA EN TIEMPO REAL */}
               {estadoViaje === 'BUSCANDO' && (
-                <div className="p-6 rounded-2xl border border-amber-500/30 bg-slate-950/80 backdrop-blur-md relative overflow-hidden shadow-2xl flex flex-col items-center justify-center text-center py-10">
-                  <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/30 mb-4 shadow-lg shadow-amber-500/10">
-                    <Activity className="text-amber-400 animate-spin" size={28} />
+                <div className="space-y-4">
+                  {/* Radar de Búsqueda Activa */}
+                  <div className="p-5 rounded-2xl border border-amber-500/30 bg-slate-950/90 backdrop-blur-md relative overflow-hidden shadow-2xl flex flex-col items-center justify-center text-center">
+                    <div className="w-14 h-14 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/30 mb-3 shadow-lg shadow-amber-500/10">
+                      <Activity className="text-amber-400 animate-spin" size={24} />
+                    </div>
+                    <h3 className="text-xs font-black uppercase tracking-widest text-amber-400 mb-1">ESCANEAR CONDUCTORES EN ZONA...</h3>
+                    <p className="text-[10px] text-slate-400 uppercase tracking-wider font-mono max-w-[240px] leading-relaxed mb-4">
+                      Tu orden ha sido propagada a la red radial. Esperando propuestas económicas.
+                    </p>
+                    <button
+                      onClick={handleCancelarViaje}
+                      className="px-4 py-2 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95 cursor-pointer"
+                    >
+                      ABORTAR PETICIÓN
+                    </button>
                   </div>
-                  <h3 className="text-sm font-black uppercase tracking-widest text-amber-400 mb-1">ESCANEAR CONDUCTORES EN ZONA...</h3>
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider font-mono max-w-[240px] leading-relaxed mb-6">
-                    Tu orden ha sido propagada a la red radial. Esperando confirmación de unidad disponible.
-                  </p>
-                  <button
-                    onClick={handleCancelarViaje}
-                    className="px-5 py-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black uppercase tracking-widest transition-all duration-300 active:scale-95 cursor-pointer"
-                  >
-                    ABORTAR PETICIÓN
-                  </button>
+
+                  {/* 🏷️ PANEL FLOTANTE DE OFERTAS EN TIEMPO REAL */}
+                  <div className="p-4 rounded-2xl border border-amber-500/30 bg-slate-950/90 backdrop-blur-md space-y-3 shadow-2xl">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                      <h3 className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5" /> OFERTAS RECIBIDAS ({ofertas.length})
+                      </h3>
+                      <span className="text-[9px] font-mono text-emerald-400 animate-pulse">SUBASTA EN VIVO</span>
+                    </div>
+
+                    {ofertas.length === 0 ? (
+                      <div className="py-6 text-center text-[10px] text-slate-500 font-mono">
+                        Esperando que los conductores cercanos envíen propuestas de tarifa...
+                      </div>
+                    ) : (
+                      <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                        {ofertas.map((oferta) => (
+                          <div 
+                            key={oferta.conductorId || oferta.ofertaId} 
+                            className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl flex justify-between items-center hover:border-amber-500/40 transition-all"
+                          >
+                            <div className="space-y-0.5">
+                              <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <span>{oferta.nombre || 'Conductor'}</span>
+                                {oferta.calificacion && (
+                                  <span className="text-[10px] text-amber-400 font-mono">★ {oferta.calificacion}</span>
+                                )}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-mono">
+                                Vehículo: <span className="text-slate-200 uppercase">{oferta.vehiculo || oferta.placa || 'Moto'}</span>
+                              </p>
+                              <p className="text-xs font-black text-amber-400 font-mono">
+                                ${Number(oferta.tarifa || 0).toLocaleString()} COP
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => handleAceptarOferta(oferta)}
+                              className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 text-[10px] font-black uppercase rounded-lg shadow-md shadow-emerald-500/20 transition-all cursor-pointer flex items-center gap-1"
+                            >
+                              <Check className="w-3 h-3 stroke-[3]" />
+                              <span>ACEPTAR</span>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
