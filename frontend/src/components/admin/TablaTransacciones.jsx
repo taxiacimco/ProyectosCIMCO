@@ -1,17 +1,12 @@
-// Versión Arquitectura: V19.0 - Integración de Paginación por Servidor, Amortiguación Debounce y Formateador de Moneda Memorizado
+// Versión Arquitectura: V19.1 - Ref-Stable & Sync (Paginación por Servidor, Amortiguación Debounce y Prevención de Ciclos Infinitos)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\TablaTransacciones.jsx
  * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism CIMCO-UI V9.3,
- *         soportando paginación por servidor (server-side pagination), filtros amortiguados (debounce)
- *         y optimización de formateo de moneda mediante memorización fuera de render.
- * Ajuste V19.0:
- *   1. Migración a Paginación por Servidor: Soporte para parámetros de control (page, limit, startDate, endDate, type, search),
- *      sincronización opcional mediante fetch/prop callbacks y soporte para data segmentada con totalCount.
- *   2. Amortiguación de Búsqueda (Debounce): Implementación de amortiguador de 400ms en el filtro de búsqueda/fecha.
- *   3. Formateador de Moneda Memorizado: Instanciación singleton fuera del componente de Intl.NumberFormat para cero sobrecosto en re-renders.
+ *         soportando paginación por servidor (server-side pagination), filtros amortiguados (debounce),
+ *         prevención de ciclos infinitos mediante ref-stable de callbacks y formateo de moneda optimizado.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     ArrowUpRight, 
     ArrowDownLeft, 
@@ -28,7 +23,7 @@ import {
 import { formatFechaColombia } from '@/utils/dateFormatter';
 import { resolverFechaSegura } from '@/utils/dateUtils';
 
-// 🛡️ MEMORIZACIÓN FUERA DEL CICLO DE RENDER: Instancia re-utilizable de Intl.NumberFormat (Singleton)
+// 🛡️ SINGLETON: Instancia re-utilizable fuera del ciclo de render
 const currencyFormatterCOP = new Intl.NumberFormat('es-CO', {
     style: 'currency',
     currency: 'COP',
@@ -39,6 +34,24 @@ const currencyFormatterCOP = new Intl.NumberFormat('es-CO', {
 const formatearMoneda = (valor = 0) => {
     const montoNumerico = Number(valor) || 0;
     return currencyFormatterCOP.format(montoNumerico);
+};
+
+const renderBadgeTipo = (tipo = '') => {
+    const t = String(tipo).toUpperCase().trim();
+    if (t === 'RECARGA' || t === 'CREDIT' || t === 'INGRESO') {
+        return (
+            <span className="flex items-center gap-1.5 w-fit text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md">
+                <ArrowDownLeft size={12} />
+                RECARGA
+            </span>
+        );
+    }
+    return (
+        <span className="flex items-center gap-1.5 w-fit text-[10px] text-cyan-400 font-mono font-bold bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-md">
+            <ArrowUpRight size={12} />
+            DEBITO
+        </span>
+    );
 };
 
 const TablaTransacciones = ({ 
@@ -58,37 +71,49 @@ const TablaTransacciones = ({
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
 
+    // Ref estable para evitar bucles si onParamsChange no está memorizado en el padre
+    const onParamsChangeRef = useRef(onParamsChange);
+    useEffect(() => {
+        onParamsChangeRef.current = onParamsChange;
+    }, [onParamsChange]);
+
+    // Ref para prevenir la petición duplicada al montar el componente
+    const isFirstRender = useRef(true);
+
+    // Sincronización de props entrantes cuando el padre actualiza paginación
+    useEffect(() => { setPage(pageProp); }, [pageProp]);
+    useEffect(() => { setLimit(limitProp); }, [limitProp]);
+
     // 🛡️ AMORTIGUACIÓN DE BÚSQUEDA (DEBOUNCE 400ms)
     useEffect(() => {
         const handler = setTimeout(() => {
             setDebouncedSearch(searchTerm);
-            setPage(1); // Reiniciar a la primera página ante un nuevo término
+            setPage(1);
         }, 400);
 
-        return () => {
-            clearTimeout(handler);
-        };
+        return () => clearTimeout(handler);
     }, [searchTerm]);
 
     // 🛡️ NOTIFICAR CAMBIOS AL SERVIDOR / COMPONENTE PADRE
-    const notificarCambioParametros = useCallback((nuevosParametros) => {
-        if (typeof onParamsChange === 'function') {
-            onParamsChange({
-                page: nuevosParametros.page ?? page,
-                limit: nuevosParametros.limit ?? limit,
-                search: nuevosParametros.search ?? debouncedSearch,
-                type: nuevosParametros.type ?? tipoFiltro,
-                startDate: nuevosParametros.startDate ?? startDate,
-                endDate: nuevosParametros.endDate ?? endDate
+    useEffect(() => {
+        if (isFirstRender.current) {
+            isFirstRender.current = false;
+            return;
+        }
+
+        if (typeof onParamsChangeRef.current === 'function') {
+            onParamsChangeRef.current({
+                page,
+                limit,
+                search: debouncedSearch,
+                type: tipoFiltro,
+                startDate,
+                endDate
             });
         }
-    }, [onParamsChange, page, limit, debouncedSearch, tipoFiltro, startDate, endDate]);
+    }, [page, limit, debouncedSearch, tipoFiltro, startDate, endDate]);
 
-    useEffect(() => {
-        notificarCambioParametros({ page, limit, search: debouncedSearch, type: tipoFiltro, startDate, endDate });
-    }, [page, limit, debouncedSearch, tipoFiltro, startDate, endDate, notificarCambioParametros]);
-
-    // 🛡️ PROCESAMIENTO MODO HYBRID / CLIENTE FALLBACK (Si no se provee servidor explícito)
+    // 🛡️ PROCESAMIENTO MODO HYBRID / CLIENTE FALLBACK
     const dataset = useMemo(() => {
         return Array.isArray(transaccionesProp) ? transaccionesProp : [];
     }, [transaccionesProp]);
@@ -127,24 +152,6 @@ const TablaTransacciones = ({
         }
     };
 
-    const renderBadgeTipo = (tipo = '') => {
-        const t = String(tipo).toUpperCase().trim();
-        if (t === 'RECARGA' || t === 'CREDIT' || t === 'INGRESO') {
-            return (
-                <span className="flex items-center gap-1.5 w-fit text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md">
-                    <ArrowDownLeft size={12} />
-                    RECARGA
-                </span>
-            );
-        }
-        return (
-            <span className="flex items-center gap-1.5 w-fit text-[10px] text-cyan-400 font-mono font-bold bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-md">
-                <ArrowUpRight size={12} />
-                DEBITO
-            </span>
-        );
-    };
-
     return (
         <div className="w-full backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-2xl overflow-hidden shadow-xl flex flex-col gap-0 font-mono antialiased text-zinc-100">
             {/* ENCABEZADO Y CONTROLES DE FILTRADO AMORTIGUADO */}
@@ -163,7 +170,7 @@ const TablaTransacciones = ({
 
                 {/* BARRA DE FILTROS Y BÚSQUEDA */}
                 <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-                    {/* BUSCADOR DEBOUCED */}
+                    {/* BUSCADOR DEBOUNCED */}
                     <div className="relative flex-1 min-w-[200px] lg:w-64">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
                         <input 
@@ -291,7 +298,7 @@ const TablaTransacciones = ({
                 )}
             </div>
 
-            {/* CONTROLES DE PAGINACIÓN POR SERVIDOR */}
+            {/* CONTROLES DE PAGINACIÓN */}
             <div className="p-4 border-t border-white/5 bg-white/[0.01] flex flex-col sm:flex-row items-center justify-between gap-3 text-[10px]">
                 <div className="flex items-center gap-2">
                     <span className="text-zinc-500 font-bold uppercase tracking-wider">Registros por página:</span>
