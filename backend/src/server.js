@@ -1,9 +1,10 @@
-// Versión Arquitectura: V19.2 - Integración Resiliente Anti-Crash del Error Middleware y Servidor HTTP
+// Versión Arquitectura: V19.3 - Habilitación de Trust Proxy SSL y Configuración Perimetral de CORS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte canónico
- * para frontend-opal-eight-58.vercel.app, orquestación de sockets, inyección de enrutadores del sistema y registro resiliente del middleware centralizado de errores.
- * Ajuste V19.2: Implementación de carga dinámica resiliente para error.middleware.js evitando quiebres de servidor por ERR_MODULE_NOT_FOUND cuando el archivo aún no está presente en disco.
+ * para entornos de desarrollo y producción (HTTP/HTTPS), habilitación de trust proxy para terminación SSL en Railway/Nginx,
+ * orquestación de sockets, inyección de enrutadores del sistema y registro resiliente del middleware centralizado de errores.
+ * Ajuste V19.3: Habilitación de `trust proxy` para decodificar cabeceras X-Forwarded-Proto e integración extendida de origenes CORS en producción.
  */
 
 import 'dotenv/config';
@@ -36,6 +37,9 @@ try {
 
 const app = express();
 
+// 🛡️ RECONOCIMIENTO DE CABECERAS HTTP/HTTPS DETRÁS DE PROXY REVERSO (RAILWAY / NGINX / VERCEL)
+app.set('trust proxy', 1);
+
 // 1. ENVOLTURAS EXPLÍCITAS DEL SERVIDOR HTTP
 const httpServer = http.createServer(app);
 
@@ -43,7 +47,7 @@ const logLocal = (msg) => {
     console.log(`[${new Date().toLocaleString('es-CO')}] ${msg}`);
 };
 
-// 🌐 ORIGENES PERMITIDOS PARA DESARROLLO LOCAL, RED LOCAL, NGROK, CLOUDFLARE TUNNEL Y PRODUCCIÓN VERCEL
+// 🌐 ORIGENES PERMITIDOS PARA DESARROLLO LOCAL, RED LOCAL, NGROK, CLOUDFLARE TUNNEL Y PRODUCCIÓN VERCEL / RAILWAY
 const origenesPermitidos = [
   'http://localhost:5173',
   'https://frontend-opal-eight-58.vercel.app',
@@ -59,6 +63,13 @@ const origenesPermitidos = [
   process.env.CLIENT_ORIGIN,
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
+  process.env.CORS_ORIGIN,
+  process.env.CLIENT_ORIGIN_LOCAL,
+  process.env.CLIENT_ORIGIN_IP,
+  process.env.CLIENT_ORIGIN_TUNNEL,
+  process.env.CLIENT_ORIGIN_VERCEL,
+  process.env.CLIENT_ORIGIN_VERCEL_ALT,
+  process.env.FRONTEND_BASE_URL,
   process.env.CLOUDFLARE_TUNNEL_URL
 ].filter(Boolean);
 

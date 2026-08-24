@@ -1,8 +1,8 @@
-// Versión Arquitectura: V15.2 - Acceso Rápido y Métrica de Credenciales Administrativas
+// Versión Arquitectura: V15.3 - Sincronización de Rutas con Query Params
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminPanel.jsx
  * Misión: Panel Central de Control Administrativo / CEO
- * Ajuste V15.2: Integración de tarjeta de acceso rápido y métrica en tiempo real para Gestión de Credenciales de Oficina / Admins.
+ * Ajuste V15.3: Actualización de redirecciones de tarjetas gerenciales mediante Query Parameters (?tab=...) para integración con la Consola Dashboard.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -285,28 +285,30 @@ const AdminPanel = () => {
           
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             
-            {/* TARJETA DE ACCESO RÁPIDO: GESTIÓN DE CREDENCIALES */}
+            {/* TARJETA 1: GESTIÓN DE CREDENCIALES */}
             <button 
-              onClick={() => navigate('/admin/dashboard', { state: { activeTab: 'admins' } })}
-              className="p-4 rounded-xl bg-[#0c0c0e] border border-amber-500/20 hover:border-amber-500/50 text-left transition-all duration-300 group hover:shadow-lg hover:shadow-amber-500/5"
+              onClick={() => navigate('/admin/dashboard?tab=admins')}
+              className="p-4 rounded-xl bg-[#0c0c0e] border border-amber-500/20 hover:border-amber-500/50 text-left transition-all duration-300 group hover:shadow-lg hover:shadow-amber-500/5 cursor-pointer"
             >
               <KeyRound className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform mb-2" />
               <p className="font-bold text-xs text-white uppercase tracking-wider">Credenciales de Oficina & Admins</p>
               <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Creación y revocación de accesos gerenciales</p>
             </button>
 
+            {/* TARJETA 2: CONTROL DE COOPERATIVAS */}
             <button 
-              onClick={() => navigate('/admin/cooperativas')}
-              className="p-4 rounded-xl bg-[#0c0c0e] border border-white/[0.03] hover:border-amber-500/30 text-left transition-all duration-300 group"
+              onClick={() => navigate('/admin/dashboard?tab=operadores')}
+              className="p-4 rounded-xl bg-[#0c0c0e] border border-white/[0.03] hover:border-amber-500/30 text-left transition-all duration-300 group cursor-pointer"
             >
               <Settings className="w-5 h-5 text-zinc-500 group-hover:text-amber-400 mb-2 transition-colors" />
               <p className="font-bold text-xs text-white uppercase tracking-wider">Control de Cooperativas</p>
               <p className="text-[10px] text-zinc-500 font-medium mt-1 uppercase">Vincular despachadores y flotas</p>
             </button>
 
+            {/* TARJETA 3: AUDITORÍA DE SALDOS */}
             <button 
-              onClick={() => navigate('/admin/auditoria-saldos')}
-              className="p-4 rounded-xl bg-[#0c0c0e] border border-white/[0.03] hover:border-amber-500/30 text-left transition-all duration-300 group"
+              onClick={() => navigate('/admin/dashboard?tab=billeteras')}
+              className="p-4 rounded-xl bg-[#0c0c0e] border border-white/[0.03] hover:border-amber-500/30 text-left transition-all duration-300 group cursor-pointer"
             >
               <TrendingUp className="w-5 h-5 text-zinc-500 group-hover:text-amber-400 mb-2 transition-colors" />
               <p className="font-bold text-xs text-white uppercase tracking-wider">Auditoría Híbrida de Saldos</p>

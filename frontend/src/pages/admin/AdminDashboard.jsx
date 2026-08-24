@@ -1,7 +1,7 @@
-// Versión Arquitectura: V14.0 - Integración de AbortController en useEffect de Métricas y Cancelación de Peticiones Asíncronas
+// Versión Arquitectura: V14.1 - Integración de Header Responsivo, Glassmorphism y Smooth Scroll Inmune a Zoom
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
- * Misión: Optimizar el ciclo de vida del componente mediante AbortController en useEffect para cancelar peticiones HTTP pendientes al desmontar o cambiar de pestaña.
+ * Misión: Optimizar la navegación superior para prevenir colapsos visuales ante variaciones de zoom o apertura de DevTools, garantizando scrolling horizontal suave y preservando el ciclo de vida asíncrono con AbortController.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -187,15 +187,15 @@ const AdminDashboard = () => {
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-mono selection:bg-amber-500 selection:text-black">
             
-            {/* 🌐 HEADER DE NAVEGACIÓN SUPERIOR (GLASSMORPHISM) */}
-            <header className="sticky top-0 z-50 w-full backdrop-blur-md bg-[#121214]/80 border-b border-white/5 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
+            {/* 🌐 HEADER DE NAVEGACIÓN SUPERIOR (GLASSMORPHISM & SMOOTH SCROLL) */}
+            <header className="sticky top-0 z-50 w-full backdrop-blur-md bg-[#121214]/80 border-b border-white/5 px-4 md:px-6 py-3 flex items-center justify-between gap-4 shadow-lg">
                 
-                {/* Branding Logístico */}
-                <div className="flex items-center gap-3 cursor-pointer" onClick={() => cambiarPestana('dashboard')}>
+                {/* Branding Logístico (Inmune a compresión con shrink-0) */}
+                <div className="flex items-center gap-3 cursor-pointer shrink-0" onClick={() => cambiarPestana('dashboard')}>
                     <div className="bg-amber-500/10 border border-amber-500/20 p-2 rounded-xl text-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.1)]">
                         <Activity size={18} className="animate-pulse" />
                     </div>
-                    <div>
+                    <div className="hidden sm:block">
                         <h1 className="text-sm font-black uppercase tracking-widest text-white flex items-center gap-2">
                             CIMCO <span className="text-amber-400">NEXUS</span>
                         </h1>
@@ -203,8 +203,8 @@ const AdminDashboard = () => {
                     </div>
                 </div>
 
-                {/* Bus de Navegación: Pestañas Superiores Sanitizadas */}
-                <nav className="flex items-center gap-2 overflow-x-auto no-scrollbar whitespace-nowrap py-2 px-1 bg-zinc-950/60 rounded-xl border border-white/5 max-w-full">
+                {/* Bus de Navegación: Desplazamiento Horizontal Fluido e Inmune a Zoom */}
+                <nav className="flex-1 flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth whitespace-nowrap py-1.5 px-2 bg-zinc-950/60 rounded-xl border border-white/5 max-w-full">
                     {pestañasPermitidas.map((tab) => {
                         const IconComponent = tab.icon;
                         const esActiva = pestanaActiva === tab.id;
@@ -213,23 +213,23 @@ const AdminDashboard = () => {
                             <button
                                 key={tab.id}
                                 onClick={() => cambiarPestana(tab.id)}
-                                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 whitespace-nowrap cursor-pointer ${
+                                className={`shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-200 cursor-pointer ${
                                     esActiva 
                                         ? 'bg-amber-500 text-black shadow-md shadow-amber-500/10 font-black scale-[1.02]' 
                                         : 'text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent'
                                 }`}
                             >
                                 <IconComponent size={14} className={esActiva ? 'text-black' : 'text-zinc-400'} />
-                                <span className="hidden md:inline">{tab.label}</span>
+                                <span>{tab.label}</span>
                             </button>
                         );
                     })}
                 </nav>
 
-                {/* Perfil del Operador y Desconexión */}
-                <div className="flex items-center gap-4">
+                {/* Perfil del Operador y Desconexión (Alineado a la derecha con shrink-0) */}
+                <div className="flex items-center gap-3 shrink-0 ml-auto">
                     <div className="text-right hidden sm:block">
-                        <p className="text-[11px] font-black text-zinc-300 uppercase truncate max-w-[150px]">
+                        <p className="text-[11px] font-black text-zinc-300 uppercase truncate max-w-[140px]">
                             {nombreUsuario}
                         </p>
                         <p className="text-[9px] text-amber-400 font-bold tracking-widest uppercase font-mono">
@@ -240,7 +240,7 @@ const AdminDashboard = () => {
                     <button
                         onClick={logout}
                         title="Cerrar sesión operativa"
-                        className="flex items-center justify-center p-2.5 rounded-xl text-red-500/80 hover:text-red-400 transition-colors bg-red-500/5 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 active:scale-95 cursor-pointer"
+                        className="flex items-center justify-center p-2 rounded-xl text-red-500/80 hover:text-red-400 transition-colors bg-red-500/5 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 active:scale-95 cursor-pointer"
                     >
                         <LogOut size={16} />
                     </button>

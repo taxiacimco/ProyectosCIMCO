@@ -1,10 +1,10 @@
-// Versión Arquitectura: V19.0 - Segmentación por Salas (empresa/user) y Flujo de Subasta (registrar_socket, crear_solicitud, enviar_oferta, aceptar_oferta)
+// Versión Arquitectura: V19.1 - Soporte de Orígenes Dinámicos CORS (HTTP/HTTPS) y Transporte Híbrido (WebSocket/Polling)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\sockets\socket.manager.js
  * Misión: Administrar el ciclo de vida de las conexiones, salas automáticas de aislamiento (empresa/usuario),
- *          telemetría GPS y flujo completo de subasta/despacho en tiempo real.
- * Ajuste V19.0: Incorporación atómica de manejadores 'registrar_socket', 'crear_solicitud' (filtrada por empresaId),
- *              'enviar_oferta' y 'aceptar_oferta' (cierre de subasta) preservando telemetría y reglas de expiración.
+ *          telemetría GPS y flujo completo de subasta/despacho en tiempo real, garantizando la resolución dinámica
+ *          de orígenes CORS (HTTP/HTTPS) y transporte dual (websocket y polling).
+ * Ajuste V19.1: Inyección de matriz de orígenes dinámicos permitidos (HTTP/HTTPS) para Socket.io y aseguramiento del soporte de transportes ['websocket', 'polling'].
  */
 
 import { socketAuthMiddleware } from '../../middleware/socketAuth.middleware.js';
@@ -18,6 +18,53 @@ const TIMEOUT_DESPACHO_MS = 60000;       // 60 segundos ($60\text{ s}$ / $60000\
 
 // MAPA ATÓMICO DE TEMPORIZADORES DE VIAJE EN MEMORIA
 const temporizadoresViaje = new Map();
+
+// 🌐 ORIGENES PERMITIDOS DINÁMICOS PARA CONEXIONES DE SOCKET.IO (HTTP Y HTTPS)
+export const origenesPermitidosSocket = [
+  'http://localhost:5173',
+  'https://frontend-opal-eight-58.vercel.app',
+  'https://frontend-taxia-cimco.vercel.app',
+  'http://localhost:4173',
+  'http://localhost:3000',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000',
+  'http://192.168.100.34:5173',
+  'http://192.168.100.34:4173',
+  'http://192.168.100.34:3000',
+  'https://globosely-appreciative-zander.ngrok-free.dev',
+  process.env.CLIENT_ORIGIN,
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL,
+  process.env.CORS_ORIGIN,
+  process.env.CLIENT_ORIGIN_LOCAL,
+  process.env.CLIENT_ORIGIN_IP,
+  process.env.CLIENT_ORIGIN_TUNNEL,
+  process.env.CLIENT_ORIGIN_VERCEL,
+  process.env.CLIENT_ORIGIN_VERCEL_ALT,
+  process.env.FRONTEND_BASE_URL,
+  process.env.CLOUDFLARE_TUNNEL_URL
+].filter(Boolean);
+
+// 📡 EVALUADOR DE ORIGEN EN TIEMPO REAL PARA HANDSHAKE SOCKET.IO
+export const isOriginAllowedSocket = (origin, callback) => {
+    if (!origin || origenesPermitidosSocket.includes(origin) || /\.vercel\.app$/.test(origin) || process.env.NODE_ENV !== 'production') {
+        callback(null, true);
+    } else {
+        callback(new Error('Bloqueado por política CORS Socket.IO de CIMCO'));
+    }
+};
+
+// ⚙️ OPCIONES RECOMENDADAS DE CONFIGURACIÓN DE SERVER SOCKET.IO
+export const socketCorsOptions = {
+    cors: {
+        origin: isOriginAllowedSocket,
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        credentials: true
+    },
+    transports: ['websocket', 'polling'],
+    pingTimeout: 60000,
+    pingInterval: 25000
+};
 
 /**
  * Cancela y remueve de forma segura el temporizador de expiración de un viaje.
@@ -50,11 +97,20 @@ export const emitirSesionExpirada = (socket, reason = 'nodo_inexistente') => {
         
         socket.disconnect(true);
     } catch (err) {
-        console.error(`[SOCKET-MGR-ERROR] Fallo al notificar 'auth_expired' y forzar desconexión:`, err.message);
+        console.error(`[SOCKET-MGR-ERROR] Fallo al notificar 'auth_expired' y forzar desconexión:`, err?.message || err);
     }
 };
 
 export const inicializarSockets = (io) => {
+    if (!io) {
+        console.error('⚠️ [SOCKET-MGR-FATAL] Instancia io no proporcionada para la inicialización.');
+        return;
+    }
+
+    // Blindaje de transportes soportados en la instancia activa
+    if (io.opts) {
+        io.opts.transports = ['websocket', 'polling'];
+    }
     
     // Inyección obligatoria de la pasarela de seguridad JWT
     io.use(socketAuthMiddleware);
@@ -137,7 +193,7 @@ export const inicializarSockets = (io) => {
 
                 logSocket(`Evento 'registrar_socket' procesado con éxito para UID: ${uId} | Empresa: ${eId || 'N/A'}`);
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error en registrar_socket para ${socket.id}:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error en registrar_socket para ${socket.id}:`, err?.message || err);
             }
         });
 
@@ -195,7 +251,7 @@ export const inicializarSockets = (io) => {
                     // 🚀 OPTIMIZACIÓN: Persistencia asíncrona sin await para evitar cuellos de botella en Sockets
                     if (typeof actualizarRadarUbicacion === 'function') {
                         actualizarRadarUbicacion(socket.usuarioId, lat, lng).catch(err => {
-                            console.error(`[SOCKET-MGR-ERROR] Error al persistir ubicación del conductor ${socket.usuarioId}:`, err.message);
+                            console.error(`[SOCKET-MGR-ERROR] Error al persistir ubicación del conductor ${socket.usuarioId}:`, err?.message || err);
                         });
                     }
 
@@ -207,7 +263,7 @@ export const inicializarSockets = (io) => {
                 socket.to('sala_despachadores').to('sala_admins').emit('actualizar_ubicacion', payloadUniversal);
 
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error procesando telemetría de ${socket.usuarioId}:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error procesando telemetría de ${socket.usuarioId}:`, err?.message || err);
             }
         };
 
@@ -312,7 +368,7 @@ export const inicializarSockets = (io) => {
                 }
 
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error en procesarCrearSolicitud:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error en procesarCrearSolicitud:`, err?.message || err);
             }
         };
 
@@ -365,7 +421,7 @@ export const inicializarSockets = (io) => {
 
                 logSocket(`Oferta ($${montoOferta}) enviada por conductor [${conductorId}] para viaje [${viajeId}] a pasajero/despachador.`);
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error en enviar_oferta:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error en enviar_oferta:`, err?.message || err);
             }
         });
 
@@ -434,7 +490,7 @@ export const inicializarSockets = (io) => {
 
                 logSocket(`Subasta del viaje [${viajeId}] CERRADA. Conductor adjudicado: [${conductorId}] | Pasajero: [${pasajeroId}].`);
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error en aceptar_oferta:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error en aceptar_oferta:`, err?.message || err);
             }
         });
 
@@ -473,7 +529,7 @@ export const inicializarSockets = (io) => {
 
                 logSocket(`Conductor [${socket.usuarioId}] asignado al viaje [${viajeId}] del pasajero [${datosAceptacion.pasajeroId}].`);
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error en aceptar_viaje:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error en aceptar_viaje:`, err?.message || err);
             }
         });
 
@@ -507,7 +563,7 @@ export const inicializarSockets = (io) => {
                     logSocket(`Viaje [${viajeId}] cancelado. Temporizador purgado y removido del radar.`);
                 }
             } catch (err) {
-                console.error(`[SOCKET-MGR-ERROR] Error en cancelar_viaje:`, err.message);
+                console.error(`[SOCKET-MGR-ERROR] Error en cancelar_viaje:`, err?.message || err);
             }
         });
 

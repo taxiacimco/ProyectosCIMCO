@@ -1,8 +1,8 @@
-// Versión Arquitectura: V21.30 - Integración Perimetral del Endpoint /check-phone y Verificación Telefónica Dual
+// Versión Arquitectura: V21.35 - Declaración de Controlador logoutHandler y Registro de Ruta POST /logout Anti-CIMCO-ROUTE-MISS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
  * Misión: Enrutador perimetral de autenticación con mapeo completo de subrutas HTTP POST y PUT/PATCH bajo el prefijo /api/auth.
- * Integridad: Garantiza la coexistencia limpia de los aliases estándar (/forgot-password, /reset-password, /check-phone) con los endpoints
+ * Integridad: Garantiza la coexistencia limpia de los aliases estándar (/forgot-password, /reset-password, /check-phone, /logout) con los endpoints
  * preexistentes (/solicitar-otp, /restablecer, /verificar-telefono), preservando el middleware de carga híbrida Multipart/Multer alineado
  * con las llaves requeridas por el cliente (documento_cedula, documento_licencia, doc_tarjeta, doc_identificacion, foto_perfil),
  * la validación de payloads, la trazabilidad de peticiones y las guardas anti-crash ESM.
@@ -72,6 +72,7 @@ const restablecerHandler = authController?.resetPassword || authController?.veri
 const verificarTelefonoHandler = authController?.verificarTelefono || authController?.checkPhone;
 const checkPhoneHandler = authController?.checkPhone || authController?.verificarTelefono;
 const updateProfileHandler = authController?.updateProfile;
+const logoutHandler = authController?.logout;
 
 /**
  * 🚀 ENDPOINTS DE ACCESO Y REGISTRO
@@ -82,6 +83,10 @@ if (typeof loginHandler === 'function') {
 
 if (typeof registerHandler === 'function') {
     router.post('/register', interceptorCargaHibrida, validateRegisterPayload, registerHandler);
+}
+
+if (typeof logoutHandler === 'function') {
+    router.post('/logout', logoutHandler);
 }
 
 /**

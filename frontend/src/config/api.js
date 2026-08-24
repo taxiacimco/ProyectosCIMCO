@@ -1,35 +1,39 @@
-// Versión Arquitectura: V24.1 - Refactorización de Cliente HTTP Centralizado (Axios Interceptors & Error Gateway)
+// Versión Arquitectura: V24.2 - Configuración Dinámica de BaseURL en Axios con Fallback Anti-Undefined
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
  * Misión: Centralización de Axios, inyección de cabeceras anti-caché, interceptores JWT multi-capa y gestión global de errores HTTP (401, 429, 500).
+ * Ajuste V24.2: Asegurar la resolución dinámica de import.meta.env.VITE_API_URL como baseURL en Axios con guardas anti-undefined.
  */
 
 import axios from 'axios';
 
 // 🔌 RESOLUCIÓN ESTRICTA DE LA IP DE RED (ÚNICA FUENTE DE VERDAD GLOBAL)
-export const HOST_IP = import.meta.env.VITE_HOST_IP || '127.0.0.1';
+export const HOST_IP = import.meta.env?.VITE_HOST_IP || '127.0.0.1';
 
 const DETERMINAR_URL_BASE = () => {
-    // 1. Prioridad Absoluta: Variable unificada desde .env / build
-    if (import.meta.env.VITE_API_URL) {
-        // Sanitización para eliminar '/api' o '/' al final si la variable de entorno ya lo incluye
-        const cleanEnvUrl = import.meta.env.VITE_API_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    // 1. Prioridad Absoluta: Variable unificada desde .env / build con blindaje anti-undefined
+    const envApiUrl = import.meta.env?.VITE_API_URL;
+    if (envApiUrl && typeof envApiUrl === 'string' && envApiUrl.trim() !== '') {
+        const cleanEnvUrl = envApiUrl.trim().replace(/\/+$/, '');
+        if (cleanEnvUrl.endsWith('/api')) {
+            return cleanEnvUrl;
+        }
         return `${cleanEnvUrl}/api`;
     }
-    // 2. Fallback Seguro para Desarrollo Local
+    // 2. Fallback Dinámico Seguro para Desarrollo Local
     return `http://${HOST_IP}:3000/api`;
 };
 
 export const API_CORE_URL = DETERMINAR_URL_BASE();
 
 // 🔍 RESOLUCIÓN DE CLOUD FUNCTIONS COMPATIBLE CON PRODUCCIÓN TLS
-const PROJ_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID || 'pelagic-chalice-467818-e1';
-export const API_FUNCTIONS_URL = import.meta.env.PROD 
-    ? import.meta.env.VITE_API_FUNCTIONS_URL || `https://api-tx.taxiacimco.com/api/v1`
+const PROJ_ID = import.meta.env?.VITE_FIREBASE_PROJECT_ID || 'pelagic-chalice-467818-e1';
+export const API_FUNCTIONS_URL = import.meta.env?.PROD 
+    ? (import.meta.env?.VITE_API_FUNCTIONS_URL || `https://api-tx.taxiacimco.com/api/v1`)
     : `http://${HOST_IP}:5001/${PROJ_ID}/us-central1`;
 
 export const api = axios.create({
-    baseURL: API_CORE_URL,
+    baseURL: API_CORE_URL || `http://${HOST_IP}:3000/api`,
     timeout: 10000,
     headers: {
         'Content-Type': 'application/json',

@@ -1,11 +1,11 @@
-// Versión Arquitectura: V21.34 - Delegación Centralizada de Excepciones a Middleware (next) y Preservación de Sincronización Firebase
+// Versión Arquitectura: V21.35 - Integración de Controlador de Cierre de Sesión (Logout) Anti-CIMCO-ROUTE-MISS y Preservación de Delegación Centralizada de Excepciones
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
- * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono) y actualización segura de perfiles.
- * Ajuste V21.34: Delegación estricta de captura de excepciones al middleware centralizado de errores mediante next(error) en todos los bloques catch.
+ * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono), actualización segura de perfiles y respuesta a desvinculación (logout).
+ * Ajuste V21.35: Incorporación de controlador `logout` para resolver fallos de ruta sin resolver [CIMCO-ROUTE-MISS] y delegación mediante next(error).
  */
 
 import jwt from 'jsonwebtoken';
@@ -919,6 +919,21 @@ export const updateProfile = async (req, res, next) => {
     }
 };
 
+/**
+ * 🚪 CIERRE DE SESIÓN (LOGOUT)
+ * Responde a las peticiones del frontend para evitar [CIMCO-ROUTE-MISS].
+ */
+export const logout = async (req, res, next) => {
+    try {
+        return res.status(200).json({
+            success: true,
+            message: "Sesión finalizada exitosamente en el nodo central."
+        });
+    } catch (error) {
+        next(error);
+    }
+};
+
 export default {
     register,
     login,
@@ -928,5 +943,6 @@ export default {
     resetPassword,
     checkPhone,
     verificarTelefono,
-    updateProfile
+    updateProfile,
+    logout
 };

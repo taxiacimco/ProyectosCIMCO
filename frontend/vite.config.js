@@ -1,4 +1,10 @@
-// Versión Arquitectura: V10.2.0 - Sincronización de HMR Seguro (WSS / ClientPort 443) para Túnel Cloudflare
+// Versión Arquitectura: V10.3.0 - Configuración Proxy Server REST API y Socket.IO sin Advertencias SSL
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\vite.config.js
+ * Misión: Orquestación de empaquetado Vite, resolución de alias de rutas (@), 
+ *         configuración de HMR para túneles y proxy server para redirección de peticiones /api y /socket.io sin fallos SSL.
+ */
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -27,13 +33,13 @@ export default defineConfig({
       '.ngrok-free.dev'
     ],
     proxy: {
-      // Redirección de llamadas REST API hacia el backend local
+      // Redirección de llamadas REST API hacia el backend local sin advertencias SSL
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
         secure: false,
       },
-      // Redirección del canal WebSocket de Socket.IO hacia el backend local
+      // Redirección del canal WebSocket de Socket.IO hacia el backend local sin advertencias SSL
       '/socket.io': {
         target: 'http://localhost:3000',
         changeOrigin: true,
@@ -55,6 +61,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (!id) return;
           if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/react-router-dom/')) {
             return 'vendor-core';
           }

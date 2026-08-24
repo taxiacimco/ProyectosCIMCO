@@ -1,9 +1,10 @@
-// Versión Arquitectura: V16.2 - Control Adaptativo de Reconexión y Detención Anti-Bucle en Fallos Auth
+// Versión Arquitectura: V16.3 - Inferencia Dinámica de Protocolo HTTPS/HTTP para WebSocket y Control Anti-Bucle Auth
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\socket.js
  * Misión: Orquestador central de WebSockets adaptativo. Detecta automáticamente HTTPS/HTTP,
- *         túneles Cloudflare/Ngrok, IP de red LAN y gestiona reconexiones inteligentes con
- *         detención automática ante fallos de autenticación JWT.
+ *         inferencia de protocolo dinámico (Production Railway vs Localhost), túneles Cloudflare/Ngrok,
+ *         IP de red LAN y gestiona reconexiones inteligentes con detención automática ante fallos de autenticación JWT.
+ * Ajuste V16.3: Incorporación de inferencia dinámica de protocolo en la reconexión de WebSocket para producción (HTTPS/Railway) y desarrollo (HTTP/Localhost).
  */
 
 import { io } from 'socket.io-client';
@@ -15,29 +16,32 @@ import { HOST_IP } from '@/config/api.js';
  */
 const DETERMINAR_SOCKET_URL = () => {
     // 1. Prioridad: Variables de entorno explícitas (Vite / Vercel -> Railway)
-    if (import.meta.env.VITE_SOCKET_URL) {
+    if (import.meta.env?.VITE_SOCKET_URL) {
         return import.meta.env.VITE_SOCKET_URL;
     }
 
-    if (import.meta.env.VITE_BACKEND_URL) {
+    if (import.meta.env?.VITE_BACKEND_URL) {
         return import.meta.env.VITE_BACKEND_URL;
     }
 
-    // 2. Detección en entorno de ejecución del navegador
+    // 2. Detección en entorno de ejecución del navegador e inferencia de protocolo dinámico
     if (typeof window !== 'undefined') {
         const isSecure = window.location.protocol === 'https:';
         const hostname = window.location.hostname;
 
-        // 🛡️ CASO A: Acceso mediante Túnel Cloudflare / Ngrok o Dominio Seguro en la nube
+        // 🛡️ CASO A: Acceso mediante Túnel Cloudflare / Ngrok o Dominio Seguro en la nube (Vercel)
         if (isSecure && (hostname.includes('trycloudflare.com') || hostname.includes('ngrok-free.dev') || hostname.includes('vercel.app'))) {
             console.log("🔒 [CIMCO-SOCKET] Detección de Túnel HTTPS/WSS Activo. Redirigiendo Socket por el túnel seguro.");
             return window.location.origin; // Reutiliza la misma URL base del túnel cifrado
         }
 
-        // 🛡️ CASO B: Acceso Local vía IP LAN (ej. http://192.168.100.34:5173)
+        // 🛡️ CASO B: Acceso Local vía IP LAN (ej. http://192.168.100.34:5173) o Localhost
         if (hostname === HOST_IP || hostname === 'localhost' || hostname === '127.0.0.1') {
             return `http://${hostname}:3000`;
         }
+
+        // 🛡️ CASO C: Inferencia de protocolo dinámico (HTTPS -> Railway / HTTP -> Localhost)
+        return isSecure ? 'https://tu-backend.up.railway.app' : `http://${HOST_IP || 'localhost'}:3000`;
     }
 
     // 3. Fallback Estándar de Red Local
