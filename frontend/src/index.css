@@ -1,7 +1,7 @@
-/* Versión Arquitectura: V11.2 - Incorporación de Clase Utilidad .no-scrollbar y Preservación CIMCO-UI V9.3 */
+/* Versión Arquitectura: V11.3 - Consolidación Tailwind CSS v4, Slate Profundo y Clases Utilitarias CIMCO-UI V9.3 */
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\index.css
- * Misión: Actualización del background core a Azul Noche/Slate profundo (#0F172A) manteniendo la tipografía moderna sans-serif, abstracciones CIMCO-UI V9.3 y utilidad no-scrollbar para tabs/contenedores deslizables.
+ * Misión: Mantener la directiva Tailwind CSS v4 (@import "tailwindcss";), el entorno visual Slate Profundo (#0F172A), y las clases utilitarias personalizadas glass-panel-premium, no-scrollbar y custom-scrollbar bajo los estándares de CIMCO-UI V9.3.
  */
 
 @import "tailwindcss";

@@ -1,7 +1,7 @@
-// Versión Arquitectura: V9.6 - Normalización de Slugs de Registro y Blindaje Anti-404
+// Versión Arquitectura: V9.7 - Consolidación del Enrutador con Homologación de Roles de Conductor y Protección de Vistas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
- * Misión: Normalización de subrutas (/register-pasajero, /register-moto, /register-intermunicipal, /register-despachador) con blindaje anti-bucle multi-rol.
+ * Misión: Conservar el componente ProtectedRoute para homologar los roles generales de conductor hacia sus subroles específicos (mototaxi, motoparrillero, motocarga, intermunicipal), manteniendo separadas las rutas de registro y de control administrativo.
  * Estilo: CIMCO-UI V9.3 Glassmorphism.
  */
 

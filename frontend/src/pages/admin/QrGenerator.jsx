@@ -40,7 +40,8 @@ const QrGenerator = () => {
         } catch (err) {
             console.warn("⚠️ Error obteniendo origen dinámico local:", err);
         }
-        return "http://192.168.100.34:5173";
+        // Fallback robusto basado estrictamente en window.location.origin o dinámico sin IP estática hardcodeada
+        return (typeof window !== 'undefined' && window.location?.origin) ? window.location.origin : "http://localhost:5173";
     };
 
     const baseUrlActiva = entorno === 'produccion' ? URL_PRODUCCION : getUrlLocal();
@@ -292,7 +293,7 @@ const QrGenerator = () => {
                                 </p>
                                 {entorno === 'local' && (
                                     <p className="text-[9px] text-blue-400/80 font-mono">
-                                        ⚠️ Nota: Los QR Locales requieren que el celular esté conectado a la misma red Wi-Fi. Para calcomanías impresas utiliza Producción.
+                                        ⚠️ Nota: Los QR Locales requieren que el dispositivo esté en la misma red o usar la IP local dinámica detectada. Para calcomanías impresas utiliza Producción.
                                     </p>
                                 )}
                             </div>

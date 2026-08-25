@@ -1,7 +1,7 @@
-// Versión Arquitectura: V14.1 - Integración de Header Responsivo, Glassmorphism y Smooth Scroll Inmune a Zoom
+// Versión Arquitectura: V14.2 - Integración de Controlador AbortController en Pestañas Dinámicas (AdminDashboard)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
- * Misión: Optimizar la navegación superior para prevenir colapsos visuales ante variaciones de zoom o apertura de DevTools, garantizando scrolling horizontal suave y preservando el ciclo de vida asíncrono con AbortController.
+ * Misión: Asegurar que cualquier nueva sub-pestaña o consulta HTTP implemente un AbortController para prevenir fugas de memoria y cancelar peticiones pendientes ante cambios rápidos de vista.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
