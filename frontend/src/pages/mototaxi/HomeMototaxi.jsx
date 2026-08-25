@@ -1,11 +1,16 @@
-// Versión Arquitectura: V19.2 - Intercepción Quirúrgica de Error 401 y Cierre de Sesión Explícito
+// Versión Arquitectura: V19.7 - Corrección Padding JWT Base64URL y Unificación de Flujo Perfil con AjustesPerfil
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
  *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo), integración fluida
- *          con AjustesPerfil, validación local rigurosa de expiración JWT (Anti-401) en tiempo real,
- *          captura explícita de error HTTP 401 por nodo de identidad extinto con logout defensivo
- *          y sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409).
+ *          con AjustesPerfil, validación local rigurosa de expiración JWT (Anti-401) con padding seguro,
+ *          captura explícita de error HTTP 401 por nodo de identidad extinto con logout defensivo,
+ *          sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409),
+ *          resiliencia ante redes inestables (timeouts, reintentos e indicador de conectividad de red),
+ *          manejo reactivo de estado Offline en UI mediante event listeners 'online'/'offline',
+ *          unificación atómica de edición de perfil a través de AjustesPerfil,
+ *          limpieza atómica de hooks (watchPosition, listeners WebSocket y suscripciones Firestore)
+ *          para prevención de fugas de memoria y centralización de trazabilidad mediante logger condicional.
  * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 
@@ -16,17 +21,18 @@ import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
 import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api'; 
+import { logger } from '@/utils/logger';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import {
-  MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
-  CircleDollarSign, Signal, LogOut, Loader, User, Edit3, X,
-  Wifi, WifiOff, Settings, Bike, ShieldCheck, RefreshCw, Phone, FileText, CheckCircle2, Palette
+  MapPin, Navigation, Wallet, Clock, User, LogOut, Loader,
+  Wifi, WifiOff, Settings, Bike
 } from 'lucide-react';
 
 /**
  * 🛡️ HELPER DE SEGURIDAD: Decodificación y Verificación Local de Expiración JWT
  * Previene llamadas HTTP innecesarias que resulten en 401 Unauthenticated.
+ * Incluye padding automático Base64URL para evitar excepciones en window.atob.
  */
 const isTokenExpired = (rawToken) => {
   if (!rawToken || typeof rawToken !== 'string') return true;
@@ -34,22 +40,23 @@ const isTokenExpired = (rawToken) => {
     const parts = rawToken.split('.');
     if (parts.length !== 3) return true;
     const payloadBase64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const decodedJson = JSON.parse(window.atob(payloadBase64));
+    const base64 = payloadBase64.padEnd(payloadBase64.length + (4 - payloadBase64.length % 4) % 4, '=');
+    const decodedJson = JSON.parse(window.atob(base64));
     if (!decodedJson || !decodedJson.exp) return false;
     
     // Margen de seguridad de 10 segundos ante desfaces de reloj
     const currentTimeInSeconds = Math.floor(Date.now() / 1000);
     return decodedJson.exp <= (currentTimeInSeconds + 10);
   } catch (err) {
-    console.error("🚨 [CIMCO-AUTH-GUARD] Error al decodificar JWT:", err);
+    logger.error("🚨 [CIMCO-AUTH-GUARD] Error al decodificar JWT:", err);
     return true;
   }
 };
 
 export default function HomeMototaxi() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
-  const { user, logout, updateUserProfile } = useAuth(); 
-  const { walletData, loading: walletLoading } = useWallet();
+  const { user, logout } = useAuth(); 
+  const { walletData } = useWallet();
   const { socket, isConnected } = useSocket();
 
   const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "CIMCO CONDUCTOR";
@@ -65,14 +72,13 @@ export default function HomeMototaxi() {
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [datosParaCalificar, setDatosParaCalificar] = useState(null);
 
-  // 📝 Estados para la Modal / Renderizado de AjustesPerfil y Sincronización
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [modoEdicionAjustes, setModoEdicionAjustes] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [syncSuccess, setSyncSuccess] = useState(false);
-  const [errorPerfil, setErrorPerfil] = useState('');
+  // 🌐 Estado de Conectividad a Internet (Manejo de Estado Offline en UI)
+  const [isNetworkOnline, setIsNetworkOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
-  // Formulario de Datos Personales y del Vehículo
+  // 📝 Estado Unificado para la Vista Completa AjustesPerfil
+  const [modoEdicionAjustes, setModoEdicionAjustes] = useState(false);
+
+  // Formulario de Datos Personales y del Vehículo (Sincronización Local)
   const [formData, setFormData] = useState({
     nombre: '',
     telefono: '',
@@ -97,6 +103,26 @@ export default function HomeMototaxi() {
 
   // Recuperación estricta sin ID predeterminado MOCK
   const conductorId = user?.uid || user?.id || user?._id || localStorage.getItem('conductorId'); 
+
+  // Listener para detección en tiempo real de cobertura / estado de red local (Manejo de estado Offline)
+  useEffect(() => {
+    const handleOnline = () => {
+      logger.log("🌐 [CIMCO-NETWORK] Conexión a red restablecida.");
+      setIsNetworkOnline(true);
+    };
+    const handleOffline = () => {
+      logger.warn("⚠️ [CIMCO-NETWORK] Cobertura de red interrumpida.");
+      setIsNetworkOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Sincronizar referencias persistentes para evitar re-suscripciones innecesarias en Socket.io
   useEffect(() => {
@@ -155,15 +181,16 @@ export default function HomeMototaxi() {
   }, [user, nombreInicialFallback]);
 
   // ==================================================================
-  // 1. ESCUCHA REACTIVA DE IDENTIDAD EN FIRESTORE
+  // 1. ESCUCHA REACTIVA DE IDENTIDAD EN FIRESTORE (CON CLEANUP)
   // ==================================================================
   useEffect(() => {
+    let unsubscribe = null;
     if (!user?.uid) return;
     
     const pathConductores = FIRESTORE_PATHS?.conductores || FIRESTORE_PATHS?.usuarios || 'usuarios';
     const conductorRef = doc(db, pathConductores, user.uid);
 
-    const unsubscribe = onSnapshot(conductorRef, (docSnap) => {
+    unsubscribe = onSnapshot(conductorRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const nombreCompleto = data?.nombre || data?.displayName || data?.nombreCompleto || nombreInicialFallback;
@@ -180,10 +207,14 @@ export default function HomeMototaxi() {
         }));
       }
     }, (error) => {
-      console.error("🚨 [CIMCO-IDENTITY-ERROR] Fallo en lectura de perfil:", error);
+      logger.error("🚨 [CIMCO-IDENTITY-ERROR] Fallo en lectura de perfil:", error);
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, [user?.uid, nombreInicialFallback]);
 
   // ==================================================================
@@ -193,7 +224,7 @@ export default function HomeMototaxi() {
     if (geoWatchRef.current !== null) {
       navigator.geolocation.clearWatch(geoWatchRef.current);
       geoWatchRef.current = null;
-      console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
+      logger.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
     }
     const currentSocket = socketRef.current;
     if (currentSocket && (currentSocket.connected || isConnected)) {
@@ -207,18 +238,27 @@ export default function HomeMototaxi() {
         });
         currentSocket.emit('desactivar_conductor', { conductorId: currentUid });
       }
-      console.log("📡 [CIMCO-SOCKET] Notificación de desactivación enviada al socket unificado.");
+      logger.log("📡 [CIMCO-SOCKET] Notificación de desactivación enviada al socket unificado.");
     }
   }, [isConnected]);
 
-  // Estabilización de Telemetría GPS: Depender ÚNICAMENTE del estado Online/Offline
+  // Estabilización de Telemetría GPS con Limpieza Estricta de Hooks
   useEffect(() => {
-    if (!isOnline) return;
+    let watchId = null;
 
-    console.log('🛰️ [CIMCO-TELEMETRIA] Encendiendo receptor GPS...');
+    if (!isOnline) {
+      if (geoWatchRef.current !== null) {
+        navigator.geolocation.clearWatch(geoWatchRef.current);
+        geoWatchRef.current = null;
+      }
+      return;
+    }
 
-    const watchId = navigator.geolocation.watchPosition(
+    logger.log('🛰️ [CIMCO-TELEMETRIA] Encendiendo receptor GPS...');
+
+    watchId = navigator.geolocation.watchPosition(
       (pos) => {
+        if (!pos || !pos.coords) return;
         const newCoords = {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude
@@ -244,24 +284,29 @@ export default function HomeMototaxi() {
             lat: newCoords.lat,
             lng: newCoords.lng
           });
-          console.log(`🎯 [RADAR-BURST] Coordenadas emitidas al ecosistema unificado: [${newCoords.lng}, ${newCoords.lat}]`);
+          logger.log(`🎯 [RADAR-BURST] Coordenadas emitidas al ecosistema unificado: [${newCoords.lng}, ${newCoords.lat}]`);
         }
       },
-      (err) => console.error(err),
+      (err) => logger.error("🚨 Error GPS:", err),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 3000 }
     );
 
     geoWatchRef.current = watchId;
 
     return () => {
-      console.log('🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.');
-      navigator.geolocation.clearWatch(watchId);
-      geoWatchRef.current = null;
+      logger.log('🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.');
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+      if (geoWatchRef.current !== null) {
+        navigator.geolocation.clearWatch(geoWatchRef.current);
+        geoWatchRef.current = null;
+      }
     };
-  }, [isOnline]);
+  }, [isOnline, user?.uid]);
 
   // ==================================================================
-  // 3. GOBERNANZA DEL CANAL WEBSOCKET CENTRALIZADO (useSocket)
+  // 3. GOBERNANZA DEL CANAL WEBSOCKET CENTRALIZADO (LIMPIEZA ATÓMICA)
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
@@ -278,11 +323,11 @@ export default function HomeMototaxi() {
       }
 
       if (!socket) {
-        console.warn("⚠️ [CIMCO-SOCKET] Instancia global de Socket no disponible en este momento.");
+        logger.warn("⚠️ [CIMCO-SOCKET] Instancia global de Socket no disponible en este momento.");
         return;
       }
 
-      console.log(`📡 [CIMCO-SOCKET] Suscribiendo a instancia global centralizada.`);
+      logger.log(`📡 [CIMCO-SOCKET] Suscribiendo a instancia global centralizada.`);
 
       const registrarYUnirSalas = () => {
         // 1. Notificar estado online e identidad
@@ -300,7 +345,7 @@ export default function HomeMototaxi() {
           email: user?.email || localStorage.getItem('conductorEmail') || ''
         });
 
-        // Unir explícitamente a la sala del tipo de vehículo por si el backend emite a io.to('mototaxi') o io.to('sala_conductores')
+        // Unir explícitamente a la sala del tipo de vehículo
         socket.emit('join_room', 'sala_conductores');
         socket.emit('join_room', 'mototaxi');
         socket.emit('unir_sala', { sala: 'mototaxi' });
@@ -315,13 +360,13 @@ export default function HomeMototaxi() {
 
       // Handler unificado de recepción de servicios con desfragmentación de payloads y VALIDACIÓN LOCAL JWT
       const handleNuevaSolicitud = (data) => {
-        console.log("🔥 [CIMCO-RADAR] ¡Alerta de viaje entrante capturada!", data);
+        logger.log("🔥 [CIMCO-RADAR] ¡Alerta de viaje entrante capturada!", data);
         if (!data) return;
 
         // 🛡️ VALIDACIÓN LOCAL DE VIGENCIA JWT ANTES DE RENDERIZAR
         const activeToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
         if (isTokenExpired(activeToken)) {
-          console.warn("⚠️ [CIMCO-AUTH-GUARD] JWT expirado detectado al recibir nuevo_viaje_disponible. Desconectando red.");
+          logger.warn("⚠️ [CIMCO-AUTH-GUARD] JWT expirado detectado al recibir nuevo_viaje_disponible. Desconectando red.");
           setIsOnline(false);
           alert("🔒 Sesión Expirada: Su token de seguridad ha caducado. Inicie sesión nuevamente para recibir solicitudes.");
           desconectarEcosistema();
@@ -341,14 +386,14 @@ export default function HomeMototaxi() {
         if (!servicioActivoRef.current && !solicitudViajeRef.current) {
           setSolicitudViaje(viaje);
         } else {
-          console.warn("⚠️ [CIMCO-RADAR] Solicitud recibida ignorada por existir un servicio activo o una alerta en curso.");
+          logger.warn("⚠️ [CIMCO-RADAR] Solicitud recibida ignorada por existir un servicio activo o una alerta en curso.");
         }
       };
 
       // Handler para remover dinámicamente ofertas expiradas o tomadas por otro conductor
       const handleViajeRemovido = (payload) => {
         const viajeIdRemover = payload?.viajeId || payload?._id || payload?.id;
-        console.log(`🗑️ [CIMCO-RADAR] Removiendo solicitud del radar local: ${viajeIdRemover}`);
+        logger.log(`🗑️ [CIMCO-RADAR] Removiendo solicitud del radar local: ${viajeIdRemover}`);
         if (!viajeIdRemover) return;
 
         setOfertasDisponibles((prev) => prev.filter((v) => v.id !== viajeIdRemover && v._id !== viajeIdRemover && v.viajeId !== viajeIdRemover));
@@ -368,22 +413,24 @@ export default function HomeMototaxi() {
       socket.on('nuevo_viaje_disponible', handleNuevaSolicitud);
       socket.on('viaje_removido_radar', handleViajeRemovido);
 
-      // 🛠️ Traza completa para depuración en vivo: Imprime absolutamente TODO evento que envíe el servidor
+      // 🛠️ Traza completa para depuración en vivo
       const handleAnyEvent = (eventName, ...args) => {
-        console.log(`📥 [SOCKET-INCOMING-DEBUG] Evento recibido: "${eventName}"`, args);
+        logger.log(`📥 [SOCKET-INCOMING-DEBUG] Evento recibido: "${eventName}"`, args);
       };
       socket.onAny(handleAnyEvent);
 
       return () => {
-        socket.off('connect', registrarYUnirSalas);
-        socket.off('viaje_difundido', handleNuevaSolicitud);
-        socket.off('solicitud_servicio', handleNuevaSolicitud);
-        socket.off('nuevo_viaje', handleNuevaSolicitud);
-        socket.off('servicio_disponible', handleNuevaSolicitud);
-        socket.off('nuevo_servicio_mototaxi', handleNuevaSolicitud);
-        socket.off('nuevo_viaje_disponible', handleNuevaSolicitud);
-        socket.off('viaje_removido_radar', handleViajeRemovido);
-        socket.offAny(handleAnyEvent);
+        if (socket) {
+          socket.off('connect', registrarYUnirSalas);
+          socket.off('viaje_difundido', handleNuevaSolicitud);
+          socket.off('solicitud_servicio', handleNuevaSolicitud);
+          socket.off('nuevo_viaje', handleNuevaSolicitud);
+          socket.off('servicio_disponible', handleNuevaSolicitud);
+          socket.off('nuevo_servicio_mototaxi', handleNuevaSolicitud);
+          socket.off('nuevo_viaje_disponible', handleNuevaSolicitud);
+          socket.off('viaje_removido_radar', handleViajeRemovido);
+          socket.offAny(handleAnyEvent);
+        }
       };
     }
   }, [
@@ -398,15 +445,16 @@ export default function HomeMototaxi() {
     logout
   ]);
 
-  // Limpieza defensiva del receptor GPS al desmontar de forma definitiva la vista
+  // Limpieza defensiva al desmontar de forma definitiva la vista
   useEffect(() => {
     return () => {
       if (geoWatchRef.current !== null) {
         navigator.geolocation.clearWatch(geoWatchRef.current);
         geoWatchRef.current = null;
       }
+      desconectarEcosistema();
     };
-  }, []);
+  }, [desconectarEcosistema]);
 
   // Alternar Estado Conectado / Desconectado
   const handleToggleState = () => {
@@ -447,7 +495,7 @@ export default function HomeMototaxi() {
         return;
       }
     } catch (err) {
-      console.warn("⚠️ Fallo en API REST, ejecutando respaldo Firestore:", err);
+      logger.warn("⚠️ Fallo en API REST, ejecutando respaldo Firestore:", err);
     }
 
     try {
@@ -469,7 +517,7 @@ export default function HomeMototaxi() {
 
       setHistorial(docs);
     } catch (noSqlErr) {
-      console.error("❌ Fallo en fallback NoSQL:", noSqlErr);
+      logger.error("❌ Fallo en fallback NoSQL:", noSqlErr);
     } finally {
       setCargandoHistorial(false);
     }
@@ -482,9 +530,11 @@ export default function HomeMototaxi() {
   }, [activeTab, fetchHistorial]);
 
   // ==================================================================
-  // 5. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
+  // 5. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE (CON CLEANUP)
   // ==================================================================
   useEffect(() => {
+    let unsubscribe = null;
+
     if (!user?.uid || !isOnline) {
       setOfertasDisponibles([]);
       return;
@@ -497,7 +547,7 @@ export default function HomeMototaxi() {
       where('estado', '==', 'SOLICITADO')
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    unsubscribe = onSnapshot(q, (snapshot) => {
       const ofertas = [];
       snapshot.forEach((docSnap) => {
         ofertas.push({ id: docSnap.id, ...docSnap.data() });
@@ -505,17 +555,22 @@ export default function HomeMototaxi() {
       setOfertasDisponibles(ofertas);
       setCargandoOfertas(false);
     }, (error) => {
-      console.error("🚨 [CIMCO-RADAR-ERROR] Fallo en la escucha de viajes:", error);
+      logger.error("🚨 [CIMCO-RADAR-ERROR] Fallo en la escucha de viajes:", error);
       setCargandoOfertas(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, [user?.uid, isOnline]);
 
   // ==================================================================
   // 6. MONITOR DE VIAJE ACTIVO EN HILO DEL CONDUCTOR (FIRESTORE)
   // ==================================================================
   useEffect(() => {
+    let unsubscribe = null;
     if (!user?.uid) return;
 
     const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
@@ -525,7 +580,7 @@ export default function HomeMototaxi() {
       where('estado', 'in', ['ACEPTADO', 'EN_SITIO', 'EN_VIAJE'])
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    unsubscribe = onSnapshot(q, (snapshot) => {
       if (!snapshot.empty) {
         const docActivo = snapshot.docs[0];
         setServicioActivo({ id: docActivo.id, ...docActivo.data() });
@@ -542,70 +597,16 @@ export default function HomeMototaxi() {
       }
     });
 
-    return () => unsubscribe();
-  }, [user?.uid]);
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [user?.uid, servicioActivo]);
 
   // ==================================================================
-  // 7. ACCIONES DE GESTIÓN DE DESPACHOS Y AJUSTES DE PERFIL / VEHÍCULO
+  // 7. ACCIONES DE GESTIÓN DE DESPACHOS
   // ==================================================================
-  const handleSaveProfile = async (e) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    setSyncSuccess(false);
-    setErrorPerfil('');
-
-    try {
-      const uid = user?.uid || user?._id || conductorId;
-      if (!uid) throw new Error("Identificador de sesión no válido.");
-
-      const updatedPayload = {
-        nombre: formData.nombre?.trim() || 'Conductor CIMCO',
-        displayName: formData.nombre?.trim() || 'Conductor CIMCO',
-        telefono: formData.telefono?.trim() || '',
-        lineaContacto: formData.telefono?.trim() || '',
-        placa: formData.placa?.toUpperCase()?.trim() || 'SIN PLACA',
-        vehiculoModelo: formData.vehiculoModelo?.trim() || '',
-        vehiculoColor: formData.vehiculoColor?.trim() || '',
-        modalidad: formData.modalidad || 'Mototaxi',
-        tipoServicio: formData.modalidad || 'Mototaxi',
-        updatedAt: new Date().toISOString(),
-        fechaActualizacion: serverTimestamp()
-      };
-
-      // Persistir en Firestore
-      const collectionPath = FIRESTORE_PATHS?.usuarios || FIRESTORE_PATHS?.conductores || 'usuarios';
-      const userDocRef = doc(db, collectionPath, uid);
-
-      await updateDoc(userDocRef, updatedPayload).catch(async () => {
-        await setDoc(userDocRef, updatedPayload, { merge: true });
-      });
-
-      // Actualizar contexto local si el AuthProvider lo expone
-      if (updateUserProfile) {
-        await updateUserProfile(updatedPayload);
-      }
-
-      if (socket && (socket.connected || isConnected)) {
-        socket.emit('registrar_conductor', { 
-          conductorId: uid, 
-          tipoServicio: formData.modalidad,
-          email: user?.email || ''
-        });
-      }
-
-      setSyncSuccess(true);
-      setTimeout(() => {
-        setSyncSuccess(false);
-        setShowSettingsModal(false);
-      }, 1200);
-    } catch (err) {
-      console.error("❌ [CIMCO-PROFILE] Error guardando unidad:", err?.message || err);
-      setErrorPerfil(err?.message || "Error al sincronizar datos de la unidad.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const aceptarViaje = async (viajeIdParam) => {
     // Resolver ID de viaje priorizando parámetro directo o estado de solicitud activa
     const viajeIdTarget = viajeIdParam || solicitudViaje?.viajeId || solicitudViaje?.id || solicitudViaje?._id || solicitudViaje?.idViaje;
@@ -620,7 +621,7 @@ export default function HomeMototaxi() {
     // 🛡️ VALIDACIÓN PREVIA DEL JWT EN LA ACCIÓN "ACEPTAR VIAJE"
     const currentToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
     if (isTokenExpired(currentToken)) {
-      console.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de aceptación con JWT expirado. Abortando POST y cerrando sesión.");
+      logger.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de aceptación con JWT expirado. Abortando POST y cerrando sesión.");
       alert("⚠️ Tu cuenta requiere reautenticación o el usuario no existe en el servidor. Inicia sesión nuevamente.");
       setSolicitudViaje(null);
       desconectarEcosistema();
@@ -637,7 +638,7 @@ export default function HomeMototaxi() {
     const idConductorActual = user?.uid || user?.id || user?._id || conductorId || localStorage.getItem('conductorId');
 
     try {
-      console.log(`⚡ [ACID-DESPACHO] Reclamando viaje ID: ${idCorrecto} para Conductor: ${idConductorActual}`);
+      logger.log(`⚡ [ACID-DESPACHO] Reclamando viaje ID: ${idCorrecto} para Conductor: ${idConductorActual}`);
 
       const headers = {};
       if (currentToken) {
@@ -655,10 +656,10 @@ export default function HomeMototaxi() {
       if (respuesta?.data?.success) {
         setServicioActivo(respuesta.data.viaje || { id: idCorrecto, ...solicitudViaje, estado: 'ACEPTADO' });
         setSolicitudViaje(null);
-        console.log("✅ [ACID-DESPACHO] Viaje adjudicado y sincronizado con éxito.");
+        logger.log("✅ [ACID-DESPACHO] Viaje adjudicado y sincronizado con éxito.");
       }
     } catch (error) {
-      console.error("Error al aceptar viaje:", error);
+      logger.error("Error al aceptar viaje:", error);
 
       // 🛡️ Captura explícita de error 401 por nodo de identidad extinto / sesión inválida
       if (error.response && error.response.status === 401) {
@@ -680,7 +681,7 @@ export default function HomeMototaxi() {
         setSolicitudViaje(null);
       } else {
         const msgError = error?.response?.data?.message || error?.response?.data?.error || "Error de conexión al procesar la solicitud.";
-        console.error("🚨 [DESPACHO-ERR] Error al reclamar solicitud:", msgError);
+        logger.error("🚨 [DESPACHO-ERR] Error al reclamar solicitud:", msgError);
         alert(msgError);
         setSolicitudViaje(null);
       }
@@ -698,7 +699,7 @@ export default function HomeMototaxi() {
     // 🛡️ VALIDACIÓN PREVIA DEL JWT AL CAPTURAR DESDE EL RADAR
     const currentToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
     if (isTokenExpired(currentToken)) {
-      console.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de captura con JWT expirado. Abortando transaccion.");
+      logger.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de captura con JWT expirado. Abortando transacción.");
       alert("🔒 Sesión Expirada: Su token de acceso ha caducado. Por favor reautentíquese.");
       desconectarEcosistema();
       await logout();
@@ -728,7 +729,7 @@ export default function HomeMototaxi() {
         });
       });
     } catch (err) {
-      console.error("🚨 [CIMCO-CAPTURE-FAIL] Bloqueo transaccional:", err?.message);
+      logger.error("🚨 [CIMCO-CAPTURE-FAIL] Bloqueo transaccional:", err?.message);
       alert(err?.message);
       setOfertasDisponibles((prev) => prev.filter((v) => v.id !== viajeId && v._id !== viajeId));
     }
@@ -744,12 +745,12 @@ export default function HomeMototaxi() {
         [`fecha_${nuevoEstado.toLowerCase()}`]: serverTimestamp()
       });
     } catch (err) {
-      console.error("🚨 [CIMCO-STATE-FAIL] Error al mutar estado:", err);
+      logger.error("🚨 [CIMCO-STATE-FAIL] Error al mutar estado:", err);
     }
   };
 
   const rechazarViaje = () => {
-    console.log("👎 [CIMCO-RADAR] Operador rechaza visualmente la oferta.");
+    logger.log("👎 [CIMCO-RADAR] Operador rechaza visualmente la oferta.");
     setSolicitudViaje(null);
   };
 
@@ -762,7 +763,7 @@ export default function HomeMototaxi() {
         }
         window.location.replace('/');
       } catch (error) {
-        console.error("🚨 [CIMCO-LOGOUT-FAIL] Error crítico al desconectar nodo de autenticación:", error);
+        logger.error("🚨 [CIMCO-LOGOUT-FAIL] Error crítico al desconectar nodo de autenticación:", error);
         localStorage.clear();
         sessionStorage.clear();
         window.location.replace('/');
@@ -773,13 +774,21 @@ export default function HomeMototaxi() {
   const currentDriverName = formData.nombre || nombreConductor || 'CONDUCTOR';
   const currentPlate = formData.placa || 'SIN PLACA';
 
-  // Renderizado condicional para la vista global de AjustesPerfil preservando el estado de Socket.io
+  // Renderizado condicional unificado para la vista global de AjustesPerfil preservando el estado de Socket.io
   if (modoEdicionAjustes) {
     return <AjustesPerfil onBack={() => setModoEdicionAjustes(false)} />;
   }
 
   return (
     <div className="min-h-screen bg-[#0d0e12] text-slate-100 flex flex-col justify-between font-sans relative overflow-x-hidden selection:bg-sky-500 selection:text-white">
+
+      {/* 📡 RENDERIZADO CONDICIONAL DE ALERTA DE COBERTURA DE RED / ESTADO OFFLINE EN UI */}
+      {!isNetworkOnline && (
+        <div className="bg-red-500/90 text-white text-xs text-center py-1 font-bold flex items-center justify-center gap-2 animate-pulse sticky top-0 z-50 shadow-md">
+          <WifiOff className="w-3.5 h-3.5" />
+          <span>Sin conexión a internet. Reintentando...</span>
+        </div>
+      )}
 
       {/* ════════════════ HEADER SUPERIOR TAQUÍMETRO Y NAVEGACIÓN ════════════════ */}
       <header className="sticky top-0 z-40 bg-[#121214]/80 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between shadow-xl">
@@ -1111,186 +1120,6 @@ export default function HomeMototaxi() {
           <span>BILLETERA</span>
         </button>
       </nav>
-
-      {/* ════════════════ MODAL AJUSTES DE UNIDAD Y PERFIL (CAMBIO DE VEHÍCULO) ════════════════ */}
-      {showSettingsModal && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
-          <div className="bg-[#121214] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl relative overflow-hidden text-white">
-            
-            {/* Cabecera del Modal */}
-            <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-5">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
-                  <Bike className="w-5 h-5" />
-                </div>
-                <div className="text-left">
-                  <h3 className="text-sm font-black tracking-wide uppercase text-amber-400">
-                    DATOS TÉCNICOS DE UNIDAD
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Actualice los datos de su vehículo operativo.
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowSettingsModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {errorPerfil && (
-              <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-medium">
-                {errorPerfil}
-              </div>
-            )}
-
-            {syncSuccess && (
-              <div className="mb-4 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-medium flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>¡Datos de unidad actualizados correctamente!</span>
-              </div>
-            )}
-
-            {/* Formulario */}
-            <form onSubmit={handleSaveProfile} className="space-y-4 text-left">
-              
-              {/* Nombre del Conductor */}
-              <div>
-                <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
-                  Nombre del Conductor
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
-                  <input
-                    type="text"
-                    required
-                    value={formData.nombre}
-                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                    placeholder="Ej: CARLOS FUENTES"
-                    className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
-                  />
-                </div>
-              </div>
-
-              {/* Línea de Contacto / Teléfono */}
-              <div>
-                <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
-                  Línea de Contacto
-                </label>
-                <div className="relative">
-                  <Phone className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
-                  <input
-                    type="tel"
-                    required
-                    value={formData.telefono}
-                    onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                    placeholder="Ej: 3001234567"
-                    className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
-                  />
-                </div>
-              </div>
-
-              {/* Placa y Modalidad */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
-                    Placa Vehículo
-                  </label>
-                  <div className="relative">
-                    <Bike className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
-                    <input
-                      type="text"
-                      required
-                      value={formData.placa}
-                      onChange={(e) => setFormData({ ...formData, placa: e.target.value.toUpperCase() })}
-                      placeholder="Ej: ABC12D"
-                      className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white font-mono font-bold placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors uppercase"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
-                    Modalidad Flota
-                  </label>
-                  <select
-                    value={formData.modalidad}
-                    onChange={(e) => setFormData({ ...formData, modalidad: e.target.value })}
-                    className="w-full bg-[#181920] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-sky-500 transition-colors"
-                  >
-                    <option value="Mototaxi">Mototaxi</option>
-                    <option value="Motocarga">Motocarga</option>
-                    <option value="Motoparrillero">Motoparrillero</option>
-                    <option value="Intermunicipal">Intermunicipal</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Detalle adicional de vehículo (Marca, Modelo, Color) */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
-                    Modelo / Año
-                  </label>
-                  <div className="relative">
-                    <FileText className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
-                    <input
-                      type="text"
-                      value={formData.vehiculoModelo}
-                      onChange={(e) => setFormData({ ...formData, vehiculoModelo: e.target.value })}
-                      placeholder="Ej: Yamaha FZ 2024"
-                      className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold tracking-wider text-slate-300 uppercase mb-1.5">
-                    Color Vehículo
-                  </label>
-                  <div className="relative">
-                    <Palette className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
-                    <input
-                      type="text"
-                      value={formData.vehiculoColor}
-                      onChange={(e) => setFormData({ ...formData, vehiculoColor: e.target.value })}
-                      placeholder="Ej: Negro / Rojo"
-                      className="w-full bg-[#181920] border border-white/10 rounded-xl pl-10 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-2 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowSettingsModal(false)}
-                  className="w-1/2 py-2.5 rounded-xl bg-white/5 border border-white/10 text-xs font-bold text-slate-300 hover:bg-white/10 transition-colors"
-                >
-                  CANCELAR
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-1/2 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-xs font-bold text-white transition-all shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader className="w-4 h-4 animate-spin" />
-                      <span>GUARDANDO...</span>
-                    </>
-                  ) : (
-                    <span>GUARDAR CAMBIOS</span>
-                  )}
-                </button>
-              </div>
-
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Modal de Calificación */}
       {mostrarModalCalificacion && datosParaCalificar && (

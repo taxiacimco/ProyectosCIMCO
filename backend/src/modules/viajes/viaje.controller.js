@@ -1,11 +1,10 @@
-// Versión Arquitectura: V19.1 - Delegación Centralizada de Excepciones a Middleware Global de Errores
+// Versión Arquitectura: V19.3 - Resolutor Dinámico de Socket.io para Evitar Bloqueos por Dependencia Circular ESM
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
  * Misión: Procesar flujos operativos, liquidación contable (10% comisión), transición de estados, cancelación,
- *         sincronización Firestore y gestión de pasarelas de pago con redirección canónica a Vercel.
- * Ajuste V19.1: Refactorización de controladores para delegar la gestión de excepciones al Middleware Centralizado
- *              de Errores mediante la incorporación de `next(error)` en todos los bloques catch asíncronos,
- *              eliminando respuestas locales fragmentadas 500 y garantizando la trazabilidad unificada.
+ *         sincronización Firestore, gestión de transiciones de estado con validación estricta y pasarelas de pago.
+ * Ajuste V19.3: Eliminación de la importación estática de { io } desde server.js para solucionar el SyntaxError de ESM
+ *              provocado por dependencias circulares en Node.js, implementando resolución dinámica vía global.io / globalThis.io.
  */
 
 import crypto from 'crypto';
@@ -16,6 +15,7 @@ import Usuario from '../../models/Usuario.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
 import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 import { FieldValue } from 'firebase-admin/firestore';
+import { ESTADOS_VIAJE, validarTransicion } from './viajeState.js';
 
 // Auxiliar de retardo con aleatoriedad (Jitter) para dispersar la ráfaga concurrentemente
 const esperarGarantizado = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -467,6 +467,94 @@ export const iniciarViaje = async (req, res, next) => {
         }
         session.endSession();
         console.error("🚨 [CIMCO-START-TRIP-ERR]:", error);
+        next(error);
+    }
+};
+
+// ==================================================================
+// 2.2 CAMBIO CENTRALIZADO DE ESTADO DE VIAJE CON VALIDACIÓN DE TRANSICIÓN
+// ==================================================================
+export const cambiarEstadoViaje = async (req, res, next) => {
+    try {
+        const { viajeId } = req.params || {};
+        const { nuevoEstado, motivoCancelacion } = req.body || {};
+
+        if (!viajeId || !mongoose.Types.ObjectId.isValid(viajeId)) {
+            return res.status(400).json({ success: false, message: 'Identificador BSON de viaje inválido o no suministrado.' });
+        }
+
+        if (!nuevoEstado || typeof nuevoEstado !== 'string') {
+            return res.status(400).json({ success: false, message: 'Falta parámetro obligatorio: nuevoEstado' });
+        }
+
+        const estadoMayusc = nuevoEstado.toUpperCase();
+
+        const viaje = await Viaje.findById(viajeId);
+
+        if (!viaje) {
+            return res.status(404).json({ success: false, message: 'Viaje no encontrado' });
+        }
+
+        const estadoActual = String(viaje.estadoViaje || viaje.estado || 'PENDIENTE').toUpperCase();
+
+        // 1. Validar que la transición sea permitida
+        if (!validarTransicion(estadoActual, estadoMayusc)) {
+            return res.status(400).json({
+                success: false,
+                message: `Transición no válida de ${estadoActual} a ${estadoMayusc}`
+            });
+        }
+
+        // 2. Construir objeto de actualización con marcas de tiempo automáticas
+        const timestampActual = new Date().toISOString();
+
+        viaje.estadoViaje = estadoMayusc;
+        viaje.estado = estadoMayusc.toLowerCase();
+
+        const operador = req.usuario || req.user || {};
+        const operadorUid = operador.id || operador._id || operador.uid || null;
+
+        if (estadoMayusc === ESTADOS_VIAJE.CANCELADO && motivoCancelacion) {
+            viaje.motivoCancelacion = motivoCancelacion;
+            if (operadorUid) {
+                viaje.canceladoPor = operadorUid;
+            }
+        }
+
+        await viaje.save();
+
+        // 3. Actualizar documento y transmitir en Firestore
+        const updateDataFirestore = {
+            updatedAt: FieldValue.serverTimestamp(),
+            [`historialEstados.${estadoMayusc}`]: timestampActual
+        };
+
+        if (estadoMayusc === ESTADOS_VIAJE.CANCELADO && motivoCancelacion) {
+            updateDataFirestore.motivoCancelacion = motivoCancelacion;
+            if (operadorUid) {
+                updateDataFirestore.canceladoPor = String(operadorUid);
+            }
+        }
+
+        await actualizarEstadoFirestore(String(viajeId), estadoMayusc, updateDataFirestore);
+
+        // 4. Emitir evento vía Sockets para actualización en tiempo real (Resolución anti-circular)
+        const ioInstance = global.io || globalThis.io;
+        if (ioInstance && typeof ioInstance.to === 'function') {
+            ioInstance.to(`viaje_${viajeId}`).emit('viaje:estado_cambiado', {
+                viajeId,
+                estadoAnterior: estadoActual,
+                nuevoEstado: estadoMayusc,
+                updatedAt: timestampActual
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Estado actualizado a ${estadoMayusc}`,
+            data: { viajeId, estado: estadoMayusc, updatedAt: timestampActual }
+        });
+    } catch (error) {
         next(error);
     }
 };
@@ -933,6 +1021,7 @@ export default {
     solicitarViaje,
     aceptarViaje,
     iniciarViaje,
+    cambiarEstadoViaje,
     completarViaje,
     cancelarViaje,
     obtenerViajes,

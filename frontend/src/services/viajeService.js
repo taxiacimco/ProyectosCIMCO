@@ -1,7 +1,7 @@
-// Versión Arquitectura: V24.1 - Servicio Centralizado de Gestión de Viajes (CIMCO-VIAJE-SERVICE)
+// Versión Arquitectura: V24.2 - Servicio Centralizado de Gestión de Viajes con Transición PATCH de Estado (CIMCO-VIAJE-SERVICE)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\viajeService.js
- * Misión: Control centralizado de solicitudes, despachos, asignaciones y estados de carreras.
+ * Misión: Control centralizado de solicitudes, despachos, asignaciones, cambios de estado y carreras.
  */
 
 import api, { VIAJES_ENDPOINTS } from '@/config/api';
@@ -74,6 +74,26 @@ export const viajeService = {
     },
 
     /**
+     * Actualiza el estado del viaje mediante consumo del endpoint PATCH
+     * @param {string} viajeId 
+     * @param {string} nuevoEstado 
+     * @param {string|null} motivoCancelacion 
+     */
+    async cambiarEstadoViaje(viajeId, nuevoEstado, motivoCancelacion = null) {
+        if (!viajeId || typeof viajeId !== 'string') {
+            throw new Error('El ID del viaje es obligatorio para cambiar el estado.');
+        }
+        if (!nuevoEstado || typeof nuevoEstado !== 'string') {
+            throw new Error('El nuevo estado es obligatorio.');
+        }
+        const response = await api.patch(`/viajes/${viajeId.trim()}/estado`, {
+            nuevoEstado: nuevoEstado.trim(),
+            motivoCancelacion: typeof motivoCancelacion === 'string' ? motivoCancelacion.trim() : motivoCancelacion
+        });
+        return response?.data || {};
+    },
+
+    /**
      * Obtiene el historial de carreras del usuario o conductor
      * @param {Object} params - Filtros opcionales
      * @param {AbortSignal} [signal]
@@ -96,5 +116,7 @@ export const viajeService = {
         return response?.data || [];
     }
 };
+
+export const cambiarEstadoViaje = viajeService.cambiarEstadoViaje;
 
 export default viajeService;

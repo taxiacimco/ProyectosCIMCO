@@ -1,8 +1,8 @@
-// Versión Arquitectura: V18.2 - Enrutador Centralizado de Viajes y Despacho Operativo
+// Versión Arquitectura: V19.3 - Enrutador Centralizado de Viajes y Despacho Operativo con Mapeo PATCH de Estado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.routes.js
  * Misión: Enrutador centralizado con interceptación de payloads, inyección de aduana perimetral
- * y securización del ciclo de vida operacional del viaje (solicitud, aceptación, inicio, cancelación, despacho y consultas).
+ * y securización del ciclo de vida operacional del viaje (solicitud, aceptación, inicio, cambio de estado, cancelación, despacho y consultas).
  */
 
 import express from 'express';
@@ -10,6 +10,7 @@ import {
     solicitarViaje, 
     aceptarViaje, 
     iniciarViaje,
+    cambiarEstadoViaje,
     completarViaje,
     cancelarViaje,
     obtenerViajes,
@@ -64,6 +65,7 @@ router.post('/aceptar', verificarPayloadViaje, aceptarViaje);
 
 // 3. Transición de Estado Operativo y Cierre Contable (Liquidación de comisión 10%)
 router.post('/iniciar', verificarPayloadViaje, iniciarViaje);
+router.patch('/:viajeId/estado', verificarPayloadViaje, cambiarEstadoViaje);
 router.post('/completar', verificarPayloadViaje, completarViaje);
 router.post('/cancelar', verificarPayloadViaje, cancelarViaje);
 
