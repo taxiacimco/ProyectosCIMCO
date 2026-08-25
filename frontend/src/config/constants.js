@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.2 - Sanitización de Endpoints y Matriz de Gobernanza
+// Versión Arquitectura: V12.3 - Sanitización Tipográfica de Endpoints y Matriz de Gobernanza
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\constants.js
  * Misión: Centralizar los diccionarios, roles oficiales, niveles de acceso jerárquicos y endpoints de API sanitizados del ecosistema.
@@ -37,11 +37,11 @@ export const COLLECTIONS = {
     USUARIOS: 'usuarios'
 };
 
-// 📡 ENDPOINTS DE VIAJES (Rutas relativas sanitizadas sin prefijo '/api' redundante)
+// 📡 ENDPOINTS DE VIAJES (Rutas relativas sanitizadas y estandarizadas en minúsculas)
 export const VIAJES_ENDPOINTS = {
     SOLICITAR: '/viajes/solicitar',
     ACEPTAR: '/viajes/aceptar',
-    CANCELAR: '/viajes/cancelAR',
+    CANCELAR: '/viajes/cancelar',
     COMPLETAR: '/viajes/completar',
     OBTENER_ACTIVO: '/viajes/activo',
     HISTORIAL: '/viajes/historial'

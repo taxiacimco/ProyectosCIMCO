@@ -1,10 +1,11 @@
-// Versión Arquitectura: V19.3 - Habilitación de Trust Proxy SSL y Configuración Perimetral de CORS
+// Versión Arquitectura: V19.4 - Verificación y Validación de Enrutamiento Perimetral de Autenticación /api/auth (update-profile)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte canónico
  * para entornos de desarrollo y producción (HTTP/HTTPS), habilitación de trust proxy para terminación SSL en Railway/Nginx,
- * orquestación de sockets, inyección de enrutadores del sistema y registro resiliente del middleware centralizado de errores.
- * Ajuste V19.3: Habilitación de `trust proxy` para decodificar cabeceras X-Forwarded-Proto e integración extendida de origenes CORS en producción.
+ * orquestación de sockets, inyección de enrutadores del sistema (incluyendo el módulo de autenticación bajo /api/auth)
+ * y registro resiliente del middleware centralizado de errores.
+ * Ajuste V19.4: Confirmación y aseguramiento del montaje de authRoutes en /api/auth para exponer de forma pública la URL PUT /api/auth/update-profile.
  */
 
 import 'dotenv/config';

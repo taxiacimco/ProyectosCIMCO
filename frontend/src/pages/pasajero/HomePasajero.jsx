@@ -1,19 +1,20 @@
-// Versión Arquitectura: V21.43 - Subasta Dinámica, Categorización de Trayecto y Gestión de Ofertas WebSocket
+// Versión Arquitectura: V21.44 - Centralización de Perfil con authService y Estandarización de TelefonoMovil
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (CartoDB Voyager),
  *         integración atómica de telemetría, sockets, billetera smart, selector dinámico de flota (4 modalidades + Cooperativas < 5km),
  *         monitoreo de hardware GPS, entrada de dirección editable con botón de recalibración GPS, subasta dinámica
- *         de ofertas en tiempo real vía WebSockets/Firestore y paleta CIMCO-UI V9.3.
+ *         de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil centralizada mediante authService y paleta CIMCO-UI V9.3.
  */
 
 import React, { useState, useEffect } from 'react';
 import { db, auth as firebaseAuth, FIRESTORE_PATHS } from '@/config/firebase'; 
-import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { useGpsGuard } from '@/hooks/useGpsGuard';
 import { useWallet } from '@/hooks/useWallet';
 import { useSocket } from '@/hooks/useSocket';
+import authService from '@/services/authService';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import { 
   Navigation, 
@@ -276,7 +277,7 @@ export default function HomePasajero() {
       if (snapshotUser.exists()) {
         const dataUser = snapshotUser.data();
         nombreBase = dataUser.nombre || nombreBase;
-        telefonoBase = dataUser.telefono || '';
+        telefonoBase = dataUser.telefonoMovil || dataUser.telefono || '';
         saldoBase = typeof dataUser.saldoBilletera === 'number' ? dataUser.saldoBilletera : (typeof dataUser.balance === 'number' ? dataUser.balance : 0);
       }
 
@@ -386,7 +387,7 @@ export default function HomePasajero() {
     });
   };
 
-  // Actualización de Datos Personales del Pasajero
+  // Actualización de Datos Personales del Pasajero mediante Servicio Centralizado
   const handleActualizarPerfil = async (e) => {
     e.preventDefault();
     if (!inputNombre.trim()) {
@@ -395,19 +396,17 @@ export default function HomePasajero() {
     }
 
     try {
-      const pathUsuarios = FIRESTORE_PATHS?.usuarios || 'usuarios';
-      const docRef = doc(db, pathUsuarios, uidUsuario);
-      
-      await updateDoc(docRef, {
+      await authService.updateProfile({
         nombre: inputNombre.trim(),
-        telefono: inputTelefono.trim(),
-        fechaActualizacion: serverTimestamp()
+        telefonoMovil: inputTelefono.trim(),
+        foto_perfil: perfilFirestore.foto_perfil || user?.foto_perfil || null
       });
 
       setMostrarModalPerfil(false);
-      console.log("🔒 [PERFIL-CIMCO] Datos de usuario guardados en nodo atómico.");
+      setErrorInterno('');
+      console.log("🔒 [PERFIL-CIMCO] Datos de usuario actualizados mediante authService.");
     } catch (err) {
-      console.error("❌ [PERFIL-ERROR] Fallo al actualizar base distribuidora:", err);
+      console.error("❌ [PERFIL-ERROR] Fallo al actualizar el perfil centralizado:", err);
       setErrorInterno("No se pudieron actualizar tus datos personales.");
     }
   };
@@ -556,12 +555,12 @@ export default function HomePasajero() {
         calificacion: oferta.calificacion || 5.0
       };
 
-      await updateDoc(docRef, {
+      await setDoc(docRef, {
         estado: 'ACEPTADO',
         conductor: conductorAsignado,
         valorTarifa: oferta.tarifa,
         fechaAceptacion: serverTimestamp()
-      });
+      }, { merge: true });
 
       setDatosConductor(conductorAsignado);
       setEstadoViaje('ACEPTADO');
@@ -577,10 +576,10 @@ export default function HomePasajero() {
     if (!rideId) return;
     try {
       const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
-      await updateDoc(doc(db, pathViajes, rideId), {
+      await setDoc(doc(db, pathViajes, rideId), {
         estado: 'CANCELADO',
         fechaCancelacion: serverTimestamp()
-      });
+      }, { merge: true });
 
       if (socket && isConnected) {
         socket.emit('cancelar_viaje', { viajeId: rideId, pasajeroId: uidUsuario });

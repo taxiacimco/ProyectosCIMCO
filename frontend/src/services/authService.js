@@ -1,7 +1,7 @@
-// Versión Arquitectura: V24.1 - Servicio Centralizado de Autenticación (CIMCO-AUTH-SERVICE)
+// Versión Arquitectura: V24.2 - Servicio Centralizado de Autenticación con UpdateProfile Híbrido (CIMCO-AUTH-SERVICE)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\authService.js
- * Misión: Gestor central de peticiones de inicio de sesión, registro, verificación de token y cierre de sesión.
+ * Misión: Gestor central de peticiones de inicio de sesión, registro, actualización de perfil, verificación de token y cierre de sesión.
  */
 
 import api, { AUTH_ENDPOINTS } from '@/config/api';
@@ -21,13 +21,37 @@ export const authService = {
 
     /**
      * Registra un nuevo usuario en la plataforma
-     * @param {Object} userData - Datos completos del usuario
+     * @param {Object} userData - Datos completos del usuario (JSON o FormData)
      */
     async register(userData) {
-        if (!userData || typeof userData !== 'object') {
+        if (!userData) {
             throw new Error('Los datos de registro son obligatorios.');
         }
         const response = await api.post(AUTH_ENDPOINTS.register, userData);
+        return response?.data || {};
+    },
+
+    /**
+     * Actualiza el perfil del usuario autenticado en la sesión activa.
+     * Soporta envío de JSON o FormData (para fotos de perfil y documentos).
+     * @param {FormData|Object} formDataOrObject - Objeto con atributos o instancia FormData
+     */
+    async updateProfile(formDataOrObject) {
+        if (!formDataOrObject) {
+            throw new Error('Los datos de actualización de perfil son obligatorios.');
+        }
+
+        const endpoint = AUTH_ENDPOINTS?.updateProfile || '/auth/update-profile';
+        const isFormData = typeof FormData !== 'undefined' && formDataOrObject instanceof FormData;
+
+        // Si es FormData, se delega a Axios el establecimiento automático del header multipart/form-data con su boundary
+        const config = isFormData ? {
+            headers: {
+                'Content-Type': undefined
+            }
+        } : {};
+
+        const response = await api.put(endpoint, formDataOrObject, config);
         return response?.data || {};
     },
 

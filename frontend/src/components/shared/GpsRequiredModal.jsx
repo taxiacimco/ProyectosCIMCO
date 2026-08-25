@@ -1,4 +1,4 @@
-// Versión Arquitectura: V16.2 - Verificación de Hardware GPS, Monitoreo de Permisos y Cero Dependencias de Red
+// Versión Arquitectura: V16.3 - Verificación de Hardware GPS, Monitoreo de Permisos y Cero Dependencias de Red
 /**
  * Ubicación: frontend/src/components/shared/GpsRequiredModal.jsx
  * Misión: Bloqueo de UI perimetral cuando el GPS está inactivo. Despierta de manera quirúrgica el prompt nativo,
@@ -94,7 +94,7 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
         if (isMounted.current) {
           setVerificando(false);
         }
-        if (typeof onRetry === 'function') onRetry(); // Callback para re-renderizar mapas e hilos de despacho
+        if (typeof onRetry === 'function') onRetry(); // Callback ejecutado únicamente en éxito
       },
       (error) => {
         console.warn(`❌ [CIMCO-GPS-BRIDGE] Error de hardware detectado. Código: ${error?.code}`);
@@ -127,9 +127,6 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
               mensaje: "Ocurrió un error inesperado al intentar encender o sincronizar el hardware GPS."
             });
         }
-        
-        // Ejecución preventiva para notificar al componente padre del estado actual
-        if (typeof onRetry === 'function') onRetry(); 
       },
       {
         enableHighAccuracy: true,

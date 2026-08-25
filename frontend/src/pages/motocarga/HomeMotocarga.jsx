@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.20 - Fusión Atómica de Motocarga, Centralización de Sockets vía useSocket, Fallback Híbrido y Desacoplamiento de Billetera
+// Versión Arquitectura: V12.21 - Centralización de Actualización de Perfil con authService.updateProfile y Adaptación de Teléfono Móvil
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
@@ -6,6 +6,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
 import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api'; 
+import authService from '@/services/authService';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
@@ -121,7 +122,7 @@ export default function HomeMotocarga() {
         // Sincronizar datos locales para el formulario de edición
         setDatosPerfil({
           nombre: nombreCompleto || '',
-          telefono: data?.telefono || '',
+          telefono: data?.telefonoMovil || data?.telefono || '',
           placa: data?.placa || data?.vehiculo?.placa || '',
           motoModelo: data?.motoModelo || data?.vehiculo?.modelo || ''
         });
@@ -134,7 +135,7 @@ export default function HomeMotocarga() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 2. ACTUALIZACIÓN MUTABLE DE DATOS (FIRESTORE)
+  // 2. ACTUALIZACIÓN MUTABLE DE DATOS VIA SERVICIO CENTRALIZADO
   // ==================================================================
   const handleGuardarPerfil = async (e) => {
     e.preventDefault();
@@ -142,6 +143,13 @@ export default function HomeMotocarga() {
     setGuardandoPerfil(true);
     
     try {
+      await authService.updateProfile({
+        nombre: datosPerfil.nombre,
+        telefonoMovil: datosPerfil.telefono,
+        placa: datosPerfil.placa.toUpperCase(),
+        motoModelo: datosPerfil.motoModelo
+      });
+
       const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
       const conductorRef = doc(db, pathConductores, user.uid);
       
@@ -149,6 +157,7 @@ export default function HomeMotocarga() {
         nombre: datosPerfil.nombre,
         nombreCompleto: datosPerfil.nombre,
         telefono: datosPerfil.telefono,
+        telefonoMovil: datosPerfil.telefono,
         placa: datosPerfil.placa.toUpperCase(),
         motoModelo: datosPerfil.motoModelo,
         fechaActualizacion: serverTimestamp()
@@ -158,7 +167,7 @@ export default function HomeMotocarga() {
       alert("✅ PERFIL Y VEHÍCULO DE CARGA ACTUALIZADOS EN RED");
     } catch (error) {
       console.error("🚨 [CIMCO-CARGA-PROFILE-UPDATE-ERR] No se pudieron salvar los datos:", error);
-      alert("Error al actualizar los datos en el servidor de carga.");
+      alert(error?.response?.data?.message || "Error al actualizar los datos en el servidor de carga.");
     } finally {
       setGuardandoPerfil(false);
     }

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V19.7 - Corrección Padding JWT Base64URL y Unificación de Flujo Perfil con AjustesPerfil
+// Versión Arquitectura: V19.8 - Delegación Unificada a AjustesPerfil y Gobernanza de Perfil Centralizado via authService
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
@@ -8,7 +8,7 @@
  *          sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409),
  *          resiliencia ante redes inestables (timeouts, reintentos e indicador de conectividad de red),
  *          manejo reactivo de estado Offline en UI mediante event listeners 'online'/'offline',
- *          unificación atómica de edición de perfil a través de AjustesPerfil,
+ *          unificación atómica de edición de perfil a través de AjustesPerfil y authService,
  *          limpieza atómica de hooks (watchPosition, listeners WebSocket y suscripciones Firestore)
  *          para prevención de fugas de memoria y centralización de trazabilidad mediante logger condicional.
  * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
@@ -171,7 +171,7 @@ export default function HomeMototaxi() {
       setNombreConductor(nombreCarga.toUpperCase());
       setFormData({
         nombre: nombreCarga,
-        telefono: user?.telefono || user?.lineaContacto || user?.phoneNumber || '',
+        telefono: user?.telefono || user?.lineaContacto || user?.phoneNumber || user?.telefonoMovil || '',
         placa: user?.placa || 'SIN PLACA',
         vehiculoModelo: user?.vehiculoModelo || user?.modelo || '',
         vehiculoColor: user?.vehiculoColor || user?.color || '',
@@ -199,7 +199,7 @@ export default function HomeMototaxi() {
         setFormData((prev) => ({
           ...prev,
           nombre: nombreCompleto,
-          telefono: data?.telefono || data?.lineaContacto || prev.telefono,
+          telefono: data?.telefonoMovil || data?.telefono || data?.lineaContacto || prev.telefono,
           placa: data?.placa || prev.placa,
           vehiculoModelo: data?.vehiculoModelo || data?.modelo || prev.vehiculoModelo,
           vehiculoColor: data?.vehiculoColor || data?.color || prev.vehiculoColor,

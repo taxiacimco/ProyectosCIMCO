@@ -1,12 +1,9 @@
-// Versión Arquitectura: V19.3 - Integración de Filtro por Empresa/Cooperativa, Caja de Contraoferta y Emisión de Ofertas en Tiempo Real
+// Versión Arquitectura: V19.4 - Refactorización de actualización de perfil mediante authService centralizado
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V19.3: 
- *   1. Filtrado riguroso de eventos 'nuevo_servicio_disponible', 'nuevo_viaje' y 'servidor:nueva_solicitud' 
- *      verificando coincidencia de empresaId/cooperativa con el perfil del conductor.
- *   2. Implementación de caja de entrada para monto de contraoferta.
- *   3. Conexión directa del botón de la notificación con el emisor 'enviarOferta' (Socket/Context).
+ * Ajuste V19.4: Encapsulamiento estricto de la actualización de perfil mediante authService.updateProfile,
+ * evitando llamadas directas a la ruta /api/conductores/:id y garantizando el uso de FIRESTORE_PATHS.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -14,7 +11,6 @@ import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
-import api from '@/config/api';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -42,6 +38,7 @@ const HomeIntermunicipal = () => {
     const authContext = useAuth ? useAuth() : {};
     const user = authContext?.user || null;
     const token = authContext?.token || localStorage.getItem('token') || user?.token || "";
+    const updateProfileService = authContext?.updateProfile || null;
     
     // 📡 Consumo Resiliente del Socket Centralizado (Canal de Empresa y Pujas)
     const socketContext = useSocket ? useSocket() : {};
@@ -131,40 +128,37 @@ const HomeIntermunicipal = () => {
     }, [user]);
 
     // ==================================================================
-    // 2. ACTUALIZACIÓN MUTABLE DE DATOS EN CALIENTE (REST + FIRESTORE)
+    // 2. ACTUALIZACIÓN MUTABLE DE DATOS MEDIANTE authService CENTRALIZADO
     // ==================================================================
     const handleGuardarPerfil = async (e) => {
         e.preventDefault();
         if (!idConductor) return;
         setGuardandoPerfil(true);
 
-        const axiosConfig = token ? {
-            headers: { Authorization: `Bearer ${token}` }
-        } : {};
-
         try {
+            // Esquema estandarizado solicitado (telefonoMovil, nombre, foto_perfil)
             const payloadPerfil = {
                 nombre: datosPerfil.nombre,
-                fullName: datosPerfil.nombre,
-                telefono: datosPerfil.telefono,
                 telefonoMovil: datosPerfil.telefono,
+                telefono: datosPerfil.telefono,
                 empresa: datosPerfil.empresa,
                 empresaTransporte: datosPerfil.empresa,
                 empresaId: datosPerfil.empresaId,
                 terminal: datosPerfil.terminal,
                 terminalOrigen: datosPerfil.terminal,
                 placaVehiculo: datosPerfil.placaVehiculo.toUpperCase(),
-                numeroInterno: datosPerfil.numeroInterno
+                numeroInterno: datosPerfil.numeroInterno,
+                foto_perfil: user?.foto_perfil || user?.photoURL || ''
             };
 
-            // Intento de actualización en Backend Central MongoDB
-            try {
-                await api.put(`/api/usuarios/${idConductor}`, payloadPerfil, axiosConfig);
-            } catch (apiErr) {
-                console.warn("⚠️ API backend no respondió a la mutación de perfil, actualizando NoSQL local:", apiErr);
+            // Invocación a través del servicio centralizado de autenticación/perfil
+            if (typeof updateProfileService === 'function') {
+                await updateProfileService(payloadPerfil);
+            } else {
+                console.warn("⚠️ updateProfile no disponible en useAuth, aplicando respaldo local Firestore.");
             }
 
-            // Sincronización secundaria en Firestore
+            // Sincronización secundaria en Firestore usando FIRESTORE_PATHS
             if (user?.uid) {
                 const pathUsuarios = FIRESTORE_PATHS?.usuarios || FIRESTORE_PATHS?.users || 'usuarios';
                 const conductorRef = doc(db, pathUsuarios, user.uid);
@@ -384,20 +378,10 @@ const HomeIntermunicipal = () => {
     const confirmarViaje = async (idViaje) => {
         if (!idViaje) return;
 
-        const axiosConfig = token ? {
-            headers: { Authorization: `Bearer ${token}` }
-        } : {};
-
         try {
-            // Notificar cambio de estado en REST API
-            try {
-                await api.put(`/api/viajes/estado/${idViaje}`, { estado: 'EN_RUTA' }, axiosConfig);
-            } catch (apiErr) {
-                console.warn("⚠️ No se actualizó REST API, aplicando mutación directa en Firestore:", apiErr);
-            }
-
-            // Actualización local Firestore
-            const viajeRef = doc(db, FIRESTORE_PATHS?.viajesIntermunicipales || 'viajes_intermunicipales', idViaje);
+            // Actualización local Firestore usando FIRESTORE_PATHS
+            const pathViajes = FIRESTORE_PATHS?.viajesIntermunicipales || 'viajes_intermunicipales';
+            const viajeRef = doc(db, pathViajes, idViaje);
             await updateDoc(viajeRef, { 
                 estado: 'EN_RUTA', 
                 inicioOperativo: serverTimestamp() 

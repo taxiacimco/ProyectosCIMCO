@@ -1,11 +1,11 @@
-// Versión Arquitectura: V21.35 - Integración de Controlador de Cierre de Sesión (Logout) Anti-CIMCO-ROUTE-MISS y Preservación de Delegación Centralizada de Excepciones
+// Versión Arquitectura: V21.37 - Integración Quirúrgica de actualizarPerfil, Manejo Híbrido Multipart (req.file/req.files), Hashing de Clave y Sincronización Polimórfica
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
- * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono), actualización segura de perfiles y respuesta a desvinculación (logout).
- * Ajuste V21.35: Incorporación de controlador `logout` para resolver fallos de ruta sin resolver [CIMCO-ROUTE-MISS] y delegación mediante next(error).
+ * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono), actualización segura de perfiles (updateProfile / actualizarPerfil)
+ * con soporte para hashes de clave opcionales, atributos de vehículo (placa/numeroInterno) y archivos binarios (req.file/req.files), y respuesta a desvinculación (logout).
  */
 
 import jwt from 'jsonwebtoken';
@@ -119,7 +119,7 @@ export const register = async (req, res, next) => {
             return fileObj.path || fileObj.location || fileObj.filename || fileObj.url || body[fieldName] || null;
         };
 
-        const foto_perfil = getFilePath('foto_perfil');
+        const foto_perfil = getFilePath('foto_perfil') || getFilePath('fotoPerfil');
         const documento_cedula = getFilePath('documento_cedula');
         const documento_licencia = getFilePath('documento_licencia');
         const doc_tarjeta = getFilePath('doc_tarjeta');
@@ -226,6 +226,7 @@ export const register = async (req, res, next) => {
                     terminal_sede: terminalSedeFinal,
                     saldo: 0,
                     foto_perfil,
+                    fotoUrl: foto_perfil || undefined,
                     doc_identificacion,
                     documento_cedula: documento_cedula || doc_identificacion,
                     access_level: parsedAccessLevel ?? 1
@@ -269,6 +270,7 @@ export const register = async (req, res, next) => {
                 
                 // Atributos y Archivos Adjuntos
                 foto_perfil,
+                fotoUrl: foto_perfil || undefined,
                 documento_cedula,
                 documento_licencia,
                 doc_tarjeta,
@@ -308,6 +310,7 @@ export const register = async (req, res, next) => {
                 saldo: 0,
                 balance: 0,
                 foto_perfil,
+                fotoUrl: foto_perfil || undefined,
                 doc_identificacion,
                 documento_cedula: documento_cedula || doc_identificacion,
                 access_level: parsedAccessLevel ?? nivelPredeterminado
@@ -339,6 +342,7 @@ export const register = async (req, res, next) => {
                     terminal_sede: nuevoUsuario.terminal_sede || 'Particular',
                     access_level: nuevoUsuario.access_level || 1,
                     foto_perfil: foto_perfil || null,
+                    fotoUrl: foto_perfil || null,
                     createdAt: new Date().toISOString()
                 };
 
@@ -529,7 +533,7 @@ export const login = async (req, res, next) => {
                 estado: cuentaEncontrada.estado,
                 isActive: cuentaEncontrada.isActive,
                 terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa,
-                foto_perfil: cuentaEncontrada.foto_perfil || null
+                foto_perfil: cuentaEncontrada.foto_perfil || cuentaEncontrada.fotoUrl || null
             }
         });
 
@@ -789,36 +793,92 @@ export const checkPhone = async (req, res, next) => {
 export const verificarTelefono = checkPhone;
 
 /**
- * 🔄 ACTUALIZACIÓN DE DATOS DE PERFIL (POLIMÓRFICO CONCURRENTE CORREGIDO)
+ * 🔄 ACTUALIZACIÓN DE DATOS DE PERFIL (POLIMÓRFICO CONCURRENTE & MULTIPART/FORM-DATA)
+ * Soporta actualización unificada de usuarios, conductores y pasajeros con hash de contraseña opcional,
+ * atributos vehiculares (placa, numeroInterno) y recepción binaria de foto de perfil (req.file o req.files).
  */
 export const updateProfile = async (req, res, next) => {
     try {
-        const userId = req.user?.id || req.user?._id || req.user?.uid || req.body?.id || req.body?.userId;
-        const rolExtraido = req.user?.rol || req.body?.rol;
+        const userId = req.usuario?.id || req.usuario?._id || req.user?.id || req.user?._id || req.user?.uid || req.body?.id || req.body?.userId;
+        const rolExtraido = req.usuario?.rol || req.user?.rol || req.body?.rol;
 
         if (!userId) {
-            return res.status(400).json({ success: false, message: "No se encontró un identificador de sesión válido." });
+            return res.status(400).json({ 
+                success: false, 
+                mensaje: "No se encontró un identificador de sesión válido.",
+                message: "No se encontró un identificador de sesión válido." 
+            });
         }
 
-        const { nombre, telefonoMovil, cooperativa, empresa, terminal_sede } = req.body || {};
+        const { 
+            nombre, 
+            telefono, 
+            telefonoMovil, 
+            correo, 
+            email, 
+            clave, 
+            password, 
+            nuevaPassword, 
+            placa, 
+            numeroInterno, 
+            cooperativa, 
+            empresa, 
+            terminal_sede 
+        } = req.body || {};
 
         const updateData = {};
+
         if (nombre) {
             updateData.nombre = String(nombre).trim();
             updateData.fullName = String(nombre).trim();
         }
-        if (telefonoMovil) {
-            updateData.telefonoMovil = String(telefonoMovil).trim();
-            updateData.telefono = String(telefonoMovil).trim();
+
+        // Mapeo híbrido de teléfono (telefono / telefonoMovil)
+        const telInput = telefono || telefonoMovil;
+        if (telInput) {
+            updateData.telefonoMovil = String(telInput).trim();
+            updateData.telefono = String(telInput).trim();
         }
 
-        const sedeFinal = terminal_sede || cooperativa || empresa;
-        if (sedeFinal) {
+        const correoInput = correo || email;
+        if (correoInput) {
+            updateData.correo = String(correoInput).trim().toLowerCase();
+            updateData.email = String(correoInput).trim().toLowerCase();
+        }
+
+        if (cooperativa || empresa || terminal_sede) {
+            const sedeFinal = terminal_sede || cooperativa || empresa;
             updateData.cooperativa = String(sedeFinal).trim();
             updateData.empresa = String(sedeFinal).trim();
             updateData.terminal_sede = String(sedeFinal).trim();
         }
 
+        if (placa) {
+            updateData.placa = String(placa).toUpperCase().trim();
+        }
+
+        if (numeroInterno) {
+            updateData.numeroInterno = String(numeroInterno).trim();
+        }
+
+        // Manejo de contraseña opcional con hashing seguro vía bcrypt
+        const passwordToHash = clave || password || nuevaPassword;
+        if (passwordToHash && String(passwordToHash).trim() !== '') {
+            const hashedPassword = await bcrypt.hash(String(passwordToHash).trim(), 10);
+            updateData.clave = hashedPassword;
+            updateData.password = hashedPassword;
+            updateData.passwordHash = hashedPassword;
+        }
+
+        // Procesamiento de archivo binario individual (upload.single - req.file)
+        const archivoFotoUnico = req.file;
+        let fotoUrlExtraida = null;
+
+        if (archivoFotoUnico) {
+            fotoUrlExtraida = archivoFotoUnico.path || archivoFotoUnico.location || archivoFotoUnico.filename || archivoFotoUnico.url;
+        }
+
+        // Procesamiento de archivos en lote/campos múltiples (upload.fields / upload.array - req.files)
         if (req.files) {
             const getFilePath = (fieldName) => {
                 let fileObj = null;
@@ -830,17 +890,23 @@ export const updateProfile = async (req, res, next) => {
                 return fileObj ? (fileObj.path || fileObj.location || fileObj.filename || fileObj.url) : null;
             };
 
-            const foto = getFilePath('foto_perfil');
-            const cedula = getFilePath('documento_cedula');
-            const licencia = getFilePath('documento_licencia');
-            const tarjeta = getFilePath('doc_tarjeta');
+            const fotoFromFiles = getFilePath('foto_perfil') || getFilePath('fotoPerfil') || getFilePath('avatar');
+            const cedula = getFilePath('documento_cedula') || getFilePath('doc_cedula');
+            const licencia = getFilePath('documento_licencia') || getFilePath('doc_licencia');
+            const tarjeta = getFilePath('doc_tarjeta') || getFilePath('tarjeta_propiedad') || getFilePath('tarjeta_operacion');
             const docId = getFilePath('doc_identificacion');
 
-            if (foto) updateData.foto_perfil = foto;
+            if (fotoFromFiles) fotoUrlExtraida = fotoFromFiles;
             if (cedula) updateData.documento_cedula = cedula;
             if (licencia) updateData.documento_licencia = licencia;
             if (tarjeta) updateData.doc_tarjeta = tarjeta;
             if (docId) updateData.doc_identificacion = docId;
+        }
+
+        if (fotoUrlExtraida) {
+            updateData.fotoUrl = fotoUrlExtraida;
+            updateData.foto = fotoUrlExtraida;
+            updateData.foto_perfil = fotoUrlExtraida;
         }
 
         // Selección del modelo según el rol
@@ -867,7 +933,11 @@ export const updateProfile = async (req, res, next) => {
         }
 
         if (!usuarioActualizado) {
-            return res.status(404).json({ success: false, message: "No se encontró la cuenta de usuario para actualizar." });
+            return res.status(404).json({ 
+                success: false, 
+                mensaje: "No se encontró la cuenta de usuario para actualizar.",
+                message: "No se encontró la cuenta de usuario para actualizar." 
+            });
         }
 
         // Sincronización secundaria hacia Firebase Firestore (Aislada en Try/Catch)
@@ -881,16 +951,27 @@ export const updateProfile = async (req, res, next) => {
                     ? (FIRESTORE_PATHS?.users || 'usuarios') 
                     : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
 
-                await dbFirestore.collection(coleccionFirestore).doc(targetUid).set({
+                const payloadSincroFirestore = {
                     nombre: usuarioActualizado.nombre,
                     fullName: usuarioActualizado.nombre,
                     telefono: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono,
                     cooperativa: usuarioActualizado.cooperativa || 'Particular',
                     empresa: usuarioActualizado.empresa || 'Particular',
                     terminal_sede: usuarioActualizado.terminal_sede || 'Particular',
-                    ...(usuarioActualizado.foto_perfil ? { foto_perfil: usuarioActualizado.foto_perfil } : {}),
                     updatedAt: new Date().toISOString()
-                }, { merge: true });
+                };
+
+                if (usuarioActualizado.foto_perfil || usuarioActualizado.fotoUrl) {
+                    payloadSincroFirestore.foto_perfil = usuarioActualizado.foto_perfil || usuarioActualizado.fotoUrl;
+                    payloadSincroFirestore.fotoUrl = usuarioActualizado.fotoUrl || usuarioActualizado.foto_perfil;
+                }
+
+                if (esConductor) {
+                    if (usuarioActualizado.placa) payloadSincroFirestore.placa = usuarioActualizado.placa;
+                    if (usuarioActualizado.numeroInterno) payloadSincroFirestore.numeroInterno = usuarioActualizado.numeroInterno;
+                }
+
+                await dbFirestore.collection(coleccionFirestore).doc(targetUid).set(payloadSincroFirestore, { merge: true });
 
             } catch (firestoreErr) {
                 console.warn(`⚠️ [CIMCO-UPDATE-SYNC-WARN] Error de replicación en Firebase: ${firestoreErr.message}`);
@@ -899,25 +980,33 @@ export const updateProfile = async (req, res, next) => {
 
         return res.status(200).json({
             success: true,
-            message: "Perfil de central actualizado con éxito en todos los nodos de datos.",
+            mensaje: 'Perfil actualizado exitosamente',
+            message: 'Perfil actualizado exitosamente',
+            usuario: usuarioActualizado,
             user: {
                 id: usuarioActualizado._id,
                 uid: usuarioActualizado.uid || usuarioActualizado.firebaseUid || usuarioActualizado._id,
                 nombre: usuarioActualizado.nombre,
-                email: usuarioActualizado.email,
+                email: usuarioActualizado.email || usuarioActualizado.correo,
                 rol: usuarioActualizado.rol || usuarioActualizado.role || rolNormalizado,
                 telefonoMovil: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono || "",
                 cooperativa: usuarioActualizado.cooperativa || usuarioActualizado.empresa || "",
                 terminal_sede: usuarioActualizado.terminal_sede || usuarioActualizado.cooperativa || "",
-                foto_perfil: usuarioActualizado.foto_perfil || null
+                foto_perfil: usuarioActualizado.foto_perfil || usuarioActualizado.fotoUrl || null
             }
         });
 
     } catch (error) {
-        console.error("🚨 [CIMCO-PROFILE-UPDATE-FATAL] Error crítico en la pasarela de actualización:", error);
-        next(error);
+        console.error("🚨 [CIMCO-PROFILE-UPDATE-FATAL] Error en actualizarPerfil:", error);
+        return res.status(500).json({
+            success: false,
+            mensaje: 'Error interno del servidor al actualizar el perfil.',
+            message: 'Error interno del servidor al actualizar el perfil.'
+        });
     }
 };
+
+export const actualizarPerfil = updateProfile;
 
 /**
  * 🚪 CIERRE DE SESIÓN (LOGOUT)
@@ -944,5 +1033,6 @@ export default {
     checkPhone,
     verificarTelefono,
     updateProfile,
+    actualizarPerfil,
     logout
 };

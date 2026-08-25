@@ -1,10 +1,11 @@
-// Versión Arquitectura: V12.17 - Integración Hook Unificado useSocket para Motoparrillero y Control Global
+// Versión Arquitectura: V12.18 - Migración de Edición de Perfil a Centralizado authService.updateProfile y Estandarización CIMCO-UI V9.3
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
 import { useSocket } from '@/hooks/useSocket';
+import authService from '@/services/authService';
 import api from '@/config/api'; 
 import ModalCalificacion from '@/components/ModalCalificacion';
 import {
@@ -24,7 +25,8 @@ export default function HomeMotoparrillero() {
   // 📝 ESTADOS COMPLEMENTARIOS DE VEHÍCULO / PERFIL
   const [datosPerfil, setDatosPerfil] = useState({
     nombre: '',
-    telefono: '',
+    telefonoMovil: '',
+    foto_perfil: '',
     placa: '',
     motoModelo: ''
   });
@@ -75,7 +77,8 @@ export default function HomeMotoparrillero() {
         // Sincronizar datos locales para el formulario de edición
         setDatosPerfil({
           nombre: nombreCompleto,
-          telefono: data?.telefono || '',
+          telefonoMovil: data?.telefonoMovil || data?.telefono || '',
+          foto_perfil: data?.foto_perfil || data?.photoURL || '',
           placa: data?.placa || data?.vehiculo?.placa || '',
           motoModelo: data?.motoModelo || data?.vehiculo?.modelo || ''
         });
@@ -88,7 +91,7 @@ export default function HomeMotoparrillero() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 2. ACTUALIZACIÓN MUTABLE DE DATOS (FIRESTORE)
+  // 2. ACTUALIZACIÓN MUTABLE DE DATOS CENTRALIZADA (authService)
   // ==================================================================
   const handleGuardarPerfil = async (e) => {
     e.preventDefault();
@@ -96,13 +99,18 @@ export default function HomeMotoparrillero() {
     setGuardandoPerfil(true);
     
     try {
+      // 1. Actualización centralizada de credenciales y perfil básico
+      await authService.updateProfile({
+        nombre: datosPerfil.nombre,
+        telefonoMovil: datosPerfil.telefonoMovil,
+        foto_perfil: datosPerfil.foto_perfil
+      });
+
+      // 2. Actualización de atributos de vehículo específicos en la colección Firestore
       const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
       const conductorRef = doc(db, pathConductores, user.uid);
       
       await updateDoc(conductorRef, {
-        nombre: datosPerfil.nombre,
-        nombreCompleto: datosPerfil.nombre,
-        telefono: datosPerfil.telefono,
         placa: datosPerfil.placa.toUpperCase(),
         motoModelo: datosPerfil.motoModelo,
         fechaActualizacion: serverTimestamp()
@@ -388,12 +396,12 @@ export default function HomeMotoparrillero() {
     <div className="min-h-screen bg-[#0e0e11] text-zinc-100 font-mono antialiased pb-28 relative selection:bg-cyan-400 selection:text-black">
       
       {/* 🔝 ENCABEZADO DE CONTROL MAESTRO */}
-      <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
+      <header className="sticky top-0 z-50 bg-[#121214]/80 backdrop-blur-md border-b border-white/5 p-4 flex justify-between items-center shadow-lg">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button 
             onClick={() => setMostrarModalPerfil(true)}
             title="Editar Datos de Perfil / Vehículo"
-            className="p-2 bg-cyan-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] select-none shrink-0 rounded-none hover:bg-cyan-300 transition-colors active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+            className="p-2 bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-lg font-black text-base flex items-center justify-center select-none shrink-0 hover:bg-cyan-500/30 transition-colors active:scale-95"
           >
             🛵
           </button>
@@ -411,14 +419,14 @@ export default function HomeMotoparrillero() {
         <div className="flex items-center gap-2 shrink-0 ml-2">
           <button
             onClick={() => setIsOnline(!isOnline)}
-            className={`px-3 py-1.5 rounded-none font-black text-[10px] uppercase tracking-wider border-2 border-black transition-all duration-150 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none shadow-[2px_2px_0px_0px_#000] ${
-              isOnline ? 'bg-emerald-400 text-black font-black' : 'bg-zinc-800 text-zinc-400 border-black hover:bg-zinc-700'
+            className={`px-3 py-1.5 rounded-lg font-black text-[10px] uppercase tracking-wider border transition-all duration-150 active:scale-95 ${
+              isOnline ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black' : 'bg-zinc-800/60 text-zinc-400 border-white/5 hover:bg-zinc-800'
             }`}
           >
             {isOnline ? 'ONLINE' : 'OFFLINE'}
           </button>
 
-          <div className="flex items-center gap-2 bg-black border-2 border-black px-2.5 py-1.5 rounded-none shadow-[2px_2px_0px_0px_#000]">
+          <div className="flex items-center gap-2 bg-[#121214]/80 border border-white/5 px-2.5 py-1.5 rounded-lg">
             <Wallet size={13} className="text-cyan-400" strokeWidth={2.5} />
             <span className="text-[10px] font-black text-zinc-200">
               {walletLoading ? '...' : `$${Number(saldoVivo).toLocaleString('es-CO')}`}
@@ -427,7 +435,7 @@ export default function HomeMotoparrillero() {
 
           <button 
             onClick={handleCerrarSesion}
-            className="p-2 bg-red-500 text-black border-2 border-black rounded-none hover:bg-red-600 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all flex items-center justify-center shadow-[2px_2px_0px_0px_#000] shrink-0"
+            className="p-2 bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/30 active:scale-95 transition-all flex items-center justify-center shrink-0"
           >
             <LogOut size={13} strokeWidth={3} />
           </button>
@@ -436,8 +444,8 @@ export default function HomeMotoparrillero() {
 
       {/* BANNER DE ALERTA DE SALDO */}
       {Number(saldoVivo) < 2000 && !walletLoading && (
-        <div className="m-4 p-3 bg-red-500 text-black border-4 border-black rounded-none flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider shadow-[4px_4px_0px_0px_#000] relative z-10 animate-pulse">
-          <AlertCircle size={16} strokeWidth={2.5} className="shrink-0" />
+        <div className="m-4 p-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider relative z-10 animate-pulse">
+          <AlertCircle size={16} strokeWidth={2.5} className="shrink-0 text-red-400" />
           <span>Malla Bloqueada: Requiere Saldo Mínimo ($2.000 COP)</span>
         </div>
       )}
@@ -446,8 +454,8 @@ export default function HomeMotoparrillero() {
       <main className="p-4 z-10 relative max-w-md mx-auto space-y-6">
         
         {!isOnline && (
-          <div className="text-center p-6 bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none my-8">
-            <div className="w-12 h-12 bg-black border-2 border-black rounded-none flex items-center justify-center mx-auto mb-4 shadow-[2px_2px_0px_0px_#000]">
+          <div className="text-center p-6 bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-xl my-8">
+            <div className="w-12 h-12 bg-zinc-800/50 border border-white/5 rounded-lg flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="text-zinc-500" size={20} strokeWidth={2.5} />
             </div>
             <p className="text-zinc-300 text-xs leading-relaxed uppercase font-bold tracking-wide">
@@ -460,20 +468,20 @@ export default function HomeMotoparrillero() {
           <>
             {/* CASO 1: ADJUDICACIÓN DE ORDEN ACTIVA */}
             {servicioActivo ? (
-              <div className="bg-zinc-900 p-5 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none space-y-4">
-                <div className="flex justify-between items-center border-b-4 border-black pb-3">
+              <div className="bg-[#121214]/80 backdrop-blur-md p-5 border border-white/5 rounded-xl space-y-4">
+                <div className="flex justify-between items-center border-b border-white/5 pb-3">
                   <div className="flex items-center gap-1.5">
                     <TrendingUp className="text-emerald-400 animate-pulse" size={14} strokeWidth={3} />
-                    <span className="text-[9px] font-black tracking-widest bg-yellow-400 text-black border-2 border-black px-2 py-0.5 uppercase">
+                    <span className="text-[9px] font-black tracking-widest bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded uppercase">
                       ESTADO: {servicioActivo.estado}
                     </span>
                   </div>
-                  <span className="text-[9px] font-bold bg-black text-zinc-400 px-2 py-0.5 border border-zinc-800">
+                  <span className="text-[9px] font-bold bg-zinc-800/60 text-zinc-400 px-2 py-0.5 border border-white/5 rounded">
                     ID: ...{String(servicioActivo?.id || "").slice(-6).toUpperCase()}
                   </span>
                 </div>
 
-                <div className="space-y-3 text-xs bg-black/40 p-3 border-2 border-black">
+                <div className="space-y-3 text-xs bg-black/40 p-3 border border-white/5 rounded-lg">
                   <div className="flex items-start gap-2.5">
                     <MapPin size={14} className="text-emerald-400 mt-0.5 shrink-0" strokeWidth={2.5} />
                     <div>
@@ -492,12 +500,12 @@ export default function HomeMotoparrillero() {
                     </div>
                   </div>
 
-                  <div className="border-t border-4 border-black pt-3 mt-2 flex justify-between items-center">
+                  <div className="border-t border-white/5 pt-3 mt-2 flex justify-between items-center">
                     <div className="flex items-center gap-1.5 text-zinc-400 text-[10px] uppercase font-black">
-                      <CircleDollarSign size={14} className="text-yellow-400" strokeWidth={2.5} />
+                      <CircleDollarSign size={14} className="text-amber-400" strokeWidth={2.5} />
                       <span>Liquidación:</span>
                     </div>
-                    <span className="text-xs font-black text-white bg-black border border-zinc-800 px-2.5 py-1">
+                    <span className="text-xs font-black text-white bg-zinc-800/80 border border-white/5 px-2.5 py-1 rounded">
                       ${Number(servicioActivo.valor || 0).toLocaleString('es-CO')} COP
                     </span>
                   </div>
@@ -507,7 +515,7 @@ export default function HomeMotoparrillero() {
                   {servicioActivo.estado === 'ACEPTADO' && (
                     <button 
                       onClick={() => transicionarEstadoViaje('EN_SITIO')}
-                      className="w-full bg-cyan-400 hover:bg-cyan-500 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                      className="w-full bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-xs font-black uppercase py-3.5 border border-cyan-500/30 rounded-lg tracking-widest active:scale-[0.98] transition-all"
                     >
                       Confirmar: Llegada al Sitio
                     </button>
@@ -515,7 +523,7 @@ export default function HomeMotoparrillero() {
                   {servicioActivo.estado === 'EN_SITIO' && (
                     <button 
                       onClick={() => transicionarEstadoViaje('EN_VIAJE')}
-                      className="w-full bg-emerald-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                      className="w-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs font-black uppercase py-3.5 border border-emerald-500/30 rounded-lg tracking-widest active:scale-[0.98] transition-all"
                     >
                       Iniciar Ruta Transaccional
                     </button>
@@ -523,7 +531,7 @@ export default function HomeMotoparrillero() {
                   {servicioActivo.estado === 'EN_VIAJE' && (
                     <button 
                       onClick={() => transicionarEstadoViaje('FINALIZADO')}
-                      className="w-full bg-yellow-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                      className="w-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-xs font-black uppercase py-3.5 border border-amber-500/30 rounded-lg tracking-widest active:scale-[0.98] transition-all"
                     >
                       Finalizar y Cobrar Servicio
                     </button>
@@ -537,7 +545,7 @@ export default function HomeMotoparrillero() {
                         setServicioActivo(null);
                         setMostrarModalCalificacion(true);
                       }}
-                      className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[9px] uppercase py-1.5 border-2 border-black rounded-none font-bold tracking-wider mt-2"
+                      className="w-full bg-zinc-800/60 hover:bg-zinc-800 text-zinc-400 text-[9px] uppercase py-1.5 border border-white/5 rounded-lg font-bold tracking-wider mt-2"
                     >
                       [DEV] Simular Cierre Forzado
                     </button>
@@ -548,17 +556,17 @@ export default function HomeMotoparrillero() {
               <>
                 {/* CASO 2: CARD INBOUND SOCKET */}
                 {solicitudViaje && (
-                  <div className="w-full bg-zinc-900 border-4 border-yellow-400 p-5 rounded-none shadow-[6px_6px_0px_0px_#000] space-y-4 mb-6 animate-pulse">
-                    <div className="flex justify-between items-start border-b-2 border-black pb-3">
-                      <span className="bg-yellow-400 text-black text-[9px] font-black px-2 py-1 border border-black uppercase tracking-wider">
+                  <div className="w-full bg-[#121214]/80 backdrop-blur-md border border-amber-500/40 p-5 rounded-xl space-y-4 mb-6 animate-pulse">
+                    <div className="flex justify-between items-start border-b border-white/5 pb-3">
+                      <span className="bg-amber-500/20 text-amber-400 text-[9px] font-black px-2 py-1 border border-amber-500/30 rounded uppercase tracking-wider">
                         SOLICITUD PARRILLERO
                       </span>
-                      <span className="text-sm font-black text-emerald-400 bg-black px-2.5 py-0.5 border border-zinc-800">
+                      <span className="text-sm font-black text-emerald-400 bg-zinc-800/80 px-2.5 py-0.5 border border-white/5 rounded">
                         ${Number(solicitudViaje?.tarifa || solicitudViaje?.valor || 0).toLocaleString('es-CO')}
                       </span>
                     </div>
                     
-                    <div className="space-y-2 text-xs text-zinc-300 bg-black/40 p-3 border-2 border-black">
+                    <div className="space-y-2 text-xs text-zinc-300 bg-black/40 p-3 border border-white/5 rounded-lg">
                       <p className="flex items-start gap-1.5">
                         <span className="text-emerald-400 font-black shrink-0">📍</span>
                         <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Recogida:</strong> {solicitudViaje?.origenTexto || solicitudViaje?.origenDireccion || "Ubicación Georeferenciada"}</span>
@@ -574,14 +582,14 @@ export default function HomeMotoparrillero() {
                       <button
                         onClick={rechazarViaje}
                         disabled={loading}
-                        className="bg-zinc-700 hover:bg-zinc-600 text-zinc-200 py-2 rounded-none font-bold text-xs uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                        className="bg-zinc-800/60 hover:bg-zinc-800 text-zinc-300 py-2 rounded-lg font-bold text-xs uppercase tracking-wider border border-white/5 active:scale-95 transition-all disabled:opacity-50"
                       >
                         Ignorar
                       </button>
                       <button
                         onClick={aceptarViaje}
                         disabled={loading}
-                        className="bg-yellow-400 hover:bg-yellow-500 text-black py-2 rounded-none font-black text-xs uppercase tracking-widest border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                        className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 py-2 rounded-lg font-black text-xs uppercase tracking-widest border border-amber-500/30 active:scale-95 transition-all disabled:opacity-50"
                       >
                         {loading ? 'ASIGNANDO...' : '¡ACEPTAR!'}
                       </button>
@@ -591,25 +599,25 @@ export default function HomeMotoparrillero() {
 
                 {/* CASO 3: RADAR GENERAL FIRESTORE */}
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between px-1 border-b-2 border-black pb-2">
+                  <div className="flex items-center justify-between px-1 border-b border-white/5 pb-2">
                     <div className="flex items-center gap-2">
                       <TrendingUp size={14} className="text-cyan-400" strokeWidth={2.5} />
                       <h2 className="text-[10px] uppercase font-black tracking-widest text-zinc-400">
                         Malla Radar ({ofertasDisponibles.length})
                       </h2>
                     </div>
-                    <span className="text-[9px] text-zinc-400 bg-zinc-900 px-2 py-1 border-2 border-black flex items-center gap-1.5 font-bold shadow-[1px_1px_0px_0px_#000]">
+                    <span className="text-[9px] text-zinc-400 bg-[#121214]/80 px-2 py-1 border border-white/5 rounded-lg flex items-center gap-1.5 font-bold">
                       <MapPin size={11} className="text-red-400" strokeWidth={3} />
                       GPS: {coordenadas?.lng?.toFixed(4)}, {coordenadas?.lat?.toFixed(4)}
                     </span>
                   </div>
 
                   {cargandoOfertas ? (
-                    <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] flex items-center justify-center gap-3">
+                    <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-xl flex items-center justify-center gap-3">
                       <Loader size={14} className="animate-spin text-cyan-400" /> Sincronizando malla...
                     </div>
                   ) : ofertasDisponibles.length === 0 ? (
-                    <div className="bg-zinc-900 border-4 border-black rounded-none p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black shadow-[4px_4px_0px_0px_#000]">
+                    <div className="bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-xl p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black">
                       Escuchando solicitudes en La Jagua de Ibirico...
                     </div>
                   ) : (
@@ -617,16 +625,16 @@ export default function HomeMotoparrillero() {
                       {ofertasDisponibles.map((oferta) => (
                         <div 
                           key={oferta.id} 
-                          className="bg-zinc-900 p-4 border-4 border-black rounded-none flex flex-col gap-3 shadow-[4px_4px_0px_0px_#000] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#000] transition-all duration-150"
+                          className="bg-[#121214]/80 backdrop-blur-md p-4 border border-white/5 rounded-xl flex flex-col gap-3 hover:border-white/10 transition-all duration-150"
                         >
                           <div className="text-xs space-y-2">
-                            <div className="flex items-center justify-between border-b-2 border-black pb-2">
-                              <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest bg-black px-2 py-0.5 border border-zinc-800">
+                            <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                              <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest bg-cyan-500/10 px-2 py-0.5 border border-cyan-500/20 rounded">
                                 {oferta.categoria || 'PARRILLERO'}
                               </span>
                               <span className="font-black text-emerald-400 text-sm">${Number(oferta.valor || 0).toLocaleString('es-CO')}</span>
                             </div>
-                            <div className="space-y-1 bg-black/30 p-2 border border-zinc-800">
+                            <div className="space-y-1 bg-black/30 p-2 border border-white/5 rounded-lg">
                               <p className="text-zinc-300 font-bold text-[11px] truncate flex items-center gap-1.5">
                                 <MapPin size={12} className="text-emerald-400 shrink-0" strokeWidth={2.5} /> {oferta.origenDireccion || "Ubicación Base"}
                               </p>
@@ -639,7 +647,7 @@ export default function HomeMotoparrillero() {
                             <button 
                               onClick={() => capturarOferta(oferta.id)}
                               disabled={Number(saldoVivo) < 2000}
-                              className="w-full bg-cyan-400 text-black disabled:bg-zinc-800 disabled:border-zinc-700 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-none uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                              className="w-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 disabled:bg-zinc-800/40 disabled:border-white/5 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-lg uppercase tracking-wider border border-cyan-500/30 active:scale-95 transition-all"
                             >
                               {Number(saldoVivo) < 2000 ? 'SALDO BLOQUEADO' : 'CAPTURAR OFERTA'}
                             </button>
@@ -655,18 +663,18 @@ export default function HomeMotoparrillero() {
         )}
       </main>
 
-      {/* 🛠️ MODAL BRUTALISTA DE AJUSTE DE DATOS PERSONALES / VEHÍCULO */}
+      {/* 🛠️ MODAL GLASSMORPHISM DE AJUSTE DE DATOS PERSONALES / VEHÍCULO */}
       {mostrarModalPerfil && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-zinc-900 border-4 border-black shadow-[8px_8px_0px_0px_#000] p-5 space-y-4 font-mono animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex justify-between items-center border-b-4 border-black pb-2">
+        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#121214]/90 border border-white/10 rounded-2xl p-5 space-y-4 font-mono animate-in fade-in zoom-in-95 duration-150 shadow-2xl">
+            <div className="flex justify-between items-center border-b border-white/5 pb-2">
               <div className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-widest">
                 <UserSquare2 size={16} className="text-cyan-400" />
                 <span>Perfil Operador</span>
               </div>
               <button 
                 onClick={() => setMostrarModalPerfil(false)}
-                className="text-[10px] font-black bg-zinc-800 border-2 border-black text-zinc-400 px-2 py-0.5 uppercase hover:bg-zinc-700 active:translate-x-[1px]"
+                className="text-[10px] font-black bg-zinc-800/60 border border-white/5 text-zinc-400 px-2 py-0.5 rounded uppercase hover:bg-zinc-800 active:scale-95 transition-all"
               >
                 Cerrar [X]
               </button>
@@ -680,7 +688,7 @@ export default function HomeMotoparrillero() {
                   required
                   value={datosPerfil.nombre}
                   onChange={(e) => setDatosPerfil({...datosPerfil, nombre: e.target.value})}
-                  className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-cyan-400 rounded-none placeholder-zinc-700 uppercase"
+                  className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700 uppercase"
                   placeholder="Ej: JUAN PÉREZ"
                 />
               </div>
@@ -690,10 +698,21 @@ export default function HomeMotoparrillero() {
                 <input 
                   type="tel" 
                   required
-                  value={datosPerfil.telefono}
-                  onChange={(e) => setDatosPerfil({...datosPerfil, telefono: e.target.value})}
-                  className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-cyan-400 rounded-none placeholder-zinc-700"
+                  value={datosPerfil.telefonoMovil}
+                  onChange={(e) => setDatosPerfil({...datosPerfil, telefonoMovil: e.target.value})}
+                  className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700"
                   placeholder="Ej: 3001234567"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">URL Foto de Perfil</label>
+                <input 
+                  type="url" 
+                  value={datosPerfil.foto_perfil}
+                  onChange={(e) => setDatosPerfil({...datosPerfil, foto_perfil: e.target.value})}
+                  className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700"
+                  placeholder="https://..."
                 />
               </div>
 
@@ -705,7 +724,7 @@ export default function HomeMotoparrillero() {
                     required
                     value={datosPerfil.placa}
                     onChange={(e) => setDatosPerfil({...datosPerfil, placa: e.target.value})}
-                    className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-cyan-400 rounded-none placeholder-zinc-700 uppercase"
+                    className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700 uppercase"
                     placeholder="Ej: XYZ123"
                   />
                 </div>
@@ -716,7 +735,7 @@ export default function HomeMotoparrillero() {
                     required
                     value={datosPerfil.motoModelo}
                     onChange={(e) => setDatosPerfil({...datosPerfil, motoModelo: e.target.value})}
-                    className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-cyan-400 rounded-none placeholder-zinc-700"
+                    className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700"
                     placeholder="Ej: Pulsar NS 200"
                   />
                 </div>
@@ -726,7 +745,7 @@ export default function HomeMotoparrillero() {
                 <button
                   type="submit"
                   disabled={guardandoPerfil}
-                  className="w-full bg-cyan-400 hover:bg-cyan-500 text-black font-black uppercase py-3 border-2 border-black tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                  className="w-full bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 font-black uppercase py-3 border border-cyan-500/30 rounded-lg tracking-widest active:scale-[0.98] transition-all disabled:opacity-50"
                 >
                   {guardandoPerfil ? 'GUARDANDO NODO...' : 'ACTUALIZAR DATOS'}
                 </button>
@@ -737,7 +756,7 @@ export default function HomeMotoparrillero() {
       )}
 
       {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR */}
-      <footer className="fixed bottom-0 left-0 w-full bg-zinc-900 border-t-4 border-black p-3 flex justify-around items-center z-50 shadow-[0_-4px_0px_0px_#000]">
+      <footer className="fixed bottom-0 left-0 w-full bg-[#121214]/80 backdrop-blur-md border-t border-white/5 p-3 flex justify-around items-center z-50">
         <button className="text-cyan-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95">
           <Navigation size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Radar</span>

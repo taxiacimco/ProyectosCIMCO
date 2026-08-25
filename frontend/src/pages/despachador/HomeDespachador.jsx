@@ -1,10 +1,9 @@
-// Versión Arquitectura: V19.2 - Integración de Canal de Empresa, Inyección de Solicitudes y Módulo de Pujas en Tiempo Real
+// Versión Arquitectura: V19.3 - Migración de ModalEditarPerfil a AjustesPerfil y Sincronización de Perfil de Central
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones con empresaId, calcomanía QR de autogestión,
  * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
- * Ajuste V19.2: Vinculación explícita del empresaId al emitir 'crearSolicitud', consumo reactivo de 'ofertas' desde el
- *               contexto de sockets y renderizado del panel de pujas en tiempo real con botón de asignación.
+ * Ajuste V19.3: Reemplazo de ModalEditarPerfil por AjustesPerfil con integración atómica de estado.
  */
 
 import React, { useEffect, useState } from "react";
@@ -22,9 +21,9 @@ import {
 import { formatHoraColombia } from "@/utils/dateFormatter";
 import { QRCodeSVG } from "qrcode.react"; 
 
-// 🗺️ IMPORTACIÓN DEL RADAR GPS OPERATIVO Y MODAL COMPARTIDO
+// 🗺️ IMPORTACIÓN DEL RADAR GPS OPERATIVO Y COMPONENTE DE AJUSTES DE PERFIL
 import MapaOperativo from "@/components/admin/MapaOperativo";
-import ModalEditarPerfil from "@/components/shared/ModalEditarPerfil";
+import AjustesPerfil from "@/components/shared/AjustesPerfil";
 
 const HomeDespachador = () => {
   // 🛡️ Guardas de Seguridad y Consumo del Contexto Centralizado
@@ -77,6 +76,35 @@ const HomeDespachador = () => {
   const cooperativaDespachador = datosOperativos.empresa || user?.cooperativa || user?.empresa || "";
   const empresaId = user?.empresaId || user?.empresa_id || user?.empresa || cooperativaDespachador || "";
   const terminalDespachador = datosOperativos.terminal || user?.terminal || user?.terminalOrigen || "";
+
+  // 🔄 MANEJADOR DE ACTUALIZACIÓN DE USUARIO DESDE AJUSTESPERFIL
+  const handleUpdateUser = (updatedUser) => {
+    console.log("Perfil de central sincronizado en sesión:", updatedUser);
+    if (updatedUser) {
+      setDatosOperativos(prev => ({
+        ...prev,
+        nombre: updatedUser?.fullName || updatedUser?.nombre || prev.nombre,
+        telefono: updatedUser?.telefonoMovil || updatedUser?.telefono || prev.telefono,
+        empresa: updatedUser?.empresa || updatedUser?.cooperativa || prev.empresa,
+        terminal: updatedUser?.terminal || updatedUser?.terminalOrigen || prev.terminal,
+        placaVehiculo: updatedUser?.placaVehiculo || prev.placaVehiculo,
+        numeroInterno: updatedUser?.numeroInterno || prev.numeroInterno
+      }));
+
+      if (setUser && typeof setUser === "function") {
+        setUser(prev => ({
+          ...prev,
+          ...updatedUser,
+          rol: updatedUser?.rol || prev?.rol,
+          role: updatedUser?.role || prev?.role,
+          cooperativa: updatedUser?.cooperativa || updatedUser?.empresa || prev?.cooperativa,
+          empresa: updatedUser?.empresa || updatedUser?.cooperativa || prev?.empresa,
+          empresaId: updatedUser?.empresaId || updatedUser?.empresa_id || prev?.empresaId,
+          terminal: updatedUser?.terminal || updatedUser?.terminalOrigen || prev?.terminal
+        }));
+      }
+    }
+  };
 
   // 1. ESCUCHA REACTIVA DE PERFIL Y PARÁMETROS EN FIRESTORE
   useEffect(() => {
@@ -647,37 +675,10 @@ const HomeDespachador = () => {
       </div>
 
       {/* MODAL GLOBAL PARA CONFIGURAR LA CENTRAL / PERFIL */}
-      <ModalEditarPerfil 
+      <AjustesPerfil 
         isOpen={isProfileModalOpen} 
         onClose={() => setIsProfileModalOpen(false)} 
-        user={{ ...user, ...datosOperativos }}
-        onUpdateSuccess={(updatedUser) => {
-          console.log("Perfil de central sincronizado en sesión:", updatedUser);
-          if (updatedUser) {
-            setDatosOperativos(prev => ({
-              ...prev,
-              nombre: updatedUser?.fullName || updatedUser?.nombre || prev.nombre,
-              telefono: updatedUser?.telefonoMovil || updatedUser?.telefono || prev.telefono,
-              empresa: updatedUser?.empresa || updatedUser?.cooperativa || prev.empresa,
-              terminal: updatedUser?.terminal || updatedUser?.terminalOrigen || prev.terminal,
-              placaVehiculo: updatedUser?.placaVehiculo || prev.placaVehiculo,
-              numeroInterno: updatedUser?.numeroInterno || prev.numeroInterno
-            }));
-
-            if (setUser && typeof setUser === "function") {
-              setUser(prev => ({
-                ...prev,
-                ...updatedUser,
-                rol: updatedUser?.rol || prev?.rol,
-                role: updatedUser?.role || prev?.role,
-                cooperativa: updatedUser?.cooperativa || updatedUser?.empresa || prev?.cooperativa,
-                empresa: updatedUser?.empresa || updatedUser?.cooperativa || prev?.empresa,
-                empresaId: updatedUser?.empresaId || updatedUser?.empresa_id || prev?.empresaId,
-                terminal: updatedUser?.terminal || updatedUser?.terminalOrigen || prev?.terminal
-              }));
-            }
-          }
-        }}
+        onUpdateSuccess={handleUpdateUser}
       />
     </div>
   );

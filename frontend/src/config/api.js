@@ -1,8 +1,7 @@
-// Versión Arquitectura: V24.2 - Configuración Dinámica de BaseURL en Axios con Fallback Anti-Undefined
+// Versión Arquitectura: V24.3 - Configuración Dinámica de Axios con Soporte FormData y Guardas JWT
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
- * Misión: Centralización de Axios, inyección de cabeceras anti-caché, interceptores JWT multi-capa y gestión global de errores HTTP (401, 429, 500).
- * Ajuste V24.2: Asegurar la resolución dinámica de import.meta.env.VITE_API_URL como baseURL en Axios con guardas anti-undefined.
+ * Misión: Centralización de Axios, inyección de cabeceras anti-caché, interceptores JWT multi-capa, gestión de FormData y manejo global de errores HTTP.
  */
 
 import axios from 'axios';
@@ -44,11 +43,16 @@ export const api = axios.create({
     withCredentials: true
 });
 
-// 🛡️ INTERCEPTOR DE PETICIONES: INYECCIÓN MULTI-CAPA DE FIRMA JWT (CIMCO-GUARD)
+// 🛡️ INTERCEPTOR DE PETICIONES: INYECCIÓN MULTI-CAPA DE FIRMA JWT Y SOPORTE FORMDATA (CIMCO-GUARD)
 api.interceptors.request.use(
     (config) => {
         try {
             config.headers = config.headers || {};
+
+            // 📂 SOPORTE FORMDATA: Si el payload es un FormData, liberamos el Content-Type por defecto
+            if (config.data instanceof FormData) {
+                delete config.headers['Content-Type'];
+            }
 
             if (typeof window !== 'undefined' && window.localStorage) {
                 // 1. Búsqueda primaria de token en almacenamiento

@@ -1,17 +1,17 @@
-// Versión Arquitectura: V21.35 - Declaración de Controlador logoutHandler y Registro de Ruta POST /logout Anti-CIMCO-ROUTE-MISS
+// Versión Arquitectura: V21.37 - Estandarización de Endpoint PUT /update-profile y /actualizar-perfil con VerificarTokenJWT e Interceptor Multipart
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
- * Misión: Enrutador perimetral de autenticación con mapeo completo de subrutas HTTP POST y PUT/PATCH bajo el prefijo /api/auth.
- * Integridad: Garantiza la coexistencia limpia de los aliases estándar (/forgot-password, /reset-password, /check-phone, /logout) con los endpoints
- * preexistentes (/solicitar-otp, /restablecer, /verificar-telefono), preservando el middleware de carga híbrida Multipart/Multer alineado
- * con las llaves requeridas por el cliente (documento_cedula, documento_licencia, doc_tarjeta, doc_identificacion, foto_perfil),
- * la validación de payloads, la trazabilidad de peticiones y las guardas anti-crash ESM.
+ * Misión: Enrutador perimetral de autenticación con mapeo completo de subrutas HTTP POST, PUT y PATCH bajo el prefijo /api/auth.
+ * Integridad: Define y estandariza las rutas de actualización de perfil (/update-profile y /actualizar-perfil) integrando
+ * la verificación de seguridad JWT (verificarTokenJWT / verificarToken) y el middleware Multer de procesamiento multipart híbrido,
+ * garantizando la coexistencia de aliases preexistentes (/solicitar-otp, /restablecer, /verificar-telefono, /check-phone), la validación anti-crash ESM
+ * y la recepción fluida de binarios de avatar y documentos.
  */
 
 import express from 'express'; 
 import multer from 'multer'; 
 import * as authController from './auth.controller.js';
-import { validateRegisterPayload, verificarToken } from '../../middleware/auth.middleware.js';
+import * as authMiddleware from '../../middleware/auth.middleware.js';
 
 const router = express.Router();
 
@@ -64,14 +64,17 @@ const interceptorCargaHibrida = (req, res, next) => {
     }
 };
 
-// 🛡️ RESOLUCIÓN DINÁMICA DE CONTROLADORES (ANTI-CRASH ESM)
+// 🛡️ RESOLUCIÓN DINÁMICA DE MIDDLEWARES Y CONTROLADORES (ANTI-CRASH ESM)
+const validateRegisterPayload = authMiddleware?.validateRegisterPayload || ((req, res, next) => next());
+const verificarTokenJWT = authMiddleware?.verificarTokenJWT || authMiddleware?.verificarToken || ((req, res, next) => next());
+
 const loginHandler = authController?.login;
 const registerHandler = authController?.register;
 const solicitarOTPHandler = authController?.forgotPassword || authController?.solicitarOTP;
 const restablecerHandler = authController?.resetPassword || authController?.verificarOTPyRestablecer;
 const verificarTelefonoHandler = authController?.verificarTelefono || authController?.checkPhone;
 const checkPhoneHandler = authController?.checkPhone || authController?.verificarTelefono;
-const updateProfileHandler = authController?.updateProfile;
+const updateProfileHandler = authController?.actualizarPerfil || authController?.updateProfile;
 const logoutHandler = authController?.logout;
 
 /**
@@ -115,12 +118,15 @@ if (typeof checkPhoneHandler === 'function') {
 
 /**
  * 🔄 GESTIÓN DE PERFIL DE USUARIO (Rutas Protegidas con Alias de Compatibilidad)
+ * Integra middleware de autenticación por Token JWT y Multer para procesamiento Multipart/Form-Data.
  */
 if (typeof updateProfileHandler === 'function') {
-    router.put('/update-profile', verificarToken, interceptorCargaHibrida, updateProfileHandler);
-    router.put('/perfil', verificarToken, interceptorCargaHibrida, updateProfileHandler);
-    router.put('/profile', verificarToken, interceptorCargaHibrida, updateProfileHandler);
-    router.patch('/update-profile', verificarToken, interceptorCargaHibrida, updateProfileHandler);
+    router.put('/update-profile', verificarTokenJWT, interceptorCargaHibrida, updateProfileHandler);
+    router.put('/actualizar-perfil', verificarTokenJWT, interceptorCargaHibrida, updateProfileHandler);
+    router.put('/perfil', verificarTokenJWT, interceptorCargaHibrida, updateProfileHandler);
+    router.put('/profile', verificarTokenJWT, interceptorCargaHibrida, updateProfileHandler);
+    router.patch('/update-profile', verificarTokenJWT, interceptorCargaHibrida, updateProfileHandler);
+    router.patch('/actualizar-perfil', verificarTokenJWT, interceptorCargaHibrida, updateProfileHandler);
 }
 
 export default router;
