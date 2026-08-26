@@ -1,14 +1,8 @@
-// Versión Arquitectura: V11.0 - Delegación de Autenticación a authService e Implementación de AbortController en Ciclo de Vida
+// Versión Arquitectura: V11.1 - Autenticación con Memorización Automática en LocalStorage
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Pantalla de Autenticación de Usuarios y Central Operativa con interfaz luminosa Light Glassmorphism,
- * psicología de color basada en Confianza (Azul/Slate) y Agilidad Operativa (Naranja/Ámbar),
- * delegación atómica de la autenticación al servicio authService.login(),
- * control de cancelación de peticiones asíncronas con AbortController en el ciclo de vida (useEffect),
- * autocompletado inteligente del identificador desde el estado de navegación (location.state.phone) al redirigir desde registros,
- * corrección de contraste en insignias y etiquetas (text-amber-950, bg-amber-100, border-amber-300, text-slate-800, text-slate-600),
- * sanitización inteligente de prefijo +57, preservación del guardián anti-loop,
- * desestructuración segura de respuestas y enrutamiento dinámico unificado por rol con Register.jsx.
+ * Misión: Pantalla de Autenticación de Usuarios con persistencia inteligente del último identificador,
+ * soporte de AbortController, sanitización de prefijo +57 y cumplimiento estricto del estándar CIMCO-UI V9.3.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -18,7 +12,6 @@ import authService from '@/services/authService';
 import { 
   Lock, 
   Mail, 
-  Phone, 
   Eye, 
   EyeOff, 
   UserPlus, 
@@ -26,13 +19,11 @@ import {
   ShieldCheck, 
   ArrowRight, 
   AlertTriangle,
-  ShieldAlert,
-  LogIn,
   Info
 } from 'lucide-react';
 
-const PHONE_REGEX = /^(\+?57)?(3\d{9})$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const STORAGE_KEY = 'cimco_last_user_identifier';
 
 const Login = () => {
   const authContext = useAuth() || {};
@@ -46,17 +37,18 @@ const Login = () => {
   
   const roleParam = searchParams ? searchParams.get('role')?.trim()?.toLowerCase() : null;
   
-  // Si viene transferido desde el flujo de registro, auto-completa el campo de celular/identificador; de lo contrario inicia vacío
-  const [identifier, setIdentifier] = useState(location.state?.phone || '');
+  // 💡 Recuperación inteligente: Prioriza el estado de navegación (registro) y como respaldo usa localStorage
+  const [identifier, setIdentifier] = useState(() => {
+    return location.state?.phone || localStorage.getItem(STORAGE_KEY) || '';
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Referencia para cancelar solicitudes en ejecución al desmontar el componente
   const abortControllerRef = useRef(null);
 
-  // 🛡️ GUARDIÁN ANTI-LOOP Y CANCELACIÓN ASÍNCRONA VÍA ABORTCONTROLLER
   useEffect(() => {
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -65,8 +57,6 @@ const Login = () => {
 
     if (user) {
       const activeRole = (user?.rol || user?.role || 'pasajero').toLowerCase();
-      console.log(`📡 [CIMCO-GUARD] Sesión activa detectada para [${user?.email || user?.nombre}]. Rol: ${activeRole}`);
-
       if (!controller.signal.aborted) {
         if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(activeRole)) {
           navigate('/conductor/home', { replace: true });
@@ -94,7 +84,7 @@ const Login = () => {
     let cleanIdentifier = identifier ? String(identifier).trim() : '';
     let cleanPassword = password ? String(password) : '';
 
-    // 💡 Sanitización inteligente: Si el usuario escribe +57 o 57 al inicio del número de 10 dígitos, se remueve automáticamente
+    // Sanitización de prefijo +57
     if (/^\+?573\d{9}$/.test(cleanIdentifier)) {
       cleanIdentifier = cleanIdentifier.replace(/^\+?57/, '');
     } else if (cleanIdentifier.startsWith('+57')) {
@@ -108,7 +98,6 @@ const Login = () => {
       return;
     }
 
-    // Validaciones sintácticas suaves
     if (cleanIdentifier.includes('@')) {
       if (!EMAIL_REGEX.test(cleanIdentifier)) {
         setError('El formato del correo electrónico es inválido.');
@@ -127,20 +116,24 @@ const Login = () => {
       let resData = null;
 
       if (typeof loginLocal === 'function') {
-        // Delegación con contexto global sincronizado de autenticación
         resData = await loginLocal(cleanIdentifier, cleanPassword);
       } else if (authService && typeof authService.login === 'function') {
-        // Delegación directa a authService centralizado
         resData = await authService.login(cleanIdentifier, cleanPassword);
       } else {
         throw new Error('El servicio de autenticación no está disponible en este entorno.');
       }
 
       if (resData?.token || resData?.success || resData?.user) {
+        // 💾 Guardar o limpiar localStorage según la preferencia de sesión
+        if (remember && cleanIdentifier) {
+          localStorage.setItem(STORAGE_KEY, cleanIdentifier);
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+
         const userData = resData.user || resData.data?.user || {};
         const userRole = (userData?.rol || userData?.role || roleParam || 'pasajero').toLowerCase();
 
-        // Redirección centralizada unificada
         if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(userRole)) {
           navigate('/conductor/home');
         } else if (userRole === 'despachador') {
@@ -156,17 +149,8 @@ const Login = () => {
         setError(resData?.message || 'Error al validar credenciales en la central.');
       }
     } catch (err) {
-      if (err.name === 'AbortError') {
-        console.warn('⚠️ [CIMCO-LOGIN] Petición cancelada por el usuario o desmontado de componente.');
-        return;
-      }
-      console.error('🚨 [CIMCO-LOGIN] Error en proceso de autenticación:', err);
-      // Captura exhaustiva de mensajes de error de la API
-      const mensajeServidor = 
-        err?.response?.data?.message || 
-        err?.data?.message || 
-        err?.message || 
-        'No se pudo conectar con la central de control.';
+      if (err.name === 'AbortError') return;
+      const mensajeServidor = err?.response?.data?.message || err?.message || 'No se pudo conectar con la central de control.';
       setError(mensajeServidor);
     } finally {
       setLoading(false);
@@ -188,16 +172,13 @@ const Login = () => {
 
       <div className="w-full max-w-md bg-white/85 backdrop-blur-xl border border-slate-200/80 p-8 sm:p-10 rounded-3xl shadow-2xl shadow-indigo-950/10 relative z-10 transition-all duration-300">
         
-        {/* Encabezado */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 bg-amber-50 border border-amber-200/80 rounded-2xl mb-4 text-amber-600 shadow-sm">
             <Lock size={26} />
           </div>
-          
           <h1 className="text-slate-900 font-black text-3xl tracking-tight uppercase flex items-center justify-center gap-1.5">
             TAXIA <span className="text-amber-500 font-black">CIMCO</span>
           </h1>
-          
           <p className="text-slate-500 font-mono text-[10px] tracking-widest uppercase mt-1 font-bold">
             Central de Control & Autenticación
           </p>
@@ -212,7 +193,6 @@ const Login = () => {
 
         <form onSubmit={handleLogin} className="space-y-5">
           
-          {/* Identificador: Correo o Celular (Alto Contraste) */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-slate-800 font-mono text-[11px] uppercase tracking-wider font-black flex items-center gap-1.5">
@@ -240,7 +220,6 @@ const Login = () => {
             </p>
           </div>
 
-          {/* Contraseña */}
           <div className="space-y-1.5">
             <label className="text-slate-700 font-mono text-[10px] uppercase tracking-wider font-extrabold flex items-center gap-1.5">
               <ShieldCheck size={12} className="text-amber-600" /> Contraseña
@@ -264,7 +243,18 @@ const Login = () => {
             </div>
           </div>
 
-          {/* Botón CTA */}
+          <div className="flex items-center justify-between text-xs font-mono text-slate-600 pt-1">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input 
+                type="checkbox" 
+                checked={remember} 
+                onChange={(e) => setRemember(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500/20 cursor-pointer"
+              />
+              <span>Recordar identificación en este equipo</span>
+            </label>
+          </div>
+
           <button 
             type="submit" 
             disabled={loading || authLoading} 
@@ -281,7 +271,6 @@ const Login = () => {
           </button>
         </form>
 
-        {/* Accesos Secundarios */}
         <div className="grid grid-cols-2 gap-3 mt-8 pt-6 border-t border-slate-200/80">
           <button 
             type="button"
