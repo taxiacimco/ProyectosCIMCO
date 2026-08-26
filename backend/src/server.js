@@ -1,11 +1,9 @@
-// Versión Arquitectura: V19.4 - Verificación y Validación de Enrutamiento Perimetral de Autenticación /api/auth (update-profile)
+// Versión Arquitectura: V19.8 - Corrección de Importación ES Modules para wallet.routes.js (Uso de Importación con Wildcard y Normalización)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte canónico
  * para entornos de desarrollo y producción (HTTP/HTTPS), habilitación de trust proxy para terminación SSL en Railway/Nginx,
- * orquestación de sockets, inyección de enrutadores del sistema (incluyendo el módulo de autenticación bajo /api/auth)
- * y registro resiliente del middleware centralizado de errores.
- * Ajuste V19.4: Confirmación y aseguramiento del montaje de authRoutes en /api/auth para exponer de forma pública la URL PUT /api/auth/update-profile.
+ * orquestación de sockets, inyección segura del enrutador wallet.routes mediante importación con namespace y respaldo in-line.
  */
 
 import 'dotenv/config';
@@ -23,7 +21,11 @@ import usuarioRoutes from './modules/usuarios/usuario.routes.js';
 import pasajeroRoutes from './modules/pasajeros/pasajero.routes.js';
 import cooperativaRoutes from './modules/cooperativas/cooperativa.routes.js';
 import excelRoutes from './modules/excel/excel.routes.js';
+import * as walletModuleExternal from './modules/billetera/wallet.routes.js';
 import { inicializarSockets } from '#modules/sockets/socket.manager.js';
+
+// Extracción segura del router de billetera (compatible con CommonJS export.module / default / router directo)
+const walletRoutesExternal = walletModuleExternal?.default || walletModuleExternal?.router || walletModuleExternal;
 
 // 🛡️ CARGA RESILIENTE DEL MIDDLEWARE DE ERRORES (ANTI-CRASH)
 let errorHandler = null;
@@ -76,7 +78,6 @@ const origenesPermitidos = [
 
 // 📡 EVALUADOR DE ORIGEN DINÁMICO CON INTEGRACIÓN DE CALLBACK
 const isOriginAllowed = (origin, callback) => {
-    // Permitir peticiones sin origen (como mobile apps, curl o Postman) o dentro de la lista / subdominios vercel
     if (!origin || origenesPermitidos.includes(origin) || /\.vercel\.app$/.test(origin) || process.env.NODE_ENV !== 'production') {
         callback(null, true);
     } else {
@@ -135,14 +136,12 @@ app.get('/api/usuarios/directorio-global', async (req, res) => {
       return res.status(503).json({ success: false, message: "Base de datos no inicializada" });
     }
 
-    // Consulta paralela a las 3 colecciones
     const [usuarios, pasajeros, conductores] = await Promise.all([
       db.collection('usuarios').find({}).toArray(),
       db.collection('pasajeros').find({}).toArray(),
       db.collection('conductores').find({}).toArray()
     ]);
 
-    // Normalización de datos para la interfaz
     const directorio = [
       ...usuarios.map(u => ({ 
         ...u, 
@@ -188,6 +187,62 @@ adminRoutes.get('/usuarios', async (req, res) => {
 });
 
 // ==================================================================\\
+// 💳 ENRUTADOR DE BILLETERA PERIMETRAL (HÍBRIDO: MÓDULO EXTERNO + FALLBACK IN-LINE)
+// ==================================================================\\
+const walletFallbackRouter = express.Router();
+
+walletFallbackRouter.get('/saldo/:uid', async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const db = mongoose.connection.db;
+        if (!db) return res.status(503).json({ success: false, message: "Base de datos no inicializada" });
+        
+        let userDoc = await db.collection('usuarios').findOne({ uid }) ||
+                      await db.collection('pasajeros').findOne({ uid }) ||
+                      await db.collection('conductores').findOne({ uid });
+
+        res.json({ 
+            success: true, 
+            saldo: userDoc?.saldo || userDoc?.billetera?.saldo || 0,
+            moneda: 'COP'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error?.message || error });
+    }
+});
+
+walletFallbackRouter.post('/recargar', async (req, res) => {
+    try {
+        const { uid, monto, metodo } = req.body;
+        if (!uid || !monto) {
+            return res.status(400).json({ success: false, message: "Parámetros incompletos (uid y monto requeridos)" });
+        }
+        const db = mongoose.connection.db;
+        if (!db) return res.status(503).json({ success: false, message: "Base de datos no inicializada" });
+
+        const filtro = { uid };
+        const actualizacion = { $inc: { saldo: Number(monto) } };
+
+        let resultado = await db.collection('pasajeros').updateOne(filtro, actualizacion);
+        if (resultado.matchedCount === 0) {
+            resultado = await db.collection('conductores').updateOne(filtro, actualizacion);
+        }
+        if (resultado.matchedCount === 0) {
+            resultado = await db.collection('usuarios').updateOne(filtro, actualizacion);
+        }
+
+        res.json({ 
+            success: true, 
+            message: "Recarga procesada exitosamente", 
+            montoRecargado: Number(monto),
+            metodo: metodo || 'NEQUI/PSE'
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error?.message || error });
+    }
+});
+
+// ==================================================================\\
 // 🚀 ENRUTADORES GENERALES DEL SISTEMA (PREFIJO BASE: /api)
 // ==================================================================\\
 app.use('/api/auth', authRoutes);
@@ -197,6 +252,15 @@ app.use('/api/usuarios', usuarioRoutes);
 app.use('/api/pasajeros', pasajeroRoutes);
 app.use('/api/cooperativas', cooperativaRoutes);
 app.use('/api/excel', excelRoutes);
+
+// Montaje integrado del módulo externo de billetera con respaldo híbrido anti-caídas
+app.use('/api/billetera', (req, res, next) => {
+    if (walletRoutesExternal && typeof walletRoutesExternal === 'function') {
+        return walletRoutesExternal(req, res, next);
+    }
+    return walletFallbackRouter(req, res, next);
+});
+
 app.use('/api/admin', adminRoutes);
 
 // ==================================================================\\
@@ -213,18 +277,15 @@ const io = new Server(httpServer, {
     pingInterval: 25000
 });
 
-// Invocación de la función inicializadora pasándole la instancia global io
 inicializarSockets(io);
 
 // ==================================================================\\
 // 🛡️ CAPA DE ERRORES CENTRALIZADA Y CONTROL DE RUTAS NO ENCONTRADAS
 // ==================================================================\\
-// 1. Registro condicional del middleware centralizado de errores si fue cargado exitosamente
 if (typeof errorHandler === 'function') {
     app.use(errorHandler);
 }
 
-// 2. Controladores de errores de resiliencia y concurrencia (Fallback Ininterrumpido)
 app.use((err, req, res, next) => {
     if (err && (err.name === 'MongoServerError' || err.code === 112 || (err.message && err.message.includes('WriteConflict')))) {
         logLocal(`💥 [CIMCO-CONCURRENCIA] Conflicto de escritura detectado bajo ráfaga masiva: ${err.message}`);
@@ -256,12 +317,10 @@ app.use((req, res) => {
 // ==================================================================\\
 const PORT = process.env.PORT || 8080;
 
-// 1. Iniciar el servidor HTTP inmediatamente para responder a Railway y Healthchecks
 httpServer.listen(PORT, '0.0.0.0', () => {
     logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo exitosamente en el puerto dinámico: ${PORT}`);
 });
 
-// 2. Proceso independiente de conexión a MongoDB Atlas
 const URI = process.env.MONGODB_URI;
 const opcionesConexion = {
     serverSelectionTimeoutMS: 10000,
