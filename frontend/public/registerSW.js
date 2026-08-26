@@ -1,4 +1,4 @@
-// Versión Arquitectura: V1.2 - Registro de Service Worker PWA con Auto-Update Replicado y Control de Ciclo de Vida
+// Versión Arquitectura: V1.3 - Registro de Service Worker PWA con Auto-Update Robusto y Control de Ciclo de Vida
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\public\registerSW.js
  * Misión: Registrar el Service Worker con alcance raíz ('/'), forzar la comprobación de actualizaciones de versión 
@@ -23,12 +23,13 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
             const installingWorker = registration.installing;
             if (installingWorker) {
               installingWorker.onstatechange = () => {
-                if (
-                  installingWorker.state === 'installed' && 
-                  navigator.serviceWorker.controller
-                ) {
-                  console.log('[CIMCO PWA] Nueva versión o cambio de entorno detectado. Recargando aplicacion...');
-                  window.location.reload();
+                if (installingWorker.state === 'installed') {
+                  if (navigator.serviceWorker.controller) {
+                    console.log('[CIMCO PWA] Nueva versión detectada. Actualizando sistema...');
+                    window.location.reload();
+                  } else {
+                    console.log('[CIMCO PWA] Contenido almacenado en caché para uso offline.');
+                  }
                 }
               };
             }
@@ -36,7 +37,7 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
         }
       })
       .catch((error) => {
-        console.error('[CIMCO PWA] Error al registrar Service Worker:', error);
+        console.error('[CIMCO PWA] Error al registrar el Service Worker:', error);
       });
   });
 }
