@@ -1,11 +1,10 @@
-// Versión Arquitectura: V19.1 - Consolidación de SocketContext, Estado Reactivo de Ofertas, Emisión de Registro y Wrappers Logísticos
+// Versión Arquitectura: V19.2 - Integración Sincronizada con Configuración Base de Sockets y Guards Anti-Undefined
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\SocketContext.jsx
  * Misión: Proveedor de Contexto Reactivo centralizado y unificado para la gestión de sockets en tiempo real.
  *         Mantiene sincronización de identidad (userId, rol, empresaId), estado reactivo de ofertas,
  *         captura global de expiración de token y wrappers de operaciones logísticas (crearSolicitud, enviarOferta, aceptarOferta).
- * Ajuste V19.1: Consolidación limpia del SocketContext y useSocket hook, emisión inmediata del evento 'registrar_socket'
- *              en reconexión/cambio de sesión y exposición de funciones wrapper con guardas de seguridad.
+ * Ajuste V19.2: Sincronización del estado de conexión con la instancia central de socket y refactorización de guardas de seguridad.
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
@@ -16,7 +15,7 @@ export const SocketContext = createContext(null);
 
 export const SocketProvider = ({ children }) => {
     const { user, logout } = useAuth();
-    const [isConnected, setIsConnected] = useState(socket.connected);
+    const [isConnected, setIsConnected] = useState(socket?.connected || false);
     const [ofertas, setOfertas] = useState([]);
 
     const userId = user?.uid || user?._id || user?.id || user?.conductorId || null;
@@ -25,7 +24,7 @@ export const SocketProvider = ({ children }) => {
 
     // Helper de emisión de registro de socket centralizado
     const emitirRegistroSocket = useCallback(() => {
-        if (!userId || !socket.connected) return;
+        if (!userId || !socket?.connected) return;
         const payloadRegistro = {
             userId: String(userId),
             rol: userRole,
@@ -38,28 +37,22 @@ export const SocketProvider = ({ children }) => {
     }, [userId, userRole, empresaId]);
 
     useEffect(() => {
+        if (!socket) return;
+
         if (userId) {
             const tokenSeguro = localStorage.getItem('cimco_token') || localStorage.getItem('token') || '';
 
             console.log(`⚡ [CIMCO-SOCKET] Identidad activa detectada [UID: ${userId} | Rol: ${userRole} | Empresa: ${empresaId || 'N/A'}]. Calibrando túnel duplex...`);
             
-            socket.io.opts.query = {
-                ...(socket.io.opts.query || {}),
-                token: tokenSeguro,
-                uid: userId,
-                rol: userRole,
-                empresaId: empresaId || ''
-            };
+            if (socket.io?.opts) {
+                socket.io.opts.query = {
+                    ...(socket.io.opts.query || {}),
+                    token: tokenSeguro,
+                    uid: userId,
+                    rol: userRole,
+                    empresaId: empresaId || ''
+                };
 
-            socket.auth = {
-                ...(socket.auth || {}),
-                token: tokenSeguro,
-                uid: userId,
-                rol: userRole,
-                empresaId: empresaId || ''
-            };
-
-            if (socket.io.opts) {
                 socket.io.opts.auth = {
                     ...(socket.io.opts.auth || {}),
                     token: tokenSeguro,
@@ -68,6 +61,14 @@ export const SocketProvider = ({ children }) => {
                     empresaId: empresaId || ''
                 };
             }
+
+            socket.auth = {
+                ...(socket.auth || {}),
+                token: tokenSeguro,
+                uid: userId,
+                rol: userRole,
+                empresaId: empresaId || ''
+            };
 
             if (!socket.connected) {
                 socket.connect();

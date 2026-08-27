@@ -1,8 +1,8 @@
-// Versión Arquitectura: V1.3 - Amortiguación Táctica de Telemetría y Suavizado Visual
+// Versión Arquitectura: V1.4 - Homologación de Estructura de Payload en Evento actualizar_ubicacion
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useTelemetryThrottle.js
  * Misión: Limitar la velocidad de actualización de coordenadas para mitigar lag en la UI y sincronizar las transmisiones en tiempo real.
- * Ajuste V1.3: Calibración de delay a 2000ms, preservación de datos de rumbo (bearing/heading) y saneamiento doble de llaves geográficas.
+ * Ajuste V1.4: Homologación del payload de geolocalización eliminando la propiedad raiz 'vehiculoId' duplicada y alineándose con el estándar del servidor y useGpsGuard.
  */
 
 import { useState, useRef, useEffect } from 'react';
@@ -63,11 +63,11 @@ export const useTelemetryThrottle = (delay = 2000) => {
       
       lastUpdated.current[id] = timestamp;
 
-      // ESTRATEGIA DE EMISIÓN DE EVENTO UNIFICADO AL BACKEND VIA WEBSOCKET (SOCKET.IO CORE)
+      // ESTRATEGIA DE EMISIÓN DE EVENTO UNIFICADO AL BACKEND VIA WEBSOCKET (SOCKET.IO CORE) - Homologado sin duplicar identificador raíz
       if (socketInstance && typeof socketInstance.emit === 'function') {
         socketInstance.emit('actualizar_ubicacion', {
-          vehiculoId: String(id),
           ...saneadoPayload,
+          vehiculoId: String(id),
           timestamp: timestamp
         });
       }

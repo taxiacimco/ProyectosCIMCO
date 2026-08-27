@@ -1,10 +1,10 @@
-// Versión Arquitectura: V16.3 - Inferencia Dinámica de Protocolo HTTPS/HTTP para WebSocket y Control Anti-Bucle Auth
+// Versión Arquitectura: V16.4 - Sincronización de Puertos y Priorización de Variables de Entorno para WebSocket
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\socket.js
  * Misión: Orquestador central de WebSockets adaptativo. Detecta automáticamente HTTPS/HTTP,
  *         inferencia de protocolo dinámico (Production Railway vs Localhost), túneles Cloudflare/Ngrok,
  *         IP de red LAN y gestiona reconexiones inteligentes con detención automática ante fallos de autenticación JWT.
- * Ajuste V16.3: Incorporación de inferencia dinámica de protocolo en la reconexión de WebSocket para producción (HTTPS/Railway) y desarrollo (HTTP/Localhost).
+ * Ajuste V16.4: Priorización absoluta de VITE_BACKEND_URL / VITE_SOCKET_URL y unificación del puerto activo (3000).
  */
 
 import { io } from 'socket.io-client';
@@ -15,7 +15,7 @@ import { HOST_IP } from '@/config/api.js';
  * Determina inteligentemente si debe usar WSS/HTTPS o WS/HTTP para prevenir el bloqueo por Mixed Content.
  */
 const DETERMINAR_SOCKET_URL = () => {
-    // 1. Prioridad: Variables de entorno explícitas (Vite / Vercel -> Railway)
+    // 1. Prioridad Absoluta: Variables de entorno explícitas (Vite / Vercel -> Railway / Development LAN)
     if (import.meta.env?.VITE_SOCKET_URL) {
         return import.meta.env.VITE_SOCKET_URL;
     }
@@ -35,16 +35,16 @@ const DETERMINAR_SOCKET_URL = () => {
             return window.location.origin; // Reutiliza la misma URL base del túnel cifrado
         }
 
-        // 🛡️ CASO B: Acceso Local vía IP LAN (ej. http://192.168.100.34:5173) o Localhost
+        // 🛡️ CASO B: Acceso Local vía IP LAN (ej. http://192.168.100.34:5173) o Localhost (Puerto sincronizado a 3000)
         if (hostname === HOST_IP || hostname === 'localhost' || hostname === '127.0.0.1') {
             return `http://${hostname}:3000`;
         }
 
-        // 🛡️ CASO C: Inferencia de protocolo dinámico (HTTPS -> Railway / HTTP -> Localhost)
+        // 🛡️ CASO C: Inferencia de protocolo dinámico (HTTPS -> Railway / HTTP -> Localhost sincronizado)
         return isSecure ? 'https://tu-backend.up.railway.app' : `http://${HOST_IP || 'localhost'}:3000`;
     }
 
-    // 3. Fallback Estándar de Red Local
+    // 3. Fallback Estándar de Red Local (Puerto sincronizado a 3000)
     return `http://${HOST_IP || 'localhost'}:3000`;
 };
 

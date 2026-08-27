@@ -1,7 +1,8 @@
-// Versión Arquitectura: V24.1 - Integración Quirúrgica con Servicio Centralizado walletService
+// Versión Arquitectura: V24.2 - Corrección de Resiliencia en Bloque Catch de Billetera REST
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
  * Misión: Sincronización exacta de saldo por rol con detención de bucles de re-renderizado, redundancia en tiempo real vía Firestore, timeout HTTP a 5s y resiliencia transaccional mediante walletService.
+ * Ajuste V24.2: Modificación del bloque catch en obtenerSaldoDesdeBackend para conservar el último saldo conocido en lugar de sobreescribirlo a cero durante parpadeos o latencia de red.
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -57,7 +58,7 @@ export const useWallet = () => {
 
     /**
      * 🌐 Consulta SSOT directa a la API REST consumiendo el servicio walletService
-     * Resiliente con timeout de 5000ms y fallback automático a $0 COP ante latencia o fallos de red.
+     * Resiliente con timeout de 5000ms y preservación del saldo previo ante latencia o fallos de red.
      */
     const obtenerSaldoDesdeBackend = useCallback(async () => {
         if (!idDocumentoUnificado) return 0;
@@ -84,23 +85,12 @@ export const useWallet = () => {
                 return saldoValido;
             }
         } catch (apiErr) {
-            console.warn("⚠️ [CIMCO-WALLET] Fallback activo por timeout/error HTTP en Billetera (5000ms excedido):", apiErr?.message);
-            
-            // Fallback seguro de $0 COP para prevenir excepciones no capturadas o bloqueos en AuthProvider
-            const saldoFallback = 0;
-            setSaldo(saldoFallback);
-
-            if (typeof actualizarEstadoLocalRef.current === 'function') {
-                try {
-                    actualizarEstadoLocalRef.current({ saldo: saldoFallback, saldoWallet: saldoFallback, balance: saldoFallback });
-                } catch (authErr) {
-                    console.warn("⚠️ [CIMCO-WALLET] Excepción aislada en AuthProvider durante fallback:", authErr?.message);
-                }
-            }
-            return saldoFallback;
+            console.warn("⚠️ [CIMCO-WALLET] Error/Timeout consultando Backend REST. Conservando saldo local previo:", apiErr?.message);
+            // NO ejecutar setSaldo(0) ni actualizarEstadoLocalRef con 0 para evitar borrado visual durante parpadeos de red
+            return null;
         }
 
-        return 0;
+        return null;
     }, [idDocumentoUnificado]);
 
     useEffect(() => {
