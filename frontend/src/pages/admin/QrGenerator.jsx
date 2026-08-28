@@ -1,11 +1,11 @@
-// Versión Arquitectura: V24.0 - Corrección de Escaneo Vectorial, Dimensión de Logo y Exportación PNG
+// Versión Arquitectura: V24.1 - Optimización de Renderizado Canvas, Memoización de Logo SVG y Manejo de Errores Firestore
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
  * Misión: Generación de códigos QR de alta legibilidad con conmutación entre Entornos Locales y Producción (Vercel).
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism.
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
@@ -95,6 +95,7 @@ const QrGenerator = () => {
             setLoadingHistorial(false);
         }, (err) => {
             console.error("❌ Error en snapshot de bitácora QR:", err);
+            setError("No se pudo sincronizar el historial de QRs con Firestore.");
             setLoadingHistorial(false);
         });
 
@@ -177,21 +178,24 @@ const QrGenerator = () => {
             
             const image = new Image();
             image.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = 1024;
-                canvas.height = 1024;
-                const context = canvas.getContext('2d');
-                if (context) {
-                    context.fillStyle = '#ffffff';
-                    context.fillRect(0, 0, canvas.width, canvas.height);
-                    context.drawImage(image, 64, 64, 896, 896);
-                    const pngURL = canvas.toDataURL('image/png');
-                    const downloadLink = document.createElement('a');
-                    downloadLink.href = pngURL;
-                    downloadLink.download = `CIMCO_QR_${(entorno || 'PROD').toUpperCase()}_${(rolSeleccionado || 'ROL').toUpperCase()}.png`;
-                    downloadLink.click();
-                }
-                urlContext.revokeObjectURL(blobURL);
+                // Pequeña diferición en event loop para resolver adecuadamente sub-recursos vectoriales
+                setTimeout(() => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 1024;
+                    canvas.height = 1024;
+                    const context = canvas.getContext('2d');
+                    if (context) {
+                        context.fillStyle = '#ffffff';
+                        context.fillRect(0, 0, canvas.width, canvas.height);
+                        context.drawImage(image, 64, 64, 896, 896);
+                        const pngURL = canvas.toDataURL('image/png');
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = pngURL;
+                        downloadLink.download = `CIMCO_QR_${(entorno || 'PROD').toUpperCase()}_${(rolSeleccionado || 'ROL').toUpperCase()}.png`;
+                        downloadLink.click();
+                    }
+                    urlContext.revokeObjectURL(blobURL);
+                }, 100);
             };
             image.src = blobURL;
         } catch (err) {
@@ -199,8 +203,8 @@ const QrGenerator = () => {
         }
     };
 
-    // 🎯 LOGO OPTIMIZADO PARA NO TRAMAR O BLOQUEAR LA LECTURA DEL CÓDIGO QR
-    const buildCentralLogoDataUrl = () => {
+    // 🎯 LOGO OPTIMIZADO Y MEMOIZADO PARA EVITAR RE-COMPUTAR O BLOQUEAR LA LECTURA DEL CÓDIGO QR
+    const centralLogoDataUrl = useMemo(() => {
         const tag = (rolSeleccionado || 'CIMCO').substring(0, 4).toUpperCase();
         const svgString = `
             <svg xmlns="http://www.w3.org/2000/svg" width="120" height="50" viewBox="0 0 120 50">
@@ -211,7 +215,7 @@ const QrGenerator = () => {
             </svg>
         `;
         return `data:image/svg+xml;utf8,${encodeURIComponent(svgString.trim())}`;
-    };
+    }, [rolSeleccionado]);
 
     return (
         <div className="space-y-6 w-full max-w-7xl mx-auto animate-in fade-in duration-300 font-sans selection:bg-amber-500 selection:text-black">
@@ -317,7 +321,7 @@ const QrGenerator = () => {
                                     level="H" 
                                     marginSize={2}
                                     imageSettings={{
-                                        src: buildCentralLogoDataUrl(),
+                                        src: centralLogoDataUrl,
                                         height: 24,
                                         width: 54,
                                         excavate: true,
