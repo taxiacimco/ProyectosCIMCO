@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.5 - Delegación Centralizada de Excepciones a Middleware Error Handling (next) y Blindaje de Controladores
+// Versión Arquitectura: V20.01 - Homologación de Validaciones de Entrada y Sanitización Estricta en Perfil de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
  * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera y blindaje contra colisiones de duplicidad E11000/Firebase Auth en peticiones concurrentes.
- * Ajuste V19.5: Refactorización de controladores asíncronos para delegar la captura y propagación de excepciones al Middleware Centralizado de Errores mediante next(error).
+ * Ajuste V20.01: Homologación de validaciones de entrada en la actualización de perfil y sanitización estricta de payloads para prevenir mutaciones no autorizadas.
  */
 
 import mongoose from 'mongoose';
@@ -135,7 +135,7 @@ export const obtenerPasajeros = async (req, res, next) => {
  */
 export const registrarPasajero = async (req, res, next) => {
     try {
-        const { nombre, email, telefono, telefonoMovil, password, uid, direccion, fotoPerfil } = req.body;
+        const { nombre, email, telefono, telefonoMovil, password, uid, direccion, fotoPerfil } = req.body || {};
         const telContacto = (telefonoMovil || telefono) ? String(telefonoMovil || telefono).trim() : null;
         const emailSanitizado = email ? String(email).toLowerCase().trim() : null;
 
@@ -297,7 +297,7 @@ export const registrarPasajero = async (req, res, next) => {
  */
 export const validarPasajeroUnico = async (req, res, next) => {
     try {
-        const { email, telefono, telefonoMovil } = req.body;
+        const { email, telefono, telefonoMovil } = req.body || {};
         const telContacto = (telefono || telefonoMovil) ? String(telefono || telefonoMovil).trim() : null;
         const emailSanitizado = email ? String(email).toLowerCase().trim() : null;
 
@@ -338,7 +338,7 @@ export const validarPasajeroUnico = async (req, res, next) => {
  */
 export const obtenerPerfilPasajero = async (req, res, next) => {
     try {
-        const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
+        const targetId = req.params?.id || req.params?.uid || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente." });
         }
@@ -361,17 +361,72 @@ export const obtenerPerfilPasajero = async (req, res, next) => {
 };
 
 /**
- * 🔄 Actualización de Perfil con Sincronización a Firestore
+ * 🔄 Actualización de Perfil con Validaciones Homologadas y Sincronización a Firestore
  */
 export const actualizarPerfilPasajero = async (req, res, next) => {
     try {
-        const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
+        const targetId = req.params?.id || req.params?.uid || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente para la actualización." });
         }
 
-        const updateData = { ...req.body };
-        delete updateData.password; // Evitar la sobreescritura accidental de la contraseña
+        const { nombre, email, telefono, telefonoMovil, direccion, fotoPerfil } = req.body || {};
+        const updateData = {};
+
+        // Validaciones de entrada homologadas
+        if (nombre !== undefined) {
+            const nombreLimpio = String(nombre).trim();
+            if (nombreLimpio.length < 2) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_NAME',
+                    message: '⚠️ El nombre debe contener al menos 2 caracteres.'
+                });
+            }
+            updateData.nombre = nombreLimpio;
+        }
+
+        if (email !== undefined) {
+            const emailLimpio = String(email).toLowerCase().trim();
+            if (emailLimpio && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLimpio)) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_EMAIL',
+                    message: '⚠️ El formato del correo electrónico es inválido.'
+                });
+            }
+            updateData.email = emailLimpio || null;
+        }
+
+        if (telefono !== undefined || telefonoMovil !== undefined) {
+            const telBruto = telefonoMovil || telefono;
+            const telLimpio = telBruto ? String(telBruto).trim() : '';
+            if (telLimpio && (telLimpio.length < 7 || telLimpio.length > 15)) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_PHONE',
+                    message: '⚠️ El número telefónico debe tener un formato válido (entre 7 y 15 dígitos).'
+                });
+            }
+            updateData.telefonoMovil = telLimpio || null;
+            updateData.telefono = telLimpio || null;
+        }
+
+        if (direccion !== undefined) {
+            updateData.direccion = String(direccion).trim();
+        }
+
+        if (fotoPerfil !== undefined) {
+            updateData.fotoPerfil = String(fotoPerfil).trim();
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({
+                success: false,
+                code: 'NO_FIELDS_TO_UPDATE',
+                message: '⚠️ No se enviaron campos válidos para actualizar.'
+            });
+        }
 
         const pasajero = await Pasajero.findOneAndUpdate(
             {
@@ -403,6 +458,9 @@ export const actualizarPerfilPasajero = async (req, res, next) => {
                 payloadFs.telefono = tel;
                 payloadFs.telefonoMovil = tel;
             }
+            if (pasajero.email) {
+                payloadFs.email = pasajero.email;
+            }
 
             await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set(payloadFs, { merge: true });
         } catch (fsErr) {
@@ -432,8 +490,8 @@ export const actualizarPerfilPasajero = async (req, res, next) => {
  */
 export const agregarDireccionFavorita = async (req, res, next) => {
     try {
-        const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
-        const { alias, direccion, latitud, longitud } = req.body;
+        const targetId = req.params?.id || req.params?.uid || req.user?.id || req.user?._id || req.user?.uid;
+        const { alias, direccion, latitud, longitud } = req.body || {};
 
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente." });
@@ -487,8 +545,8 @@ export const agregarDireccionFavorita = async (req, res, next) => {
  */
 export const eliminarDireccionFavorita = async (req, res, next) => {
     try {
-        const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
-        const { direccionId } = req.params;
+        const targetId = req.params?.id || req.params?.uid || req.user?.id || req.user?._id || req.user?.uid;
+        const { direccionId } = req.params || {};
 
         if (!targetId || !direccionId) {
             return res.status(400).json({ success: false, message: "⚠️ Parámetros insuficientes para eliminar la dirección." });
@@ -532,7 +590,7 @@ export const eliminarDireccionFavorita = async (req, res, next) => {
  */
 export const obtenerHistorialViajesPasajero = async (req, res, next) => {
     try {
-        const targetId = req.params.id || req.params.uid || req.user?.id || req.user?._id || req.user?.uid;
+        const targetId = req.params?.id || req.params?.uid || req.user?.id || req.user?._id || req.user?.uid;
 
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente." });
@@ -566,7 +624,7 @@ export const obtenerHistorialViajesPasajero = async (req, res, next) => {
  */
 export const obtenerSaldoPasajero = async (req, res, next) => {
     try {
-        const targetId = req.params.id || req.user?.id || req.user?._id || req.user?.uid;
+        const targetId = req.params?.id || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente." });
         }
@@ -615,7 +673,7 @@ export const recargarSaldoPasajero = async (req, res, next) => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-        const { pasajeroId, id, uid, monto, referencia, nota } = req.body;
+        const { pasajeroId, id, uid, monto, referencia, nota } = req.body || {};
         const targetId = pasajeroId || id || uid;
         const montoNum = parseFloat(monto);
         

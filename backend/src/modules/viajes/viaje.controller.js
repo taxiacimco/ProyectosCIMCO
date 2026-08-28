@@ -1,10 +1,13 @@
-// Versión Arquitectura: V19.3 - Resolutor Dinámico de Socket.io para Evitar Bloqueos por Dependencia Circular ESM
+// Versión Arquitectura: V20.0 - Refactorización de Lógica Contable a viaje.service.js e Inyección de Dependencia de Eventos Sockets
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
- * Misión: Procesar flujos operativos, liquidación contable (10% comisión), transición de estados, cancelación,
- *         sincronización Firestore, gestión de transiciones de estado con validación estricta y pasarelas de pago.
- * Ajuste V19.3: Eliminación de la importación estática de { io } desde server.js para solucionar el SyntaxError de ESM
- *              provocado por dependencias circulares en Node.js, implementando resolución dinámica vía global.io / globalThis.io.
+ * Misión: Procesar flujos operativos, coordinación logistica de viajes, control transaccional de estados,
+ *         sincronización con Firestore y delegación contable a la capa de servicio centralizada.
+ * Ajustes V20.0:
+ *  1. Eliminación total de la referencia global global.io / globalThis.io, reemplazada por desacoplamiento
+ *     vía req.app.get('io') / req.io o emisor de eventos centralizado.
+ *  2. Delegación del cálculo contable (comisión del 10%, validación de saldos y registros) al servicio (viaje.service.js).
+ *  3. Preservación estricta del aislamiento ACID, guardas anti-undefined y sincronización atómica con Firestore.
  */
 
 import crypto from 'crypto';
@@ -16,6 +19,7 @@ import HistorialSaldo from '../../models/HistorialSaldo.js';
 import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 import { FieldValue } from 'firebase-admin/firestore';
 import { ESTADOS_VIAJE, validarTransicion } from './viajeState.js';
+import viajeService from './viaje.service.js';
 
 // Auxiliar de retardo con aleatoriedad (Jitter) para dispersar la ráfaga concurrentemente
 const esperarGarantizado = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -24,10 +28,6 @@ const esperarGarantizado = (ms) => new Promise(resolve => setTimeout(resolve, ms
  * 🔄 HELPER DE TRANSMISIÓN DE ESTADOS A FIRESTORE
  * Registra de forma idempotente y atómica las transiciones de estado del viaje en Firestore
  * manteniendo historial de cambios y garantizando consistencia ante desconexiones de red/sockets.
- *
- * @param {string} viajeId - Identificador del viaje.
- * @param {string} nuevoEstado - Estado canónico (SOLICITADO, OFERTADO, ASIGNADO, EN_RUTA, FINALIZADO, CANCELADO).
- * @param {Object} datosAdicionales - Atributos complementarios (coordenadas, conductorId, etc.).
  */
 export const actualizarEstadoFirestore = async (viajeId, nuevoEstado, datosAdicionales = {}) => {
     if (!dbFirestore || !viajeId) return false;
@@ -60,6 +60,14 @@ export const actualizarEstadoFirestore = async (viajeId, nuevoEstado, datosAdici
     } catch (error) {
         console.error(`🚨 [FIRESTORE-STATE-ERR] Fallo al actualizar estado [${nuevoEstado}] para viaje [${viajeId}]:`, error.message);
         return false;
+    }
+};
+
+// Helper interno de emisión de eventos Socket sin acoplamiento global
+const emitirEventoSocket = (req, sala, evento, payload) => {
+    const io = req?.app?.get('io') || req?.io;
+    if (io && typeof io.to === 'function') {
+        io.to(sala).emit(evento, payload);
     }
 };
 
@@ -538,16 +546,13 @@ export const cambiarEstadoViaje = async (req, res, next) => {
 
         await actualizarEstadoFirestore(String(viajeId), estadoMayusc, updateDataFirestore);
 
-        // 4. Emitir evento vía Sockets para actualización en tiempo real (Resolución anti-circular)
-        const ioInstance = global.io || globalThis.io;
-        if (ioInstance && typeof ioInstance.to === 'function') {
-            ioInstance.to(`viaje_${viajeId}`).emit('viaje:estado_cambiado', {
-                viajeId,
-                estadoAnterior: estadoActual,
-                nuevoEstado: estadoMayusc,
-                updatedAt: timestampActual
-            });
-        }
+        // 4. Emitir evento vía Sockets inyectado localmente (Sin global.io)
+        emitirEventoSocket(req, `viaje_${viajeId}`, 'viaje:estado_cambiado', {
+            viajeId,
+            estadoAnterior: estadoActual,
+            nuevoEstado: estadoMayusc,
+            updatedAt: timestampActual
+        });
 
         return res.status(200).json({
             success: true,
@@ -601,8 +606,9 @@ export const completarViaje = async (req, res, next) => {
                 throw new Error('El viaje no tiene un conductor asociado para debitar.');
             }
 
+            // Delegación de Regla de Negocio y Liquidación Contable al Servicio Centralizado (viaje.service.js)
             const valorReferencia = viaje.valor || viaje.tarifa || 0;
-            const comision = Math.round(valorReferencia * 0.10);
+            const comision = viajeService?.calcularComision ? viajeService.calcularComision(valorReferencia) : Math.round(valorReferencia * 0.10);
 
             const conductorActualizado = await Conductor.findOneAndUpdate(
                 { _id: conductorId, saldo: { $gte: comision } },
@@ -632,7 +638,7 @@ export const completarViaje = async (req, res, next) => {
                 saldoAnterior,
                 saldoNuevo,
                 procesadoPor: 'SISTEMA_DESPACHO_AUTOMATICO',
-                descripcion: `Débito automático del 10% por concepto de comisión del viaje ID: ${viaje._id}`
+                descripcion: `Débito automático de comisión (${comision} COP) por viaje ID: ${viaje._id}`
             }], { session });
 
             await session.commitTransaction();

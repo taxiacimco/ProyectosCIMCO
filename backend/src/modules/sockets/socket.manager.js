@@ -1,20 +1,20 @@
-// Versión Arquitectura: V19.1 - Soporte de Orígenes Dinámicos CORS (HTTP/HTTPS) y Transporte Híbrido (WebSocket/Polling)
+// Versión Arquitectura: V21.36 - Refactorización de Importación ESM y Manejo Defensivo de Telemetría GPS
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\sockets\socket.manager.js
  * Misión: Administrar el ciclo de vida de las conexiones, salas automáticas de aislamiento (empresa/usuario),
  *          telemetría GPS y flujo completo de subasta/despacho en tiempo real, garantizando la resolución dinámica
  *          de orígenes CORS (HTTP/HTTPS) y transporte dual (websocket y polling).
- * Ajuste V19.1: Inyección de matriz de orígenes dinámicos permitidos (HTTP/HTTPS) para Socket.io y aseguramiento del soporte de transportes ['websocket', 'polling'].
+ * Ajuste V21.36: Corrección de ruta de importación ESM apuntando a conductor.controller.js y manejo defensivo de persistencia GPS.
  */
 
 import { socketAuthMiddleware } from '../../middleware/socketAuth.middleware.js';
-import { actualizarRadarUbicacion } from '../conductores/conductor.controller.js';
+import { actualizarUbicacionConductor } from '../conductores/conductor.controller.js';
 
 const logSocket = (msg) => console.log(`[${new Date().toLocaleString('es-CO')}] ⚡ [SOCKET-MGR] ${msg}`);
 
-// 📏 PARÁMETROS CRÍTICOS DE RED Y DESPACHO SPATIAL
-const RADIO_DESPACHO_MAX_METROS = 5000; // 5 km ($5\text{ km}$ / $5000\text{ m}$)
-const TIMEOUT_DESPACHO_MS = 60000;       // 60 segundos ($60\text{ s}$ / $60000\text{ ms}$)
+// 📏 PARÁMETROS CRÍTICOS DE RED Y DESPACHO SPATIAL (EXTERNALIZADOS A .ENV)
+const RADIO_DESPACHO_MAX_METROS = parseInt(process.env.RADIO_DESPACHO_MAX_METROS, 10) || 5000;
+const TIMEOUT_DESPACHO_MS = parseInt(process.env.TIMEOUT_DESPACHO_MS, 10) || 60000;
 
 // MAPA ATÓMICO DE TEMPORIZADORES DE VIAJE EN MEMORIA
 const temporizadoresViaje = new Map();
@@ -248,9 +248,9 @@ export const inicializarSockets = (io) => {
                         conductorId: socket.usuarioId
                     });
                     
-                    // 🚀 OPTIMIZACIÓN: Persistencia asíncrona sin await para evitar cuellos de botella en Sockets
-                    if (typeof actualizarRadarUbicacion === 'function') {
-                        actualizarRadarUbicacion(socket.usuarioId, lat, lng).catch(err => {
+                    // 🚀 PERSISTENCIA EN BD MEDIANTE EL CONTROLADOR UNIFICADO
+                    if (typeof actualizarUbicacionConductor === 'function') {
+                        actualizarUbicacionConductor(socket.usuarioId, lat, lng).catch(err => {
                             console.error(`[SOCKET-MGR-ERROR] Error al persistir ubicación del conductor ${socket.usuarioId}:`, err?.message || err);
                         });
                     }
@@ -295,7 +295,7 @@ export const inicializarSockets = (io) => {
                 const latOrigen = parseFloat(datosSolicitud.lat || datosSolicitud.latitud || datosSolicitud.origenLat || (datosSolicitud.origenCoords && datosSolicitud.origenCoords.lat));
                 const lngOrigen = parseFloat(datosSolicitud.lng || datosSolicitud.longitud || datosSolicitud.origenLng || (datosSolicitud.origenCoords && datosSolicitud.origenCoords.lng));
 
-                // Configuración de filtro geoespacial $near ($5000\text{ m}$)
+                // Configuración de filtro geoespacial
                 const filtroGeoespacial = (!isNaN(latOrigen) && !isNaN(lngOrigen)) ? {
                     location: {
                         $near: {
@@ -340,17 +340,17 @@ export const inicializarSockets = (io) => {
                 // Auditoría central para despachadores y administradores
                 io.to('sala_despachadores').to('sala_admins').emit('auditoria_nuevo_viaje', payloadDespacho);
 
-                // ⏱️ PROGRAMACIÓN DE EXPIRACIÓN AUTOMÁTICA DE SUBASTA (60 SEGUNDOS)
+                // ⏱️ PROGRAMACIÓN DE EXPIRACIÓN AUTOMÁTICA DE SUBASTA
                 if (viajeId) {
                     const timerId = setTimeout(() => {
-                        logSocket(`⌛ [TIMEOUT] Solicitud/Viaje [${viajeId}] no fue adjudicado en 60s. Expirando...`);
+                        logSocket(`⌛ [TIMEOUT] Solicitud/Viaje [${viajeId}] no fue adjudicado en ${TIMEOUT_DESPACHO_MS / 1000}s. Expirando...`);
                         
                         // Notificar expiración directa al pasajero o creador
                         if (pasajeroId) {
                             io.to(`user_${pasajeroId}`).to(pasajeroId).emit('viaje_expirado', {
                                 viajeId,
                                 motivo: 'tiempo_limite_excedido',
-                                mensaje: 'No se recibieron ofertas o el tiempo tope de 60 segundos fue excedido.'
+                                mensaje: `No se recibieron ofertas o el tiempo tope de ${TIMEOUT_DESPACHO_MS / 1000} segundos fue excedido.`
                             });
                         }
 
@@ -358,7 +358,7 @@ export const inicializarSockets = (io) => {
                         const canalRemocion = empresaId ? io.to(`empresa_${empresaId}`) : io.to('sala_conductores');
                         canalRemocion.to('sala_despachadores').to('sala_admins').emit('viaje_removido_radar', {
                             viajeId,
-                            motivo: 'expirado_timeout_60s'
+                            motivo: `expirado_timeout_${TIMEOUT_DESPACHO_MS / 1000}s`
                         });
 
                         temporizadoresViaje.delete(viajeId);

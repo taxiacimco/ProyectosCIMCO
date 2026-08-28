@@ -1,11 +1,12 @@
-// Versión Arquitectura: V21.37 - Integración Quirúrgica de actualizarPerfil, Manejo Híbrido Multipart (req.file/req.files), Hashing de Clave y Sincronización Polimórfica
+// Versión Arquitectura: V21.38 - Delegación de subida de archivos y adaptadores Firebase (Clean Architecture)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
  * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono), actualización segura de perfiles (updateProfile / actualizarPerfil)
- * con soporte para hashes de clave opcionales, atributos de vehículo (placa/numeroInterno) y archivos binarios (req.file/req.files), y respuesta a desvinculación (logout).
+ * con soporte para hashes de clave opcionales, atributos de vehículo (placa/numeroInterno) y archivos binarios.
+ * NOTA: Gestión de archivos delegada a upload.service y sincronización a firebase.service.
  */
 
 import jwt from 'jsonwebtoken';
@@ -14,9 +15,10 @@ import bcrypt from 'bcryptjs';
 import Conductor from '../../models/Conductor.js';
 import Usuario from '../../models/Usuario.js';
 import Pasajero from '../../models/Pasajero.js';
-import admin, { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 
-const firebaseAdmin = admin?.default || admin;
+// 🔄 GOBERNANZA DE SERVICIOS CENTRALIZADOS (Clean Architecture / Hexagonal)
+import firebaseService from '../../services/firebase.service.js';
+import uploadService from '../../services/upload.service.js';
 
 // 🔒 BLINDAJE DE FIRMA: Si la variable de entorno no está definida, el servidor aborta
 if (!process.env.JWT_SECRET) {
@@ -46,7 +48,7 @@ setInterval(() => {
 /**
  * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO Y SINCRO FIREBASE AUTH
  * Lógica anti-doble hashing: Se delega el cifrado al middleware pre('save') del modelo Mongoose.
- * Inyección Aprovisionada de UID / firebaseUid vía Firebase Admin SDK.
+ * Inyección Aprovisionada de UID / firebaseUid vía Firebase Admin SDK delegado.
  */
 export const register = async (req, res, next) => {
     try {
@@ -104,26 +106,13 @@ export const register = async (req, res, next) => {
         // Nivel de acceso sugerido/proporcionado
         const parsedAccessLevel = access_level !== undefined ? Number(access_level) : (accessLevel !== undefined ? Number(accessLevel) : undefined);
 
-        // 📁 EXTRACCIÓN Y EXTRACTION SHIELDING DE ARCHIVOS MULTIPART/FORM-DATA (MULTER & REQ.FILES)
-        const getFilePath = (fieldName) => {
-            if (!req.files) return body[fieldName] || null;
-            
-            let fileObj = null;
-            if (Array.isArray(req.files)) {
-                fileObj = req.files.find(f => f.fieldname === fieldName);
-            } else if (typeof req.files === 'object' && req.files[fieldName]) {
-                fileObj = req.files[fieldName][0];
-            }
-
-            if (!fileObj) return body[fieldName] || null;
-            return fileObj.path || fileObj.location || fileObj.filename || fileObj.url || body[fieldName] || null;
-        };
-
-        const foto_perfil = getFilePath('foto_perfil') || getFilePath('fotoPerfil');
-        const documento_cedula = getFilePath('documento_cedula');
-        const documento_licencia = getFilePath('documento_licencia');
-        const doc_tarjeta = getFilePath('doc_tarjeta');
-        const doc_identificacion = getFilePath('doc_identificacion');
+        // 📁 EXTRACCIÓN Y EXTRACTION SHIELDING DE ARCHIVOS MULTIPART/FORM-DATA DELEGADO AL SERVICIO DE UPLOADS
+        const extractedFiles = uploadService.extractFiles(req.files, req.file, body);
+        const foto_perfil = extractedFiles.foto_perfil || extractedFiles.fotoPerfil;
+        const documento_cedula = extractedFiles.documento_cedula;
+        const documento_licencia = extractedFiles.documento_licencia;
+        const doc_tarjeta = extractedFiles.doc_tarjeta;
+        const doc_identificacion = extractedFiles.doc_identificacion;
 
         // 🛡️ VALIDACIÓN PREVIA DE DUPLICADOS EN TODAS LAS COLECCIONES (CONCURRENTE)
         const [uExist, cExist, pExist] = await Promise.all([
@@ -150,54 +139,22 @@ export const register = async (req, res, next) => {
         // 🛡️ SIN DOBLE HASHING: Se pasa la contraseña plana para que el Hook pre('save') la encripte
         const plainPassword = String(password);
 
-        // 🔑 APROVISIONAMIENTO Y VINCULACIÓN DE UID FIREBASE ADMIN SDK
-        let firebaseUser;
+        // 🔑 APROVISIONAMIENTO Y VINCULACIÓN DE UID FIREBASE DELEGADO AL SERVICIO FIREBASE
         let finalUid = bodyUid ? String(bodyUid).trim() : null;
 
-        if (firebaseAdmin && typeof firebaseAdmin.auth === 'function') {
-            try {
-                // Paso 1: Asegurar que el usuario exista en Firebase Authentication
-                try {
-                    firebaseUser = await firebaseAdmin.auth().getUserByEmail(emailLimpio);
-                } catch (err) {
-                    if (err.code === 'auth/user-not-found') {
-                        const createOptions = {
-                            email: emailLimpio,
-                            password: plainPassword,
-                            displayName: nombreFinal,
-                        };
-
-                        const cleanDigits = telFinal.replace(/\D/g, '');
-                        if (cleanDigits.length >= 10) {
-                            createOptions.phoneNumber = cleanDigits.startsWith('57') ? `+${cleanDigits}` : `+57${cleanDigits}`;
-                        }
-
-                        firebaseUser = await firebaseAdmin.auth().createUser(createOptions);
-                    } else {
-                        throw err;
-                    }
-                }
-
-                if (firebaseUser && firebaseUser.uid) {
-                    finalUid = firebaseUser.uid;
-                }
-            } catch (fbAuthErr) {
-                if (fbAuthErr.code === 'auth/phone-number-already-exists') {
-                    try {
-                        const formattedPhone = telFinal.replace(/\D/g, '').startsWith('57') 
-                            ? `+${telFinal.replace(/\D/g, '')}` 
-                            : `+57${telFinal.replace(/\D/g, '')}`;
-                        firebaseUser = await firebaseAdmin.auth().getUserByPhoneNumber(formattedPhone);
-                        if (firebaseUser && firebaseUser.uid) {
-                            finalUid = firebaseUser.uid;
-                        }
-                    } catch (getErr) {
-                        console.warn("⚠️ [CIMCO-AUTH-WARN] No se pudo consultar teléfono existente en Firebase Auth:", getErr.message);
-                    }
-                } else {
-                    console.warn("⚠️ [CIMCO-AUTH-WARN] Error en proceso de registro/sincronización Firebase Auth:", fbAuthErr.message);
-                }
+        try {
+            const authResult = await firebaseService.syncAuthUser({
+                email: emailLimpio,
+                password: plainPassword,
+                nombre: nombreFinal,
+                telefono: telFinal,
+                uid: finalUid
+            });
+            if (authResult && authResult.uid) {
+                finalUid = authResult.uid;
             }
+        } catch (fbAuthErr) {
+            console.warn("⚠️ [CIMCO-AUTH-WARN] Error en proceso de registro/sincronización Firebase Auth delegado:", fbAuthErr.message);
         }
 
         let nuevoUsuario;
@@ -318,61 +275,56 @@ export const register = async (req, res, next) => {
             await nuevoUsuario.save();
         }
 
-        // 🛡️ SINCRONIZACIÓN HACIA FIREBASE FIRESTORE AISLADA EN TRY/CATCH SECUNDARIO (SIN ABORTAR MONGO)
-        if (dbFirestore) {
-            try {
-                const targetUid = nuevoUsuario.uid || nuevoUsuario.firebaseUid || finalUid || String(nuevoUsuario._id);
-                const coleccionFirestore = esPasajero 
-                    ? (FIRESTORE_PATHS?.users || 'usuarios') 
-                    : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
+        // 🛡️ SINCRONIZACIÓN HACIA FIREBASE FIRESTORE AISLADA EN TRY/CATCH SECUNDARIO Y DELEGADA
+        try {
+            const targetUid = nuevoUsuario.uid || nuevoUsuario.firebaseUid || finalUid || String(nuevoUsuario._id);
+            
+            const payloadFirestore = {
+                uid: targetUid,
+                firebaseUid: targetUid,
+                email: nuevoUsuario.email,
+                nombre: nuevoUsuario.nombre,
+                fullName: nuevoUsuario.nombre,
+                telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
+                rol: nuevoUsuario.rol,
+                subrol: nuevoUsuario.subrol || subrolFinal || null,
+                estado: nuevoUsuario.estado,
+                isActive: nuevoUsuario.isActive,
+                cooperativa: nuevoUsuario.cooperativa || 'Particular',
+                empresa: nuevoUsuario.empresa || 'Particular',
+                terminal_sede: nuevoUsuario.terminal_sede || 'Particular',
+                access_level: nuevoUsuario.access_level || 1,
+                foto_perfil: foto_perfil || null,
+                fotoUrl: foto_perfil || null,
+                createdAt: new Date().toISOString()
+            };
 
-                const payloadFirestore = {
-                    uid: targetUid,
-                    firebaseUid: targetUid,
-                    email: nuevoUsuario.email,
-                    nombre: nuevoUsuario.nombre,
-                    fullName: nuevoUsuario.nombre,
-                    telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
-                    rol: nuevoUsuario.rol,
-                    subrol: nuevoUsuario.subrol || subrolFinal || null,
-                    estado: nuevoUsuario.estado,
-                    isActive: nuevoUsuario.isActive,
-                    cooperativa: nuevoUsuario.cooperativa || 'Particular',
-                    empresa: nuevoUsuario.empresa || 'Particular',
-                    terminal_sede: nuevoUsuario.terminal_sede || 'Particular',
-                    access_level: nuevoUsuario.access_level || 1,
-                    foto_perfil: foto_perfil || null,
-                    fotoUrl: foto_perfil || null,
-                    createdAt: new Date().toISOString()
-                };
-
-                if (esConductor) {
-                    payloadFirestore.isOnline = false;
-                    payloadFirestore.placa = nuevoUsuario.placa;
-                    payloadFirestore.numeroInterno = nuevoUsuario.numeroInterno;
-                    payloadFirestore.estadoAdministrativo = nuevoUsuario.estadoAdministrativo;
-                    payloadFirestore.documento_cedula = documento_cedula || null;
-                    payloadFirestore.documento_licencia = documento_licencia || null;
-                    payloadFirestore.doc_tarjeta = doc_tarjeta || null;
-                    payloadFirestore.doc_identificacion = doc_identificacion || null;
-                }
-
-                await dbFirestore.collection(coleccionFirestore).doc(targetUid).set(payloadFirestore);
-
-                // Denormalización de Billetera/Wallet en Firestore
-                const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-                await dbFirestore.collection(pathBilleteras).doc(targetUid).set({
-                    id: targetUid,
-                    nombreUsuario: nuevoUsuario.nombre,
-                    rolUsuario: nuevoUsuario.rol,
-                    balance: 0,
-                    saldo: 0,
-                    ultimaActualizacion: new Date().toISOString()
-                });
-
-            } catch (firestoreError) {
-                console.warn("⚠️ [CIMCO-AUTH-SYNC-WARN] Falló el espejo en Firebase Firestore (Persistencia MongoDB exitosa):", firestoreError.message);
+            if (esConductor) {
+                payloadFirestore.isOnline = false;
+                payloadFirestore.placa = nuevoUsuario.placa;
+                payloadFirestore.numeroInterno = nuevoUsuario.numeroInterno;
+                payloadFirestore.estadoAdministrativo = nuevoUsuario.estadoAdministrativo;
+                payloadFirestore.documento_cedula = documento_cedula || null;
+                payloadFirestore.documento_licencia = documento_licencia || null;
+                payloadFirestore.doc_tarjeta = doc_tarjeta || null;
+                payloadFirestore.doc_identificacion = doc_identificacion || null;
             }
+
+            // Sync Usuario a Firestore
+            await firebaseService.syncFirestoreUser(targetUid, payloadFirestore, esPasajero, esConductor);
+
+            // Denormalización de Billetera/Wallet en Firestore
+            await firebaseService.syncFirestoreWallet(targetUid, {
+                id: targetUid,
+                nombreUsuario: nuevoUsuario.nombre,
+                rolUsuario: nuevoUsuario.rol,
+                balance: 0,
+                saldo: 0,
+                ultimaActualizacion: new Date().toISOString()
+            });
+
+        } catch (firestoreError) {
+            console.warn("⚠️ [CIMCO-AUTH-SYNC-WARN] Falló el espejo en Firebase Firestore (Persistencia MongoDB exitosa):", firestoreError.message);
         }
 
         // Respuesta diferenciada según la categoría del onboarding
@@ -795,7 +747,7 @@ export const verificarTelefono = checkPhone;
 /**
  * 🔄 ACTUALIZACIÓN DE DATOS DE PERFIL (POLIMÓRFICO CONCURRENTE & MULTIPART/FORM-DATA)
  * Soporta actualización unificada de usuarios, conductores y pasajeros con hash de contraseña opcional,
- * atributos vehiculares (placa, numeroInterno) y recepción binaria de foto de perfil (req.file o req.files).
+ * atributos vehiculares (placa, numeroInterno) y recepción binaria de foto de perfil (delegado a upload.service).
  */
 export const updateProfile = async (req, res, next) => {
     try {
@@ -870,43 +822,28 @@ export const updateProfile = async (req, res, next) => {
             updateData.passwordHash = hashedPassword;
         }
 
-        // Procesamiento de archivo binario individual (upload.single - req.file)
-        const archivoFotoUnico = req.file;
-        let fotoUrlExtraida = null;
-
-        if (archivoFotoUnico) {
-            fotoUrlExtraida = archivoFotoUnico.path || archivoFotoUnico.location || archivoFotoUnico.filename || archivoFotoUnico.url;
-        }
-
-        // Procesamiento de archivos en lote/campos múltiples (upload.fields / upload.array - req.files)
-        if (req.files) {
-            const getFilePath = (fieldName) => {
-                let fileObj = null;
-                if (Array.isArray(req.files)) {
-                    fileObj = req.files.find(f => f.fieldname === fieldName);
-                } else if (typeof req.files === 'object' && req.files[fieldName]) {
-                    fileObj = req.files[fieldName][0];
-                }
-                return fileObj ? (fileObj.path || fileObj.location || fileObj.filename || fileObj.url) : null;
-            };
-
-            const fotoFromFiles = getFilePath('foto_perfil') || getFilePath('fotoPerfil') || getFilePath('avatar');
-            const cedula = getFilePath('documento_cedula') || getFilePath('doc_cedula');
-            const licencia = getFilePath('documento_licencia') || getFilePath('doc_licencia');
-            const tarjeta = getFilePath('doc_tarjeta') || getFilePath('tarjeta_propiedad') || getFilePath('tarjeta_operacion');
-            const docId = getFilePath('doc_identificacion');
-
-            if (fotoFromFiles) fotoUrlExtraida = fotoFromFiles;
-            if (cedula) updateData.documento_cedula = cedula;
-            if (licencia) updateData.documento_licencia = licencia;
-            if (tarjeta) updateData.doc_tarjeta = tarjeta;
-            if (docId) updateData.doc_identificacion = docId;
-        }
-
+        // 📁 PROCESAMIENTO DE ARCHIVOS BINARIOS DELEGADO (upload.service)
+        const extractedFiles = uploadService.extractFiles(req.files, req.file, req.body);
+        
+        let fotoUrlExtraida = extractedFiles.foto_perfil || extractedFiles.fotoPerfil || extractedFiles.avatar || extractedFiles.fotoUrlExtraida || extractedFiles.foto;
+        
         if (fotoUrlExtraida) {
             updateData.fotoUrl = fotoUrlExtraida;
             updateData.foto = fotoUrlExtraida;
             updateData.foto_perfil = fotoUrlExtraida;
+        }
+        
+        if (extractedFiles.documento_cedula || extractedFiles.doc_cedula) {
+            updateData.documento_cedula = extractedFiles.documento_cedula || extractedFiles.doc_cedula;
+        }
+        if (extractedFiles.documento_licencia || extractedFiles.doc_licencia) {
+            updateData.documento_licencia = extractedFiles.documento_licencia || extractedFiles.doc_licencia;
+        }
+        if (extractedFiles.doc_tarjeta || extractedFiles.tarjeta_propiedad || extractedFiles.tarjeta_operacion) {
+            updateData.doc_tarjeta = extractedFiles.doc_tarjeta || extractedFiles.tarjeta_propiedad || extractedFiles.tarjeta_operacion;
+        }
+        if (extractedFiles.doc_identificacion) {
+            updateData.doc_identificacion = extractedFiles.doc_identificacion;
         }
 
         // Selección del modelo según el rol
@@ -940,42 +877,36 @@ export const updateProfile = async (req, res, next) => {
             });
         }
 
-        // Sincronización secundaria hacia Firebase Firestore (Aislada en Try/Catch)
-        if (dbFirestore) {
-            try {
-                const targetUid = usuarioActualizado.uid || usuarioActualizado.firebaseUid || String(usuarioActualizado._id);
-                const esPasajero = usuarioActualizado.rol === 'pasajero' || usuarioActualizado.role === 'pasajero';
-                const esConductor = ROLES_CONDUCTORES.includes(usuarioActualizado.rol) || ROLES_CONDUCTORES.includes(usuarioActualizado.role);
+        // Sincronización secundaria hacia Firebase Firestore (Aislada y Delegada)
+        try {
+            const targetUid = usuarioActualizado.uid || usuarioActualizado.firebaseUid || String(usuarioActualizado._id);
+            const esPasajero = usuarioActualizado.rol === 'pasajero' || usuarioActualizado.role === 'pasajero';
+            const esConductor = ROLES_CONDUCTORES.includes(usuarioActualizado.rol) || ROLES_CONDUCTORES.includes(usuarioActualizado.role);
 
-                const coleccionFirestore = esPasajero 
-                    ? (FIRESTORE_PATHS?.users || 'usuarios') 
-                    : (esConductor ? (FIRESTORE_PATHS?.conductores || 'conductores') : (FIRESTORE_PATHS?.users || 'usuarios'));
+            const payloadSincroFirestore = {
+                nombre: usuarioActualizado.nombre,
+                fullName: usuarioActualizado.nombre,
+                telefono: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono,
+                cooperativa: usuarioActualizado.cooperativa || 'Particular',
+                empresa: usuarioActualizado.empresa || 'Particular',
+                terminal_sede: usuarioActualizado.terminal_sede || 'Particular',
+                updatedAt: new Date().toISOString()
+            };
 
-                const payloadSincroFirestore = {
-                    nombre: usuarioActualizado.nombre,
-                    fullName: usuarioActualizado.nombre,
-                    telefono: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono,
-                    cooperativa: usuarioActualizado.cooperativa || 'Particular',
-                    empresa: usuarioActualizado.empresa || 'Particular',
-                    terminal_sede: usuarioActualizado.terminal_sede || 'Particular',
-                    updatedAt: new Date().toISOString()
-                };
-
-                if (usuarioActualizado.foto_perfil || usuarioActualizado.fotoUrl) {
-                    payloadSincroFirestore.foto_perfil = usuarioActualizado.foto_perfil || usuarioActualizado.fotoUrl;
-                    payloadSincroFirestore.fotoUrl = usuarioActualizado.fotoUrl || usuarioActualizado.foto_perfil;
-                }
-
-                if (esConductor) {
-                    if (usuarioActualizado.placa) payloadSincroFirestore.placa = usuarioActualizado.placa;
-                    if (usuarioActualizado.numeroInterno) payloadSincroFirestore.numeroInterno = usuarioActualizado.numeroInterno;
-                }
-
-                await dbFirestore.collection(coleccionFirestore).doc(targetUid).set(payloadSincroFirestore, { merge: true });
-
-            } catch (firestoreErr) {
-                console.warn(`⚠️ [CIMCO-UPDATE-SYNC-WARN] Error de replicación en Firebase: ${firestoreErr.message}`);
+            if (usuarioActualizado.foto_perfil || usuarioActualizado.fotoUrl) {
+                payloadSincroFirestore.foto_perfil = usuarioActualizado.foto_perfil || usuarioActualizado.fotoUrl;
+                payloadSincroFirestore.fotoUrl = usuarioActualizado.fotoUrl || usuarioActualizado.foto_perfil;
             }
+
+            if (esConductor) {
+                if (usuarioActualizado.placa) payloadSincroFirestore.placa = usuarioActualizado.placa;
+                if (usuarioActualizado.numeroInterno) payloadSincroFirestore.numeroInterno = usuarioActualizado.numeroInterno;
+            }
+
+            await firebaseService.updateFirestoreUser(targetUid, payloadSincroFirestore, esPasajero, esConductor);
+
+        } catch (firestoreErr) {
+            console.warn(`⚠️ [CIMCO-UPDATE-SYNC-WARN] Error de replicación en Firebase delegado: ${firestoreErr.message}`);
         }
 
         return res.status(200).json({

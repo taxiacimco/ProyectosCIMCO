@@ -1,9 +1,9 @@
-// Versión Arquitectura: V17.01 - Delegación Centralizada de Excepciones a Middleware (next) y Propagación Transaccional en Cascada
+// Versión Arquitectura: V21.36 - Control de Lotes por Trozos (Chunking) para Sincronización en Firestore (Límite 500 Ops)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\cooperativas\cooperativa.controller.js
  * Misión: Administrar entidades de cooperativas, asignaciones de flota, estados operativos
  * e inyección de suspensión en cascada sobre los conductores vinculados mediante sesión ACID y espejo Firebase.
- * Ajuste V17.01: Refactorización de controladores asíncronos para delegar la gestión de excepciones al middleware centralizado mediante next(error).
+ * Ajuste V21.36: Implementación de procesamiento por lotes (max 500 ops) para garantizar escrituras seguras en Firestore durante la desactivación masiva.
  */
 
 import mongoose from 'mongoose';
@@ -188,24 +188,29 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
           { session }
         );
 
-        // Replicación en tiempo real hacia Firestore
+        // Replicación en tiempo real hacia Firestore dividida en lotes <= 500 operaciones
         if (dbFirestore) {
           try {
             const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-            const batch = dbFirestore.batch();
+            const CHUNK_SIZE = 450; // Límite estricto de seguridad por debajo de 500
 
-            for (const condId of idsConductores) {
-              const docRef = dbFirestore.collection(coleccionConductores).doc(condId);
-              batch.set(docRef, {
-                isOnline: false,
-                estadoOperativo: 'NO_DISPONIBLE',
-                isActive: false,
-                estadoAdministrativo: payloadDesactivacion.estadoAdministrativo,
-                ultimaActualizacion: new Date().toISOString()
-              }, { merge: true });
+            for (let i = 0; i < idsConductores.length; i += CHUNK_SIZE) {
+              const chunk = idsConductores.slice(i, i + CHUNK_SIZE);
+              const batch = dbFirestore.batch();
+
+              for (const condId of chunk) {
+                const docRef = dbFirestore.collection(coleccionConductores).doc(condId);
+                batch.set(docRef, {
+                  isOnline: false,
+                  estadoOperativo: 'NO_DISPONIBLE',
+                  isActive: false,
+                  estadoAdministrativo: payloadDesactivacion.estadoAdministrativo,
+                  ultimaActualizacion: new Date().toISOString()
+                }, { merge: true });
+              }
+
+              await batch.commit();
             }
-
-            await batch.commit();
           } catch (fsError) {
             console.warn(`⚠️ [CIMCO-CASCADE-SYNC-WARN] Falló la actualización de conductores en Firestore: ${fsError.message}`);
           }

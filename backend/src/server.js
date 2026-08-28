@@ -1,9 +1,8 @@
-// Versión Arquitectura: V19.8 - Corrección de Importación ES Modules para wallet.routes.js (Uso de Importación con Wildcard y Normalización)
+// Versión Arquitectura: V19.9 - Integración quirúrgica y centralizada del submódulo de billetera en el núcleo HTTP
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
- * Misión: Integración de red centralizada, habilitación de CORS perimetral controlado con soporte canónico
- * para entornos de desarrollo y producción (HTTP/HTTPS), habilitación de trust proxy para terminación SSL en Railway/Nginx,
- * orquestación de sockets, inyección segura del enrutador wallet.routes mediante importación con namespace y respaldo in-line.
+ * Misión: Integración del módulo de billetera (/api/billetera) manteniendo todas las políticas de seguridad perimetral,
+ * gestión robusta de CORS, manejo de sockets y resiliencia anti-crash.
  */
 
 import 'dotenv/config';
@@ -24,7 +23,7 @@ import excelRoutes from './modules/excel/excel.routes.js';
 import * as walletModuleExternal from './modules/billetera/wallet.routes.js';
 import { inicializarSockets } from '#modules/sockets/socket.manager.js';
 
-// Extracción segura del router de billetera (compatible con CommonJS export.module / default / router directo)
+// Extracción segura del router de billetera (compatible con ES Modules / CommonJS / default)
 const walletRoutesExternal = walletModuleExternal?.default || walletModuleExternal?.router || walletModuleExternal;
 
 // 🛡️ CARGA RESILIENTE DEL MIDDLEWARE DE ERRORES (ANTI-CRASH)
@@ -253,7 +252,7 @@ app.use('/api/pasajeros', pasajeroRoutes);
 app.use('/api/cooperativas', cooperativaRoutes);
 app.use('/api/excel', excelRoutes);
 
-// Montaje integrado del módulo externo de billetera con respaldo híbrido anti-caídas
+// Montaje integrado del módulo de billetera con soporte híbrido de respaldo
 app.use('/api/billetera', (req, res, next) => {
     if (walletRoutesExternal && typeof walletRoutesExternal === 'function') {
         return walletRoutesExternal(req, res, next);

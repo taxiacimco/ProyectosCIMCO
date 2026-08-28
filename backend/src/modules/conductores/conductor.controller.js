@@ -1,8 +1,8 @@
-// Versión Arquitectura: V21.34 - Delegación Centralizada de Excepciones a Middleware (next) y Persistencia Radárica Atómica
+// Versión Arquitectura: V21.36 - Exportación de Helper actualizarUbicacionConductor para Integración con Socket Manager
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, telemetría GPS, recargas atómicas y métricas de capital circulante.
- * Ajuste V21.34: Refactorización integral de controladores asíncronos para delegar la captura de excepciones al middleware centralizado de errores mediante next(error).
+ * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, recargas atómicas y métricas de capital circulante.
+ * Ajuste V21.36: Inclusión de alias de exportación `actualizarUbicacionConductor` para el consumo seguro desde socket.manager.js.
  */
 
 import mongoose from 'mongoose';
@@ -11,6 +11,7 @@ import Usuario from '../../models/Usuario.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
 import admin, { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js'; 
 import { FieldValue } from 'firebase-admin/firestore'; 
+import { actualizarRadarUbicacion } from '../../services/telemetria.service.js';
 
 /**
  * Helper para registrar transacciones auditables en Firestore
@@ -909,65 +910,10 @@ export const obtenerConductoresCercanos = async (req, res, next) => {
 // 4. TELEMETRÍA REACTIVA (PERSISTENCIA ATÓMICA CIMCO-RADAR 2DSPHERE)
 // ==================================================================
 
-export const actualizarRadarUbicacion = async (conductorId, lat, lng) => {
-    try {
-        if (!conductorId || lat === undefined || lng === undefined) {
-            return false;
-        }
-        const longNum = parseFloat(lng);
-        const latNum = parseFloat(lat);
+export { actualizarRadarUbicacion };
 
-        if (isNaN(longNum) || isNaN(latNum)) {
-            return false;
-        }
-
-        const conductor = await Conductor.findOne({
-            $or: [
-                { _id: mongoose.Types.ObjectId.isValid(conductorId) ? conductorId : null },
-                { uid: conductorId },
-                { conductorId: conductorId }
-            ]
-        });
-
-        if (!conductor) return false;
-
-        const estadoActual = String(conductor.estado || conductor.estadoAdministrativo || '').toUpperCase();
-        if ((estadoActual !== 'APROBADO' && estadoActual !== 'ACTIVO') || conductor.isActive === false) {
-            console.warn(`🔒 [RADAR-REJECT] El conductor ${conductor._id} intentó enviar GPS sin estar APROBADO.`);
-            return false;
-        }
-
-        const conductorActualizado = await Conductor.findOneAndUpdate(
-            { _id: conductor._id },
-            {
-                $set: {
-                    'coordenadas.type': 'Point',
-                    'coordenadas.coordinates': [longNum, latNum],
-                    'ubicacion.type': 'Point',
-                    'ubicacion.coordinates': [longNum, latNum]
-                }
-            },
-            { new: true, upsert: false }
-        );
-
-        if (!conductorActualizado) return false;
-
-        const docFirestoreId = conductorActualizado.uid || conductorActualizado._id.toString();
-        const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-        await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
-            coordenadas: {
-                latitude: latNum,
-                longitude: longNum
-            },
-            ultimaActualizacion: FieldValue.serverTimestamp()
-        }, { merge: true });
-
-        return true;
-    } catch (error) {
-        console.error(`❌ [RADAR-DB-ERROR] Error en Atlas/Firestore:`, error.message);
-        return false;
-    }
-};
+// Alias de exportación nombrado para resolución desacoplada con socket.manager.js
+export const actualizarUbicacionConductor = actualizarRadarUbicacion;
 
 export const actualizarUbicacionGPS = async (req, res, next) => {
     try {
@@ -1016,5 +962,6 @@ export default {
     actualizarEstadoConductor,
     obtenerConductoresCercanos,
     actualizarRadarUbicacion,
+    actualizarUbicacionConductor,
     actualizarUbicacionGPS
 };
