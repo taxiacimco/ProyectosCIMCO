@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.38 - Delegación de subida de archivos y adaptadores Firebase (Clean Architecture)
+// Versión Arquitectura: V21.39 - Bloqueo Preventivo de Saldo Restringido en Registro e Integración de Restricción Automática
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
@@ -7,6 +7,7 @@
  * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono), actualización segura de perfiles (updateProfile / actualizarPerfil)
  * con soporte para hashes de clave opcionales, atributos de vehículo (placa/numeroInterno) y archivos binarios.
  * NOTA: Gestión de archivos delegada a upload.service y sincronización a firebase.service.
+ * Ajuste V21.39: Asignación de bloqueo preventivo por saldo inicial (< $2.000 COP) en registro de conductores y helper centralizado para restricción de estado.
  */
 
 import jwt from 'jsonwebtoken';
@@ -35,6 +36,9 @@ const ROLES_CONDUCTORES = ['conductor', 'mototaxi', 'motoparrillero', 'motocarga
 const ROLES_ADMINISTRATIVOS = ['despachador', 'admin', 'secretaria', 'staff', 'ceo'];
 const ROLES_OPERATIVOS = [...ROLES_CONDUCTORES, ...ROLES_ADMINISTRATIVOS];
 
+// Límite mínimo de saldo operativo para conductores ($2.000 COP)
+const SALDO_MINIMO_OPERATIVO = 2000;
+
 // Mantenimiento preventivo: Eliminación de OTPs expirados cada 10 minutos para evitar fugas de memoria
 setInterval(() => {
     const ahora = Date.now();
@@ -44,6 +48,35 @@ setInterval(() => {
         }
     }
 }, 10 * 60 * 1000);
+
+/**
+ * 🛡️ HELPER DE ARQUITECTURA: EVALUACIÓN DE RESTRICCIÓN AUTOMÁTICA DE SALDO
+ * Evalúa si el saldo de un conductor cae por debajo del umbral mínimo ($2.000 COP).
+ * Si es así, restringe su estado administrativo a 'RESTRINGIDO_POR_SALDO' o 'BLOQUEADO'
+ * y su estado operativo a 'NO_DISPONIBLE', requiriendo recarga administrativa.
+ */
+export const evaluarRestriccionSaldoConductor = (conductorDoc, saldoEvaluar) => {
+    if (!conductorDoc) return null;
+
+    const saldoActual = saldoEvaluar !== undefined ? Number(saldoEvaluar) : Number(conductorDoc.saldo || 0);
+
+    if (saldoActual < SALDO_MINIMO_OPERATIVO) {
+        conductorDoc.estadoAdministrativo = 'RESTRINGIDO_POR_SALDO';
+        conductorDoc.estadoOperativo = 'NO_DISPONIBLE';
+        conductorDoc.isActive = false;
+        conductorDoc.isOnline = false;
+        if (conductorDoc.estado && conductorDoc.estado !== 'PENDIENTE') {
+            conductorDoc.estado = 'RESTRINGIDO_POR_SALDO';
+        }
+    } else if (conductorDoc.estadoAdministrativo === 'RESTRINGIDO_POR_SALDO') {
+        // Si superó el saldo mínimo tras una recarga administrativa, se reactiva a APROBADO
+        conductorDoc.estadoAdministrativo = 'APROBADO';
+        conductorDoc.estado = 'APROBADO';
+        conductorDoc.isActive = true;
+    }
+
+    return conductorDoc;
+};
 
 /**
  * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO Y SINCRO FIREBASE AUTH
@@ -72,7 +105,8 @@ export const register = async (req, res, next) => {
             terminal_sede,
             terminalSede,
             access_level,
-            accessLevel
+            accessLevel,
+            saldo: saldoInicialInput
         } = body;
 
         // 🛡️ VALIDACIÓN EXPLÍCITA DE CAMPOS CRÍTICOS OBLIGATORIOS (EMAIL Y TELÉFONO)
@@ -181,7 +215,7 @@ export const register = async (req, res, next) => {
                     cooperativa: terminalSedeFinal,
                     empresa: terminalSedeFinal,
                     terminal_sede: terminalSedeFinal,
-                    saldo: 0,
+                    saldo: Number(saldoInicialInput || 0),
                     foto_perfil,
                     fotoUrl: foto_perfil || undefined,
                     doc_identificacion,
@@ -198,7 +232,7 @@ export const register = async (req, res, next) => {
 
             esPasajero = true;
         } 
-        // 🔴 ROL: CONDUCTOR (Requiere Aprobación Manual por Admin/Secretaría)
+        // 🔴 ROL: CONDUCTOR (Requiere Aprobación Manual y Evaluación Preventiva de Saldo Inicial)
         else if (ROLES_CONDUCTORES.includes(rolNormalizado)) {
             if (!placa || !numeroInterno) {
                 return res.status(400).json({ 
@@ -206,6 +240,14 @@ export const register = async (req, res, next) => {
                     message: "Para el registro de un conductor se requiere la placa y el número interno del vehículo." 
                 });
             }
+
+            const saldoInicial = Number(saldoInicialInput || 0);
+
+            // ⚠️ BLOQUEO PREVENTIVO INICIAL POR SALDO < $2.000 COP
+            // Si el saldo inicial es inferior a $2.000 COP, nace bloqueado/restringido requiriendo recarga por Admin/CEO
+            const requiereBloqueoSaldo = saldoInicial < SALDO_MINIMO_OPERATIVO;
+            const estadoAdminInicial = requiereBloqueoSaldo ? 'RESTRINGIDO_POR_SALDO' : 'PENDIENTE';
+            const estadoInicial = requiereBloqueoSaldo ? 'RESTRINGIDO_POR_SALDO' : 'PENDIENTE';
 
             nuevoUsuario = new Conductor({
                 ...(finalUid ? { uid: finalUid, firebaseUid: finalUid } : {}),
@@ -234,13 +276,13 @@ export const register = async (req, res, next) => {
                 doc_identificacion,
                 access_level: parsedAccessLevel ?? 10,
 
-                // 🔴 RETENCIÓN ADMINISTRATIVA: Nace PENDIENTE e INACTIVO hasta verificación manual
-                estadoAdministrativo: 'PENDIENTE',
-                estado: 'PENDIENTE',
+                // 🔴 RETENCIÓN ADMINISTRATIVA Y EVALUACIÓN DE SALDO INICIAL
+                estadoAdministrativo: estadoAdminInicial,
+                estado: estadoInicial,
                 estadoOperativo: 'NO_DISPONIBLE',
                 isActive: false,
                 isOnline: false,
-                saldo: 0
+                saldo: saldoInicial
             });
             await nuevoUsuario.save();
             esConductor = true;
@@ -264,8 +306,8 @@ export const register = async (req, res, next) => {
                 terminal_sede: terminalSedeFinal,
                 isActive: true,
                 estado: 'APROBADO',
-                saldo: 0,
-                balance: 0,
+                saldo: Number(saldoInicialInput || 0),
+                balance: Number(saldoInicialInput || 0),
                 foto_perfil,
                 fotoUrl: foto_perfil || undefined,
                 doc_identificacion,
@@ -318,8 +360,8 @@ export const register = async (req, res, next) => {
                 id: targetUid,
                 nombreUsuario: nuevoUsuario.nombre,
                 rolUsuario: nuevoUsuario.rol,
-                balance: 0,
-                saldo: 0,
+                balance: nuevoUsuario.saldo || 0,
+                saldo: nuevoUsuario.saldo || 0,
                 ultimaActualizacion: new Date().toISOString()
             });
 
@@ -329,9 +371,13 @@ export const register = async (req, res, next) => {
 
         // Respuesta diferenciada según la categoría del onboarding
         if (esConductor) {
+            const mensajeConductor = nuevoUsuario.estadoAdministrativo === 'RESTRINGIDO_POR_SALDO'
+                ? "Registro recibido. El saldo inicial es inferior a $2.000 COP; la cuenta está restringida y requiere aprobación y recarga por parte del Administrador/CEO."
+                : "Registro recibido. Su cuenta está en revisión por la administración.";
+
             return res.status(201).json({
                 success: true,
-                message: "Registro recibido. Su cuenta está en revisión por la administración.",
+                message: mensajeConductor,
                 data: {
                     id: nuevoUsuario._id,
                     uid: nuevoUsuario.uid || nuevoUsuario.firebaseUid || finalUid || nuevoUsuario._id,
@@ -340,7 +386,9 @@ export const register = async (req, res, next) => {
                     telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
                     rol: nuevoUsuario.rol,
                     estado: nuevoUsuario.estado,
+                    estadoAdministrativo: nuevoUsuario.estadoAdministrativo,
                     isActive: nuevoUsuario.isActive,
+                    saldo: nuevoUsuario.saldo,
                     terminal_sede: nuevoUsuario.terminal_sede || nuevoUsuario.cooperativa,
                     foto_perfil: nuevoUsuario.foto_perfil || null
                 }
@@ -413,7 +461,16 @@ export const login = async (req, res, next) => {
             });
         }
 
-        // 🔴 BLOQUEO POR REVISIÓN PENDIENTE / SUSPENSIÓN
+        // 🔴 EVALUACIÓN DE SALDO EN TIEMPO REAL PARA CONDUCTORES
+        const esConductor = ROLES_CONDUCTORES.includes(cuentaEncontrada.rol) || ROLES_CONDUCTORES.includes(cuentaEncontrada.role);
+        if (esConductor) {
+            evaluarRestriccionSaldoConductor(cuentaEncontrada);
+            if (cuentaEncontrada.isModified()) {
+                await cuentaEncontrada.save();
+            }
+        }
+
+        // 🔴 BLOQUEO POR REVISIÓN PENDIENTE / SUSPENSIÓN / SALDO INSUFICIENTE
         const estadoEvaluado = cuentaEncontrada.estado ? String(cuentaEncontrada.estado).toUpperCase() : '';
         const estadoAdmin = cuentaEncontrada.estadoAdministrativo ? String(cuentaEncontrada.estadoAdministrativo).toUpperCase() : '';
 
@@ -422,6 +479,14 @@ export const login = async (req, res, next) => {
                 success: false, 
                 code: 'ACCOUNT_PENDING_APPROVAL',
                 message: "Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación." 
+            });
+        }
+
+        if (estadoEvaluado === 'RESTRINGIDO_POR_SALDO' || estadoAdmin === 'RESTRINGIDO_POR_SALDO') {
+            return res.status(403).json({
+                success: false,
+                code: 'INSUFFICIENT_BALANCE_RESTRICTED',
+                message: "Su cuenta se encuentra restringida por saldo inferior a $2.000 COP. Requiere una recarga por parte del Administrador/CEO para reactivarse."
             });
         }
 
@@ -483,6 +548,8 @@ export const login = async (req, res, next) => {
                 rol: rolFinal,
                 subrol: cuentaEncontrada.subrol || null,
                 estado: cuentaEncontrada.estado,
+                estadoAdministrativo: cuentaEncontrada.estadoAdministrativo,
+                saldo: cuentaEncontrada.saldo ?? 0,
                 isActive: cuentaEncontrada.isActive,
                 terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa,
                 foto_perfil: cuentaEncontrada.foto_perfil || cuentaEncontrada.fotoUrl || null
@@ -965,5 +1032,6 @@ export default {
     verificarTelefono,
     updateProfile,
     actualizarPerfil,
-    logout
+    logout,
+    evaluarRestriccionSaldoConductor
 };

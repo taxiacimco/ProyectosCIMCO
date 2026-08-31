@@ -1,12 +1,13 @@
-// Versión Arquitectura: V20.0 - Refactorización de Lógica Contable a viaje.service.js e Inyección de Dependencia de Eventos Sockets
+// Versión Arquitectura: V20.1 - Intercepción con 403 Forbidden por Saldo Insuficiente (< $2.000 COP) y Delegación Multimodal a viaje.service.js
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
- * Misión: Procesar flujos operativos, coordinación logistica de viajes, control transaccional de estados,
+ * Misión: Procesar flujos operativos, coordinación logística de viajes, control transaccional de estados,
  *         sincronización con Firestore y delegación contable a la capa de servicio centralizada.
- * Ajustes V20.0:
- *  1. Eliminación total de la referencia global global.io / globalThis.io, reemplazada por desacoplamiento
- *     vía req.app.get('io') / req.io o emisor de eventos centralizado.
- *  2. Delegación del cálculo contable (comisión del 10%, validación de saldos y registros) al servicio (viaje.service.js).
+ * Ajustes V20.1:
+ *  1. Intercepción estricta en `aceptarViaje`, `crearYDespacharViajeAtomico` y `despacharViajeAtomico`:
+ *     Si el saldo del conductor es < 2000 COP, retorna res.status(403).json({ success: false, message: "Saldo insuficiente para operar, saldo mínimo $2.000 COP" }).
+ *  2. Delegación completa de liquidación contable en `completarViaje` a `viajeService.procesarPagoWalletTransaccional` o `viajeService.calcularComisionPorSubrol`
+ *     para dar soporte a la matriz por subrol (mototaxi, motocarga, conductor_intermunicipal) y pagos por billetera.
  *  3. Preservación estricta del aislamiento ACID, guardas anti-undefined y sincronización atómica con Firestore.
  */
 
@@ -114,6 +115,23 @@ export const crearYDespacharViajeAtomico = async (req, res, next) => {
     session.startTransaction();
 
     try {
+        // Intercepción previa de saldo del conductor para evitar bloquear de forma prematura
+        const conductorPrevio = await Conductor.findById(conductorId).session(session);
+        if (!conductorPrevio) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ success: false, message: 'El conductor especificado no existe.' });
+        }
+
+        if ((Number(conductorPrevio.saldo) || 0) < 2000) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({
+                success: false,
+                message: "Saldo insuficiente para operar, saldo mínimo $2.000 COP"
+            });
+        }
+
         const conductor = await Conductor.findOneAndUpdate(
             { _id: conductorId, estadoOperativo: 'DISPONIBLE' },
             { 
@@ -133,15 +151,6 @@ export const crearYDespacharViajeAtomico = async (req, res, next) => {
                 success: false,
                 code: 'DRIVER_CONCURRENT_CONFLICT',
                 message: 'Conflicto de despacho. El conductor no existe o ya cambió a estado OCUPADO/INACTIVO por otra asignación.'
-            });
-        }
-
-        if ((conductor.saldo || 0) < 2000) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                success: false,
-                message: `Despacho denegado. El conductor posee saldo insuficiente en billetera ($${conductor.saldo || 0} COP).`
             });
         }
 
@@ -325,6 +334,23 @@ export const aceptarViaje = async (req, res, next) => {
     session.startTransaction();
 
     try {
+        const conductorPrevio = await Conductor.findById(conductorId).session(session);
+        if (!conductorPrevio) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ success: false, message: 'Conductor no encontrado.' });
+        }
+
+        const saldoConductor = Number(conductorPrevio.saldo) || 0;
+        if (saldoConductor < 2000) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({
+                success: false,
+                message: "Saldo insuficiente para operar, saldo mínimo $2.000 COP"
+            });
+        }
+
         const conductor = await Conductor.findOneAndUpdate(
             { _id: conductorId, estadoOperativo: 'DISPONIBLE' }, 
             { $set: { estado: 'busy', estadoOperativo: 'OCUPADO', viajeActualId: String(viajeId) } },
@@ -338,16 +364,6 @@ export const aceptarViaje = async (req, res, next) => {
                 success: false,
                 code: 'DRIVER_BUSY_OR_OFFLINE',
                 message: 'Operación declinada. El conductor ya se encuentra en estado OCUPADO o cambió su perfil operativo.'
-            });
-        }
-
-        const saldoConductor = conductor.saldo || 0;
-        if (saldoConductor < 2000) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                success: false,
-                message: `Transacción rechazada. Saldo de billetera insuficiente ($${saldoConductor} COP).`
             });
         }
 
@@ -606,60 +622,121 @@ export const completarViaje = async (req, res, next) => {
                 throw new Error('El viaje no tiene un conductor asociado para debitar.');
             }
 
-            // Delegación de Regla de Negocio y Liquidación Contable al Servicio Centralizado (viaje.service.js)
-            const valorReferencia = viaje.valor || viaje.tarifa || 0;
-            const comision = viajeService?.calcularComision ? viajeService.calcularComision(valorReferencia) : Math.round(valorReferencia * 0.10);
-
-            const conductorActualizado = await Conductor.findOneAndUpdate(
-                { _id: conductorId, saldo: { $gte: comision } },
-                { 
-                    $inc: { saldo: -comision, balance: -comision },
-                    $set: { estado: 'active', estadoOperativo: 'DISPONIBLE', viajeActualId: null }
-                },
-                { new: false, session }
-            );
-
-            if (!conductorActualizado) {
-                throw new Error('Conductor no hallado o fondos insuficientes para cubrir la comisión en tiempo real.');
+            const conductorObj = await Conductor.findById(conductorId).session(session);
+            if (!conductorObj) {
+                throw new Error('Conductor no hallado en la base de datos.');
             }
 
-            const saldoAnterior = conductorActualizado.saldo || 0;
-            const saldoNuevo = saldoAnterior - comision;
+            const esWallet = String(viaje.metodoPago || '').toUpperCase() === 'WALLET';
+            const tarifaMonto = Number(viaje.valor || viaje.tarifa || 0);
+            const esIntermunicipal = Boolean(viaje.despachadorId || viaje.esIntermunicipal);
 
-            viaje.estado = 'finalizado';
-            viaje.estadoViaje = 'FINALIZADO';
-            await viaje.save({ session });
+            let comisionConductor = 0;
+            let comisionDespachador = 0;
+            let saldoNuevoConductor = Number(conductorObj.saldo) || 0;
 
-            await HistorialSaldo.create([{
-                conductor: conductorId, 
-                viajeId,
-                tipo: 'descuento_comision',
-                monto: comision,
-                saldoAnterior,
-                saldoNuevo,
-                procesadoPor: 'SISTEMA_DESPACHO_AUTOMATICO',
-                descripcion: `Débito automático de comisión (${comision} COP) por viaje ID: ${viaje._id}`
-            }], { session });
+            if (esWallet && viajeService?.procesarPagoWalletTransaccional) {
+                // Liberar la sesión actual para delegar la transacción ACID atómica a viajeService
+                await session.abortTransaction();
+                session.endSession();
 
-            await session.commitTransaction();
-            session.endSession();
+                const resultadoWallet = await viajeService.procesarPagoWalletTransaccional({
+                    viajeId: viaje._id,
+                    pasajeroId: viaje.pasajeroId,
+                    conductorId: viaje.conductorId,
+                    despachadorId: viaje.despachadorId,
+                    tarifa: tarifaMonto,
+                    subrolConductor: conductorObj.subrol,
+                    esIntermunicipal
+                });
+
+                comisionConductor = resultadoWallet.comisionConductor;
+                comisionDespachador = resultadoWallet.comisionDespachador;
+                saldoNuevoConductor = resultadoWallet.saldoFinalConductor;
+
+                // Marcar viaje finalizado
+                await Viaje.findByIdAndUpdate(viajeId, {
+                    $set: { estado: 'finalizado', estadoViaje: 'FINALIZADO' }
+                });
+
+                // Liberar conductor
+                await Conductor.findByIdAndUpdate(conductorId, {
+                    $set: { estado: 'active', estadoOperativo: 'DISPONIBLE', viajeActualId: null }
+                });
+
+            } else {
+                // LIQUIDACIÓN EN EFECTIVO CON MATRIZ POR SUBROL Y DESPACHO
+                const calculo = viajeService?.calcularComisionPorSubrol
+                    ? viajeService.calcularComisionPorSubrol(conductorObj.subrol, tarifaMonto, esIntermunicipal, viaje.despachadorId)
+                    : { comisionConductor: viajeService?.calcularComision ? viajeService.calcularComision(tarifaMonto) : Math.round(tarifaMonto * 0.10), comisionDespachador: 0 };
+
+                comisionConductor = calculo.comisionConductor;
+                comisionDespachador = calculo.comisionDespachador;
+
+                const saldoAnterior = Number(conductorObj.saldo) || 0;
+                saldoNuevoConductor = saldoAnterior - comisionConductor;
+
+                const conductorActualizado = await Conductor.findOneAndUpdate(
+                    { _id: conductorId },
+                    { 
+                        $inc: { saldo: -comisionConductor, balance: -comisionConductor },
+                        $set: { estado: 'active', estadoOperativo: 'DISPONIBLE', viajeActualId: null }
+                    },
+                    { new: true, session }
+                );
+
+                if (!conductorActualizado) {
+                    throw new Error('Error al actualizar saldo del conductor.');
+                }
+
+                if (comisionDespachador > 0 && viaje.despachadorId) {
+                    await Usuario.findByIdAndUpdate(
+                        viaje.despachadorId,
+                        { $inc: { saldo: -comisionDespachador } },
+                        { session }
+                    );
+                }
+
+                viaje.estado = 'finalizado';
+                viaje.estadoViaje = 'FINALIZADO';
+                await viaje.save({ session });
+
+                if (comisionConductor > 0) {
+                    await HistorialSaldo.create([{
+                        entidadId: conductorId,
+                        tipoEntidad: 'Conductor',
+                        conductorId: conductorId,
+                        viajeId,
+                        tipo: 'descuento_comision',
+                        monto: comisionConductor,
+                        saldoAnterior,
+                        saldoNuevo: saldoNuevoConductor,
+                        procesadoPor: 'SISTEMA_DESPACHO_AUTOMATICO',
+                        descripcion: `Débito de comisión por viaje ID: ${viaje._id} (Subrol: ${conductorObj.subrol || 'estándar'})`
+                    }], { session });
+                }
+
+                await session.commitTransaction();
+                session.endSession();
+            }
 
             const latenciaTotal = Date.now() - tiempoInicio;
             if (intento > 1) {
-                console.log(`📈 [CIMCO-PRODUCCION-AUDIT] Viaje ${viajeId} liquidado con éxito tras mitigar colisiones. Intentos: ${intento}. Latencia total: ${latenciaTotal}ms.`);
+                console.log(`📈 [CIMCO-PRODUCCION-AUDIT] Viaje ${viajeId} liquidado tras mitigar colisiones. Intentos: ${intento}. Latencia: ${latenciaTotal}ms.`);
             }
 
             // 🔄 SINCRONIZACIÓN ATÓMICA DE ESTADO EN FIRESTORE
             await actualizarEstadoFirestore(String(viajeId), 'FINALIZADO', {
-                comisionDebitada: comision,
+                comisionDebitada: comisionConductor,
+                comisionDespachador: comisionDespachador,
                 fechaFinalizacion: FieldValue.serverTimestamp()
             });
 
             if (dbFirestore) {
                 const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
                 dbFirestore.collection(coleccionConductores).doc(String(conductorId)).update({
-                    saldo: FieldValue.increment(-comision),
-                    balance: FieldValue.increment(-comision),
+                    saldo: FieldValue.increment(-comisionConductor),
+                    balance: FieldValue.increment(-comisionConductor),
                     estado: 'active',
                     estadoOperativo: 'DISPONIBLE',
                     viajeActualId: null,
@@ -670,12 +747,14 @@ export const completarViaje = async (req, res, next) => {
             return res.status(200).json({
                 success: true,
                 message: 'Servicio completado y balance liquidado de forma segura.',
-                comisionDebitada: comision,
-                saldoRestante: saldoNuevo
+                comisionDebitada: comisionConductor,
+                saldoRestante: saldoNuevoConductor
             });
 
         } catch (error) {
-            await session.abortTransaction();
+            if (session.inTransaction()) {
+                await session.abortTransaction();
+            }
             session.endSession();
 
             const esWriteConflict = error.code === 112 || 
@@ -938,6 +1017,22 @@ export const despacharViajeAtomico = async (req, res, next) => {
     session.startTransaction();
 
     try {
+        const conductorPrevio = await Conductor.findById(conductorId).session(session);
+        if (!conductorPrevio) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ success: false, message: 'El conductor asignado no existe.' });
+        }
+
+        if ((Number(conductorPrevio.saldo) || 0) < 2000) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({
+                success: false,
+                message: "Saldo insuficiente para operar, saldo mínimo $2.000 COP"
+            });
+        }
+
         const conductor = await Conductor.findOneAndUpdate(
             { _id: conductorId, estadoOperativo: 'DISPONIBLE' },
             { $set: { estado: 'busy', estadoOperativo: 'OCUPADO', viajeActualId: String(viajeId) } },

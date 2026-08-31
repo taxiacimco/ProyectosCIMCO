@@ -1,13 +1,12 @@
-// Versión Arquitectura: V15.0 - Exclusividad REST API, Claves de Idempotencia y Manejo Numérico Seguro
+// Versión Arquitectura: V15.1 - Reglas de Comisión Dinámicas e Indicador de Saldo Crítico
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
  * Misión: Monitoreo global de saldos y ejecución de ajustes de capital (Abono / Débito Manual) para todos los actores:
  *         Pasajeros, Mototaxistas, Motoparrilleros, Montacargas, Despachadores y Conductores.
- * Ajuste V15.0:
- *   1. Eliminación total de mutaciones directas a Firestore desde el Frontend (sólo lectura/escucha reactiva).
- *   2. Integración de Idempotency Keys (UUID v4) en cada transacción para evitar duplicidad de cargos en red inestable.
- *   3. Manejo numérico seguro con redondeo entero e higienización estricta de saldos y montos monetarios.
- * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
+ * Ajuste V15.1:
+ *   1. Integración de la matriz de reglas de comisión en la tarjeta de detalle del destinatario.
+ *   2. Indicador visual dinámico de alerta en la grilla para saldos inferiores a $2.000 COP (Rojo/Amarillo).
+ *   3. Mantenimiento estricto del estándar CIMCO-UI V9.3 (Glassmorphism), alias absolutos y seguridad REST.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -15,7 +14,7 @@ import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { 
     Wallet, Search, RefreshCw, ArrowUpRight, DollarSign, 
-    AlertCircle, CheckCircle2, ShieldAlert, ServerOff, Loader
+    AlertCircle, CheckCircle2, ShieldAlert, ServerOff, Loader, Info
 } from 'lucide-react';
 // 🛡️ Importación del helper de deduplicación
 import { deduplicarEntidades } from '@/utils/deduplicar';
@@ -98,6 +97,27 @@ export const GestionBilleteras = () => {
         }
 
         return `ACTOR ${(nodo.rol || nodo.role || nodo.subrol || 'USUARIO').toUpperCase()}`;
+    };
+
+    // 📋 Matriz de Reglas de Comisión según el rol/subrol
+    const obtenerReglaComision = (rol, subrol) => {
+        const val = (subrol || rol || '').toUpperCase();
+        if (val.includes('MOTOTAXI') || val.includes('PARRILLERO')) {
+            return "Comisión: 10% por servicio accepted | Min $2.000 COP";
+        }
+        if (val.includes('CARGA')) {
+            return "Comisión: $500 COP fijo por servicio | Min $2.000 COP";
+        }
+        if (val.includes('DESPACHADOR')) {
+            return "Comisión: $500 COP fijo por servicio despachado | Min $2.000 COP";
+        }
+        if (val.includes('INTERMUNICIPAL')) {
+            return "Comisión: $0 COP (Asumida por Despachador)";
+        }
+        if (val.includes('PASAJERO')) {
+            return "Saldo Opcional (Pago con Billetera)";
+        }
+        return "Comisión Estándar de Plataforma | Min $2.000 COP";
     };
 
     // 🚀 OBTENER BÓVEDAS GLOBALMENTE (API REST + FALLBACK FIRESTORE REACTIVO LECTURA SIN MEMORY LEAKS)
@@ -430,6 +450,9 @@ export const GestionBilleteras = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[520px] overflow-y-auto pr-1">
                             {cuentasFiltradas.map((cuenta) => {
                                 const esSeleccionado = cuentaSeleccionada?.id === cuenta.id;
+                                const esSaldoBajo = cuenta.saldo < 2000;
+                                const esSaldoCero = cuenta.saldo <= 0;
+
                                 return (
                                     <div 
                                         key={cuenta.id}
@@ -437,12 +460,24 @@ export const GestionBilleteras = () => {
                                         className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
                                             esSeleccionado 
                                                 ? 'bg-cyan-500/10 border-cyan-500/50 shadow-[0_0_20px_rgba(34,211,238,0.1)] scale-[1.01]' 
+                                                : esSaldoCero
+                                                ? 'bg-red-950/20 border-red-500/30 hover:border-red-500/50 hover:bg-red-900/30'
+                                                : esSaldoBajo
+                                                ? 'bg-amber-950/20 border-amber-500/30 hover:border-amber-500/50 hover:bg-amber-900/30'
                                                 : 'bg-zinc-950/40 border-white/5 hover:border-white/20 hover:bg-zinc-900/80'
                                         }`}
                                     >
                                         <div className="flex items-start justify-between gap-2">
                                             <div className="truncate">
-                                                <h4 className="text-xs font-black text-white uppercase truncate">{cuenta.nombre}</h4>
+                                                <div className="flex items-center gap-1.5 truncate">
+                                                    <h4 className="text-xs font-black text-white uppercase truncate">{cuenta.nombre}</h4>
+                                                    {esSaldoBajo && (
+                                                        <span className="flex-shrink-0 relative flex h-2 w-2" title="Saldo Inferior al Mínimo Requerido ($2.000 COP)">
+                                                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${esSaldoCero ? 'bg-red-400' : 'bg-amber-400'}`}></span>
+                                                            <span className={`relative inline-flex rounded-full h-2 w-2 ${esSaldoCero ? 'bg-red-500' : 'bg-amber-500'}`}></span>
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 <p className="text-[10px] text-zinc-500 truncate">TEL: {cuenta.telefono}</p>
                                             </div>
                                             {renderBadgeRol(cuenta.rol, cuenta.subrol)}
@@ -450,8 +485,23 @@ export const GestionBilleteras = () => {
 
                                         <div className="flex items-end justify-between pt-2 border-t border-white/5">
                                             <div>
-                                                <p className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider">Saldo Disponible</p>
-                                                <p className="text-sm font-black text-emerald-400">
+                                                <div className="flex items-center gap-1">
+                                                    <p className="text-[9px] text-zinc-500 uppercase font-bold tracking-wider">Saldo Disponible</p>
+                                                    {esSaldoBajo && (
+                                                        <span className={`text-[8px] font-black uppercase px-1 py-0.2 rounded ${
+                                                            esSaldoCero ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                                        }`}>
+                                                            {esSaldoCero ? 'CRÍTICO' : 'ALERTA'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className={`text-sm font-black ${
+                                                    esSaldoCero 
+                                                        ? 'text-red-400' 
+                                                        : esSaldoBajo 
+                                                        ? 'text-amber-400' 
+                                                        : 'text-emerald-400'
+                                                }`}>
                                                     ${(cuenta.saldo || 0).toLocaleString('es-CO')} <span className="text-[9px] text-zinc-500">COP</span>
                                                 </p>
                                             </div>
@@ -489,7 +539,7 @@ export const GestionBilleteras = () => {
                             </div>
                         ) : (
                             <form onSubmit={ejecutarRecarga} className="space-y-4 animate-in fade-in duration-200">
-                                <div className="bg-zinc-950 p-3.5 rounded-xl border border-cyan-500/30 space-y-1">
+                                <div className="bg-zinc-950 p-3.5 rounded-xl border border-cyan-500/30 space-y-2">
                                     <div className="flex items-center justify-between">
                                         <span className="text-[9px] font-bold text-cyan-400 uppercase tracking-widest">Destinatario</span>
                                         {renderBadgeRol(cuentaSeleccionada.rol, cuentaSeleccionada.subrol)}
@@ -498,7 +548,17 @@ export const GestionBilleteras = () => {
                                     <p className="text-[10px] text-zinc-400 truncate">ID: {cuentaSeleccionada.id}</p>
                                     <div className="pt-2 flex justify-between items-center text-[10px] border-t border-white/5 text-zinc-400">
                                         <span>Saldo Actual:</span>
-                                        <span className="font-bold text-emerald-400">${(cuentaSeleccionada.saldo || 0).toLocaleString('es-CO')} COP</span>
+                                        <span className={`font-bold ${
+                                            cuentaSeleccionada.saldo < 2000 ? 'text-amber-400' : 'text-emerald-400'
+                                        }`}>${(cuentaSeleccionada.saldo || 0).toLocaleString('es-CO')} COP</span>
+                                    </div>
+
+                                    {/* 📜 Despliegue de la Regla de Comisión */}
+                                    <div className="mt-2 p-2 rounded-lg bg-cyan-500/5 border border-cyan-500/20 flex items-start gap-2 text-[10px] text-cyan-300">
+                                        <Info size={14} className="text-cyan-400 flex-shrink-0 mt-0.5" />
+                                        <span className="leading-tight font-medium">
+                                            {obtenerReglaComision(cuentaSeleccionada.rol, cuentaSeleccionada.subrol)}
+                                        </span>
                                     </div>
                                 </div>
 

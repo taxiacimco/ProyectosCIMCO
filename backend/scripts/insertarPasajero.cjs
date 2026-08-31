@@ -29,6 +29,22 @@ const defaultPasswordHash = bcrypt.hashSync('123456', 10);
 
 const pasajerosDePrueba = [
     {
+        _id: new mongoose.Types.ObjectId("6a831620f66873663b1f73ac"),
+        nombre: "Diana Mendoza Altahona",
+        email: "diana.mendoza@gmail.com",
+        telefono: "3157654321",
+        telefonoMovil: "3157654321",
+        password: defaultPasswordHash,
+        passwordHash: defaultPasswordHash,
+        uid: "6a831620f66873663b1f73ac",
+        rol: "pasajero",
+        role: "pasajero",
+        subrol: "pasajero",
+        saldo: 0,
+        estado: "activo",
+        isActive: true
+    },
+    {
         _id: new mongoose.Types.ObjectId("6a29b491c8d7b14cd8f85871"),
         nombre: "milevis Pasajero Test",
         email: "milevis@test.com",
@@ -40,23 +56,7 @@ const pasajerosDePrueba = [
         rol: "pasajero",
         role: "pasajero",
         subrol: "pasajero",
-        saldo: 20000,
-        estado: "activo",
-        isActive: true
-    },
-    {
-        _id: new mongoose.Types.ObjectId("6a4ab95a9afcfb7540cd9876"),
-        nombre: "Carlos Fuentes (Test Pasajero)",
-        email: "carlos.pasajero@taxiacimco.com",
-        telefono: "3001234567",
-        telefonoMovil: "3001234567",
-        password: defaultPasswordHash,
-        passwordHash: defaultPasswordHash,
-        uid: "6a4ab95a9afcfb7540cd9876",
-        rol: "pasajero",
-        role: "pasajero",
-        subrol: "pasajero",
-        saldo: 15000,
+        saldo: 0,
         estado: "activo",
         isActive: true
     }
@@ -64,12 +64,12 @@ const pasajerosDePrueba = [
 
 const ejecutarSeeder = async () => {
     try {
-        console.log("📡 Conectando a MongoDB...");
+        console.log("📡 Conectando a MongoDB para pasajeros...");
         await mongoose.connect(mongoURI);
 
         for (const p of pasajerosDePrueba) {
             await Pasajero.findByIdAndUpdate(p._id, { $set: p }, { upsert: true, new: true });
-            console.log(`🚀 Pasajero sincronizado atómicamente: ${p.nombre} | Saldo: $${p.saldo} COP`);
+            console.log(`🚀 Pasajero sincronizado: ${p.nombre} (${p.email}) | Saldo: $${p.saldo} COP`);
         }
     } catch (error) {
         console.error("❌ Error en seeder de pasajeros:", error.message);

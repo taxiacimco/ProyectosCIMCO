@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.21 - Centralización de Actualización de Perfil con authService.updateProfile y Adaptación de Teléfono Móvil
+// Versión Arquitectura: V12.22 - Eliminación de Simulación de Desarrollo ([DEV] Simular Cierre Forzado) para Despliegue en Producción
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
@@ -572,20 +572,6 @@ export default function HomeMotocarga() {
                       className="w-full bg-emerald-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
                     >
                       Finalizar Entrega y Cobrar
-                    </button>
-                  )}
-
-                  {/* ✅ Mostrar solo en entorno de desarrollo */}
-                  {import.meta.env.DEV && (
-                    <button 
-                      onClick={() => {
-                        setDatosParaCalificar({ id: servicioActivo?.id || 'SIMULADO', clienteNombre: servicioActivo?.clienteNombre || 'Pasajero CIMCO' });
-                        setServicioActivo(null);
-                        setMostrarModalCalificacion(true);
-                      }}
-                      className="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-400 text-[9px] uppercase py-1.5 border-2 border-black rounded-none font-bold tracking-wider mt-2"
-                    >
-                      [DEV] Simular Cierre Forzado
                     </button>
                   )}
                 </div>

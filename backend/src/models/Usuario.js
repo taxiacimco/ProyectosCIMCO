@@ -1,10 +1,10 @@
-// Versión Arquitectura: V17.6 - Depuración de Índices Duplicados sobre Atributo UID y Telemetría GeoJSON
+// Versión Arquitectura: V19.4 - Integración de Método Operativo de Billetera (puedeOperar) para Control de Saldos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva la sincronización bidireccional (rol ↔ role, saldo ↔ balance), persistencia estricta,
- * indices GeoJSON y encriptación bcrypt única en el hook pre-save controlando isModified('password').
- * Ajuste V17.6: Depuración del índice duplicado en 'uid' para eliminar la advertencia Mongoose 'Duplicate schema index on {"uid":1}'.
+ * indices GeoJSON, encriptación bcrypt única en el hook pre-save controlando isModified('password') y evaluación de umbral
+ * financiero de operabilidad (puedeOperar).
  */
 
 import mongoose from 'mongoose';
@@ -221,6 +221,14 @@ usuarioSchema.methods.compararPassword = async function (passwordCandidato) {
         console.error("🚨 [CIMCO-SECURITY-FATAL] Error en el handshake de comparación de credenciales hash:", err);
         return false;
     }
+};
+
+// 💳 MÉTODO HELPER DE NEGOCIO: Validación de umbral operativo por saldo de billetera ($2.000 COP)
+usuarioSchema.methods.puedeOperar = function () {
+    if (this.rol === 'despachador') {
+        return (Number(this.saldo) || 0) >= 2000;
+    }
+    return true;
 };
 
 const Usuario = mongoose.models.Usuario || mongoose.model('Usuario', usuarioSchema, 'usuarios');

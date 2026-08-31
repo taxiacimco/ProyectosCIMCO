@@ -1,12 +1,15 @@
-// Versión Arquitectura: V21.36 - Refactorización de Importación ESM y Manejo Defensivo de Telemetría GPS
+// Versión Arquitectura: V22.0 - Filtrado en tiempo real de nuevo_servicio_disponible por umbral de saldo ($2000 COP) y consulta asíncrona de MongoDB/Firestore
+
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\sockets\socket.manager.js
  * Misión: Administrar el ciclo de vida de las conexiones, salas automáticas de aislamiento (empresa/usuario),
  *          telemetría GPS y flujo completo de subasta/despacho en tiempo real, garantizando la resolución dinámica
- *          de orígenes CORS (HTTP/HTTPS) y transporte dual (websocket y polling).
- * Ajuste V21.36: Corrección de ruta de importación ESM apuntando a conductor.controller.js y manejo defensivo de persistencia GPS.
+ *          de orígenes CORS (HTTP/HTTPS) y transporte dual (websocket y polling), omitiendo la emisión de
+ *          servicios disponibles a conductores cuyo saldo en la base de datos sea menor a 2.000 COP.
  */
 
+import mongoose from 'mongoose';
+import { getFirestore } from 'firebase-admin/firestore';
 import { socketAuthMiddleware } from '../../middleware/socketAuth.middleware.js';
 import { actualizarUbicacionConductor } from '../conductores/conductor.controller.js';
 
@@ -15,6 +18,7 @@ const logSocket = (msg) => console.log(`[${new Date().toLocaleString('es-CO')}] 
 // 📏 PARÁMETROS CRÍTICOS DE RED Y DESPACHO SPATIAL (EXTERNALIZADOS A .ENV)
 const RADIO_DESPACHO_MAX_METROS = parseInt(process.env.RADIO_DESPACHO_MAX_METROS, 10) || 5000;
 const TIMEOUT_DESPACHO_MS = parseInt(process.env.TIMEOUT_DESPACHO_MS, 10) || 60000;
+const UMBRAL_SALDO_MINIMO_COP = 2000;
 
 // MAPA ATÓMICO DE TEMPORIZADORES DE VIAJE EN MEMORIA
 const temporizadoresViaje = new Map();
@@ -77,6 +81,43 @@ const limpiarTemporizadorViaje = (viajeId) => {
         temporizadoresViaje.delete(viajeId);
         logSocket(`⏱️ Temporizador de expiración cancelado para el viaje: [${viajeId}]`);
     }
+};
+
+/**
+ * Consulta el saldo actualizado de un conductor en MongoDB/Firestore.
+ * @param {string} conductorUid - UID o ID del conductor.
+ * @returns {Promise<number>} - Saldo actual en COP.
+ */
+const obtenerSaldoConductor = async (conductorUid) => {
+    if (!conductorUid) return 0;
+    try {
+        const db = mongoose.connection?.db;
+        if (db) {
+            const queryFilter = mongoose.Types.ObjectId.isValid(conductorUid)
+                ? { $or: [{ uid: conductorUid }, { _id: new mongoose.Types.ObjectId(conductorUid) }] }
+                : { uid: conductorUid };
+
+            const doc = await db.collection('conductores').findOne(queryFilter) ||
+                        await db.collection('usuarios').findOne(queryFilter);
+
+            if (doc) {
+                return doc.saldo ?? doc.billetera?.saldo ?? 0;
+            }
+        }
+
+        const firestoreDb = getFirestore();
+        if (firestoreDb) {
+            const docRef = firestoreDb.collection('conductores').doc(conductorUid);
+            const docSnap = await docRef.get();
+            if (docSnap.exists) {
+                const data = docSnap.data();
+                return data.saldo ?? data.billetera?.saldo ?? 0;
+            }
+        }
+    } catch (error) {
+        console.error(`[SOCKET-MGR-ERROR] Error consultando saldo de conductor ${conductorUid}:`, error?.message || error);
+    }
+    return 0;
 };
 
 /**
@@ -276,9 +317,9 @@ export const inicializarSockets = (io) => {
 
         /**
          * Manejador centralizado para la creación de solicitudes de viaje (Urbano e Intermunicipal / Despachador).
-         * Filtra la distribución según el empresaId si el servicio corresponde a una flota/cooperativa.
+         * Filtra la distribución verificando el saldo de los conductores (>= $2.000 COP) antes de emitir nuevo_servicio_disponible.
          */
-        const procesarCrearSolicitud = (datosSolicitud = {}) => {
+        const procesarCrearSolicitud = async (datosSolicitud = {}) => {
             try {
                 if (!socket.usuarioId && !datosSolicitud.usuarioId && !datosSolicitud.pasajeroId) {
                     emitirSesionExpirada(socket, 'nodo_inexistente');
@@ -324,18 +365,37 @@ export const inicializarSockets = (io) => {
                     limpiarTemporizadorViaje(viajeId);
                 }
 
-                // 🎯 SEGMENTACIÓN ESTRICTA DE SALA POR EMPRESA / COOPERATIVA
-                if (empresaId) {
-                    // Emitir la oferta ÚNICAMENTE a los conductores pertenecientes a la sala de la empresa
-                    io.to(`empresa_${empresaId}`).emit('nuevo_servicio_disponible', payloadDespacho);
-                    io.to(`empresa_${empresaId}`).emit('nuevo_viaje_disponible', payloadDespacho);
-                    logSocket(`Solicitud [${viajeId}] emitida EXCLUSIVAMENTE a sala: empresa_${empresaId}`);
-                } else {
-                    // Transmisión general radial urbana si no pertenece a una flota específica
-                    io.to('sala_conductores').emit('nuevo_servicio_disponible', payloadDespacho);
-                    io.to('sala_conductores').emit('nuevo_viaje_disponible', payloadDespacho);
-                    logSocket(`Solicitud urbana [${viajeId}] difundida a 'sala_conductores'.`);
+                // 🎯 EMISIÓN FILTRADA POR UMBRAL DE SALDO (>= $2.000 COP)
+                const nombreSalaObjetivo = empresaId ? `empresa_${empresaId}` : 'sala_conductores';
+                const socketsEnSala = await io.in(nombreSalaObjetivo).fetchSockets();
+
+                let conductoresNotificados = 0;
+                let conductoresOmitidosPorSaldo = 0;
+
+                for (const clientSocket of socketsEnSala) {
+                    const rolCliente = (clientSocket.rol || '').toLowerCase();
+                    const esConductor = ['conductor', 'mototaxi', 'intermunicipal', 'motoparrillero', 'motocarga'].includes(rolCliente);
+
+                    if (esConductor) {
+                        const conductorUid = clientSocket.usuarioId;
+                        const saldo = await obtenerSaldoConductor(conductorUid);
+
+                        if (saldo >= UMBRAL_SALDO_MINIMO_COP) {
+                            clientSocket.emit('nuevo_servicio_disponible', payloadDespacho);
+                            clientSocket.emit('nuevo_viaje_disponible', payloadDespacho);
+                            conductoresNotificados++;
+                        } else {
+                            conductoresOmitidosPorSaldo++;
+                            logSocket(`⛔ Omitida emisión 'nuevo_servicio_disponible' a conductor [${conductorUid}]. Saldo insuficiente: $${saldo} COP (< $${UMBRAL_SALDO_MINIMO_COP} COP).`);
+                        }
+                    } else {
+                        // Sockets que no son conductores pero están en la sala (ej. monitores)
+                        clientSocket.emit('nuevo_servicio_disponible', payloadDespacho);
+                        clientSocket.emit('nuevo_viaje_disponible', payloadDespacho);
+                    }
                 }
+
+                logSocket(`Solicitud [${viajeId}] procesada en sala [${nombreSalaObjetivo}]. Notificados: ${conductoresNotificados} | Omitidos por saldo: ${conductoresOmitidosPorSaldo}`);
 
                 // Auditoría central para despachadores y administradores
                 io.to('sala_despachadores').to('sala_admins').emit('auditoria_nuevo_viaje', payloadDespacho);

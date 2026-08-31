@@ -1,4 +1,4 @@
-// Versión Arquitectura: V2.1 - Inyección Múltiple, Hash Encriptado y ObjectId Nativo
+// Versión Arquitectura: V2.2 - Inyección Estándar de Escuadrón Multimodal
 /**
  * Ubicación: backend/scripts/insertarConductor.cjs
  */
@@ -21,8 +21,8 @@ const escuadronConductores = [
         email: "mototaxi@test.com",
         telefono: "3102223344",
         clave: "123456",
-        placa: "MOT123",
-        numeroInterno: "#057",
+        placa: "MOT-001",
+        numeroInterno: "M-01",
         subrol: "mototaxi",
         cooperativa: "asociturji"
     },
@@ -32,8 +32,8 @@ const escuadronConductores = [
         email: "parrillero@test.com",
         telefono: "3103334455",
         clave: "123456",
-        placa: "PAR123",
-        numeroInterno: "#056",
+        placa: "PAR-002",
+        numeroInterno: "P-02",
         subrol: "motoparrillero",
         cooperativa: "Cooperativaparrilleros"
     },
@@ -43,8 +43,8 @@ const escuadronConductores = [
         email: "carga@test.com",
         telefono: "3104445566",
         clave: "123456",
-        placa: "CAR123",
-        numeroInterno: "#059",
+        placa: "CAR-003",
+        numeroInterno: "C-03",
         subrol: "motocarga",
         cooperativa: "Cootracaraga"
     },
@@ -54,9 +54,10 @@ const escuadronConductores = [
         email: "inter@test.com",
         telefono: "3106666666",
         clave: "123456",
-        placa: "INT123",
-        numeroInterno: "#057",
+        placa: "INT-004",
+        numeroInterno: "I-04",
         subrol: "conductor_intermunicipal",
+        cooperativa: "SISTEMA CENTRAL",
         flota_id: "FLOTA_TERMINAL_JAGUA"
     }
 ];
@@ -65,15 +66,14 @@ async function sembrarEscuadron() {
     const client = new MongoClient(URI_ATLAS, { connectTimeoutMS: 10000 });
 
     try {
-        console.log('📡 [CIMCO-CONDUCTORES] Conectando de forma segura a la base de datos...');
+        console.log('📡 [CIMCO-CONDUCTORES] Conectando de forma segura a MongoDB...');
         await client.connect();
         
         const db = client.db('taxia-cimco');
         const coleccion = db.collection('conductores');
 
         for (const piloto of escuadronConductores) {
-            console.log(`🔍 Verificando preexistencia del piloto: ${piloto.email}...`);
-            const existe = await coleccion.findOne({ email: piloto.email });
+            console.log(`🔍 Verificando piloto: ${piloto.nombre} (${piloto.email})...`);
             const passHash = piloto.clave ? bcrypt.hashSync(piloto.clave, 10) : defaultPasswordHash;
 
             const payload = {
@@ -93,26 +93,24 @@ async function sembrarEscuadron() {
                 flota_id: piloto.flota_id || null,
                 estado: "activo",
                 isActive: true,
-                saldo: 20000,
-                saldoWallet: 20000,
+                saldo: 0,
+                saldoWallet: 0,
                 updatedAt: new Date()
             };
 
-            if (existe) {
-                console.log(`⚠️ Actualizando credenciales de ${piloto.nombre}...`);
-                await coleccion.updateOne({ email: piloto.email }, { $set: payload });
-            } else {
-                payload.fechaCreacion = new Date();
-                await coleccion.insertOne(payload);
-                console.log(`🚀 [SÚPER ÉXITO] Piloto ${piloto.nombre} inyectado al nodo central.`);
-            }
+            await coleccion.updateOne(
+                { email: piloto.email }, 
+                { $set: payload },
+                { upsert: true }
+            );
+            console.log(`🚀 [SÚPER ÉXITO] Piloto ${piloto.nombre} sincronizado (Empresa: ${piloto.cooperativa}).`);
         }
 
     } catch (error) {
-        console.error('❌ [ERROR CRÍTICO] Fallo en la inyección:', error.message);
+        console.error('❌ [ERROR CRÍTICO] Fallo en la inyección de conductores:', error.message);
     } finally {
         await client.close();
-        console.log('🔌 [CIMCO-CONDUCTORES] Canal cerrado con éxito.');
+        console.log('🔌 [CIMCO-CONDUCTORES] Conexión cerrada con éxito.');
         process.exit(0);
     }
 }

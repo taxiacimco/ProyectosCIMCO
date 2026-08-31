@@ -1,12 +1,12 @@
-// Versión Arquitectura: V2.5.0 - Cancelación por AbortController, Dynamic Import XLSX y Manejo Explícito de HTTP 401
+// Versión Arquitectura: V2.6.0 - Integración de Saldo Wallet e Indicador de Estado Operativo Mínimo ($2,000 COP)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\DirectorioGlobal.jsx
  * Misión: Monitoreo, filtrado, auditoría unificada y exportación centralizada a Excel (XLSX) con descarga API y Dynamic Import.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajustes V2.5.0:
- *   1. Sustitución de antipatrón `isMounted` por `AbortController` vinculado al ciclo de vida del `useEffect` para cancelar peticiones HTTP activas.
- *   2. Implementación de Carga Diferida (Dynamic Import: `const XLSX = await import('xlsx')`) para optimizar el peso inicial del bundle.
- *   3. Intercepción y manejo explícito de respuestas HTTP 401 Unauthorized con limpieza de sesión y notificación de expiración.
+ * Ajustes V2.6.0:
+ *   1. Incorporación de visualización de `saldoWallet` en la tabla de registros del directorio global.
+ *   2. Indicador de estado funcional según regla de negocio: Si `saldoWallet` < $2,000 COP para roles operacionales (Mototaxi, Motoparrillero, Motocarga o Despachador), despliega badge de advertencia `<span className="bg-red-500/10 text-red-400 font-bold px-2 py-0.5 rounded text-[9px] border border-red-500/20 uppercase">BLOQUEADO POR SALDO</span>`.
+ *   3. Preservación del patrón AbortController, Carga Diferida de XLSX y Gestión 401 Unauthorized.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -104,6 +104,12 @@ export const DirectorioGlobal = () => {
     // Helper para normalizar y mostrar el nombre de entidad
     const getNombre = (u) => u?.nombre || u?.fullName || u?.nombreCompleto || u?.nombreUsuario || u?.displayName || 'SIN REGISTRO';
 
+    // Helper para extracción defensiva del saldoWallet de la entidad
+    const getSaldoWallet = (u) => {
+        const val = u?.saldoWallet ?? u?.saldo ?? u?.balance ?? u?.billetera;
+        return typeof val === 'number' ? val : (Number(val) || 0);
+    };
+
     // Helper para badge visual de Rol / Subrol bajo especificación CIMCO-UI V9.3
     const renderRolBadge = (u) => {
         const rol = (u?.rolNormalizado || u?.rol || u?.role || 'usuario').toLowerCase();
@@ -122,6 +128,29 @@ export const DirectorioGlobal = () => {
             return <span className="bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-2 py-0.5 rounded text-[9px] font-bold">OPERADOR ({subrol})</span>;
         }
         return <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded text-[9px] font-bold">{subrol}</span>;
+    };
+
+    // Helper de evaluación de estado funcional de wallet bajo regla de negocio ($2,000 COP)
+    const renderEstadoWalletBadge = (u) => {
+        const rol = (u?.rolNormalizado || u?.rol || u?.role || '').toLowerCase();
+        const subrol = (u?.subrol || '').toLowerCase();
+        const saldo = getSaldoWallet(u);
+
+        // Roles operacionales aplicables a la regla de umbral de $2,000 COP
+        const esRolOperacional = [
+            'mototaxi',
+            'motoparrillero',
+            'motocarga',
+            'despachador',
+            'conductor',
+            'operador'
+        ].some(r => rol.includes(r) || subrol.includes(r));
+
+        if (esRolOperacional && saldo < 2000) {
+            return <span className="bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">BLOQUEADO POR SALDO</span>;
+        }
+
+        return <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">OPERATIVO</span>;
     };
 
     // Filtrado en tiempo real con motor de búsqueda multicriterio
@@ -156,16 +185,25 @@ export const DirectorioGlobal = () => {
             // Carga diferida dinámica de la librería heavy xlsx
             const XLSX = await import('xlsx');
 
-            const datosMapeados = usuariosFiltrados.map((u) => ({
-                ID: u?._id || u?.id || 'N/A',
-                Nombre: getNombre(u),
-                Rol: (u?.rolNormalizado || u?.rol || u?.role || 'N/A').toUpperCase(),
-                Subrol: (u?.subrol || 'N/A').toUpperCase(),
-                Telefono: u?.telefono || u?.telefonoMovil || 'N/A',
-                Email: u?.email || 'N/A',
-                Empresa: u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL',
-                OrigenDB: u?.origenColeccion || u?.origen || 'DB'
-            }));
+            const datosMapeados = usuariosFiltrados.map((u) => {
+                const saldo = getSaldoWallet(u);
+                const rol = (u?.rolNormalizado || u?.rol || u?.role || '').toLowerCase();
+                const subrol = (u?.subrol || '').toLowerCase();
+                const esOperacional = ['mototaxi', 'motoparrillero', 'motocarga', 'despachador', 'conductor', 'operador'].some(r => rol.includes(r) || subrol.includes(r));
+
+                return {
+                    ID: u?._id || u?.id || 'N/A',
+                    Nombre: getNombre(u),
+                    Rol: (u?.rolNormalizado || u?.rol || u?.role || 'N/A').toUpperCase(),
+                    Subrol: (u?.subrol || 'N/A').toUpperCase(),
+                    Telefono: u?.telefono || u?.telefonoMovil || 'N/A',
+                    Email: u?.email || 'N/A',
+                    SaldoWallet: saldo,
+                    EstadoOperativo: (esOperacional && saldo < 2000) ? 'BLOQUEADO POR SALDO' : 'OPERATIVO',
+                    Empresa: u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL',
+                    OrigenDB: u?.origenColeccion || u?.origen || 'DB'
+                };
+            });
 
             const worksheet = XLSX.utils.json_to_sheet(datosMapeados);
             const workbook = XLSX.utils.book_new();
@@ -329,6 +367,8 @@ export const DirectorioGlobal = () => {
                                     <th className="pb-3 pl-2">Usuario / Nombre</th>
                                     <th className="pb-3">Contacto</th>
                                     <th className="pb-3">Rol Registrado</th>
+                                    <th className="pb-3">Saldo Wallet</th>
+                                    <th className="pb-3">Estado Operativo</th>
                                     <th className="pb-3">Entidad / Empresa</th>
                                     <th className="pb-3 pr-2 text-right">Origen DB</th>
                                 </tr>
@@ -339,6 +379,7 @@ export const DirectorioGlobal = () => {
                                     const email = u?.email || 'SIN EMAIL';
                                     const tel = u?.telefono || u?.telefonoMovil || 'N/A';
                                     const empresa = u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL';
+                                    const saldo = getSaldoWallet(u);
 
                                     return (
                                         <tr key={u?._id || u?.id || idx} className="hover:bg-white/[0.02] transition-colors">
@@ -352,6 +393,12 @@ export const DirectorioGlobal = () => {
                                             </td>
                                             <td className="py-3">
                                                 {renderRolBadge(u)}
+                                            </td>
+                                            <td className="py-3 font-mono text-xs font-bold text-zinc-200">
+                                                ${saldo.toLocaleString('es-CO')} <span className="text-[9px] text-zinc-500 font-normal">COP</span>
+                                            </td>
+                                            <td className="py-3">
+                                                {renderEstadoWalletBadge(u)}
                                             </td>
                                             <td className="py-3 text-[10px] font-mono text-zinc-400 uppercase">
                                                 {empresa}

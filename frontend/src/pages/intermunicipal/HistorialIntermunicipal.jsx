@@ -1,10 +1,9 @@
-// Versión Arquitectura: V16.1 - Saneamiento de Interceptores Axios y Rutas REST en Historial Intermunicipal
+// Versión Arquitectura: V16.2 - Verificación de Estabilidad e Integridad de Conexión en Red para Historial Intermunicipal
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HistorialIntermunicipal.jsx
  * Misión: Renderizar la bitácora de viajes intermunicipales del conductor conectándose
  *        con el backend REST (MongoDB) mediante el cliente API unificado, con fallback resiliente a Firestore.
- * Ajuste V16.1: Eliminación de cabeceras de autorización manuales redundantes y saneamiento de endpoint
- *               para evitar duplicación /api/api y consultas NoSQL innecesarias.
+ * Ajuste V16.2: Verificación y blindaje de la estabilidad de conexiones en red (navegador/REST/Firestore).
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
@@ -12,7 +11,7 @@ import api, { VIAJES_ENDPOINTS } from '@/config/api';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
 import { formatDireccion } from '@/utils/formatters';
-import { FileText, MapPin, Bus, Loader, AlertTriangle, RefreshCw } from 'lucide-react';
+import { FileText, MapPin, Bus, Loader, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
 
 const HistorialIntermunicipal = () => {
     const authContext = useAuth();
@@ -21,14 +20,37 @@ const HistorialIntermunicipal = () => {
     const [historial, setHistorial] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [isOnline, setIsOnline] = useState(navigator?.onLine ?? true);
 
     const idConductor = user?.id || user?._id || user?.uid || "";
+
+    // Listener para monitoreo activo de la estabilidad de la red
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
 
     const fetchHistorial = useCallback(async () => {
         if (!idConductor) {
             setLoading(false);
             return;
         }
+
+        if (navigator?.onLine === false) {
+            setIsOnline(false);
+            setError("Sin acceso a la red. Verifica la estabilidad de tu conexión de datos o Wi-Fi.");
+            setLoading(false);
+            return;
+        }
+
         setLoading(true);
         setError(null);
 
@@ -55,7 +77,14 @@ const HistorialIntermunicipal = () => {
         } catch (err) {
             console.warn("⚠️ [CIMCO-HISTORIAL-REST] Fallo en REST API Express, ejecutando respaldo NoSQL Firestore:", err?.message || err);
             
-            // 🔄 2. FALLBACK SECUNDARIO A FIRESTORE
+            // 🔄 2. FALLBACK SECUNDARIO A FIRESTORE CON VERIFICACIÓN DE RED
+            if (navigator?.onLine === false) {
+                setIsOnline(false);
+                setError("Sin acceso a la red. No se pudo establecer comunicación con los servicios.");
+                setLoading(false);
+                return;
+            }
+
             try {
                 const pathColeccion = FIRESTORE_PATHS?.viajesIntermunicipales || 'viajes_intermunicipales';
                 const q = query(
@@ -68,7 +97,7 @@ const HistorialIntermunicipal = () => {
                 setHistorial(listadoNoSQL);
             } catch (noSqlErr) {
                 console.error("❌ [CIMCO-LOG-ERROR] Error leyendo historial operativo Intermunicipal:", noSqlErr);
-                setError("No se pudo sincronizar el historial. Verifica tu señal o conexión de datos.");
+                setError("No se pudo sincronizar el historial. Verifica tu señal o estabilidad de la conexión.");
             }
         } finally {
             setLoading(false);
@@ -90,6 +119,13 @@ const HistorialIntermunicipal = () => {
                     <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Manifiestos de salida y transporte intermunicipal</p>
                 </div>
             </header>
+
+            {!isOnline && (
+                <div className="backdrop-blur-md bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl flex items-center gap-2 text-amber-400 text-xs uppercase font-bold tracking-wide">
+                    <WifiOff size={16} className="shrink-0" />
+                    <span>Conexión inestable o sin conexión a internet detected.</span>
+                </div>
+            )}
 
             <div className="space-y-4">
                 {/* 🚨 CAPA DE CONTROL DE INTERRUPCIÓN DE RED */}

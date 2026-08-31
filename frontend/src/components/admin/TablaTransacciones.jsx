@@ -1,9 +1,9 @@
-// Versión Arquitectura: V19.1 - Ref-Stable & Sync (Paginación por Servidor, Amortiguación Debounce y Prevención de Ciclos Infinitos)
+// Versión Arquitectura: V19.2 - Integración de Tipos Especiales de Transacciones y Filtros Contables por Tipo/Rol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\TablaTransacciones.jsx
  * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism CIMCO-UI V9.3,
- *         soportando paginación por servidor (server-side pagination), filtros amortiguados (debounce),
- *         prevención de ciclos infinitos mediante ref-stable de callbacks y formateo de moneda optimizado.
+ *         soportando paginación por servidor, mapeo/parseo ampliado de tipos de movimiento 
+ *         (CEO, Comisiones de Carrera/Fija, Pagos Servicio Pasajero) y filtros avanzados por Tipo y Rol.
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -18,7 +18,11 @@ import {
     ChevronRight, 
     Calendar, 
     Filter,
-    RefreshCw 
+    RefreshCw,
+    UserCheck,
+    Coins,
+    Receipt,
+    ShieldAlert
 } from 'lucide-react';
 import { formatFechaColombia } from '@/utils/dateFormatter';
 import { resolverFechaSegura } from '@/utils/dateUtils';
@@ -38,18 +42,88 @@ const formatearMoneda = (valor = 0) => {
 
 const renderBadgeTipo = (tipo = '') => {
     const t = String(tipo).toUpperCase().trim();
-    if (t === 'RECARGA' || t === 'CREDIT' || t === 'INGRESO') {
+
+    switch (t) {
+        case 'RECARGA_MANUAL_CEO':
+        case 'RECARGA':
+        case 'CREDIT':
+        case 'INGRESO':
+            return (
+                <span className="flex items-center gap-1.5 w-fit text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md">
+                    <ArrowDownLeft size={12} />
+                    RECARGA CEO
+                </span>
+            );
+
+        case 'DEBITO_MANUAL_CEO':
+            return (
+                <span className="flex items-center gap-1.5 w-fit text-[10px] text-rose-400 font-mono font-bold bg-rose-500/10 border border-rose-500/20 px-2.5 py-1 rounded-md">
+                    <ArrowUpRight size={12} />
+                    DÉBITO CEO
+                </span>
+            );
+
+        case 'COMISION_CARRERA_10':
+            return (
+                <span className="flex items-center gap-1.5 w-fit text-[10px] text-orange-400 font-mono font-bold bg-orange-500/10 border border-orange-500/20 px-2.5 py-1 rounded-md">
+                    <Coins size={12} />
+                    COMISIÓN 10%
+                </span>
+            );
+
+        case 'COMISION_FIJA_500':
+            return (
+                <span className="flex items-center gap-1.5 w-fit text-[10px] text-amber-400 font-mono font-bold bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-md">
+                    <Receipt size={12} />
+                    COMISIÓN FIJA $500
+                </span>
+            );
+
+        case 'PAGO_SERVICIO_PASAJERO':
+            return (
+                <span className="flex items-center gap-1.5 w-fit text-[10px] text-blue-400 font-mono font-bold bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-md">
+                    <CircleDollarSign size={12} />
+                    PAGO PASAJERO
+                </span>
+            );
+
+        default:
+            return (
+                <span className="flex items-center gap-1.5 w-fit text-[10px] text-cyan-400 font-mono font-bold bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-md">
+                    <ArrowUpRight size={12} />
+                    {t || 'OTRO DÉBITO'}
+                </span>
+            );
+    }
+};
+
+const renderBadgeRol = (rol = '') => {
+    const r = String(rol).toLowerCase().trim();
+    
+    if (r === 'mototaxi' || r === 'motoparrillero') {
         return (
-            <span className="flex items-center gap-1.5 w-fit text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md">
-                <ArrowDownLeft size={12} />
-                RECARGA
+            <span className="text-[9px] text-orange-300 bg-orange-950/40 border border-orange-500/20 px-2 py-0.5 rounded font-bold uppercase">
+                {r}
+            </span>
+        );
+    }
+    if (r === 'motocarga' || r === 'despachador') {
+        return (
+            <span className="text-[9px] text-amber-300 bg-amber-950/40 border border-amber-500/20 px-2 py-0.5 rounded font-bold uppercase">
+                {r}
+            </span>
+        );
+    }
+    if (r === 'pasajero' || r === 'usuario') {
+        return (
+            <span className="text-[9px] text-blue-300 bg-blue-950/40 border border-blue-500/20 px-2 py-0.5 rounded font-bold uppercase">
+                {r}
             </span>
         );
     }
     return (
-        <span className="flex items-center gap-1.5 w-fit text-[10px] text-cyan-400 font-mono font-bold bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-md">
-            <ArrowUpRight size={12} />
-            DEBITO
+        <span className="text-[9px] text-zinc-400 bg-zinc-900 border border-white/5 px-2 py-0.5 rounded font-bold uppercase">
+            {r || 'S/R'}
         </span>
     );
 };
@@ -68,6 +142,7 @@ const TablaTransacciones = ({
     const [searchTerm, setSearchTerm] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [tipoFiltro, setTipoFiltro] = useState('TODOS');
+    const [rolFiltro, setRolFiltro] = useState('TODOS');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
 
@@ -107,11 +182,12 @@ const TablaTransacciones = ({
                 limit,
                 search: debouncedSearch,
                 type: tipoFiltro,
+                rol: rolFiltro,
                 startDate,
                 endDate
             });
         }
-    }, [page, limit, debouncedSearch, tipoFiltro, startDate, endDate]);
+    }, [page, limit, debouncedSearch, tipoFiltro, rolFiltro, startDate, endDate]);
 
     // 🛡️ PROCESAMIENTO MODO HYBRID / CLIENTE FALLBACK
     const dataset = useMemo(() => {
@@ -129,13 +205,15 @@ const TablaTransacciones = ({
             const ref = String(tx?.referencia || '').toLowerCase();
             const user = String(tx?.usuarioId || tx?.userId || tx?.driverId || '').toLowerCase();
             const tipo = String(tx?.tipo || tx?.type || '').toUpperCase();
+            const rol = String(tx?.rolUsuario || tx?.userRole || tx?.rol || '').toUpperCase();
 
             const matchQuery = !query || id.includes(query) || ref.includes(query) || user.includes(query);
             const matchTipo = tipoFiltro === 'TODOS' || tipo === tipoFiltro;
+            const matchRol = rolFiltro === 'TODOS' || rol === rolFiltro;
 
-            return matchQuery && matchTipo;
+            return matchQuery && matchTipo && matchRol;
         });
-    }, [dataset, debouncedSearch, tipoFiltro, esModoServidor]);
+    }, [dataset, debouncedSearch, tipoFiltro, rolFiltro, esModoServidor]);
 
     const totalRegistros = esModoServidor ? (totalRegistrosProp || dataset.length) : transaccionesFiltradas.length;
     const totalPaginas = Math.max(1, Math.ceil(totalRegistros / limit));
@@ -163,7 +241,7 @@ const TablaTransacciones = ({
                             Auditoría Global de Caja
                         </h3>
                         <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">
-                            Paginación Servidor & Filtros Amortiguados
+                            Paginación Servidor & Filtros Contables de Comisión
                         </span>
                     </div>
                 </div>
@@ -171,7 +249,7 @@ const TablaTransacciones = ({
                 {/* BARRA DE FILTROS Y BÚSQUEDA */}
                 <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                     {/* BUSCADOR DEBOUNCED */}
-                    <div className="relative flex-1 min-w-[200px] lg:w-64">
+                    <div className="relative flex-1 min-w-[180px] lg:w-56">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
                         <input 
                             type="text"
@@ -182,7 +260,7 @@ const TablaTransacciones = ({
                         />
                     </div>
 
-                    {/* SELECTOR DE TIPO */}
+                    {/* SELECTOR DE TIPO / COMISIÓN */}
                     <div className="relative">
                         <select
                             value={tipoFiltro}
@@ -193,10 +271,33 @@ const TablaTransacciones = ({
                             className="bg-[#0c0c0e] border border-white/5 rounded-xl px-3 py-1.5 text-[10px] font-bold text-zinc-300 focus:outline-none focus:border-yellow-500/40 uppercase tracking-wider appearance-none pr-8 cursor-pointer"
                         >
                             <option value="TODOS">TODOS LOS TIPOS</option>
-                            <option value="RECARGA">RECARGAS</option>
-                            <option value="DEBITO">DÉBITOS</option>
+                            <option value="RECARGA_MANUAL_CEO">RECARGA CEO</option>
+                            <option value="DEBITO_MANUAL_CEO">DÉBITO CEO</option>
+                            <option value="COMISION_CARRERA_10">COMISIÓN 10% (MOTOTAXI/PARRILLERO)</option>
+                            <option value="COMISION_FIJA_500">COMISIÓN FIJA $500 (MOTOCARGA/DESPACHADOR)</option>
+                            <option value="PAGO_SERVICIO_PASAJERO">PAGO SERVICIO PASAJERO</option>
                         </select>
                         <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={12} />
+                    </div>
+
+                    {/* SELECTOR DE ROL DE USUARIO */}
+                    <div className="relative">
+                        <select
+                            value={rolFiltro}
+                            onChange={(e) => {
+                                setRolFiltro(e.target.value);
+                                setPage(1);
+                            }}
+                            className="bg-[#0c0c0e] border border-white/5 rounded-xl px-3 py-1.5 text-[10px] font-bold text-zinc-300 focus:outline-none focus:border-yellow-500/40 uppercase tracking-wider appearance-none pr-8 cursor-pointer"
+                        >
+                            <option value="TODOS">TODOS LOS ROLES</option>
+                            <option value="MOTOTAXI">MOTOTAXI</option>
+                            <option value="MOTOPARRILLERO">MOTOPARRILLERO</option>
+                            <option value="MOTOCARGA">MOTOCARGA</option>
+                            <option value="DESPACHADOR">DESPACHADOR</option>
+                            <option value="PASAJERO">PASAJERO</option>
+                        </select>
+                        <UserCheck className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={12} />
                     </div>
 
                     {/* FILTROS DE FECHAS */}
@@ -245,7 +346,8 @@ const TablaTransacciones = ({
                             <tr className="border-b border-white/5 bg-white/[0.01] text-[9px] uppercase tracking-widest text-zinc-500 font-black">
                                 <th className="p-4 pl-6">Estampa Temporal</th>
                                 <th className="p-4">Identificador Operativo</th>
-                                <th className="p-4">Tipo</th>
+                                <th className="p-4">Rol</th>
+                                <th className="p-4">Tipo / Comisión</th>
                                 <th className="p-4 text-right pr-6">Monto Consolidado</th>
                             </tr>
                         </thead>
@@ -254,6 +356,7 @@ const TablaTransacciones = ({
                                 const keyTransaccion = tx?.id || tx?._id || tx?.referencia || `tx-fallback-${index}`;
                                 const fechaObjetivo = resolverFechaSegura(tx?.fecha || tx?.createdAt || tx?.timestamp);
                                 const tipoString = String(tx?.tipo || tx?.type || '').toUpperCase();
+                                const rolString = tx?.rolUsuario || tx?.userRole || tx?.rol || '';
 
                                 return (
                                     <tr key={keyTransaccion} className="hover:bg-white/[0.02] transition-colors duration-150 group">
@@ -278,14 +381,20 @@ const TablaTransacciones = ({
                                         </td>
 
                                         <td className="p-4">
-                                            {renderBadgeTipo(tx?.tipo || tx?.type || '')}
+                                            {renderBadgeRol(rolString)}
+                                        </td>
+
+                                        <td className="p-4">
+                                            {renderBadgeTipo(tipoString)}
                                         </td>
 
                                         <td className="p-4 text-right pr-6">
                                             <span className={`text-sm font-mono font-black ${
-                                                tipoString === 'RECARGA' || tipoString === 'CREDIT' || tipoString === 'INGRESO'
+                                                tipoString === 'RECARGA_MANUAL_CEO' || tipoString === 'RECARGA' || tipoString === 'CREDIT' || tipoString === 'INGRESO'
                                                 ? 'text-emerald-400' 
-                                                : 'text-cyan-400'
+                                                : tipoString === 'PAGO_SERVICIO_PASAJERO'
+                                                ? 'text-blue-400'
+                                                : 'text-orange-400'
                                             }`}>
                                                 {formatearMoneda(tx?.monto || tx?.amount || 0)}
                                             </span>

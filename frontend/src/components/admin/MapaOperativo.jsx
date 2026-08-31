@@ -1,8 +1,9 @@
-// Versión Arquitectura: V19.5 - Recalibración Automática invalidateSize y Muestreo Táctico Leaflet
+// Versión Arquitectura: V19.6 - Integración Táctica de Control de Saldo Operativo y Estado de Marcadores
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
  * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled, prevención 
- *         de colisiones de contenedor en React 18 / React-Leaflet y recalibración de tiles (invalidateSize).
+ *         de colisiones de contenedor en React 18 / React-Leaflet, recalibración de tiles (invalidateSize) 
+ *         y evaluación de saldo operativo para inhabilitación visual de marcadores.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -25,8 +26,14 @@ L.Icon.Default.mergeOptions({
     shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const createCustomIcon = (rol) => {
-    const color = rol === 'mototaxi' || rol === 'conductor' || rol === 'intermunicipal' ? '#f97316' : '#eab308';
+const createCustomIcon = (rol, saldo = 0) => {
+    let color = rol === 'mototaxi' || rol === 'conductor' || rol === 'intermunicipal' ? '#f97316' : '#eab308';
+    
+    // Inhabilitación visual si el saldo es menor a $2000
+    if (typeof saldo === 'number' && saldo < 2000) {
+        color = '#ef4444'; // Color rojo/gris de inhabilitado por saldo insuficiente
+    }
+
     const svgHtml = `
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22C12 22 19 14.25 19 9C19 5.13 15.87 2 12 2Z" fill="${color}" stroke="#121214" stroke-width="1.5"/>
@@ -133,6 +140,7 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                             placa: data?.placa || data?.vehiculo || 'S/P',
                             numeroInterno: data?.numeroInterno || data?.interno || 'S/I',
                             cooperativa: data?.cooperativa || data?.empresa || 'S/C',
+                            saldo: Number(data?.saldo ?? data?.wallet?.saldo ?? 0),
                             lat,
                             lng,
                             origenReporte: 'FIRESTORE'
@@ -232,6 +240,8 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                             const keyMarker = m?.id || m?.placa || m?.numeroInterno || `marker-${index}`;
                             const lat = m?.lat;
                             const lng = m?.lng;
+                            const saldo = m?.saldo ?? 0;
+                            const estadoOperativo = saldo >= 2000 ? 'En Regla' : 'Saldo Insuficiente';
 
                             if (!lat || !lng) return null;
 
@@ -239,7 +249,7 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                                 <Marker 
                                     key={keyMarker}
                                     position={[lat, lng]} 
-                                    icon={createCustomIcon(m?.rol)}
+                                    icon={createCustomIcon(m?.rol, saldo)}
                                 >
                                     <Popup className="custom-popup">
                                         <div className="w-60 backdrop-blur-md bg-[#121214]/95 border border-white/10 rounded-2xl p-4 shadow-2xl font-mono text-zinc-100">
@@ -257,6 +267,18 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                                                 <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
                                                     <span className="text-zinc-500">PLACA / INTERNO:</span>
                                                     <span className="text-white font-bold">{m?.placa || 'S/P'} / Int. {m?.numeroInterno || 'S/I'}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
+                                                    <span className="text-zinc-500">SALDO ACTUAL:</span>
+                                                    <span className={`font-bold ${saldo >= 2000 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                        ${saldo.toLocaleString('es-CO')}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
+                                                    <span className="text-zinc-500">ESTADO OPERATIVO:</span>
+                                                    <span className={`font-bold ${saldo >= 2000 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                                        {estadoOperativo}
+                                                    </span>
                                                 </div>
                                                 <div className="flex justify-between items-center bg-zinc-950/60 p-1.5 rounded-lg border border-white/5">
                                                     <span className="text-zinc-500">ORIGEN FEED:</span>

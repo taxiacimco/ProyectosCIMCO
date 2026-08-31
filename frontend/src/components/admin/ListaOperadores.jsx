@@ -1,14 +1,14 @@
-// Versión Arquitectura: V16.0 - Virtualización de Malla (@tanstack/react-virtual), Moderación Unificada REST y Modal de Causa Razonada
+// Versión Arquitectura: V16.1 - Alerta Combinada de Saldo Insuficiente y Bloqueo de Activación para Conductores Suspendidos (< $2.000 COP)
 /**
  * Ubicación: frontend\src\components\admin\ListaOperadores.jsx
  * Misión: Renderizar la malla virtualizada de operadores recuperando registros desde la API central 
  *         con fallback de lectura reactiva a Firestore.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajuste V16.0:
- *   1. Virtualización de Malla: Integración de @tanstack/react-virtual (useVirtualizer) para evitar sobrecarga del DOM.
- *   2. Moderación Unificada REST: Eliminación de escrituras directas a Firestore para cambios de estado (APROBADO/INACTIVO).
- *      Toda moderación se encamina exclusivamente por la API REST para auditoría centralizada.
- *   3. Confirmación Modal con Causa Razonada: Captura obligatoria de justificación auditada antes de ejecutar mutaciones.
+ * Ajuste V16.1:
+ *   1. Columna de Estado con Saldo Vinculado: Si estado === 'APROBADO' y saldo < 2000 COP, muestra
+ *      alerta combinada `<span className="bg-orange-500/10 text-orange-400">APROBADO (SIN SALDO)</span>`.
+ *   2. Bloqueo de Activación para Suspendidos con Saldo < 2000 COP: Deshabilita o advierte al administrador
+ *      impidiendo reactivar a un operador suspendido con saldo insuficiente en el Modal y en la lista.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -191,6 +191,13 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         const nuevoActive = esAprobar ? true : (esSuspender ? false : true);
         const nuevoEstado = esAprobar ? 'APROBADO' : (esSuspender ? 'INACTIVO' : 'APROBADO');
 
+        const saldoNum = Number(operador.saldoWallet || operador.saldo || operador.balance || 0);
+        let errorInicial = null;
+
+        if (accion === 'ACTIVAR' && saldoNum < 2000) {
+            errorInicial = 'Bloqueo de Seguridad: No es posible activar a un conductor suspendido con un saldo inferior a $2.000 COP.';
+        }
+
         setModalModeracion({
             isOpen: true,
             operador,
@@ -199,7 +206,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
             nuevoActive
         });
         setJustificacion('');
-        setErrorModal(null);
+        setErrorModal(errorInicial);
     };
 
     const cerrarModalModeracion = () => {
@@ -219,6 +226,12 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
     const ejecutarModeracion = async () => {
         const { operador, accion, nuevoEstado, nuevoActive } = modalModeracion;
         if (!operador) return;
+
+        const saldoNum = Number(operador.saldoWallet || operador.saldo || operador.balance || 0);
+        if (accion === 'ACTIVAR' && saldoNum < 2000) {
+            setErrorModal('Acción bloqueada: El operador posee un saldo inferior a $2.000 COP. Recargue el saldo antes de activar.');
+            return;
+        }
 
         if (!justificacion || !justificacion.trim()) {
             setErrorModal('Debe ingresar una causa o justificación obligatoria para continuar.');
@@ -390,7 +403,11 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                                                         </span>
                                                     </div>
                                                     <div className="col-span-2">
-                                                        {estaAprobado ? (
+                                                        {c.estado === 'APROBADO' && saldoNum < 2000 ? (
+                                                            <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2.5 py-1 rounded text-[10px] font-bold inline-flex items-center gap-1">
+                                                                <AlertTriangle size={11} className="shrink-0" /> APROBADO (SIN SALDO)
+                                                            </span>
+                                                        ) : estaAprobado ? (
                                                             <span className="inline-flex items-center gap-1 rounded bg-green-900/40 px-2.5 py-1 text-[10px] text-green-400 font-bold border border-green-500/40">
                                                                 <CheckCircle size={11} className="shrink-0" /> APROBADO
                                                             </span>
@@ -414,10 +431,14 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                                                         )}
                                                         <button 
                                                             onClick={() => abrirModalModeracion(c, estaAprobado ? 'SUSPENDER' : 'ACTIVAR')} 
+                                                            disabled={!estaAprobado && saldoNum < 2000}
+                                                            title={!estaAprobado && saldoNum < 2000 ? "Saldo insuficiente (< $2.000 COP) para activar" : ""}
                                                             className={`text-[9px] font-black tracking-widest uppercase transition-all duration-200 px-2 py-1 rounded-lg border active:scale-95 ${
-                                                                estaAprobado 
-                                                                    ? 'border-red-500/20 text-red-400 hover:bg-red-500/10' 
-                                                                    : 'border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10'
+                                                                !estaAprobado && saldoNum < 2000
+                                                                    ? 'border-zinc-800 text-zinc-600 bg-zinc-900/50 cursor-not-allowed opacity-50'
+                                                                    : estaAprobado 
+                                                                        ? 'border-red-500/20 text-red-400 hover:bg-red-500/10' 
+                                                                        : 'border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10'
                                                             }`}
                                                         >
                                                             {estaAprobado ? 'SUSPENDER' : 'ACTIVAR'}
@@ -470,6 +491,16 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                                 </span>
                             </div>
                             <div className="flex justify-between items-center">
+                                <span className="text-zinc-500 text-[10px] uppercase font-bold">Saldo Actual:</span>
+                                <span className={`font-mono font-bold text-xs ${
+                                    Number(modalModeracion.operador.saldoWallet || modalModeracion.operador.saldo || modalModeracion.operador.balance || 0) < 2000
+                                        ? 'text-orange-400'
+                                        : 'text-emerald-400'
+                                }`}>
+                                    ${Number(modalModeracion.operador.saldoWallet || modalModeracion.operador.saldo || modalModeracion.operador.balance || 0).toLocaleString('es-CO')} COP
+                                </span>
+                            </div>
+                            <div className="flex justify-between items-center">
                                 <span className="text-zinc-500 text-[10px] uppercase font-bold">Acción Requerida:</span>
                                 <span className={`font-extrabold text-[10px] uppercase px-2 py-0.5 rounded border ${
                                     modalModeracion.accion === 'SUSPENDER'
@@ -494,8 +525,8 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                                 value={justificacion}
                                 onChange={(e) => setJustificacion(e.target.value)}
                                 placeholder="Ingrese el motivo detallado de la moderación para el libro de auditoría central..."
-                                disabled={procesandoModeracion}
-                                className="w-full bg-zinc-950/80 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-500/40 transition-colors uppercase resize-none font-mono"
+                                disabled={procesandoModeracion || (modalModeracion.accion === 'ACTIVAR' && Number(modalModeracion.operador.saldoWallet || modalModeracion.operador.saldo || modalModeracion.operador.balance || 0) < 2000)}
+                                className="w-full bg-zinc-950/80 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-500/40 transition-colors uppercase resize-none font-mono disabled:opacity-50"
                             />
                         </div>
 
@@ -517,7 +548,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                             </button>
                             <button
                                 onClick={ejecutarModeracion}
-                                disabled={procesandoModeracion}
+                                disabled={procesandoModeracion || (modalModeracion.accion === 'ACTIVAR' && Number(modalModeracion.operador.saldoWallet || modalModeracion.operador.saldo || modalModeracion.operador.balance || 0) < 2000)}
                                 className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider text-white shadow-lg transition active:scale-95 flex items-center gap-2 ${
                                     modalModeracion.accion === 'SUSPENDER'
                                         ? 'bg-red-600 hover:bg-red-500 shadow-red-600/20'

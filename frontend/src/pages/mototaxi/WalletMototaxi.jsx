@@ -1,5 +1,4 @@
-// Versión Arquitectura: V11.2 - PROD READY: Integración Financiera y Retrocompatibilidad balance/saldo
-// Refactorización Estética: Cyber-Neo-Brutalismo Industrial (Alta Visibilidad, Cero Curvas, Hard Shadows)
+// Versión Arquitectura: V12.0 - Ajuste CIMCO-UI V9.3 Glassmorphism e Integración de StatusBanner
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
@@ -15,62 +14,78 @@ const WalletMototaxi = () => {
     useEffect(() => {
         if (!user?.uid) return;
         
-        const pathColeccion = FIRESTORE_PATHS.wallets || 'wallets';
+        const pathColeccion = FIRESTORE_PATHS?.wallets || 'wallets';
         const unsub = onSnapshot(doc(db, pathColeccion, user.uid), (docRef) => {
-            if (docRef.exists()) {
-                setBalance(docRef.data().balance || docRef.data().saldo || 0);
+            if (docRef?.exists()) {
+                const data = docRef.data();
+                const saldoCalculado = data?.balance ?? data?.saldo ?? 0;
+                setBalance(saldoCalculado);
             }
         });
         return () => unsub();
     }, [user]);
 
+    const saldoEfectivo = balance;
+
     return (
-        <div className="min-h-screen bg-[#0e0e11] font-mono text-zinc-100 p-6 flex flex-col gap-6 selection:bg-cyan-400 selection:text-black">
+        <div className="min-h-screen bg-[#0e0e11] font-sans text-zinc-100 p-6 flex flex-col gap-6 selection:bg-cyan-400 selection:text-black">
             
             {/* 🔝 ENCABEZADO: Módulo de Identidad Financiera */}
-            <header className="flex items-center gap-4 bg-zinc-900 border-4 border-black p-4 shadow-[4px_4px_0px_0px_#000] rounded-none">
-                <div className="p-2.5 bg-cyan-400 text-black border-2 border-black shadow-[2px_2px_0px_0px_#000] shrink-0">
+            <header className="flex items-center gap-4 bg-[#121214]/80 backdrop-blur-md border border-white/5 p-4 rounded-xl shadow-lg">
+                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 rounded-lg shrink-0">
                     <Wallet size={24} strokeWidth={2.5} />
                 </div>
                 <div>
-                    <h1 className="text-xl font-black uppercase tracking-widest text-white leading-none">Mi Billetera</h1>
-                    <p className="text-[10px] text-cyan-400 uppercase tracking-wider font-bold mt-1">Consola de fondos y conciliación de saldos TAXIA</p>
+                    <h1 className="text-xl font-bold tracking-wide text-white leading-none">Mi Billetera</h1>
+                    <p className="text-xs text-zinc-400 font-medium mt-1">Consola de fondos y conciliación de saldos TAXIA</p>
                 </div>
             </header>
 
-            {/* 💳 PANEL DE CONTROL DE SALDO (Bloque Masivo Rígido) */}
-            <div className="bg-zinc-900 border-4 border-black p-6 shadow-[4px_4px_0px_0px_#000] rounded-none flex flex-col relative overflow-hidden">
-                {/* Reemplazo de difuminados por un bloque geométrico sólido de fondo de diseño brutalista */}
-                <div className="absolute top-0 right-0 w-24 h-24 bg-zinc-800 border-b-4 border-l-4 border-black flex items-center justify-center font-black text-zinc-700 text-3xl select-none pointer-events-none">
+            {/* 🚦 StatusBanner: Indicador Visual de Estado (CIMCO-UI V9.3) */}
+            <div className={`p-4 rounded-xl border backdrop-blur-md ${
+                saldoEfectivo >= 2000 
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                    : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+            }`}>
+                <p className="font-semibold text-sm">
+                    {saldoEfectivo >= 2000 
+                        ? '✅ Cuenta Operativa - Habilitado para recibir carreras' 
+                        : '🚫 Cuenta Inactiva - Requiere recarga mínima de $2.000 COP'}
+                </p>
+            </div>
+
+            {/* 💳 PANEL DE CONTROL DE SALDO */}
+            <div className="bg-[#121214]/80 backdrop-blur-md border border-white/5 p-6 rounded-xl shadow-lg flex flex-col relative overflow-hidden">
+                <div className="absolute top-4 right-4 text-xs font-semibold px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg text-zinc-400 select-none">
                     COP
                 </div>
 
                 <div className="relative z-10">
-                    <p className="text-[10px] text-zinc-400 uppercase tracking-widest font-black mb-1">
+                    <p className="text-xs text-zinc-400 font-medium mb-1">
                         Saldo Disponible en Red
                     </p>
-                    <h2 className="text-3xl font-black text-emerald-400 tracking-tight border-b-4 border-black pb-4 mb-5">
-                        ${balance.toLocaleString()} COP
+                    <h2 className="text-3xl font-bold text-emerald-400 tracking-tight border-b border-white/5 pb-4 mb-5">
+                        ${(balance ?? 0).toLocaleString()} COP
                     </h2>
                     
                     {/* Botonera Operativa Inyectada */}
-                    <div className="flex gap-4 [&_button]:w-full [&_button]:bg-yellow-400 [&_button]:text-black [&_button]:font-black [&_button]:text-xs [&_button]:uppercase [&_button]:tracking-widest [&_button]:py-3.5 [&_button]:px-4 [&_button]:border-2 [&_button]:border-black [&_button]:rounded-none [&_button]:shadow-[3px_3px_0px_0px_#000] [&_button]:transition-all [&_button]:active:translate-x-[1px] [&_button]:active:translate-y-[1px] [&_button]:active:shadow-[2px_2px_0px_0px_#000]">
+                    <div className="flex gap-4">
                         <BotonRecarga usuarioId={user?.uid} rol={user?.role || user?.rol} />
                     </div>
                 </div>
             </div>
 
             {/* 📊 PANEL DE AUDITORÍA TRANSACCIONAL */}
-            <div className="flex-1 bg-zinc-900 border-4 border-black p-6 shadow-[4px_4px_0px_0px_#000] rounded-none flex flex-col gap-4">
-                <div className="flex items-center gap-2.5 border-b-4 border-black pb-3">
+            <div className="flex-1 bg-[#121214]/80 backdrop-blur-md border border-white/5 p-6 rounded-xl shadow-lg flex flex-col gap-4">
+                <div className="flex items-center gap-2.5 border-b border-white/5 pb-3">
                     <Activity size={16} className="text-cyan-400" strokeWidth={2.5} />
-                    <h3 className="text-xs font-black uppercase tracking-widest text-zinc-200">
+                    <h3 className="text-sm font-semibold text-zinc-200">
                         Auditoría Financiera Reciente
                     </h3>
                 </div>
                 
-                {/* Contenedor del Historial con Scrollbar Rígida */}
-                <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-black scrollbar-track-zinc-800">
+                {/* Contenedor del Historial */}
+                <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-700 scrollbar-track-transparent">
                     <TransactionHistory usuarioId={user?.uid} />
                 </div>
             </div>

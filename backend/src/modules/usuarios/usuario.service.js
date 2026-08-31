@@ -1,5 +1,17 @@
+// Versión Arquitectura: V20.04 - Lógica de actualización de estadoOperativo/isActive según umbral de saldo ($2.000 COP)
 // Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.service.js
+
 import mongoose from 'mongoose';
+
+/**
+ * Roles operativos sujetos a la regla de negocio de saldo mínimo ($2.000 COP)
+ */
+const ROLES_OPERATIVOS = [
+    'Mototaxi', 'Motoparrillero', 'Motocarga', 'Despachador', 'Conductor', 
+    'mototaxi', 'motoparrillero', 'motocarga', 'despachador', 'conductor'
+];
+
+const UMBRAL_MINIMO_OPERATIVO = 2000;
 
 /**
  * Obtención dinámica del modelo de Usuario para evitar fallos de importación por rutas relativas.
@@ -15,6 +27,52 @@ const getUsuarioModel = () => {
 };
 
 export class UsuarioService {
+
+    /**
+     * Auxiliar interno para evaluar y actualizar la disponibilidad del usuario/conductor según su saldo resultante.
+     * Regla: Saldo < 2.000 COP => estadoOperativo = 'NO_DISPONIBLE', isActive = false
+     *        Saldo >= 2.000 COP => estadoOperativo = 'DISPONIBLE', isActive = true
+     */
+    async _sincronizarEstadoPorSaldo(docUsuario) {
+        if (!docUsuario) return docUsuario;
+
+        const rolNormalizado = docUsuario.rol || docUsuario.role || '';
+        const esRolOperativo = ROLES_OPERATIVOS.some(r => r.toLowerCase() === rolNormalizado.toLowerCase());
+
+        // Si no es un rol operativo (ej. Pasajero, Admin central), no alteramos disponibilidad por saldo
+        if (!esRolOperativo) {
+            return docUsuario;
+        }
+
+        const saldoActual = docUsuario.saldoWallet ?? docUsuario.saldo ?? 0;
+        const estaHabilitado = saldoActual >= UMBRAL_MINIMO_OPERATIVO;
+        const nuevoEstadoOperativo = estaHabilitado ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+
+        docUsuario.estadoOperativo = nuevoEstadoOperativo;
+        docUsuario.isActive = estaHabilitado;
+
+        // Mantener sincronía de estado general si no está inactivo por causa administrativa previa
+        if (docUsuario.estado !== 'INACTIVO') {
+            docUsuario.estado = estaHabilitado ? 'ACTIVO' : 'BLOQUEADO';
+        }
+
+        if (typeof docUsuario.save === 'function') {
+            return await docUsuario.save();
+        } else {
+            const Usuario = getUsuarioModel();
+            return await Usuario.findByIdAndUpdate(
+                docUsuario._id,
+                { 
+                    $set: { 
+                        estadoOperativo: nuevoEstadoOperativo,
+                        isActive: estaHabilitado,
+                        ...(docUsuario.estado !== 'INACTIVO' && { estado: estaHabilitado ? 'ACTIVO' : 'BLOQUEADO' })
+                    } 
+                },
+                { new: true }
+            );
+        }
+    }
 
     async obtenerDirectorioGlobal() {
         const Usuario = getUsuarioModel();
@@ -67,10 +125,18 @@ export class UsuarioService {
 
         await this.validarRegistroUnico(datos);
 
+        const saldoInicial = datos.saldoWallet ?? datos.saldo ?? 0;
+        const rolNormalizado = datos.rol || datos.role || '';
+        const esRolOperativo = ROLES_OPERATIVOS.some(r => r.toLowerCase() === rolNormalizado.toLowerCase());
+        const estaHabilitado = !esRolOperativo || saldoInicial >= UMBRAL_MINIMO_OPERATIVO;
+
         const nuevoUsuario = new Usuario({
             ...datos,
             email: mailTarget,
-            saldoWallet: datos.saldoWallet ?? datos.saldo ?? 0
+            saldoWallet: saldoInicial,
+            saldo: saldoInicial,
+            estadoOperativo: datos.estadoOperativo || (estaHabilitado ? 'DISPONIBLE' : 'NO_DISPONIBLE'),
+            isActive: datos.isActive ?? estaHabilitado
         });
 
         return await nuevoUsuario.save();
@@ -85,6 +151,20 @@ export class UsuarioService {
 
     async actualizarUsuario(targetId, datos) {
         const Usuario = getUsuarioModel();
+        
+        // Si se incluye modificación de saldo en los datos de actualización, evaluar estados
+        if (datos.saldoWallet !== undefined || datos.saldo !== undefined) {
+            const saldoEvaluado = datos.saldoWallet ?? datos.saldo;
+            const rolNormalizado = datos.rol || datos.role || '';
+            const esRolOperativo = ROLES_OPERATIVOS.some(r => r.toLowerCase() === rolNormalizado.toLowerCase());
+            
+            if (esRolOperativo) {
+                const estaHabilitado = saldoEvaluado >= UMBRAL_MINIMO_OPERATIVO;
+                datos.estadoOperativo = estaHabilitado ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+                datos.isActive = estaHabilitado;
+            }
+        }
+
         return await Usuario.findOneAndUpdate(
             { $or: [{ _id: targetId }, { uid: targetId }] },
             { $set: datos },
@@ -122,45 +202,58 @@ export class UsuarioService {
         const Usuario = getUsuarioModel();
         return await Usuario.findOne({
             $or: [{ _id: targetId }, { uid: targetId }]
-        }).select('saldoWallet saldo nombre rol').lean();
+        }).select('saldoWallet saldo nombre rol estadoOperativo isActive').lean();
     }
 
     async recargarSaldoDespachador({ targetId, montoNum }) {
         const Usuario = getUsuarioModel();
-        const usuarioActualizado = await Usuario.findOneAndUpdate(
-            { $or: [{ _id: targetId }, { uid: targetId }] },
-            { $inc: { saldoWallet: montoNum, saldo: montoNum } },
-            { new: true }
-        );
+        let usuario = await Usuario.findOne({ $or: [{ _id: targetId }, { uid: targetId }] });
 
-        if (!usuarioActualizado) return null;
+        if (!usuario) return null;
+
+        usuario.saldoWallet = (usuario.saldoWallet || 0) + montoNum;
+        usuario.saldo = (usuario.saldo || 0) + montoNum;
+
+        usuario = await this._sincronizarEstadoPorSaldo(usuario);
+
+        const saldoNuevo = usuario.saldoWallet ?? usuario.saldo ?? 0;
 
         return {
-            saldoNuevo: usuarioActualizado.saldoWallet ?? usuarioActualizado.saldo ?? 0
+            saldoNuevo,
+            usuario
         };
     }
 
     async ajustarSaldoBilletera({ targetId, montoNumerico }) {
         const Usuario = getUsuarioModel();
-        let usuario = await Usuario.findOneAndUpdate(
-            { $or: [{ _id: targetId }, { uid: targetId }] },
-            { $inc: { saldoWallet: montoNumerico, saldo: montoNumerico } },
-            { new: true }
-        );
+        let usuario = await Usuario.findOne({ $or: [{ _id: targetId }, { uid: targetId }] });
+        let esColeccionConductor = false;
 
         if (!usuario && mongoose.models.Conductor) {
-            usuario = await mongoose.models.Conductor.findOneAndUpdate(
-                { $or: [{ _id: targetId }, { uid: targetId }] },
-                { $inc: { saldoWallet: montoNumerico, saldo: montoNumerico } },
-                { new: true }
-            );
+            usuario = await mongoose.models.Conductor.findOne({ $or: [{ _id: targetId }, { uid: targetId }] });
+            esColeccionConductor = true;
         }
 
         if (!usuario) return null;
 
+        const saldoAnterior = usuario.saldoWallet ?? usuario.saldo ?? 0;
+        const saldoCalculado = saldoAnterior + montoNumerico;
+
+        usuario.saldoWallet = saldoCalculado;
+        usuario.saldo = saldoCalculado;
+
+        if (esColeccionConductor) {
+            const estaHabilitado = saldoCalculado >= UMBRAL_MINIMO_OPERATIVO;
+            usuario.estadoOperativo = estaHabilitado ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+            usuario.isActive = estaHabilitado;
+            await usuario.save();
+        } else {
+            usuario = await this._sincronizarEstadoPorSaldo(usuario);
+        }
+
         const nuevoSaldo = usuario.saldoWallet ?? usuario.saldo ?? 0;
         return {
-            saldoActual: nuevoSaldo - montoNumerico,
+            saldoActual: saldoAnterior,
             nuevoSaldo,
             usuario
         };
@@ -186,9 +279,13 @@ export class UsuarioService {
 
         usuario.saldoWallet = (usuario.saldoWallet || 0) + delta;
         usuario.saldo = (usuario.saldo || 0) + delta;
-        await usuario.save();
 
-        return { saldoNuevo: usuario.saldoWallet };
+        const usuarioActualizado = await this._sincronizarEstadoPorSaldo(usuario);
+
+        return { 
+            saldoNuevo: usuarioActualizado.saldoWallet ?? usuarioActualizado.saldo ?? 0,
+            usuario: usuarioActualizado
+        };
     }
 }
 

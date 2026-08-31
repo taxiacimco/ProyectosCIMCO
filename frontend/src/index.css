@@ -1,7 +1,7 @@
-/* Versión Arquitectura: V11.3 - Consolidación Tailwind CSS v4, Slate Profundo y Clases Utilitarias CIMCO-UI V9.3 */
+/* Versión Arquitectura: V11.4 - Consolidación Tailwind CSS v4, Purga Atómica y Normalización de Estilos Leaflet CIMCO-UI V9.3 */
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\index.css
- * Misión: Mantener la directiva Tailwind CSS v4 (@import "tailwindcss";), el entorno visual Slate Profundo (#0F172A), y las clases utilitarias personalizadas glass-panel-premium, no-scrollbar y custom-scrollbar bajo los estándares de CIMCO-UI V9.3.
+ * Misión: Asegurar el motor de procesamiento Tailwind CSS v4 (@import "tailwindcss";), verificar la no duplicación y correcto aislamiento de los estilos del mapa Leaflet, manteniendo el entorno visual Slate Profundo (#0F172A) y la regla de diseño Glassmorphism según el estándar CIMCO-UI V9.3.
  */
 
 @import "tailwindcss";
@@ -77,11 +77,12 @@
   }
 }
 
-/* 🛡️ FIX PARA CONTENEDORES MAPA LEAFLET - Fusión Atómica Asegurada */
+/* 🛡️ OPTIMIZACIÓN Y NORMALIZACIÓN DE CONTENEDORES MAPA LEAFLET - Fusión Atómica Sin Duplicaciones */
 .leaflet-container {
   width: 100%;
   height: 100%;
   background: var(--color-cimco-bg) !important;
+  z-index: 1;
 }
 
 /* Estética CIMCO-UI Glassmorphism para los Popups del Radar Geográfico */
@@ -90,6 +91,7 @@
   color: var(--color-zinc-100) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border-radius: 16px !important;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
 }

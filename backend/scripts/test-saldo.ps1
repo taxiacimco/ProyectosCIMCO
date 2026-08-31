@@ -1,24 +1,46 @@
-# ==============================================================================
-# SCRIPT DE PRUEBAS DE INTEGRIDAD DE SALDOS - TAXIA CIMCO (CORE V19.1)
+# Versión Arquitectura: V19.3 - Autenticación JWT Administrador y Pruebas de Saldos
 # Ubicación: backend/scripts/test-saldo.ps1
-# ==============================================================================
 
 param (
-    [string]$USER_ID = "64a1b2c3d4e5f67890123456",
+    [string]$USER_ID = "6a831620f66873663b1f73ac",
+    [string]$LOGIN_EMAIL = "taxiacimco@gmail.com",
+    [string]$LOGIN_PASS = "Mijagua*57",
     [string]$TOKEN = ""
 )
 
+$AUTH_URL = "http://localhost:3000/api/auth/login"
 $BASE_URL = "http://localhost:3000/api/usuarios"
 
 $HEADERS = @{
     "Content-Type" = "application/json"
 }
 
-if ($TOKEN -ne "") {
-    $HEADERS.Add("Authorization", "Bearer $TOKEN")
+Write-Host "🚀 Iniciando suite de validación de saldo en: $BASE_URL" -ForegroundColor Cyan
+
+# ------------------------------------------------------------------------------
+# PASO PREVIO: AUTENTICACIÓN AUTOMÁTICA ADMIN Y OBTENCIÓN DE TOKEN JWT
+# ------------------------------------------------------------------------------
+if ($TOKEN -eq "") {
+    Write-Host "`n🔑 [AUTH ADMIN] Autenticando con el usuario $LOGIN_EMAIL..." -ForegroundColor Yellow
+    
+    $loginBody = @{
+        email = $LOGIN_EMAIL
+        password = $LOGIN_PASS
+    } | ConvertTo-Json
+
+    try {
+        $loginRes = Invoke-RestMethod -Uri $AUTH_URL -Method Post -Body $loginBody -ContentType "application/json"
+        $TOKEN = $loginRes.token
+        Write-Host "✅ [AUTH ADMIN] Token JWT de Administrador obtenido exitosamente." -ForegroundColor Green
+    } catch {
+        Write-Host "❌ [AUTH ADMIN] Falló el inicio de sesión previo:" -ForegroundColor Red $_.Exception.Message
+        exit 1
+    }
 }
 
-Write-Host "🚀 Iniciando suite de validación de saldo en: $BASE_URL" -ForegroundColor Cyan
+if ($TOKEN -ne "") {
+    $HEADERS["Authorization"] = "Bearer $TOKEN"
+}
 
 # ------------------------------------------------------------------------------
 # TEST 1: ABONO DE SALDO (PUT /saldo)

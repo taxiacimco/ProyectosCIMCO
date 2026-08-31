@@ -1,11 +1,56 @@
-// Versión Arquitectura: V20.02 - Desacoplamiento Clean Architecture / Hexagonal (SRP) mediante UsuarioService y FirebaseRepository
+// Versión Arquitectura: V20.03 - Validación y actualización de estado operativo según umbral de saldo ($2.000 COP)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
  * Misión: Controlador unificado de usuarios (Admin, Despachador, Pasajero, Staff) desacoplado mediante servicios y repositorios (SRP).
- * Preserva la deduplicación del directorio global, inyección sincrónica de UID, trazabilidad de transacciones y operaciones de billetera polimórfica.
+ * Preserva la deduplicación del directorio global, inyección sincrónica de UID, trazabilidad de transacciones,
+ * operaciones de billetera polimórfica y evaluación automática de estado operativo según saldo en recargas/débitos.
  */
 
 import usuarioService from './usuario.service.js';
+
+// Roles operativos sujetos al umbral mínimo de saldo ($2.000 COP)
+const ROLES_OPERATIVOS = ['Mototaxi', 'Motoparrillero', 'Motocarga', 'Despachador', 'Conductor', 'mototaxi', 'motoparrillero', 'motocarga', 'despachador', 'conductor'];
+
+/**
+ * Auxiliar interno para evaluar y sincronizar el estado operativo según el saldo resultante
+ */
+const evaluarEstadoOperativoPorSaldo = async (usuario, nuevoSaldo) => {
+    if (!usuario) return usuario;
+
+    const rolNormalizado = usuario.rol || usuario.role || '';
+    const esRolOperativo = ROLES_OPERATIVOS.some(r => r.toLowerCase() === rolNormalizado.toLowerCase());
+
+    if (!esRolOperativo) {
+        return usuario;
+    }
+
+    const UMBRAL_MINIMO_OPERATIVO = 2000;
+    const nuevoEstado = nuevoSaldo < UMBRAL_MINIMO_OPERATIVO ? 'NO_DISPONIBLE' : 'DISPONIBLE';
+    const nuevoEstadoGeneral = nuevoSaldo < UMBRAL_MINIMO_OPERATIVO ? 'BLOQUEADO' : 'ACTIVO';
+
+    // Se actualiza el estado operativo si difiere del actual
+    if (usuario.estadoOperativo !== nuevoEstado || (usuario.estado !== 'INACTIVO' && usuario.estado !== nuevoEstadoGeneral)) {
+        try {
+            const actualizacion = {
+                estadoOperativo: nuevoEstado,
+                disponible: nuevoSaldo >= UMBRAL_MINIMO_OPERATIVO
+            };
+
+            // Solo actualizar estado general si no ha sido suspendido manualmente
+            if (usuario.estado !== 'INACTIVO') {
+                actualizacion.estado = nuevoEstadoGeneral;
+            }
+
+            const usuarioActualizado = await usuarioService.actualizarUsuario(usuario._id || usuario.id || usuario.uid, actualizacion);
+            return usuarioActualizado || usuario;
+        } catch (err) {
+            console.error(`⚠️ [CIMCO-ESTADO-OPERATIVO] Error al sincronizar estado por saldo para ${usuario._id}:`, err);
+            return usuario;
+        }
+    }
+
+    return usuario;
+};
 
 // ==================================================================
 // 1. GESTIÓN GENERAL Y DIRECTORIO GLOBAL DE USUARIOS
@@ -288,6 +333,11 @@ export const recargarSaldoDespachador = async (req, res, next) => {
             return res.status(404).json({ success: false, message: "Despachador no encontrado o rol no válido." });
         }
 
+        // Evaluar y actualizar estado operativo según saldo resultante
+        if (resultado.usuario) {
+            await evaluarEstadoOperativoPorSaldo(resultado.usuario, resultado.saldoNuevo);
+        }
+
         return res.status(200).json({
             success: true,
             message: `Saldo acreditado al despachador. Nuevo saldo: $${resultado.saldoNuevo} COP`,
@@ -334,12 +384,18 @@ export const ajustarSaldoBilletera = async (req, res, next) => {
             });
         }
 
+        // Evaluar y actualizar estado operativo según saldo resultante
+        let usuarioProcesado = resultado.usuario;
+        if (usuarioProcesado) {
+            usuarioProcesado = await evaluarEstadoOperativoPorSaldo(usuarioProcesado, resultado.nuevoSaldo);
+        }
+
         return res.status(200).json({
             success: true,
             message: "Ajuste de billetera procesado con éxito.",
             saldoAnterior: resultado.saldoActual,
             nuevoSaldo: resultado.nuevoSaldo,
-            usuario: resultado.usuario
+            usuario: usuarioProcesado || resultado.usuario
         });
     } catch (error) {
         console.error("🚨 [CIMCO-WALLET-FATAL] Error al ajustar saldo de billetera:", error);
@@ -372,6 +428,12 @@ export const recargarSaldo = async (req, res, next) => {
             motivo,
             adminId
         });
+
+        // Obtener usuario actualizado y evaluar estado operativo por saldo
+        const usuarioActual = await usuarioService.obtenerUsuarioPorId(targetId);
+        if (usuarioActual) {
+            await evaluarEstadoOperativoPorSaldo(usuarioActual, resultado.saldoNuevo);
+        }
 
         return res.status(200).json({
             success: true,

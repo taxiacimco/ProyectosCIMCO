@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.3 - Blindaje de Seguridad en Rutas de Aprobación y Mapeo Métrica Capital Circulante
+// Versión Arquitectura: V19.4 - Unificación de Endpoints de Recarga Administrativa con Revaluación de Estado en Tiempo Real
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
  * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría, métricas y recargas auditadas sin provocar CIMCO-ROUTE-MISS.
- * Ajuste V19.3: Preservación de la integración del endpoint `/metricas/capital-circulante` asegurando coexistencia con la ruta legacy `/capital-circulante` e inmunidad ante regresiones.
+ * Ajuste V19.4: Mapeo de endpoints de recarga de saldo administrativa (recargarSaldoAdmin, recargarBilleteraPorAdmin) garantizando la revaluación de estado en tiempo real.
  */
 
 import express from 'express';
@@ -119,6 +119,7 @@ router.post('/', validarConductorUnico, registrarConductor);
 // 💳 BILLETERA Y RECARGAS ATÓMICAS (UNIFICACIÓN DE RUTAS Y ALIAS ANTI CIMCO-ROUTE-MISS)
 // ==================================================================
 router.post('/saldos/admin/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
+router.post('/billeteras/admin/recargar', autenticarJWT, verificarRol('admin'), recargarBilleteraPorAdmin);
 router.put('/:id/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
 router.post('/:id/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
 router.put('/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);

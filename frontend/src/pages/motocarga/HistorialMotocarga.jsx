@@ -1,11 +1,10 @@
-// Versión Arquitectura: V13.0 - Migración Híbrida REST API / Firestore con Resiliencia NoSQL y Rediseño CIMCO-UI Glassmorphism
+// Versión Arquitectura: V13.1 - Filtrado Estricto REST por tipoServicio=motocarga y Resiliencia NoSQL
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\motocarga\HistorialMotocarga.jsx
  * Misión: Renderizar la bitácora de fletes completados en la red de motocarga/logística pesada consumiendo la API REST de Express/MongoDB
  *        con fallback resiliente a Firestore y ordenamiento en memoria para mitigar ausencias de índices compuestos.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Acento Ámbar/Esmeralda).
- * Ajuste V13.0: Implementación del patrón de carga híbrido REST/NoSQL, control de excepciones por ausencia de índices NoSQL,
- *               mecanismo de reintento de conexión y transición del estilo brutalista a Glassmorphism.
+ * Ajuste V13.1: Garantía de filtrado en endpoint REST para asegurar que `tipoServicio=motocarga` prevenga la contaminación de registros.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -48,13 +47,18 @@ const HistorialMotocarga = () => {
         setLoading(true);
         setError(null);
 
-        // 📡 1. INTENTO DE CONSULTA EN API REST DE MONGODB CORE
+        // 📡 1. INTENTO DE CONSULTA EN API REST DE MONGODB CORE CON PARÁMETROS FILTRADOS ESTRICTAMENTE
         try {
             const rawEndpoint = VIAJES_ENDPOINTS?.historial || '/viajes/historial';
             const cleanEndpoint = rawEndpoint.replace(/^\/api/, '');
-            const endpoint = `${cleanEndpoint}?conductorId=${conductorId}&tipoServicio=motocarga`;
 
-            const res = await api.get(endpoint);
+            const res = await api.get(cleanEndpoint, {
+                params: {
+                    conductorId: conductorId,
+                    tipoServicio: 'motocarga'
+                }
+            });
+
             const viajesRest = res?.data?.viajes || (Array.isArray(res?.data) ? res.data : null);
 
             if (res?.data?.success && Array.isArray(res?.data?.viajes)) {
@@ -76,6 +80,7 @@ const HistorialMotocarga = () => {
             const q = query(
                 collection(db, pathColeccion),
                 where('conductorId', '==', conductorId),
+                where('tipoServicio', '==', 'motocarga'),
                 where('estado', '==', 'COMPLETADO')
             );
 
@@ -174,7 +179,7 @@ const HistorialMotocarga = () => {
                                         <div>
                                             <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold">Flete Neto Recaudado</p>
                                             <p className="text-lg font-black text-amber-400 tracking-tight mt-0.5">
-                                                ${tarifaFinal.toLocaleString()} <span className="text-[10px] text-zinc-500 font-normal">COP</span>
+                                                ${tarifaFinal.toLocaleString('es-CO')} <span className="text-[10px] text-zinc-500 font-normal">COP</span>
                                             </p>
                                         </div>
                                         <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider text-[10px] shadow-[0_0_10px_rgba(16,185,129,0.05)]">

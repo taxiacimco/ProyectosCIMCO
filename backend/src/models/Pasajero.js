@@ -1,11 +1,11 @@
-// Versión Arquitectura: V21.29 - Reconfiguración del Atributo UID con Unicidad y Dispersión Unificada
+// Versión Arquitectura: V21.30 - Homologación de Interfaz Operativa con Método puedeOperar
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva cifrado Bcrypt con guarda anti-doble hashing (isModified('password')
  * y detección de prefijo hash $2a$/$2b$), esquema de direcciones favoritas, soporte GeoJSON 2dsphere,
- * aprobación automática inmediata, URL de foto_perfil y normalización de variables.
- * Ajuste V21.29: Homologación del atributo 'uid' con { type: String, unique: true, sparse: true } para prevenir desbordamientos E11000.
+ * aprobación automática inmediata, URL de foto_perfil, normalización de variables e índice UID disperso.
+ * Ajuste V21.30: Inyección del método de instancia helper 'puedeOperar()' retornando siempre true para homologar la API polimórfica del ecosistema.
  */
 
 import mongoose from 'mongoose';
@@ -168,6 +168,11 @@ pasajeroSchema.pre('save', async function (next) {
         return next(error);
     }
 });
+
+// 💳 HOMOLOGACIÓN DE INTERFAZ: El Pasajero no está sujeto a restricciones de umbral de comisión de billetera para operar
+pasajeroSchema.methods.puedeOperar = function () {
+    return true;
+};
 
 const Pasajero = mongoose.models.Pasajero || mongoose.model('Pasajero', pasajeroSchema, 'pasajeros');
 

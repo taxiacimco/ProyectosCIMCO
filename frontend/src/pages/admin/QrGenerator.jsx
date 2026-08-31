@@ -1,7 +1,8 @@
-// Versión Arquitectura: V24.1 - Optimización de Renderizado Canvas, Memoización de Logo SVG y Manejo de Errores Firestore
+// Versión Arquitectura: V24.2 - Exportación por Defecto Completa para Soporte de Carga Perezosa (React.lazy)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\QrGenerator.jsx
  * Misión: Generación de códigos QR de alta legibilidad con conmutación entre Entornos Locales y Producción (Vercel).
+ * Ajuste V24.2: Asegurar la firma de exportación por defecto (export default QrGenerator) para garantizar compatibilidad atómica al ser importado mediante React.lazy() en el enrutador principal.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism.
  */
 

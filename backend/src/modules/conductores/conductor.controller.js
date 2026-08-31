@@ -1,8 +1,8 @@
-// Versión Arquitectura: V21.36 - Exportación de Helper actualizarUbicacionConductor para Integración con Socket Manager
+// Versión Arquitectura: V22.1 - Evaluación de Umbral de Saldo ($2.000 COP) para Transición de estadoOperativo en Recargas y Ajustes
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, recargas atómicas y métricas de capital circulante.
- * Ajuste V21.36: Inclusión de alias de exportación `actualizarUbicacionConductor` para el consumo seguro desde socket.manager.js.
+ * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, recargas atómicas, métricas de capital circulante y transición automática de estadoOperativo según el umbral de saldo ($2.000 COP).
+ * Ajuste V22.1: Integración de la guarda de umbral de saldo de $2.000 COP en recargas y ajustes de saldo. Si nuevoSaldo >= 2000 y el conductor estaba inhabilitado/no disponible por saldo, se conmuta a DISPONIBLE en MongoDB y Firestore. Si nuevoSaldo < 2000, se actualiza a NO_DISPONIBLE.
  */
 
 import mongoose from 'mongoose';
@@ -12,6 +12,8 @@ import HistorialSaldo from '../../models/HistorialSaldo.js';
 import admin, { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js'; 
 import { FieldValue } from 'firebase-admin/firestore'; 
 import { actualizarRadarUbicacion } from '../../services/telemetria.service.js';
+
+const UMBRAL_SALDO_MINIMO_COP = 2000;
 
 /**
  * Helper para registrar transacciones auditables en Firestore
@@ -524,14 +526,7 @@ export const recargarSaldoAdmin = async (req, res, next) => {
             ]
         };
 
-        const conductor = await Conductor.findOneAndUpdate(
-            query,
-            { 
-                $inc: { saldo: montoNum },
-                $unset: { saldoWallet: "" } 
-            },
-            { new: false, session }
-        );
+        const conductor = await Conductor.findOne(query).session(session);
 
         if (!conductor) {
             await session.abortTransaction();
@@ -540,6 +535,26 @@ export const recargarSaldoAdmin = async (req, res, next) => {
 
         const saldoAnterior = Number(conductor.saldo || 0);
         const nuevoSaldo = saldoAnterior + montoNum;
+
+        // 🟢 GUARDA DE UMBRAL: Evaluar y actualizar estadoOperativo según cruce de $2.000 COP
+        const estadoAdmin = String(conductor.estado || conductor.estadoAdministrativo || '').toUpperCase();
+        const estaAprobado = (estadoAdmin === 'APROBADO' || estadoAdmin === 'ACTIVO') && conductor.isActive !== false;
+
+        let nuevoEstadoOperativo = conductor.estadoOperativo;
+        if (nuevoSaldo >= UMBRAL_SALDO_MINIMO_COP) {
+            if (conductor.estadoOperativo === 'NO_DISPONIBLE' || !conductor.estadoOperativo) {
+                if (estaAprobado) {
+                    nuevoEstadoOperativo = 'DISPONIBLE';
+                }
+            }
+        } else {
+            nuevoEstadoOperativo = 'NO_DISPONIBLE';
+        }
+
+        conductor.saldo = nuevoSaldo;
+        conductor.estadoOperativo = nuevoEstadoOperativo;
+        delete conductor.saldoWallet;
+        await conductor.save({ session });
 
         const nuevoHistorial = new HistorialSaldo({
             conductor: conductor._id,
@@ -556,14 +571,25 @@ export const recargarSaldoAdmin = async (req, res, next) => {
         session.endSession();
 
         const docFirestoreId = conductor.uid || conductor._id.toString();
-        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-        await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
-            id: docFirestoreId,
-            nombreUsuario: conductor.nombre,
-            saldo: nuevoSaldo,
-            balance: nuevoSaldo,
-            ultimaActualizacion: new Date().toISOString()
-        }, { merge: true });
+        
+        try {
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                id: docFirestoreId,
+                nombreUsuario: conductor.nombre,
+                saldo: nuevoSaldo,
+                balance: nuevoSaldo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+            await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
+                estadoOperativo: nuevoEstadoOperativo,
+                ultimaActualizacion: FieldValue.serverTimestamp()
+            }, { merge: true });
+        } catch (fsErr) {
+            console.warn("⚠️ [SYNC-WARN] Falló réplica a Firestore en recargarSaldoAdmin:", fsErr.message);
+        }
 
         await registrarTransaccionFirestore({
             idUsuario: docFirestoreId,
@@ -579,9 +605,10 @@ export const recargarSaldoAdmin = async (req, res, next) => {
 
         return res.status(200).json({
             success: true,
-            message: `Recarga exitosa. Nuevo saldo: $${nuevoSaldo} COP`,
+            message: `Recarga exitosa. Nuevo saldo: $${nuevoSaldo} COP. Estado operativo: ${nuevoEstadoOperativo}`,
             nuevoSaldo,
-            data: { nuevoSaldo }
+            estadoOperativo: nuevoEstadoOperativo,
+            data: { nuevoSaldo, estadoOperativo: nuevoEstadoOperativo }
         });
 
     } catch (error) {
@@ -606,35 +633,65 @@ export const ajustarSaldo = async (req, res, next) => {
 
         const incremento = operacion === 'descuento' ? -Math.abs(montoNum) : Math.abs(montoNum);
 
-        const conductor = await Conductor.findOneAndUpdate(
-            {
-                $or: [
-                    { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
-                    { uid: targetId },
-                    { conductorId: targetId }
-                ]
-            },
-            { 
-                $inc: { saldo: incremento },
-                $unset: { saldoWallet: "" } 
-            },
-            { new: false }
-        );
+        const conductorExistente = await Conductor.findOne({
+            $or: [
+                { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                { uid: targetId },
+                { conductorId: targetId }
+            ]
+        });
 
-        if (!conductor) {
+        if (!conductorExistente) {
             return res.status(404).json({ success: false, message: 'Conductor no encontrado' });
         }
 
-        const saldoAnterior = Number(conductor.saldo || 0);
+        const saldoAnterior = Number(conductorExistente.saldo || 0);
         const nuevoSaldo = saldoAnterior + incremento;
+
+        const estadoAdmin = String(conductorExistente.estado || conductorExistente.estadoAdministrativo || '').toUpperCase();
+        const estaAprobado = (estadoAdmin === 'APROBADO' || estadoAdmin === 'ACTIVO') && conductorExistente.isActive !== false;
+
+        let nuevoEstadoOperativo = conductorExistente.estadoOperativo;
+        if (nuevoSaldo >= UMBRAL_SALDO_MINIMO_COP) {
+            if (conductorExistente.estadoOperativo === 'NO_DISPONIBLE' || !conductorExistente.estadoOperativo) {
+                if (estaAprobado) {
+                    nuevoEstadoOperativo = 'DISPONIBLE';
+                }
+            }
+        } else {
+            nuevoEstadoOperativo = 'NO_DISPONIBLE';
+        }
+
+        const conductor = await Conductor.findOneAndUpdate(
+            { _id: conductorExistente._id },
+            { 
+                $set: { 
+                    saldo: nuevoSaldo,
+                    estadoOperativo: nuevoEstadoOperativo
+                },
+                $unset: { saldoWallet: "" } 
+            },
+            { new: true }
+        );
+
         const docFirestoreId = conductor.uid || conductor._id.toString();
 
-        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-        await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
-            saldo: nuevoSaldo,
-            balance: nuevoSaldo,
-            ultimaActualizacion: new Date().toISOString()
-        }, { merge: true });
+        try {
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                saldo: nuevoSaldo,
+                balance: nuevoSaldo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+            await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
+                estadoOperativo: nuevoEstadoOperativo,
+                ultimaActualizacion: FieldValue.serverTimestamp()
+            }, { merge: true });
+        } catch (fsErr) {
+            console.warn("⚠️ [SYNC-WARN] Falló réplica a Firestore en ajustarSaldo:", fsErr.message);
+        }
 
         await registrarTransaccionFirestore({
             idUsuario: docFirestoreId,
@@ -651,6 +708,7 @@ export const ajustarSaldo = async (req, res, next) => {
         return res.status(200).json({
             success: true,
             nuevoSaldo,
+            estadoOperativo: nuevoEstadoOperativo,
             message: `Saldo ${operacion === 'descuento' ? 'descontado' : 'recargado'} correctamente`
         });
     } catch (error) {
@@ -683,14 +741,7 @@ export const descontarComisionViaje = async (req, res, next) => {
             saldo: { $gte: comisionNum }
         };
 
-        const conductor = await Conductor.findOneAndUpdate(
-            query,
-            { 
-                $inc: { saldo: -comisionNum },
-                $unset: { saldoWallet: "" }
-            },
-            { new: false, session }
-        );
+        const conductor = await Conductor.findOne(query).session(session);
 
         if (!conductor) {
             throw new Error("Conductor no localizado o saldo insuficiente.");
@@ -698,6 +749,16 @@ export const descontarComisionViaje = async (req, res, next) => {
 
         const saldoAnterior = Number(conductor.saldo || 0);
         const nuevoSaldo = saldoAnterior - comisionNum;
+
+        let nuevoEstadoOperativo = conductor.estadoOperativo;
+        if (nuevoSaldo < UMBRAL_SALDO_MINIMO_COP) {
+            nuevoEstadoOperativo = 'NO_DISPONIBLE';
+        }
+
+        conductor.saldo = nuevoSaldo;
+        conductor.estadoOperativo = nuevoEstadoOperativo;
+        delete conductor.saldoWallet;
+        await conductor.save({ session });
 
         const historialDescuento = new HistorialSaldo({
             conductor: conductor._id,
@@ -715,12 +776,22 @@ export const descontarComisionViaje = async (req, res, next) => {
 
         const docFirestoreId = conductor.uid || conductor._id.toString();
         
-        const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-        await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
-            saldo: nuevoSaldo,
-            balance: nuevoSaldo,
-            ultimaActualizacion: new Date().toISOString()
-        }, { merge: true });
+        try {
+            const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
+            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                saldo: nuevoSaldo,
+                balance: nuevoSaldo,
+                ultimaActualizacion: new Date().toISOString()
+            }, { merge: true });
+
+            const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
+            await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
+                estadoOperativo: nuevoEstadoOperativo,
+                ultimaActualizacion: FieldValue.serverTimestamp()
+            }, { merge: true });
+        } catch (fsErr) {
+            console.warn("⚠️ [SYNC-WARN] Falló réplica a Firestore en descontarComisionViaje:", fsErr.message);
+        }
 
         await registrarTransaccionFirestore({
             idUsuario: docFirestoreId,
@@ -738,11 +809,13 @@ export const descontarComisionViaje = async (req, res, next) => {
             success: true, 
             message: "Comisión debitada correctamente.", 
             nuevoSaldo,
+            estadoOperativo: nuevoEstadoOperativo,
             data: {
                 conductorId: conductor._id,
                 saldoAnterior,
                 nuevoSaldo,
                 montoDebitado: comisionNum,
+                estadoOperativo: nuevoEstadoOperativo,
                 viajeId: viajeId || null
             } 
         });
@@ -832,13 +905,20 @@ export const actualizarEstadoConductor = async (req, res, next) => {
             });
         }
 
+        const saldoActual = Number(conductorExistente.saldo || 0);
+        let estadoOperativoCalculado = conductorExistente.estadoOperativo;
+
+        if (intentaEncender) {
+            estadoOperativoCalculado = saldoActual >= UMBRAL_SALDO_MINIMO_COP ? 'DISPONIBLE' : 'NO_DISPONIBLE';
+        }
+
         const conductor = await Conductor.findOneAndUpdate(
             { _id: conductorExistente._id },
             { 
                 $set: { 
                     estado,
                     ...(isOnline !== undefined && { isOnline }),
-                    ...(intentaEncender && { estadoOperativo: 'DISPONIBLE' })
+                    estadoOperativo: estadoOperativoCalculado
                 } 
             },
             { new: true }
@@ -849,6 +929,7 @@ export const actualizarEstadoConductor = async (req, res, next) => {
         await dbFirestore.collection(coleccionConductores).doc(docFirestoreId).set({
             estado,
             isOnline: conductor.isOnline ?? intentaEncender,
+            estadoOperativo: estadoOperativoCalculado,
             ultimaActualizacion: FieldValue.serverTimestamp()
         }, { merge: true });
 
@@ -884,7 +965,8 @@ export const obtenerConductoresCercanos = async (req, res, next) => {
                     maxDistance: radioMetros,
                     query: { 
                         estado: { $in: ["active", "disponible", "APROBADO"] },
-                        isActive: true
+                        isActive: true,
+                        estadoOperativo: "DISPONIBLE"
                     }, 
                     spherical: true
                 }

@@ -1,7 +1,7 @@
-// Versión Arquitectura: V1.2 - Módulo CEO para Gestión de Credenciales con Integración Polimórfica de Endpoints, AbortController y Estética CIMCO-UI V9.3
+// Versión Arquitectura: V1.3 - Módulo CEO para Gestión de Credenciales con Garantía de Acceso GestionBilleteras (access_level >= 8) y Estética CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionAdmins.jsx
- * Misión: Permitir al CEO la creación, asignación de permisos y revocación de administradores/oficinas.
+ * Misión: Permitir al CEO la creación, asignación de permisos y revocación de administradores/oficinas asegurando el nivel mínimo de acceso para recargas manuales.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism.
  */
 
@@ -24,7 +24,7 @@ const GestionAdmins = () => {
     const [revocandoId, setRevocandoId] = useState(null);
     const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
 
-    // Formulario de creación de Admin/Oficina
+    // Formulario de creación de Admin/Oficina con garantía de nivel mínimo 8 para recargas en GestionBilleteras
     const [formData, setFormData] = useState({
         nombre: '',
         email: '',
@@ -100,7 +100,7 @@ const GestionAdmins = () => {
         };
     }, []);
 
-    // 2. Registrar Nuevo Administrador u Oficina con fallback de endpoints
+    // 2. Registrar Nuevo Administrador u Oficina con fallback de endpoints y nivel de acceso blindado
     const handleSubmit = async (e) => {
         e.preventDefault();
         setMensaje({ tipo: '', texto: '' });
@@ -109,6 +109,9 @@ const GestionAdmins = () => {
         const emailLimpio = formData.email?.trim() || '';
         const passwordLimpia = formData.password?.trim() || '';
         const rolLimpio = formData.role || 'oficina';
+        
+        // Garantizar que el access_level no sea inferior a 8 para mantener permisos en GestionBilleteras.jsx
+        const nivelCalculado = Math.max(Number(formData.access_level) || 8, 8);
 
         if (!nombreLimpio || !emailLimpio || !passwordLimpia) {
             setMensaje({ tipo: 'error', texto: 'Todos los campos marcados son obligatorios.' });
@@ -126,7 +129,7 @@ const GestionAdmins = () => {
                 password: passwordLimpia,
                 rol: rolLimpio,
                 role: rolLimpio,
-                access_level: formData.access_level || 8,
+                access_level: nivelCalculado,
                 cooperativaId: formData.cooperativaId || null,
                 aprobado: true
             };
@@ -229,7 +232,7 @@ const GestionAdmins = () => {
                         <span className="bg-amber-500/10 text-amber-400 text-[10px] font-black px-2.5 py-0.5 rounded-md uppercase border border-amber-500/20">
                             Módulo CEO
                         </span>
-                        <span className="text-zinc-500 text-xs">| Niveles 8 a 99</span>
+                        <span className="text-zinc-500 text-xs">| Niveles 8 a 99 (Gestión Billeteras Activada)</span>
                     </div>
                     <h2 className="text-lg font-black text-white uppercase tracking-wider flex items-center gap-2">
                         <KeyRound className="w-5 h-5 text-amber-400" />
@@ -292,6 +295,8 @@ const GestionAdmins = () => {
                         const targetId = admin?._id || admin?.id || admin?.uid;
                         const isRevocando = revocandoId === targetId;
                         const userRole = admin?.role || admin?.rol || 'admin';
+                        const currentAccessLevel = Number(admin?.access_level ?? 8);
+                        const tieneAccesoBilleteras = currentAccessLevel >= 8;
 
                         return (
                             <div key={targetId || Math.random()} className="backdrop-blur-md bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-2xl p-5 shadow-xl transition-all relative group">
@@ -327,9 +332,19 @@ const GestionAdmins = () => {
                                     <Mail className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
                                     {admin?.email || 'N/A'}
                                 </p>
-                                <div className="pt-3 border-t border-white/5 flex items-center justify-between text-[10px] text-zinc-500">
-                                    <span>Nivel: <strong className="text-white">{admin?.access_level ?? 8}</strong></span>
-                                    <span>Coop ID: <strong className="text-zinc-300">{admin?.cooperativaId || 'Global'}</strong></span>
+                                <div className="pt-3 border-t border-white/5 flex items-center justify-between text-[10px]">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="text-zinc-500">Nivel:</span>
+                                        <strong className={tieneAccesoBilleteras ? 'text-emerald-400' : 'text-amber-400'}>
+                                            {currentAccessLevel}
+                                        </strong>
+                                        {tieneAccesoBilleteras && (
+                                            <span className="bg-emerald-500/10 text-emerald-400 text-[8px] font-bold px-1.5 py-0.2 rounded border border-emerald-500/20 uppercase" title="Permiso de Recarga de Billeteras Activo">
+                                                Recargas OK
+                                            </span>
+                                        )}
+                                    </div>
+                                    <span className="text-zinc-500">Coop ID: <strong className="text-zinc-300">{admin?.cooperativaId || 'Global'}</strong></span>
                                 </div>
                             </div>
                         );
@@ -413,11 +428,15 @@ const GestionAdmins = () => {
                                 </div>
 
                                 <div>
-                                    <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-1">Nivel Acceso</label>
+                                    <label className="block text-[10px] text-zinc-400 font-bold uppercase mb-1">
+                                        Nivel Acceso (Mín. 8)
+                                    </label>
                                     <input 
                                         type="number" 
+                                        min="8"
+                                        max="99"
                                         value={formData.access_level}
-                                        onChange={(e) => setFormData({...formData, access_level: Number(e.target.value)})}
+                                        onChange={(e) => setFormData({...formData, access_level: Math.max(8, Number(e.target.value))})}
                                         disabled={guardando}
                                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-50"
                                     />

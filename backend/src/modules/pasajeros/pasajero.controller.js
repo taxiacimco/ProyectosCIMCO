@@ -1,8 +1,8 @@
-// Versión Arquitectura: V20.01 - Homologación de Validaciones de Entrada y Sanitización Estricta en Perfil de Pasajeros
+// Versión Arquitectura: V20.02 - Consulta Opcional de Saldo de Billetera y Ajustes sin Umbral Mínimo para Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
  * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera y blindaje contra colisiones de duplicidad E11000/Firebase Auth en peticiones concurrentes.
- * Ajuste V20.01: Homologación de validaciones de entrada en la actualización de perfil y sanitización estricta de payloads para prevenir mutaciones no autorizadas.
+ * Ajuste V20.02: Implementación de verificación para pagos vía WALLET (saldoPasajero >= tarifaTotal) y acreditación libre de saldo por Administrador/CEO sin restricción de umbral mínimo ($0 COP permitido).
  */
 
 import mongoose from 'mongoose';
@@ -620,11 +620,11 @@ export const obtenerHistorialViajesPasajero = async (req, res, next) => {
 // ==================================================================
 
 /**
- * 💰 Consultar saldo del pasajero con timeout estricto de 3000ms y fallback resiliente $0 COP
+ * 💰 Consultar saldo opcional del pasajero con timeout estricto de 3000ms y fallback resiliente $0 COP
  */
 export const obtenerSaldoPasajero = async (req, res, next) => {
     try {
-        const targetId = req.params?.id || req.user?.id || req.user?._id || req.user?.uid;
+        const targetId = req.params?.id || req.params?.uid || req.user?.id || req.user?._id || req.user?.uid;
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente." });
         }
@@ -667,7 +667,73 @@ export const obtenerSaldoPasajero = async (req, res, next) => {
 };
 
 /**
- * 💳 Recargar saldo a Pasajero con incremento atómico ($inc) y auditoría
+ * 💳 Validar disponibilidad de saldo en Billetera para la selección de método de pago "WALLET"
+ */
+export const validarPagoBilleteraPasajero = async (req, res, next) => {
+    try {
+        const targetId = req.body?.pasajeroId || req.body?.id || req.body?.uid || req.params?.id || req.user?.id || req.user?._id || req.user?.uid;
+        const tarifaTotal = parseFloat(req.body?.tarifaTotal ?? req.body?.monto ?? req.body?.tarifa);
+
+        if (!targetId) {
+            return res.status(400).json({ 
+                success: false, 
+                code: 'MISSING_PASAJERO_ID', 
+                message: "⚠️ Identificador de pasajero ausente." 
+            });
+        }
+
+        if (isNaN(tarifaTotal) || tarifaTotal <= 0) {
+            return res.status(400).json({ 
+                success: false, 
+                code: 'INVALID_FARE', 
+                message: "⚠️ Tarifa del servicio no válida o no especificada." 
+            });
+        }
+
+        const pasajero = await Pasajero.findOne({
+            $or: [
+                { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                { uid: targetId }
+            ]
+        })
+        .select('saldo nombre email')
+        .lean();
+
+        if (!pasajero) {
+            return res.status(404).json({ 
+                success: false, 
+                code: 'PASAJERO_NOT_FOUND', 
+                message: "Pasajero no encontrado en el sistema." 
+            });
+        }
+
+        const saldoPasajero = Number(pasajero.saldo ?? 0);
+
+        if (saldoPasajero < tarifaTotal) {
+            return res.status(400).json({
+                success: false,
+                code: 'INSUFFICIENT_WALLET_BALANCE',
+                message: `⚠️ Saldo insuficiente en billetera para esta carrera. Tu saldo es $${saldoPasajero} COP y la tarifa es $${tarifaTotal} COP. Por favor recarga o selecciona efectivo.`,
+                saldoPasajero,
+                tarifaTotal
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            valido: true,
+            message: "Saldo de billetera suficiente para completar la solicitud.",
+            saldoPasajero,
+            tarifaTotal
+        });
+
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * 💳 Recargar/Acreditar saldo a Pasajero libremente por Admin/CEO sin restricción de umbral mínimo ($0 COP válido)
  */
 export const recargarSaldoPasajero = async (req, res, next) => {
     const session = await mongoose.startSession();
@@ -687,10 +753,11 @@ export const recargarSaldoPasajero = async (req, res, next) => {
             ? new mongoose.Types.ObjectId(adminIdSanitizado)
             : null;
 
-        if (!targetId || isNaN(montoNum) || montoNum <= 0) {
+        // Modificación V20.02: Para pasajeros $0 COP es un ajuste/acreditación válida, sin restricción de umbral mínimo operativo
+        if (!targetId || isNaN(montoNum) || montoNum < 0) {
             await session.abortTransaction();
             session.endSession();
-            return res.status(400).json({ success: false, message: "Parámetros de recarga inválidos." });
+            return res.status(400).json({ success: false, message: "Parámetros de recarga/acreditación de saldo inválidos." });
         }
 
         const pasajero = await Pasajero.findOneAndUpdate(
@@ -724,7 +791,7 @@ export const recargarSaldoPasajero = async (req, res, next) => {
             saldoNuevo,
             realizadoPor: adminObjectId || adminIdSanitizado,
             referencia: referencia || `PAS-${Date.now()}`,
-            descripcion: nota || 'Recarga de saldo a pasajero realizada por central/admin'
+            descripcion: nota || 'Acreditación/Recarga de saldo a pasajero realizada por central/admin/CEO'
         });
         await nuevoHistorial.save({ session });
 
@@ -762,7 +829,7 @@ export const recargarSaldoPasajero = async (req, res, next) => {
 
         return res.status(200).json({
             success: true,
-            message: `Recarga de pasajero exitosa. Nuevo saldo: $${saldoNuevo} COP`,
+            message: `Acreditación exitosa. Nuevo saldo del pasajero: $${saldoNuevo} COP`,
             saldoNuevo,
             data: { saldoNuevo }
         });
@@ -786,5 +853,6 @@ export default {
     eliminarDireccionFavorita,
     obtenerHistorialViajesPasajero,
     obtenerSaldoPasajero,
+    validarPagoBilleteraPasajero,
     recargarSaldoPasajero
 };

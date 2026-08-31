@@ -1,4 +1,4 @@
-// Versión Arquitectura: V19.8 - Delegación Unificada a AjustesPerfil y Gobernanza de Perfil Centralizado via authService
+// Versión Arquitectura: V19.9 - Incorporación de Guards de Validación de Saldo Operativo y Comisión en HomeMototaxi
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
@@ -9,6 +9,7 @@
  *          resiliencia ante redes inestables (timeouts, reintentos e indicador de conectividad de red),
  *          manejo reactivo de estado Offline en UI mediante event listeners 'online'/'offline',
  *          unificación atómica de edición de perfil a través de AjustesPerfil y authService,
+ *          guards estrictos de validación de saldo operativo ($2.000 COP) y comisión del 10% previa a la emisión Socket,
  *          limpieza atómica de hooks (watchPosition, listeners WebSocket y suscripciones Firestore)
  *          para prevención de fugas de memoria y centralización de trazabilidad mediante logger condicional.
  * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
@@ -53,6 +54,8 @@ const isTokenExpired = (rawToken) => {
   }
 };
 
+const UMBRAL_MINIMO_COP = 2000;
+
 export default function HomeMototaxi() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
   const { user, logout } = useAuth(); 
@@ -71,6 +74,7 @@ export default function HomeMototaxi() {
   const [coords, setCoords] = useState({ lat: 9.5610, lng: -73.3332 }); // Default: La Jagua de Ibirico
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [datosParaCalificar, setDatosParaCalificar] = useState(null);
+  const [errorInterno, setErrorInterno] = useState(null);
 
   // 🌐 Estado de Conectividad a Internet (Manejo de Estado Offline en UI)
   const [isNetworkOnline, setIsNetworkOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -146,7 +150,7 @@ export default function HomeMototaxi() {
   }, [socket]);
 
   // Mapeo seguro con fallback de $20.000 COP en caso de indeterminación
-  const saldoVivo = Number(
+  const saldoEfectivo = Number(
     user?.saldoWallet ?? 
     user?.billetera?.saldo ?? 
     user?.saldo ?? 
@@ -155,7 +159,7 @@ export default function HomeMototaxi() {
     20000
   );
 
-  const puedeOperar = saldoVivo >= 2000;
+  const puedeOperar = saldoEfectivo >= UMBRAL_MINIMO_COP;
 
   // 🛡️ Guarda de seguridad: Desconecta el estado online si no existe ID de conductor válido
   useEffect(() => {
@@ -317,6 +321,7 @@ export default function HomeMototaxi() {
       }
 
       if (!puedeOperar) {
+        setErrorInterno("⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.");
         alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en red.");
         setIsOnline(false);
         return;
@@ -458,6 +463,13 @@ export default function HomeMototaxi() {
 
   // Alternar Estado Conectado / Desconectado
   const handleToggleState = () => {
+    setErrorInterno(null);
+    if (!isOnline && !puedeOperar) {
+      setErrorInterno("⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.");
+      alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en red.");
+      return;
+    }
+
     const nextState = !isOnline;
     setIsOnline(nextState);
 
@@ -472,6 +484,33 @@ export default function HomeMototaxi() {
         });
       }
     }
+  };
+
+  const handleAceptarCarrera = (carrera) => {
+    setErrorInterno(null);
+    if (!carrera) return;
+
+    if (!puedeOperar) {
+      setErrorInterno("⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.");
+      alert("⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.");
+      return;
+    }
+
+    const valorCarrera = Number(carrera.valor || carrera.precio || 0);
+    const comisionRequerida = valorCarrera * 0.10;
+    if (saldoEfectivo < comisionRequerida) {
+      setErrorInterno("⚠️ Saldo insuficiente para cubrir la comisión (10%) de este servicio.");
+      alert("⚠️ Saldo insuficiente para cubrir la comisión (10%) de este servicio.");
+      return;
+    }
+
+    const carreraIdTarget = carrera.id || carrera.viajeId || carrera._id;
+
+    if (socket && (socket.connected || isConnected)) {
+      socket.emit('aceptar_carrera', { carreraId: carreraIdTarget, conductorId: user?.uid || conductorId });
+    }
+
+    aceptarViaje(carreraIdTarget);
   };
 
   // ==================================================================
@@ -613,6 +652,7 @@ export default function HomeMototaxi() {
     if (!viajeIdTarget && !solicitudViaje) return;
 
     if (!puedeOperar) {
+      setErrorInterno("⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.");
       alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para procesar despachos.");
       setSolicitudViaje(null);
       return;
@@ -691,7 +731,14 @@ export default function HomeMototaxi() {
   };
 
   const capturarOferta = async (viajeId) => {
+    const ofertaObj = ofertasDisponibles.find((v) => v.id === viajeId || v._id === viajeId);
+    if (ofertaObj) {
+      handleAceptarCarrera(ofertaObj);
+      return;
+    }
+
     if (!puedeOperar) {
+      setErrorInterno("⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.");
       alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para procesar despachos.");
       return;
     }
@@ -717,6 +764,12 @@ export default function HomeMototaxi() {
         const datosViaje = viajeSnap.data();
         if (datosViaje?.estado !== 'SOLICITADO') {
           throw new Error("Lo sentimos, este servicio ya fue capturado por otra unidad.");
+        }
+
+        const valorCarrera = Number(datosViaje.valor || datosViaje.precio || 0);
+        const comisionRequerida = valorCarrera * 0.10;
+        if (saldoEfectivo < comisionRequerida) {
+          throw new Error("⚠️ Saldo insuficiente para cubrir la comisión (10%) de este servicio.");
         }
 
         transaction.update(viajeRef, {
@@ -790,6 +843,13 @@ export default function HomeMototaxi() {
         </div>
       )}
 
+      {/* ⚠️ NOTIFICACIÓN LOCAL DE ERROR INTERNO (SALDO INSUFICIENTE / COMISIÓN) */}
+      {errorInterno && (
+        <div className="bg-amber-500/90 text-slate-950 text-xs text-center py-1.5 px-4 font-bold flex items-center justify-center gap-2 sticky top-0 z-50 shadow-md">
+          <span>{errorInterno}</span>
+        </div>
+      )}
+
       {/* ════════════════ HEADER SUPERIOR TAQUÍMETRO Y NAVEGACIÓN ════════════════ */}
       <header className="sticky top-0 z-40 bg-[#121214]/80 backdrop-blur-md border-b border-white/5 px-4 py-3 flex items-center justify-between shadow-xl">
         
@@ -827,8 +887,11 @@ export default function HomeMototaxi() {
           {/* ONLINE: Azul Suave / Sky Blue (Confianza, Serenidad, Operativo) */}
           <button
             onClick={handleToggleState}
+            disabled={!puedeOperar && !isOnline}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black tracking-wider transition-all duration-300 active:scale-95 border ${
-              isOnline
+              !puedeOperar && !isOnline
+                ? 'bg-slate-800/50 text-slate-500 border-slate-700/50 cursor-not-allowed opacity-60'
+                : isOnline
                 ? 'bg-gradient-to-r from-sky-500/20 via-blue-500/15 to-sky-600/20 text-sky-300 border-sky-400/40 shadow-[0_0_20px_rgba(56,189,248,0.25)] hover:bg-sky-500/30'
                 : 'bg-gradient-to-r from-amber-500/20 via-orange-500/15 to-amber-600/20 text-amber-300 border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.20)] hover:bg-amber-500/30'
             }`}
@@ -854,7 +917,7 @@ export default function HomeMototaxi() {
           {/* Saldo de Billetera */}
           <div className="bg-[#181920] border border-white/10 px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-mono text-emerald-400 font-bold shadow-sm">
             <Wallet className="w-3.5 h-3.5 text-emerald-400" />
-            <span>${saldoVivo.toLocaleString('es-CO')}</span>
+            <span>${saldoEfectivo.toLocaleString('es-CO')}</span>
           </div>
 
           {/* Cerrar Sesión */}
@@ -958,7 +1021,7 @@ export default function HomeMototaxi() {
                     IGNORAR
                   </button>
                   <button
-                    onClick={() => aceptarViaje()}
+                    onClick={() => handleAceptarCarrera(solicitudViaje)}
                     disabled={loading}
                     className="py-2.5 rounded-xl bg-emerald-500 text-white font-bold text-xs hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
                   >
@@ -987,7 +1050,12 @@ export default function HomeMototaxi() {
 
                 <button
                   onClick={handleToggleState}
-                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 text-white font-black text-xs tracking-wider uppercase shadow-lg shadow-sky-500/20 hover:from-sky-400 hover:to-blue-500 transition-all active:scale-95"
+                  disabled={!puedeOperar}
+                  className={`w-full py-3 px-4 rounded-xl font-black text-xs tracking-wider uppercase transition-all ${
+                    puedeOperar
+                      ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/20 hover:from-sky-400 hover:to-blue-500 active:scale-95'
+                      : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
+                  }`}
                 >
                   ACTIVAR RADAR Y RECIBIR VIAJES
                 </button>
@@ -1031,7 +1099,7 @@ export default function HomeMototaxi() {
                         <div key={of.id} className="bg-[#181920] p-3 rounded-xl border border-white/5 flex justify-between items-center">
                           <div className="text-xs">
                             <p className="font-bold text-white">{of.origenDireccion || of.origen || 'Origen sin especificar'}</p>
-                            <p className="text-emerald-400 font-mono font-bold">${Number(of.valor || 0).toLocaleString('es-CO')}</p>
+                            <p className="text-emerald-400 font-mono font-bold">${Number(of.valor || of.precio || 0).toLocaleString('es-CO')}</p>
                           </div>
                           <button
                             onClick={() => capturarOferta(of.id)}
@@ -1080,7 +1148,7 @@ export default function HomeMototaxi() {
           <div className="w-full max-w-lg bg-[#121214]/80 backdrop-blur-md border border-white/5 rounded-2xl p-6 text-center shadow-xl">
             <Wallet className="w-10 h-10 text-emerald-400 mx-auto mb-3" />
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">Billetera Digital CIMCO</h3>
-            <p className="text-2xl font-mono font-bold text-emerald-400 mt-2">${saldoVivo.toLocaleString('es-CO')} COP</p>
+            <p className="text-2xl font-mono font-bold text-emerald-400 mt-2">${saldoEfectivo.toLocaleString('es-CO')} COP</p>
             <p className="text-xs text-slate-400 mt-2 leading-relaxed">
               Saldo disponible para recarga y comisión de carreras. Recuerde mantener un saldo mínimo de $2.000 COP para operar en red.
             </p>

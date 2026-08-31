@@ -1,11 +1,11 @@
-// Versión Arquitectura: V9.7 - Consolidación del Enrutador con Homologación de Roles de Conductor y Protección de Vistas
+// Versión Arquitectura: V9.8 - Optimización de Rutas Administrativas con Carga Perezosa (React.lazy) y Suspense Fallback
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
- * Misión: Conservar el componente ProtectedRoute para homologar los roles generales de conductor hacia sus subroles específicos (mototaxi, motoparrillero, motocarga, intermunicipal), manteniendo separadas las rutas de registro y de control administrativo.
+ * Misión: Conservar el componente ProtectedRoute para homologar los roles generales de conductor hacia sus subroles específicos (mototaxi, motoparrillero, motocarga, intermunicipal), integrando React.lazy() y Suspense para optimización de bundle en vistas administrativas.
  * Estilo: CIMCO-UI V9.3 Glassmorphism.
  */
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -45,10 +45,11 @@ import HomeDespachador from '@/pages/despachador/HomeDespachador';
 import HistorialDespachador from '@/pages/despachador/HistorialDespachador';
 import WalletDespachador from '@/pages/despachador/WalletDespachador';
 
-import AdminDashboard from '@/pages/admin/AdminDashboard';
-import AdminPanel from '@/pages/admin/AdminPanel';
-import Cooperativas from '@/pages/admin/Cooperativas';
-import QrGenerator from '@/pages/admin/QrGenerator';
+// Vistas Administrativas con Carga Perezosa (React.lazy)
+const AdminDashboard = React.lazy(() => import('@/pages/admin/AdminDashboard'));
+const AdminPanel = React.lazy(() => import('@/pages/admin/AdminPanel'));
+const Cooperativas = React.lazy(() => import('@/pages/admin/Cooperativas'));
+const QrGenerator = React.lazy(() => import('@/pages/admin/QrGenerator'));
 
 // Pantalla de Carga Glassmorphism con Guardas Anti-Undefined
 const LoadingScreen = () => (
@@ -144,221 +145,223 @@ const RoleRedirect = () => {
 const AppRouter = () => {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Rutas Públicas de Autenticación y Registro (SIN ProtectedRoute, Slugs Planos) */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/register-pasajero" element={<RegisterPasajero />} />
-        <Route path="/register-moto" element={<RegisterMoto />} />
-        <Route path="/register-intermunicipal" element={<RegisterIntermunicipal />} />
-        <Route path="/register-despachador" element={<RegisterDespachador />} />
-        <Route path="/register-admin" element={<RegisterAdmin />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Suspense fallback={<LoadingScreen />}>
+        <Routes>
+          {/* Rutas Públicas de Autenticación y Registro (SIN ProtectedRoute, Slugs Planos) */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/register-pasajero" element={<RegisterPasajero />} />
+          <Route path="/register-moto" element={<RegisterMoto />} />
+          <Route path="/register-intermunicipal" element={<RegisterIntermunicipal />} />
+          <Route path="/register-despachador" element={<RegisterDespachador />} />
+          <Route path="/register-admin" element={<RegisterAdmin />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
 
-        {/* Ruta Protegida Unificada: Ajustes de Perfil Multi-Rol */}
-        <Route
-          path="/ajustes-perfil"
-          element={
-            <ProtectedRoute>
-              <AjustesPerfil />
-            </ProtectedRoute>
-          }
-        />
+          {/* Ruta Protegida Unificada: Ajustes de Perfil Multi-Rol */}
+          <Route
+            path="/ajustes-perfil"
+            element={
+              <ProtectedRoute>
+                <AjustesPerfil />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Subrutas Protegidas de Pasajero (/pasajero) */}
-        <Route
-          path="/pasajero"
-          element={
-            <ProtectedRoute allowedRoles={['pasajero']}>
-              <HomePasajero />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/pasajero/perfil"
-          element={
-            <ProtectedRoute allowedRoles={['pasajero']}>
-              <PerfilPasajero />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/pasajero/historial"
-          element={
-            <ProtectedRoute allowedRoles={['pasajero']}>
-              <HistorialViajes />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/pasajero/wallet"
-          element={
-            <ProtectedRoute allowedRoles={['pasajero']}>
-              <WalletPasajero />
-            </ProtectedRoute>
-          }
-        />
+          {/* Subrutas Protegidas de Pasajero (/pasajero) */}
+          <Route
+            path="/pasajero"
+            element={
+              <ProtectedRoute allowedRoles={['pasajero']}>
+                <HomePasajero />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pasajero/perfil"
+            element={
+              <ProtectedRoute allowedRoles={['pasajero']}>
+                <PerfilPasajero />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pasajero/historial"
+            element={
+              <ProtectedRoute allowedRoles={['pasajero']}>
+                <HistorialViajes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/pasajero/wallet"
+            element={
+              <ProtectedRoute allowedRoles={['pasajero']}>
+                <WalletPasajero />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Subrutas Protegidas de Mototaxi (/mototaxi) */}
-        <Route
-          path="/mototaxi"
-          element={
-            <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
-              <HomeMototaxi />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/mototaxi/historial"
-          element={
-            <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
-              <HistorialMototaxi />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/mototaxi/wallet"
-          element={
-            <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
-              <WalletMototaxi />
-            </ProtectedRoute>
-          }
-        />
+          {/* Subrutas Protegidas de Mototaxi (/mototaxi) */}
+          <Route
+            path="/mototaxi"
+            element={
+              <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
+                <HomeMototaxi />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mototaxi/historial"
+            element={
+              <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
+                <HistorialMototaxi />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mototaxi/wallet"
+            element={
+              <ProtectedRoute allowedRoles={['mototaxi', 'conductor']}>
+                <WalletMototaxi />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Subrutas Protegidas de Motoparrillero */}
-        <Route
-          path="/motoparrillero"
-          element={
-            <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
-              <HomeMotoparrillero />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/motoparrillero/historial"
-          element={
-            <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
-              <HistorialMotoparrillero />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/motoparrillero/wallet"
-          element={
-            <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
-              <WalletMotoparrillero />
-            </ProtectedRoute>
-          }
-        />
+          {/* Subrutas Protegidas de Motoparrillero */}
+          <Route
+            path="/motoparrillero"
+            element={
+              <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
+                <HomeMotoparrillero />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/motoparrillero/historial"
+            element={
+              <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
+                <HistorialMotoparrillero />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/motoparrillero/wallet"
+            element={
+              <ProtectedRoute allowedRoles={['motoparrillero', 'conductor']}>
+                <WalletMotoparrillero />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Subrutas Protegidas de Motocarga */}
-        <Route
-          path="/motocarga"
-          element={
-            <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
-              <HomeMotocarga />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/motocarga/historial"
-          element={
-            <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
-              <HistorialMotocarga />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/motocarga/wallet"
-          element={
-            <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
-              <WalletMotocarga />
-            </ProtectedRoute>
-          }
-        />
+          {/* Subrutas Protegidas de Motocarga */}
+          <Route
+            path="/motocarga"
+            element={
+              <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
+                <HomeMotocarga />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/motocarga/historial"
+            element={
+              <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
+                <HistorialMotocarga />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/motocarga/wallet"
+            element={
+              <ProtectedRoute allowedRoles={['motocarga', 'conductor']}>
+                <WalletMotocarga />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Subrutas Protegidas de Intermunicipal */}
-        <Route
-          path="/intermunicipal"
-          element={
-            <ProtectedRoute allowedRoles={['intermunicipal', 'conductor']}>
-              <HomeIntermunicipal />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/intermunicipal/historial"
-          element={
-            <ProtectedRoute allowedRoles={['intermunicipal', 'conductor']}>
-              <HistorialIntermunicipal />
-            </ProtectedRoute>
-          }
-        />
+          {/* Subrutas Protegidas de Intermunicipal */}
+          <Route
+            path="/intermunicipal"
+            element={
+              <ProtectedRoute allowedRoles={['intermunicipal', 'conductor']}>
+                <HomeIntermunicipal />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/intermunicipal/historial"
+            element={
+              <ProtectedRoute allowedRoles={['intermunicipal', 'conductor']}>
+                <HistorialIntermunicipal />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Subrutas Protegidas de Despachador (/despachador) */}
-        <Route
-          path="/despachador"
-          element={
-            <ProtectedRoute allowedRoles={['despachador']}>
-              <HomeDespachador />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/despachador/historial"
-          element={
-            <ProtectedRoute allowedRoles={['despachador']}>
-              <HistorialDespachador />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/despachador/wallet"
-          element={
-            <ProtectedRoute allowedRoles={['despachador']}>
-              <WalletDespachador />
-            </ProtectedRoute>
-          }
-        />
+          {/* Subrutas Protegidas de Despachador (/despachador) */}
+          <Route
+            path="/despachador"
+            element={
+              <ProtectedRoute allowedRoles={['despachador']}>
+                <HomeDespachador />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/despachador/historial"
+            element={
+              <ProtectedRoute allowedRoles={['despachador']}>
+                <HistorialDespachador />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/despachador/wallet"
+            element={
+              <ProtectedRoute allowedRoles={['despachador']}>
+                <WalletDespachador />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Subrutas Protegidas de Administrador */}
-        <Route
-          path="/admin/dashboard"
-          element={
-            <ProtectedRoute allowedRoles={['admin']}>
-              <AdminDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin/panel"
-          element={
-            <ProtectedRoute allowedRoles={['admin']}>
-              <AdminPanel />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin/cooperativas"
-          element={
-            <ProtectedRoute allowedRoles={['admin']}>
-              <Cooperativas />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin/qr-generator"
-          element={
-            <ProtectedRoute allowedRoles={['admin']}>
-              <QrGenerator />
-            </ProtectedRoute>
-          }
-        />
+          {/* Subrutas Protegidas de Administrador */}
+          <Route
+            path="/admin/dashboard"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/panel"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <AdminPanel />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/cooperativas"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <Cooperativas />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/qr-generator"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <QrGenerator />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Redirección Raíz y Fallback Global */}
-        <Route path="/" element={<RoleRedirect />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Redirección Raíz y Fallback Global */}
+          <Route path="/" element={<RoleRedirect />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 };

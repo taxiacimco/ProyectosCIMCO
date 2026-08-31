@@ -1,8 +1,8 @@
-// Versión Arquitectura: V16.3 - Homologación de Importación useSocket y Sincronización de Tesorería REST/Socket
+// Versión Arquitectura: V19.4 - Control de Umbral Mínimo de Billetera ($2,000 COP) e Interfaz de Despacho
 /**
  * Ubicación: frontend\src\pages\despachador\WalletDespachador.jsx
  * Misión: Caja de Despachos Vinculada con Tesorería Central en MongoDB y Escucha de Saldo por WebSockets.
- * Ajuste V16.3: Corregida ruta de importación de useSocket hacia @/hooks/useSocket para eliminar fallo de compilación en Vite.
+ * Ajuste V19.4: Integración del umbral mínimo operativo de $2,000 COP. Validación y bloqueo visual de la interfaz de despacho cuando el saldo de la caja sea inferior a dicho límite.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -11,9 +11,12 @@ import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { Wallet, Activity, AlertTriangle, RefreshCw, Loader } from 'lucide-react';
+import { Wallet, Activity, AlertTriangle, RefreshCw, Loader, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import BotonRecarga from '@/components/wallet/BotonRecarga';
 import TransactionHistory from '@/components/wallet/TransactionHistory';
+
+// 💳 CONSTANTE DE NEGOCIO: UMBRAL MÍNIMO OPERATIVO DE BILLETERA DE DESPACHADOR
+const UMBRAL_MINIMO_SALDO = 2000;
 
 const WalletDespachador = () => {
     // 🛡️ Guardas de Seguridad y Consumo del Contexto Centralizado
@@ -21,7 +24,9 @@ const WalletDespachador = () => {
     const user = authContext?.user || null;
     const token = authContext?.token || localStorage.getItem('token') || user?.token || "";
     
-    const { socket, isConnected } = useSocket();
+    const socketContext = useSocket ? useSocket() : {};
+    const socket = socketContext?.socket || null;
+    const isConnected = socketContext?.isConnected ?? Boolean(socket?.connected);
 
     // 📝 ESTADOS DE CONTROL DE TESORERÍA
     const [saldo, setSaldo] = useState(null); 
@@ -30,6 +35,9 @@ const WalletDespachador = () => {
 
     const idUsuario = user?.id || user?._id || user?.uid || "";
     const rolVerificado = user?.role || user?.rol;
+
+    // 🛡️ EVALUACIÓN DE BLOQUEO POR SALDO INSUFICIENTE
+    const saldoInsuficiente = saldo !== null && Number(saldo) < UMBRAL_MINIMO_SALDO;
 
     // 💰 FUNCIÓN DE OBTENCIÓN DE SALDO DESDE TESORERÍA CENTRAL (REST API MongoDB)
     const obtenerSaldoBackend = useCallback(async () => {
@@ -154,6 +162,30 @@ const WalletDespachador = () => {
                 </div>
             </header>
 
+            {/* 🚨 BANDEROLA DE ESTADO DE UMBRAL OPERATIVO */}
+            {saldo !== null && (
+                saldoInsuficiente ? (
+                    <div className="backdrop-blur-md bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-center justify-between gap-4 text-red-400 font-mono text-xs shadow-lg animate-pulse">
+                        <div className="flex items-center gap-3">
+                            <ShieldAlert size={20} className="shrink-0 text-red-400" />
+                            <div>
+                                <p className="font-black uppercase tracking-wider">Opción de Despacho Bloqueada</p>
+                                <p className="text-[10px] text-red-300/80 uppercase mt-0.5">
+                                    El saldo de caja actual (${Number(saldo).toLocaleString()} COP) es inferior al umbral operativo mínimo de ${UMBRAL_MINIMO_SALDO.toLocaleString()} COP. Recargue la billetera para habilitar la asignación de rutas y pujas.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="backdrop-blur-md bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3 flex items-center gap-3 text-emerald-400 font-mono text-xs shadow-md">
+                        <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />
+                        <p className="text-[10px] uppercase tracking-wider font-semibold">
+                            Habilitado para Despacho: Saldo sobre el umbral mínimo operativo (${UMBRAL_MINIMO_SALDO.toLocaleString()} COP).
+                        </p>
+                    </div>
+                )
+            )}
+
             {errorCaja ? (
                 <div className="backdrop-blur-md bg-red-500/5 p-6 rounded-3xl border border-red-500/20 text-center flex flex-col items-center gap-3 shadow-xl font-mono">
                     <AlertTriangle className="text-red-500" size={24} />
@@ -168,14 +200,25 @@ const WalletDespachador = () => {
             ) : (
                 <div className="backdrop-blur-xl bg-[#161619]/40 border border-white/5 p-6 rounded-3xl shadow-xl relative overflow-hidden">
                     <div className="absolute -top-10 -right-10 w-32 h-32 bg-orange-500/5 rounded-full blur-3xl pointer-events-none"></div>
-                    <p className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest mb-2 relative z-10">Fondo Operativo de Caja</p>
+                    <div className="flex items-center justify-between mb-2 relative z-10">
+                        <p className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-widest">Fondo Operativo de Caja</p>
+                        <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full border uppercase ${
+                            saldoInsuficiente 
+                                ? 'bg-red-500/10 border-red-500/30 text-red-400' 
+                                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        }`}>
+                            {saldoInsuficiente ? 'Despacho Bloqueado' : 'Despacho Activo'}
+                        </span>
+                    </div>
                     
                     {saldo === null || loadingSaldo ? (
                         <div className="h-10 flex items-center gap-2 text-zinc-500 font-mono text-xs uppercase animate-pulse mb-6">
                             <Loader size={16} className="animate-spin text-orange-400" /> Consultando fondos en tesorería central...
                         </div>
                     ) : (
-                        <h2 className="text-4xl font-black text-white mb-6 relative z-10 font-mono tracking-tight">
+                        <h2 className={`text-4xl font-black mb-6 relative z-10 font-mono tracking-tight ${
+                            saldoInsuficiente ? 'text-red-400' : 'text-white'
+                        }`}>
                             ${Number(saldo).toLocaleString()} <span className="text-xs font-medium text-zinc-500">COP</span>
                         </h2>
                     )}

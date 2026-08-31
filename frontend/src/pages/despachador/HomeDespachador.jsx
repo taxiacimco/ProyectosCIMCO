@@ -1,12 +1,12 @@
-// Versión Arquitectura: V19.3 - Migración de ModalEditarPerfil a AjustesPerfil y Sincronización de Perfil de Central
+// Versión Arquitectura: V19.5 - Carga Perezosa de MapaOperativo con React.lazy() y React.Suspense
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones con empresaId, calcomanía QR de autogestión,
  * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
- * Ajuste V19.3: Reemplazo de ModalEditarPerfil por AjustesPerfil con integración atómica de estado.
+ * Ajuste V19.5: Carga perezosa (React.lazy) del componente MapaOperativo para optimizar el bundle principal.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, Suspense } from "react";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
 import { db, FIRESTORE_PATHS } from "@/config/firebase"; 
 import { useAuth } from "@/hooks/useAuth";
@@ -16,14 +16,17 @@ import api, { VIAJES_ENDPOINTS } from "@/config/api";
 import { 
   Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, 
   QrCode, Download, Map, Settings, Wallet, Building2, User, Phone, FileText, 
-  Gavel, DollarSign, Clock 
+  Gavel, DollarSign, Clock, AlertTriangle
 } from "lucide-react";
 import { formatHoraColombia } from "@/utils/dateFormatter";
 import { QRCodeSVG } from "qrcode.react"; 
 
-// 🗺️ IMPORTACIÓN DEL RADAR GPS OPERATIVO Y COMPONENTE DE AJUSTES DE PERFIL
-import MapaOperativo from "@/components/admin/MapaOperativo";
+// 🗺️ CARGA PEREZOSA DEL RADAR GPS OPERATIVO Y COMPONENTE DE AJUSTES DE PERFIL
+const MapaOperativo = React.lazy(() => import("@/config/firebase").then(() => import("@/components/admin/MapaOperativo")));
 import AjustesPerfil from "@/components/shared/AjustesPerfil";
+
+// 💳 CONSTANTE DE NEGOCIO: UMBRAL MÍNIMO OPERATIVO DE BILLETERA DE DESPACHADOR
+const UMBRAL_MINIMO_SALDO = 2000;
 
 const HomeDespachador = () => {
   // 🛡️ Guardas de Seguridad y Consumo del Contexto Centralizado
@@ -45,6 +48,9 @@ const HomeDespachador = () => {
   const wallet = walletContext?.wallet || null;
   const saldo = walletContext?.saldo ?? walletContext?.balance ?? 0;
   const loadingWallet = walletContext?.loading ?? walletContext?.loadingWallet ?? false;
+
+  // 🛡️ EVALUACIÓN DE BLOQUEO POR SALDO INSUFICIENTE
+  const saldoInsuficiente = Number(saldo) < UMBRAL_MINIMO_SALDO;
 
   // 📝 ESTADOS DE CONTROL OPERATIVO
   const [conductores, setConductores] = useState([]);
@@ -192,6 +198,11 @@ const HomeDespachador = () => {
 
   // 🚀 DISPARADOR TRANSACCIONAL: Registro centralizado e inyección del viaje en el pool logístico con empresaId
   const handleRegistrarYDistribuirViaje = async (conductorSeleccionado) => {
+    if (saldoInsuficiente) {
+      setMensajeError(`Operación bloqueada. Billetera por debajo del umbral mínimo ($${UMBRAL_MINIMO_SALDO.toLocaleString('es-CO')} COP). Recargue saldo.`);
+      return;
+    }
+
     if (!conductorSeleccionado || !origen.trim() || !destino.trim() || !valorPasaje) {
       setMensajeError("Verifique los parámetros de la ruta. Faltan datos obligatorios.");
       return;
@@ -275,6 +286,11 @@ const HomeDespachador = () => {
 
   // 🔨 ASIGNACIÓN DE OFERTA / PUJA DESDE LA TABLA EN TIEMPO REAL
   const handleAceptarOfertaPuja = async (ofertaItem) => {
+    if (saldoInsuficiente) {
+      setMensajeError(`Asignación bloqueada. Billetera por debajo del umbral mínimo ($${UMBRAL_MINIMO_SALDO.toLocaleString('es-CO')} COP). Recargue saldo.`);
+      return;
+    }
+
     if (!ofertaItem) return;
     const ofertaId = ofertaItem?.id || ofertaItem?._id || ofertaItem?.ofertaId;
     
@@ -363,12 +379,20 @@ const HomeDespachador = () => {
           </div>
 
           <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
-            {/* 💳 BANDEROLA DE SALDO OPERATIVO UNIFICADO */}
-            <div className="flex items-center gap-2 font-mono text-[10px] uppercase bg-zinc-950/50 border border-white/5 px-3 py-2 rounded-xl text-zinc-400">
-              <Wallet size={13} className="text-emerald-400 shrink-0" />
+            {/* 💳 BANDEROLA DE SALDO OPERATIVO UNIFICADO Y ESTADO DE UMBRAL */}
+            <div className={`flex items-center gap-2 font-mono text-[10px] uppercase border px-3 py-2 rounded-xl transition-all ${
+              saldoInsuficiente 
+                ? "bg-red-500/10 border-red-500/30 text-red-400 shadow-[0_0_10px_rgba(239,68,68,0.1)]" 
+                : "bg-zinc-950/50 border-white/5 text-zinc-400"
+            }`}>
+              {saldoInsuficiente ? (
+                <AlertTriangle size={13} className="text-red-400 shrink-0 animate-pulse" />
+              ) : (
+                <Wallet size={13} className="text-emerald-400 shrink-0" />
+              )}
               <span>
                 Saldo Operativo:{" "}
-                <strong className="text-emerald-400 font-bold">
+                <strong className={`font-bold ${saldoInsuficiente ? "text-red-400" : "text-emerald-400"}`}>
                   {loadingWallet ? "Cargando..." : `$${Number(saldo).toLocaleString('es-CO')} COP`}
                 </strong>
               </span>
@@ -389,6 +413,21 @@ const HomeDespachador = () => {
             </div>
           </div>
         </div>
+
+        {/* 🚨 ALERTA BANDEROLA DE BLOQUEO POR SALDO MÍNIMO OPERATIVO */}
+        {saldoInsuficiente && (
+          <div className="backdrop-blur-md bg-red-500/10 border border-red-500/20 rounded-2xl p-4 flex items-center justify-between gap-4 text-red-400 font-mono text-xs shadow-lg animate-pulse">
+            <div className="flex items-center gap-3">
+              <AlertTriangle size={20} className="shrink-0 text-red-400" />
+              <div>
+                <p className="font-black uppercase tracking-wider">Módulo de Despacho Bloqueado por Saldo Insuficiente</p>
+                <p className="text-[10px] text-red-300/80 uppercase mt-0.5">
+                  Su billetera actual (${Number(saldo).toLocaleString('es-CO')} COP) es inferior al umbral mínimo requerido de ${UMBRAL_MINIMO_SALDO.toLocaleString('es-CO')} COP. Recargue saldo para habilitar las asignaciones.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* REJILLA TÁCTICA PRINCIPAL */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -412,8 +451,9 @@ const HomeDespachador = () => {
                     type="text" 
                     value={origen}
                     onChange={(e) => setOrigen(e.target.value)}
+                    disabled={saldoInsuficiente}
                     placeholder={terminalDespachador ? `Ej. ${terminalDespachador}` : "Ej. AGUACHICA"}
-                    className="w-full bg-zinc-950 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-orange-500/50 uppercase font-mono transition-all"
+                    className="w-full bg-zinc-950 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-orange-500/50 uppercase font-mono transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
 
@@ -423,8 +463,9 @@ const HomeDespachador = () => {
                     type="text" 
                     value={destino}
                     onChange={(e) => setDestino(e.target.value)}
+                    disabled={saldoInsuficiente}
                     placeholder="Ej. VALLEDUPAR"
-                    className="w-full bg-zinc-950 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-orange-500/50 uppercase font-mono transition-all"
+                    className="w-full bg-zinc-950 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-white placeholder-zinc-700 focus:outline-none focus:border-orange-500/50 uppercase font-mono transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
 
@@ -434,8 +475,9 @@ const HomeDespachador = () => {
                     type="number" 
                     value={valorPasaje}
                     onChange={(e) => setValorPasaje(e.target.value)}
+                    disabled={saldoInsuficiente}
                     placeholder="0"
-                    className="w-full bg-zinc-950 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-orange-400 font-mono focus:outline-none focus:border-orange-500/50 transition-all"
+                    className="w-full bg-zinc-950 border border-white/5 rounded-xl px-3 py-2.5 text-xs text-orange-400 font-mono focus:outline-none focus:border-orange-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   />
                 </div>
               </div>
@@ -508,7 +550,7 @@ const HomeDespachador = () => {
           {/* COLUMNA 2 Y 3: RADAR SATELITAL, MALLA DE SELECCIÓN Y TABLA DE PUJAS EN TIEMPO REAL */}
           <div className="lg:col-span-2 space-y-6">
             
-            {/* RADAR OPERATIVO CON FILTRADO EN CALIENTE */}
+            {/* RADAR OPERATIVO CON FILTRADO EN CALIENTE Y SUSPENSE */}
             <div className="backdrop-blur-md bg-[#121214]/80 border border-white/5 rounded-3xl p-2 shadow-xl overflow-hidden relative">
               <div className="absolute top-4 left-4 z-[1000] bg-zinc-950/80 backdrop-blur-md border border-white/5 px-3 py-1.5 rounded-xl flex items-center gap-2">
                 <Map size={12} className="text-orange-400 animate-pulse" />
@@ -516,7 +558,14 @@ const HomeDespachador = () => {
               </div>
               
               <div className="h-[260px] w-full rounded-2xl overflow-hidden">
-                <MapaOperativo filtroCooperativa={cooperativaDespachador} />
+                <Suspense fallback={
+                  <div className="w-full h-full bg-zinc-950/50 flex flex-col items-center justify-center gap-2">
+                    <div className="w-6 h-6 border-2 border-orange-500/20 border-t-orange-400 rounded-full animate-spin" />
+                    <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-500">Cargando Mapa Satelital...</span>
+                  </div>
+                }>
+                  <MapaOperativo filtroCooperativa={cooperativaDespachador} />
+                </Suspense>
               </div>
             </div>
 
@@ -571,11 +620,12 @@ const HomeDespachador = () => {
 
                         <button
                           onClick={() => handleAceptarOfertaPuja(oferta)}
-                          disabled={loadingAceptarId === idOferta}
-                          className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-4 py-2 font-black text-[9px] uppercase rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+                          disabled={loadingAceptarId === idOferta || saldoInsuficiente}
+                          title={saldoInsuficiente ? `Saldo insuficiente (Mínimo $${UMBRAL_MINIMO_SALDO.toLocaleString('es-CO')} COP)` : "Asignar Puja"}
+                          className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-zinc-950 px-4 py-2 font-black text-[9px] uppercase rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
                         >
                           <CheckCircle size={12} />
-                          {loadingAceptarId === idOferta ? "Asignando..." : "Asignar Puja"}
+                          {loadingAceptarId === idOferta ? "Asignando..." : saldoInsuficiente ? "Saldo Bloqueado" : "Asignar Puja"}
                         </button>
                       </div>
                     );
@@ -657,11 +707,12 @@ const HomeDespachador = () => {
                       
                       <button 
                         onClick={() => handleRegistrarYDistribuirViaje(conductor)}
-                        disabled={loadingAccion || isFormInvalid}
+                        disabled={loadingAccion || isFormInvalid || saldoInsuficiente}
+                        title={saldoInsuficiente ? `Saldo insuficiente (Mínimo $${UMBRAL_MINIMO_SALDO.toLocaleString('es-CO')} COP)` : "Asignar Ruta e Inyectar"}
                         className="w-full sm:w-auto bg-orange-500 hover:bg-orange-400 text-zinc-950 px-5 py-3 font-black text-[10px] uppercase rounded-xl transition-all shadow-md border border-orange-400 active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed disabled:transform-none shrink-0 cursor-pointer"
                       >
                         <Send size={12} />
-                        {loadingAccion ? "Despachando..." : "Asignar Ruta e Inyectar"}
+                        {loadingAccion ? "Despachando..." : saldoInsuficiente ? "Saldo Bloqueado" : "Asignar Ruta e Inyectar"}
                       </button>
                     </div>
                   ))}

@@ -1,17 +1,19 @@
-// Versión Arquitectura: V15.6 - Manejo Táctico de Errores de Índices Compuestos Firestore y Captura de Enlace Directo
+// Versión Arquitectura: V16.0 - Desglose y Formateo Personalizado de Comisiones Deductoras por Rol y Pago Billetera
 /**
  * Ubicación: frontend\src\components\wallet\TransactionHistory.jsx
- * Misión: Auditar y renderizar la trazabilidad financiera del usuario mitigando nulos por desincronización y extrayendo enlaces de índices compuestos de Firestore.
+ * Misión: Auditar y renderizar la trazabilidad financiera con desglose específico de comisiones deductoras por rol
+ *         (Mototaxi/Motoparrillero: 10%, Motocarga: $500, Despachador: $500, Intermunicipal: $0, Pasajero: Pago Billetera).
+ * Estilo: CIMCO-UI V9.3 Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 import React, { useState, useEffect } from 'react';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
-import { Clock, ArrowUpRight, ArrowDownLeft, Loader2, ServerOff, ExternalLink } from 'lucide-react';
+import { Clock, ArrowUpRight, ArrowDownLeft, Loader2, ServerOff, ExternalLink, Coins, Receipt, Wallet, Percent, ShieldCheck } from 'lucide-react';
 import { formatFechaColombia } from '@/utils/dateFormatter';
 
 const TransactionHistory = ({ targetUid = null }) => {
-    const { user } = useAuth();
+    const { user, profile } = useAuth();
     const [transactions, setTransactions] = useState([]);
     const [loadingTx, setLoadingTx] = useState(true);
     const [errorFirebase, setErrorFirebase] = useState(null);
@@ -41,7 +43,7 @@ const TransactionHistory = ({ targetUid = null }) => {
             const unsubscribe = onSnapshot(q, 
                 (snapshot) => {
                     const txList = snapshot.docs.map(doc => {
-                        const data = doc.data();
+                        const data = doc.data() || {};
                         return {
                             id: doc.id,
                             ...data,
@@ -83,6 +85,85 @@ const TransactionHistory = ({ targetUid = null }) => {
         }
     }, [user?.uid, targetUid]);
 
+    /**
+     * 🛡️ Helper para formatear el detalle de deducciones/comisiones según el rol del usuario y tipo de transacción
+     */
+    const obtenerDetalleComision = (tx) => {
+        const rolUsuario = String(tx?.rolUsuario || tx?.rol || profile?.rol || user?.rol || '').toLowerCase().trim();
+        const tipoTx = String(tx?.type || tx?.tipo || '').toUpperCase().trim();
+        const montoBase = Number(tx?.valorServicio || tx?.montoBase || tx?.amount || tx?.monto || 0);
+
+        // Si es una recarga o crédito directo del CEO, no aplica deducción
+        if (['RECARGA', 'CREDIT', 'ABONO', 'RECARGA_MANUAL_CEO'].includes(tipoTx)) {
+            return {
+                textoBadge: "Abono de Saldo",
+                descuentoTexto: "+$0 COP",
+                icono: ShieldCheck,
+                estiloBadge: "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+            };
+        }
+
+        // 1. Mototaxi / Motoparrillero: Deducción del 10% vinculada al valor del servicio
+        if (rolUsuario === 'mototaxi' || rolUsuario === 'motoparrillero') {
+            const comisionCalculada = tx?.comisionMonto ? Number(tx.comisionMonto) : (montoBase * 0.10);
+            return {
+                textoBadge: "Comisión 10% Carrera",
+                descuentoTexto: `10% ($${comisionCalculada.toLocaleString('es-CO')} COP)`,
+                icono: Percent,
+                estiloBadge: "text-orange-400 bg-orange-500/10 border-orange-500/20"
+            };
+        }
+
+        // 2. Motocarga: Deducción fija de $500 COP
+        if (rolUsuario === 'motocarga') {
+            return {
+                textoBadge: "Comisión Fija Motocarga",
+                descuentoTexto: "$500 COP",
+                icono: Receipt,
+                estiloBadge: "text-amber-400 bg-amber-500/10 border-amber-500/20"
+            };
+        }
+
+        // 3. Despachador: Deducción fija de $500 COP por servicio asignado
+        if (rolUsuario === 'despachador') {
+            return {
+                textoBadge: "Comisión Fija Despacho",
+                descuentoTexto: "$500 COP",
+                icono: Coins,
+                estiloBadge: "text-amber-400 bg-amber-500/10 border-amber-500/20"
+            };
+        }
+
+        // 4. Intermunicipal: $0 COP de descuento
+        if (rolUsuario === 'intermunicipal') {
+            return {
+                textoBadge: "Servicio Intermunicipal",
+                descuentoTexto: "$0 COP (Sin Descuento)",
+                icono: ShieldCheck,
+                estiloBadge: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20"
+            };
+        }
+
+        // 5. Pasajero: Descuento total por "Pago con Billetera" si eligió este método
+        if (rolUsuario === 'pasajero' || rolUsuario === 'usuario') {
+            const montoPagado = Number(tx?.amount || tx?.monto || 0);
+            return {
+                textoBadge: "Pago con Billetera",
+                descuentoTexto: `Descuento Billetera: -$${montoPagado.toLocaleString('es-CO')} COP`,
+                icono: Wallet,
+                estiloBadge: "text-blue-400 bg-blue-500/10 border-blue-500/20"
+            };
+        }
+
+        // Fallback estándar
+        return {
+            textoBadge: tipoTx || "Deducción General",
+            descuentoTexto: `$${Number(tx?.amount || tx?.monto || 0).toLocaleString('es-CO')} COP`,
+            icono: ArrowDownLeft,
+            estiloBadge: "text-zinc-400 bg-zinc-500/10 border-white/5"
+        };
+    };
+
     if (loadingTx) {
         return (
             <div className="flex items-center justify-center py-8 gap-2 text-zinc-500 font-mono text-[10px] tracking-widest uppercase">
@@ -119,7 +200,7 @@ const TransactionHistory = ({ targetUid = null }) => {
     }
 
     return (
-        <div className="w-full font-sans">
+        <div className="w-full font-mono antialiased">
             {transactions.length === 0 ? (
                 <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest text-center py-6 border border-dashed border-white/5 rounded-xl bg-white/[0.01]">
                     Sin movimientos financieros registrados en la bitácora.
@@ -127,32 +208,48 @@ const TransactionHistory = ({ targetUid = null }) => {
             ) : (
                 <div className="space-y-2.5">
                     {transactions.map((tx) => {
-                        const tipoTx = (tx.type || tx.tipo || 'Transacción').toUpperCase();
-                        const isRecarga = tipoTx === 'RECARGA' || tipoTx === 'CREDIT' || tipoTx === 'ABONO';
+                        const tipoTx = String(tx?.type || tx?.tipo || 'Transacción').toUpperCase();
+                        const isRecarga = tipoTx === 'RECARGA' || tipoTx === 'CREDIT' || tipoTx === 'ABONO' || tipoTx === 'RECARGA_MANUAL_CEO';
+                        const detalleComision = obtenerDetalleComision(tx);
+                        const IconoDetalle = detalleComision.icono;
                         
                         return (
-                            <div key={tx.id} className="flex items-center justify-between p-3 rounded-xl bg-[#161619]/40 border border-white/5 hover:border-white/10 transition-all">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center border shrink-0 ${
+                            <div key={tx.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-xl bg-[#121214]/80 backdrop-blur-md border border-white/5 hover:border-white/10 transition-all gap-3">
+                                <div className="flex items-start sm:items-center gap-3 min-w-0">
+                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 mt-0.5 sm:mt-0 ${
                                         isRecarga 
                                         ? 'bg-orange-500/10 border-orange-500/20 text-orange-400' 
                                         : 'bg-zinc-500/10 border-white/5 text-zinc-400'
                                     }`}>
-                                        {isRecarga ? <ArrowUpRight size={14} /> : <ArrowDownLeft size={14} />}
+                                        {isRecarga ? <ArrowUpRight size={16} /> : <ArrowDownLeft size={16} />}
                                     </div>
-                                    <div className="min-w-0">
-                                        <p className="text-[10px] font-black text-zinc-200 uppercase tracking-widest truncate">{tipoTx}</p>
-                                        <p className="text-[9px] text-zinc-500 font-mono truncate">
-                                            Ref: {tx.id ? tx.id.substring(0, 8).toUpperCase() : 'S/R'}
-                                        </p>
+
+                                    <div className="min-w-0 flex flex-col gap-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <p className="text-[10px] font-black text-zinc-200 uppercase tracking-widest truncate">
+                                                {tipoTx}
+                                            </p>
+                                            
+                                            {/* Badge dinámico de deducción/comisión */}
+                                            <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md border ${detalleComision.estiloBadge}`}>
+                                                <IconoDetalle size={10} className="shrink-0" />
+                                                {detalleComision.textoBadge}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 text-[9px] text-zinc-400 font-mono">
+                                            <span>Ref: {tx.id ? tx.id.substring(0, 8).toUpperCase() : 'S/R'}</span>
+                                            <span className="text-zinc-600">•</span>
+                                            <span className="text-zinc-300 font-bold">{detalleComision.descuentoTexto}</span>
+                                        </div>
                                     </div>
                                 </div>
                                 
-                                <div className="text-right shrink-0 pl-2">
-                                    <p className={`text-xs font-bold font-mono ${isRecarga ? 'text-orange-400' : 'text-zinc-300'}`}>
+                                <div className="text-left sm:text-right shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5 flex sm:flex-col justify-between sm:justify-center items-center sm:items-end">
+                                    <p className={`text-xs font-black font-mono ${isRecarga ? 'text-orange-400' : 'text-zinc-200'}`}>
                                         {isRecarga ? '+' : '-'}${parseFloat(tx.amount || tx.monto || 0).toLocaleString('es-CO')}
                                     </p>
-                                    <p className="text-[8px] text-zinc-500 font-bold uppercase flex items-center gap-1 justify-end mt-0.5 tracking-wider font-mono">
+                                    <p className="text-[8px] text-zinc-500 font-bold uppercase flex items-center gap-1 mt-0.5 tracking-wider font-mono">
                                         <Clock className="opacity-60" size={9} /> 
                                         {formatFechaColombia(tx.fechaSanitizada)}
                                     </p>

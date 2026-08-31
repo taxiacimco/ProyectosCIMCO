@@ -1,9 +1,9 @@
-// Versión Arquitectura: V19.4 - Refactorización de actualización de perfil mediante authService centralizado
+// Versión Arquitectura: V19.5 - Estandarización de Actualización de Perfil mediante authService Centralizado
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V19.4: Encapsulamiento estricto de la actualización de perfil mediante authService.updateProfile,
- * evitando llamadas directas a la ruta /api/conductores/:id y garantizando el uso de FIRESTORE_PATHS.
+ * Ajuste V19.5: Estandarización de llamadas de actualización de perfil estrictamente a través de
+ *               authService.updateProfile para mantener un mapeo uniforme entre REST y Firestore.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -11,6 +11,7 @@ import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
+import { authService } from '@/services/authService';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -38,7 +39,6 @@ const HomeIntermunicipal = () => {
     const authContext = useAuth ? useAuth() : {};
     const user = authContext?.user || null;
     const token = authContext?.token || localStorage.getItem('token') || user?.token || "";
-    const updateProfileService = authContext?.updateProfile || null;
     
     // 📡 Consumo Resiliente del Socket Centralizado (Canal de Empresa y Pujas)
     const socketContext = useSocket ? useSocket() : {};
@@ -112,7 +112,7 @@ const HomeIntermunicipal = () => {
 
                 setDatosPerfil({
                     nombre: nombreCompleto || user?.nombre || '',
-                    telefono: data?.telefono || data?.telefonoMovil || user?.telefono || '',
+                    telefono: data?.telefonoMovil || data?.telefono || user?.telefonoMovil || user?.telefono || '',
                     empresa: data?.empresa || data?.empresaTransporte || data?.cooperativa || user?.empresa || user?.cooperativa || '',
                     empresaId: data?.empresaId || data?.empresa_id || user?.empresaId || user?.empresa_id || '',
                     terminal: data?.terminal || data?.terminalOrigen || user?.terminal || '',
@@ -136,26 +136,27 @@ const HomeIntermunicipal = () => {
         setGuardandoPerfil(true);
 
         try {
-            // Esquema estandarizado solicitado (telefonoMovil, nombre, foto_perfil)
+            // Esquema estandarizado obligatorio (telefonoMovil, nombre, foto_perfil)
             const payloadPerfil = {
                 nombre: datosPerfil.nombre,
                 telefonoMovil: datosPerfil.telefono,
-                telefono: datosPerfil.telefono,
+                foto_perfil: user?.foto_perfil || user?.photoURL || '',
                 empresa: datosPerfil.empresa,
                 empresaTransporte: datosPerfil.empresa,
                 empresaId: datosPerfil.empresaId,
                 terminal: datosPerfil.terminal,
                 terminalOrigen: datosPerfil.terminal,
                 placaVehiculo: datosPerfil.placaVehiculo.toUpperCase(),
-                numeroInterno: datosPerfil.numeroInterno,
-                foto_perfil: user?.foto_perfil || user?.photoURL || ''
+                numeroInterno: datosPerfil.numeroInterno
             };
 
-            // Invocación a través del servicio centralizado de autenticación/perfil
-            if (typeof updateProfileService === 'function') {
-                await updateProfileService(payloadPerfil);
+            // Invocación estandarizada y centralizada a través de authService.updateProfile
+            if (typeof authService?.updateProfile === 'function') {
+                await authService.updateProfile(payloadPerfil);
+            } else if (typeof authContext?.updateProfile === 'function') {
+                await authContext.updateProfile(payloadPerfil);
             } else {
-                console.warn("⚠️ updateProfile no disponible en useAuth, aplicando respaldo local Firestore.");
+                console.warn("⚠️ Servicio updateProfile no disponible, aplicando respaldo en Firestore.");
             }
 
             // Sincronización secundaria en Firestore usando FIRESTORE_PATHS

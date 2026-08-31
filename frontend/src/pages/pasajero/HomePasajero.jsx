@@ -1,15 +1,16 @@
-// Versión Arquitectura: V21.44 - Centralización de Perfil con authService y Estandarización de TelefonoMovil
+// Versión Arquitectura: V21.46 - Corrección de Importación SDK Modular Firebase
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (CartoDB Voyager),
  *         integración atómica de telemetría, sockets, billetera smart, selector dinámico de flota (4 modalidades + Cooperativas < 5km),
  *         monitoreo de hardware GPS, entrada de dirección editable con botón de recalibración GPS, subasta dinámica
- *         de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil centralizada mediante authService y paleta CIMCO-UI V9.3.
+ *         de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil centralizada mediante authService,
+ *         guard de validación previa al envío para método de pago 'BILLETERA' contra saldo suficiente y paleta CIMCO-UI V9.3.
  */
 
 import React, { useState, useEffect } from 'react';
 import { db, auth as firebaseAuth, FIRESTORE_PATHS } from '@/config/firebase'; 
-import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, addDoc, serverTimestamp, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
 import { useGpsGuard } from '@/hooks/useGpsGuard';
 import { useWallet } from '@/hooks/useWallet';
@@ -148,6 +149,7 @@ export default function HomePasajero() {
   const [metodoPago, setMetodoPago] = useState('EFECTIVO'); // 'EFECTIVO' | 'BILLETERA'
   const [origenText, setOrigenText] = useState('Ubicación actual (GPS)');
   const [destinoText, setDestinoText] = useState('');
+  const [valorEstimado, setValorEstimado] = useState(0);
   const [estadoViaje, setEstadoViaje] = useState('IDLE'); 
   const [datosConductor, setDatosConductor] = useState(null);
   const [rideId, setRideId] = useState(null);
@@ -460,6 +462,11 @@ export default function HomePasajero() {
       return;
     }
 
+    if (metodoPago === 'BILLETERA' && saldoEfectivo < valorEstimado) {
+      setErrorInterno("⚠️ Saldo insuficiente en billetera para este trayecto. Selecciona otro método de pago o recarga.");
+      return;
+    }
+
     setProcesandoPeticion(true);
     setErrorInterno('');
     setMensajeExpirado('');
@@ -486,6 +493,7 @@ export default function HomePasajero() {
         metodoPago,
         origen: origenText.trim() || 'Ubicación actual (GPS)',
         destino: destinoText.trim(),
+        valorEstimado,
         estado: 'BUSCANDO',
         coordenadasInicio: { lat: coordsActuales[0], lng: coordsActuales[1] },
         fechaCreacion: serverTimestamp()

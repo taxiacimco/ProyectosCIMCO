@@ -1,11 +1,17 @@
-// Versión Arquitectura: V24.2 - Corrección de Resiliencia en Bloque Catch de Billetera REST
+// Versión Arquitectura: V25.0 - Integración de Flag de Operatividad, Validación Previa canAcceptService y Cabecera X-Idempotency-Key
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
- * Misión: Sincronización exacta de saldo por rol con detención de bucles de re-renderizado, redundancia en tiempo real vía Firestore, timeout HTTP a 5s y resiliencia transaccional mediante walletService.
- * Ajuste V24.2: Modificación del bloque catch en obtenerSaldoDesdeBackend para conservar el último saldo conocido en lugar de sobreescribirlo a cero durante parpadeos o latencia de red.
+ * Misión: Hook centralizado para la gobernanza del saldo de la billetera.
+ * Ajustes V25.0:
+ *  1. Flag de Operatividad:
+ *     - Pasajero / Intermunicipal: estaHabilitadoParaOperar = true
+ *     - Mototaxi, Motoparrillero, Motocarga, Despachador: estaHabilitadoParaOperar = (saldoWallet >= 2000)
+ *  2. Método canAcceptService(valorCarrera):
+ *     - Comprueba si el saldo remanente tras descontar la comisión del rol (10% o $500 COP) mantendrá el saldo >= $2.000 COP.
+ *  3. Garantizar la cabecera X-Idempotency-Key en todas las peticiones de actualización/débito de saldo.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
@@ -40,11 +46,22 @@ export const useWallet = () => {
     const idDocumentoUnificado = idCrudo ? String(idCrudo).trim() : null;
 
     // Normalización polimórfica del rol del usuario
-    const rolNormalizado = String(user?.rol || user?.role || user?.tipo || 'usuario').toLowerCase();
+    const rolNormalizado = String(user?.rol || user?.role || user?.tipo || 'usuario').toLowerCase().trim();
+
+    // 1. Flag de Operatividad Computado
+    const estaHabilitadoParaOperar = useMemo(() => {
+        if (['pasajero', 'intermunicipal', 'usuario'].includes(rolNormalizado)) {
+            return true;
+        }
+        if (['mototaxi', 'motoparrillero', 'motocarga', 'despachador', 'conductor'].includes(rolNormalizado)) {
+            return Number(saldo) >= 2000;
+        }
+        return true;
+    }, [rolNormalizado, saldo]);
 
     // Determinación dinámica de la colección de Firestore basada en el rol
     const coleccionDestino = (() => {
-        if (rolNormalizado === 'conductor' && FIRESTORE_PATHS?.conductores) {
+        if (['conductor', 'mototaxi', 'motoparrillero', 'motocarga', 'despachador'].includes(rolNormalizado) && FIRESTORE_PATHS?.conductores) {
             return FIRESTORE_PATHS.conductores;
         }
         if (rolNormalizado === 'pasajero' && FIRESTORE_PATHS?.pasajeros) {
@@ -86,7 +103,6 @@ export const useWallet = () => {
             }
         } catch (apiErr) {
             console.warn("⚠️ [CIMCO-WALLET] Error/Timeout consultando Backend REST. Conservando saldo local previo:", apiErr?.message);
-            // NO ejecutar setSaldo(0) ni actualizarEstadoLocalRef con 0 para evitar borrado visual durante parpadeos de red
             return null;
         }
 
@@ -102,7 +118,7 @@ export const useWallet = () => {
         let unsubscribeFirestore = null;
 
         const sincronizarBoveda = async () => {
-            // 1. Carga prioritaria inmediata desde MongoDB (SSOT) con timeout a 5s
+            // 1. Carga prioritaria inmediata desde MongoDB (SSOT)
             await obtenerSaldoDesdeBackend();
 
             // 2. Suscripción en tiempo real vía Firestore
@@ -150,7 +166,34 @@ export const useWallet = () => {
     }, [idDocumentoUnificado, coleccionDestino, obtenerSaldoDesdeBackend]);
 
     /**
+     * 2. Método canAcceptService:
+     * Calcula en tiempo real si el saldo remanente tras aplicar la comisión del servicio mantendrá al operador >= $2.000 COP.
+     */
+    const canAcceptService = useCallback((valorCarrera = 0) => {
+        if (['pasajero', 'intermunicipal', 'usuario'].includes(rolNormalizado)) {
+            return true;
+        }
+
+        const saldoActualNumerico = Number(saldo) || 0;
+        const valorCarreraNumerico = Number(valorCarrera) || 0;
+        let comisionCalculada = 0;
+
+        // Reglas de comisión por rol
+        if (rolNormalizado === 'mototaxi' || rolNormalizado === 'motoparrillero') {
+            comisionCalculada = valorCarreraNumerico * 0.10;
+        } else if (rolNormalizado === 'motocarga' || rolNormalizado === 'despachador') {
+            comisionCalculada = 500;
+        } else if (rolNormalizado === 'conductor') {
+            comisionCalculada = valorCarreraNumerico * 0.10;
+        }
+
+        const saldoRemanente = saldoActualNumerico - comisionCalculada;
+        return saldoRemanente >= 2000;
+    }, [saldo, rolNormalizado]);
+
+    /**
      * ⚡ MUTACIÓN TRANSACCIONAL DUAL (MongoDB REST Primario + Firestore Backup)
+     * 3. Incluye X-Idempotency-Key obligatoria para evitar duplicados en cobros de red.
      */
     const procesarDebitoTransaccional = async (montoDebito, motivo = "DEBITO_OPERATIVO") => {
         if (!idDocumentoUnificado) throw new Error("No hay un identificador de usuario válido para la transacción.");
@@ -158,14 +201,22 @@ export const useWallet = () => {
 
         setIsMutating(true);
 
+        // Generación de Clave de Idempotencia Única por Solicitud
+        const idempotencyKey = `tx-deb-${idDocumentoUnificado}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
         try {
-            // STEP 1: Transacción primaria en MongoDB vía API REST
+            // STEP 1: Transacción primaria en MongoDB vía API REST con X-Idempotency-Key
             const respuestaBackend = await api.post('/wallet/debit', {
                 usuarioId: idDocumentoUnificado,
                 monto: montoDebito,
                 concepto: motivo,
                 rol: rolNormalizado
-            }, { timeout: 10000 });
+            }, { 
+                headers: {
+                    'X-Idempotency-Key': idempotencyKey
+                },
+                timeout: 10000 
+            });
 
             const nuevoSaldoApi = respuestaBackend?.data?.nuevoSaldo ?? respuestaBackend?.data?.saldo;
             
@@ -201,6 +252,7 @@ export const useWallet = () => {
                             saldoAnterior: saldoActual,
                             saldoNuevo: nuevoSaldoCalculado,
                             concepto: motivo,
+                            idempotencyKey,
                             fecha: serverTimestamp()
                         });
                     }
@@ -218,6 +270,46 @@ export const useWallet = () => {
         }
     };
 
+    /**
+     * 3. Método para recargas/créditos con X-Idempotency-Key obligatoria
+     */
+    const procesarRecargaTransaccional = async (montoRecarga, motivo = "RECARGA_MANUAL_CEO") => {
+        if (!idDocumentoUnificado) throw new Error("No hay un identificador de usuario válido para la transacción.");
+        if (!montoRecarga || montoRecarga <= 0) throw new Error("El monto a recargar debe ser mayor a cero.");
+
+        setIsMutating(true);
+
+        const idempotencyKey = `tx-rec-${idDocumentoUnificado}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+        try {
+            const respuestaBackend = await api.post('/wallet/recharge', {
+                usuarioId: idDocumentoUnificado,
+                monto: montoRecarga,
+                concepto: motivo,
+                rol: rolNormalizado
+            }, {
+                headers: {
+                    'X-Idempotency-Key': idempotencyKey
+                },
+                timeout: 10000
+            });
+
+            const nuevoSaldoApi = respuestaBackend?.data?.nuevoSaldo ?? respuestaBackend?.data?.saldo;
+
+            if (nuevoSaldoApi !== undefined && nuevoSaldoApi !== null) {
+                const saldoCalculado = Number(nuevoSaldoApi);
+                setSaldo(isNaN(saldoCalculado) ? 0 : saldoCalculado);
+            }
+
+            setIsMutating(false);
+            return true;
+        } catch (err) {
+            console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Error en la recarga:", err?.message);
+            setIsMutating(false);
+            throw err;
+        }
+    };
+
     return {
         balance: saldo, 
         saldo,
@@ -225,8 +317,11 @@ export const useWallet = () => {
         error,
         isMutating,
         isSolvente: saldo >= 2000,
+        estaHabilitadoParaOperar,
+        canAcceptService,
         refetchSaldo: obtenerSaldoDesdeBackend,
-        procesarDebitoTransaccional
+        procesarDebitoTransaccional,
+        procesarRecargaTransaccional
     };
 };
 

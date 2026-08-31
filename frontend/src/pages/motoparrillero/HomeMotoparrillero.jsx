@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.18 - Migración de Edición de Perfil a Centralizado authService.updateProfile y Estandarización CIMCO-UI V9.3
+// Versión Arquitectura: V12.19 - Guard de Saldo Mínimo ($2.000 COP) y Validación de Comisión (10%) en Solicitudes
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
@@ -12,6 +12,8 @@ import {
   MapPin, Navigation, Wallet, TrendingUp, AlertCircle, 
   CircleDollarSign, Signal, LogOut, Loader, UserSquare2
 } from 'lucide-react';
+
+const UMBRAL_MINIMO_COP = 2000;
 
 export default function HomeMotoparrillero() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
@@ -42,12 +44,14 @@ export default function HomeMotoparrillero() {
   const [coordenadas, setCoordenadas] = useState({ lat: 9.5661, lng: -73.3332 }); 
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [datosParaCalificar, setDatosParaCalificar] = useState(null);
+  const [errorInterno, setErrorInterno] = useState('');
 
   const geoWatchRef = useRef(null);
 
   const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
   const token = localStorage.getItem('token') || user?.token;
-  const saldoVivo = walletData?.saldo || walletData?.balance || 0;
+  const saldoEfectivo = walletData?.saldo ?? walletData?.balance ?? 0;
+  const puedeOperar = saldoEfectivo >= UMBRAL_MINIMO_COP;
 
   // Validation: Desconectar de red si no existe ID de conductor válido
   useEffect(() => {
@@ -137,8 +141,10 @@ export default function HomeMotoparrillero() {
         return;
       }
 
-      if (Number(saldoVivo) < 2000) {
-        alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en red.");
+      if (!puedeOperar) {
+        const msg = "⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.";
+        setErrorInterno(msg);
+        alert(msg);
         setIsOnline(false);
         return;
       }
@@ -176,7 +182,7 @@ export default function HomeMotoparrillero() {
         socket.emit('desactivar_conductor', { conductorId });
       }
     }
-  }, [isOnline, conductorId, token, socket]);
+  }, [isOnline, conductorId, token, socket, puedeOperar]);
 
   // ==================================================================
   // 4. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
@@ -300,11 +306,26 @@ export default function HomeMotoparrillero() {
   // ==================================================================
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
-    if (Number(saldoVivo) < 2000) {
-      alert("⚠️ FONDO INSUFICIENTE: Requiere saldo mínimo de $2.000 COP.");
+
+    if (!puedeOperar) {
+      const msg = "⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.";
+      setErrorInterno(msg);
+      alert(msg);
       setSolicitudViaje(null);
       return;
     }
+
+    const valorServicio = Number(solicitudViaje.tarifa || solicitudViaje.valor || 0);
+    const comisionRequerida = valorServicio * 0.10;
+    if (saldoEfectivo < comisionRequerida) {
+      const msg = "⚠️ Saldo insuficiente para cubrir la comisión (10%) de este servicio.";
+      setErrorInterno(msg);
+      alert(msg);
+      setSolicitudViaje(null);
+      return;
+    }
+
+    setErrorInterno('');
     setLoading(true);
     try {
       console.log(`⚡ [ACID-DESPACHO] Aceptando servicio parrillero ID: ${solicitudViaje.viajeId}`);
@@ -317,6 +338,9 @@ export default function HomeMotoparrillero() {
       });
 
       if (respuesta?.data?.success) {
+        if (socket && isSocketConnected) {
+          socket.emit('aceptar_carrera', { carreraId: solicitudViaje.viajeId, conductorId });
+        }
         setServicioActivo(respuesta.data.viaje);
         setSolicitudViaje(null);
       }
@@ -330,11 +354,25 @@ export default function HomeMotoparrillero() {
   };
 
   const capturarOferta = async (viajeId) => {
-    if (Number(saldoVivo) < 2000) {
-      alert("⚠️ FONDO INSUFICIENTE: Requiere saldo mínimo de $2.000 COP.");
+    if (!puedeOperar) {
+      const msg = "⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.";
+      setErrorInterno(msg);
+      alert(msg);
       return;
     }
 
+    const ofertaTarget = ofertasDisponibles.find((item) => item.id === viajeId);
+    const valorServicio = Number(ofertaTarget?.valor || ofertaTarget?.tarifa || 0);
+    const comisionRequerida = valorServicio * 0.10;
+
+    if (saldoEfectivo < comisionRequerida) {
+      const msg = "⚠️ Saldo insuficiente para cubrir la comisión (10%) de este servicio.";
+      setErrorInterno(msg);
+      alert(msg);
+      return;
+    }
+
+    setErrorInterno('');
     try {
       const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
       const viajeRef = doc(db, pathViajes, viajeId);
@@ -354,6 +392,10 @@ export default function HomeMotoparrillero() {
           fechaAceptado: serverTimestamp()
         });
       });
+
+      if (socket && isSocketConnected) {
+        socket.emit('aceptar_carrera', { carreraId: viajeId, conductorId });
+      }
     } catch (err) {
       console.error("🚨 [CIMCO-CAPTURE-FAIL] Bloqueo transaccional Parrillero:", err?.message);
       alert(err?.message);
@@ -392,6 +434,17 @@ export default function HomeMotoparrillero() {
     }
   };
 
+  const toggleEstadoOperativo = () => {
+    if (!isOnline && !puedeOperar) {
+      const msg = "⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.";
+      setErrorInterno(msg);
+      alert(msg);
+      return;
+    }
+    setErrorInterno('');
+    setIsOnline(!isOnline);
+  };
+
   return (
     <div className="min-h-screen bg-[#0e0e11] text-zinc-100 font-mono antialiased pb-28 relative selection:bg-cyan-400 selection:text-black">
       
@@ -418,9 +471,12 @@ export default function HomeMotoparrillero() {
 
         <div className="flex items-center gap-2 shrink-0 ml-2">
           <button
-            onClick={() => setIsOnline(!isOnline)}
+            onClick={toggleEstadoOperativo}
+            disabled={!isOnline && !puedeOperar}
             className={`px-3 py-1.5 rounded-lg font-black text-[10px] uppercase tracking-wider border transition-all duration-150 active:scale-95 ${
-              isOnline ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black' : 'bg-zinc-800/60 text-zinc-400 border-white/5 hover:bg-zinc-800'
+              isOnline 
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black' 
+                : 'bg-zinc-800/60 text-zinc-400 border-white/5 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed'
             }`}
           >
             {isOnline ? 'ONLINE' : 'OFFLINE'}
@@ -429,7 +485,7 @@ export default function HomeMotoparrillero() {
           <div className="flex items-center gap-2 bg-[#121214]/80 border border-white/5 px-2.5 py-1.5 rounded-lg">
             <Wallet size={13} className="text-cyan-400" strokeWidth={2.5} />
             <span className="text-[10px] font-black text-zinc-200">
-              {walletLoading ? '...' : `$${Number(saldoVivo).toLocaleString('es-CO')}`}
+              {walletLoading ? '...' : `$${Number(saldoEfectivo).toLocaleString('es-CO')}`}
             </span>
           </div>
 
@@ -443,10 +499,10 @@ export default function HomeMotoparrillero() {
       </header>
 
       {/* BANNER DE ALERTA DE SALDO */}
-      {Number(saldoVivo) < 2000 && !walletLoading && (
+      {(!puedeOperar || errorInterno) && !walletLoading && (
         <div className="m-4 p-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider relative z-10 animate-pulse">
           <AlertCircle size={16} strokeWidth={2.5} className="shrink-0 text-red-400" />
-          <span>Malla Bloqueada: Requiere Saldo Mínimo ($2.000 COP)</span>
+          <span>{errorInterno || "Malla Bloqueada: Saldo inferior a $2.000 COP"}</span>
         </div>
       )}
 
@@ -588,7 +644,7 @@ export default function HomeMotoparrillero() {
                       </button>
                       <button
                         onClick={aceptarViaje}
-                        disabled={loading}
+                        disabled={loading || !puedeOperar}
                         className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 py-2 rounded-lg font-black text-xs uppercase tracking-widest border border-amber-500/30 active:scale-95 transition-all disabled:opacity-50"
                       >
                         {loading ? 'ASIGNANDO...' : '¡ACEPTAR!'}
@@ -622,38 +678,48 @@ export default function HomeMotoparrillero() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {ofertasDisponibles.map((oferta) => (
-                        <div 
-                          key={oferta.id} 
-                          className="bg-[#121214]/80 backdrop-blur-md p-4 border border-white/5 rounded-xl flex flex-col gap-3 hover:border-white/10 transition-all duration-150"
-                        >
-                          <div className="text-xs space-y-2">
-                            <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                              <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest bg-cyan-500/10 px-2 py-0.5 border border-cyan-500/20 rounded">
-                                {oferta.categoria || 'PARRILLERO'}
-                              </span>
-                              <span className="font-black text-emerald-400 text-sm">${Number(oferta.valor || 0).toLocaleString('es-CO')}</span>
+                      {ofertasDisponibles.map((oferta) => {
+                        const valorServicio = Number(oferta?.valor || oferta?.tarifa || 0);
+                        const comisionRequerida = valorServicio * 0.10;
+                        const bloqueadoPorComision = saldoEfectivo < comisionRequerida;
+
+                        return (
+                          <div 
+                            key={oferta.id} 
+                            className="bg-[#121214]/80 backdrop-blur-md p-4 border border-white/5 rounded-xl flex flex-col gap-3 hover:border-white/10 transition-all duration-150"
+                          >
+                            <div className="text-xs space-y-2">
+                              <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                                <span className="text-[9px] font-black text-cyan-400 uppercase tracking-widest bg-cyan-500/10 px-2 py-0.5 border border-cyan-500/20 rounded">
+                                  {oferta.categoria || 'PARRILLERO'}
+                                </span>
+                                <span className="font-black text-emerald-400 text-sm">${valorServicio.toLocaleString('es-CO')}</span>
+                              </div>
+                              <div className="space-y-1 bg-black/30 p-2 border border-white/5 rounded-lg">
+                                <p className="text-zinc-300 font-bold text-[11px] truncate flex items-center gap-1.5">
+                                  <MapPin size={12} className="text-emerald-400 shrink-0" strokeWidth={2.5} /> {oferta.origenDireccion || "Ubicación Base"}
+                                </p>
+                                <p className="text-zinc-400 text-[10px] truncate flex items-center gap-1.5">
+                                  <Navigation size={12} className="text-cyan-400 shrink-0" strokeWidth={2.5} /> {oferta.destinoDireccion || "Destino Final"}
+                                </p>
+                              </div>
                             </div>
-                            <div className="space-y-1 bg-black/30 p-2 border border-white/5 rounded-lg">
-                              <p className="text-zinc-300 font-bold text-[11px] truncate flex items-center gap-1.5">
-                                <MapPin size={12} className="text-emerald-400 shrink-0" strokeWidth={2.5} /> {oferta.origenDireccion || "Ubicación Base"}
-                              </p>
-                              <p className="text-zinc-400 text-[10px] truncate flex items-center gap-1.5">
-                                <Navigation size={12} className="text-cyan-400 shrink-0" strokeWidth={2.5} /> {oferta.destinoDireccion || "Destino Final"}
-                              </p>
+                            <div className="pt-1">
+                              <button 
+                                onClick={() => capturarOferta(oferta.id)}
+                                disabled={!puedeOperar || bloqueadoPorComision}
+                                className="w-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 disabled:bg-zinc-800/40 disabled:border-white/5 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-lg uppercase tracking-wider border border-cyan-500/30 active:scale-95 transition-all"
+                              >
+                                {!puedeOperar 
+                                  ? 'SALDO BLOQUEADO (< $2.000)' 
+                                  : bloqueadoPorComision 
+                                    ? 'SALDO INSUFICIENTE PARA COMISIÓN (10%)' 
+                                    : 'CAPTURAR OFERTA'}
+                              </button>
                             </div>
                           </div>
-                          <div className="pt-1">
-                            <button 
-                              onClick={() => capturarOferta(oferta.id)}
-                              disabled={Number(saldoVivo) < 2000}
-                              className="w-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 disabled:bg-zinc-800/40 disabled:border-white/5 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-lg uppercase tracking-wider border border-cyan-500/30 active:scale-95 transition-all"
-                            >
-                              {Number(saldoVivo) < 2000 ? 'SALDO BLOQUEADO' : 'CAPTURAR OFERTA'}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

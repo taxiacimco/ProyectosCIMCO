@@ -1,10 +1,10 @@
-// Versión Arquitectura: V21.30 - Reconfiguración del Atributo UID con Índice Disperso y Unicidad Criptográfica
+// Versión Arquitectura: V21.31 - Integración de Método Operativo de Billetera (puedeOperar) para Control de Saldos en Conductores
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
- * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales, cifrado Bcrypt anti-doble hashing)
- * e inyecta la definición estricta de 'uid' con unicidad dispersa (unique: true, sparse: true) para prevenir desbordamientos E11000.
+ * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales, cifrado Bcrypt anti-doble hashing,
+ * índice UID disperso) e inyecta la evaluación de umbral financiero de operabilidad (puedeOperar).
  */
 
 import mongoose from 'mongoose';
@@ -278,6 +278,12 @@ ConductorSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function(ne
 
     next();
 });
+
+// 💳 MÉTODO HELPER DE NEGOCIO: Evaluación de umbral operativo por saldo de billetera ($2.000 COP)
+ConductorSchema.methods.puedeOperar = function () {
+    if (this.subrol === 'conductor_intermunicipal') return true;
+    return (Number(this.saldo) || 0) >= 2000;
+};
 
 // 🛡️ ENLACE BLINDADO DEFINITIVO: Persistencia estricta en la colección 'conductores'
 const Conductor = mongoose.models.Conductor || mongoose.model('Conductor', ConductorSchema, 'conductores');

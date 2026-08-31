@@ -1,16 +1,15 @@
-// Versión Arquitectura: V17.2 - Jerarquía de Proveedores Protegida y Cúpula AuthProvider/SocketProvider
+// Versión Arquitectura: V17.3 - Montaje Atómico en DOM y Jerarquía Estricta de Proveedores Globales
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\main.jsx
- * Misión: Mantener el estricto orden jerárquico de proveedores en el árbol de React, asegurando que AuthProvider
- * se ubique en la cúspide para que SocketProvider reciba de forma síncrona el identificador de sesión (user.uid).
+ * Misión: Preservar la responsabilidad atómica exclusiva de montaje en el DOM mediante createRoot e inyección de proveedores globales (AuthProvider, SocketProvider) y router central.
  */
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import AppRouter from '@/AppRouter';
-import { AuthProvider } from '@/hooks/AuthProvider'; 
-import { SocketProvider } from '@/hooks/SocketContext.jsx'; // 📡 Extensión explícita requerida para prevenir errores de resolución
-import '@/index.css'; // 🎨 Estilos core unificados
+import { AuthProvider } from '@/hooks/AuthProvider';
+import { SocketProvider } from '@/hooks/SocketContext.jsx';
+import '@/index.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.4 - Blindaje defensivo del middleware de taquilla/despacho y estabilidad operacional en viaje.routes.js
+// Versión Arquitectura: V19.5 - Corrección de bypass de Webhook Wompi y alineación defensiva de rutas operacionales
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.routes.js
  * Misión: Enrutador centralizado con interceptación de payloads, inyección de aduana perimetral,
- * blindaje defensivo del middleware de despacho y securización del ciclo de vida operacional del viaje.
+ * reordenamiento de webhooks públicos (Wompi) antes de la autenticación JWT y blindaje defensivo del despacho.
  */
 
 import express from 'express';
@@ -83,7 +83,17 @@ router.use((req, res, next) => {
     next();
 });
 
-// Guardián global para el módulo de viajes: Requiere autenticación JWT
+// ==================================================================
+// 💳 RUTAS PÚBLICAS / PASARELAS DE PAGO EXTERNAS (SIN TOKEN JWT)
+// ==================================================================
+
+// Webhook de confirmación Wompi (Debe ejecutarse antes de verificarToken para permitir callback del proveedor)
+router.post('/wompi-webhook', recibirAlertaWompiLocal);
+
+// ==================================================================
+// 🔒 BARRERA DE SEGURIDAD GLOBAL: Requiere Autenticación JWT
+// ==================================================================
+
 router.use(verificarToken);
 
 // ==================================================================
@@ -98,20 +108,16 @@ router.get('/historial', obtenerHistorialViajes);
 router.post('/solicitar', verificarPayloadViaje, solicitarViaje);
 router.post('/aceptar', verificarPayloadViaje, aceptarViaje);
 
-// 3. Transición de Estado Operativo y Cierre Contable (Liquidación de comisión 10%)
+// 3. Transición de Estado Operativo y Cierre Contable (Comisiones: 10% Mototaxi/Parrillero, $500 Motocarga, $500 Despachador)
 router.post('/iniciar', verificarPayloadViaje, iniciarViaje);
 router.patch('/:viajeId/estado', verificarPayloadViaje, cambiarEstadoViaje);
 router.post('/completar', verificarPayloadViaje, completarViaje);
 router.post('/cancelar', verificarPayloadViaje, cancelarViaje);
 
 // ==================================================================
-// 🏢 RUTAS DE DESPACHO Y PASARELA EXTERNA
+// 🏢 RUTAS DE DESPACHO INTERMUNICIPAL Y TAQUILLA
 // ==================================================================
 
-// 4. Webhook de confirmación Wompi (Pasarela)
-router.post('/wompi-webhook', recibirAlertaWompiLocal);
-
-// 5. Despacho Atómico y Flujos Intermunicipales / Taquilla (Blindados con middleware seguro)
 router.post('/despachar', validarDespachoSeguro, despacharViajeAtomico);
 router.post('/despachar-atomico', validarDespachoSeguro, despacharViajeAtomico);
 router.post('/despachar-inmediato', verificarPayloadViaje, crearYDespacharViajeAtomico);
@@ -120,7 +126,7 @@ router.post('/despachar-inmediato', verificarPayloadViaje, crearYDespacharViajeA
 // 📊 CONSULTAS ESPECÍFICAS DE VIAJE
 // ==================================================================
 
-// 6. Lectura Individual de Viaje (Al final por jerarquía de parámetros dinámicos de Express)
+// Lectura Individual de Viaje (Jerarquía de parámetros dinámicos de Express)
 router.get('/detalle/:id', obtenerDetalleViaje);
 router.get('/:id', obtenerViajePorId);
 
