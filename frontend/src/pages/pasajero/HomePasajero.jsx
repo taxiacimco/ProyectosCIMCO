@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.48 - Integración de Selector de Pasajeros y Tarifa Propuesta con Comisión CIMCO-UI V9.3
+// Versión Arquitectura: V21.49 - Eliminación visual del bloque de comisión de plataforma en HomePasajero CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (OpenStreetMap),
@@ -825,13 +825,6 @@ export default function HomePasajero() {
                         </div>
                       </div>
                     </div>
-
-                    {tarifaPropuesta > 0 && (
-                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[10px] font-mono text-amber-300 flex justify-between items-center">
-                        <span>Comisión Plataforma (10%):</span>
-                        <span className="font-bold">${(Number(tarifaPropuesta) * 0.10).toLocaleString()} COP</span>
-                      </div>
-                    )}
 
                     {/* 🚖 SELECCIÓN DE MODALIDAD ORGANIZADA (4 SERVICIOS) */}
                     <div>
