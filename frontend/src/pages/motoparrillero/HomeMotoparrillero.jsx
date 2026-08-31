@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.20 - Corrección de Sintaxis Final y Exportación por Defecto Estándar ES6
+// Versión Arquitectura: V12.21 - Actualización Capa Mapas OpenStreetMap y Gobernanza CIMCO-UI V9.3
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 

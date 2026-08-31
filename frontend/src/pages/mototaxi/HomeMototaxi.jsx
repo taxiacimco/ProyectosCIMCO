@@ -1,18 +1,18 @@
-// Versión Arquitectura: V19.9 - Incorporación de Guards de Validación de Saldo Operativo y Comisión en HomeMototaxi
+// Versión Arquitectura: V20.0 - Migración de Proveedor de Capas MapTile a OpenStreetMap Público en HomeMototaxi[cite: 10]
 /**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
- * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
- *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo), integración fluida
- *          con AjustesPerfil, validación local rigurosa de expiración JWT (Anti-401) con padding seguro,
- *          captura explícita de error HTTP 401 por nodo de identidad extinto con logout defensivo,
- *          sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409),
- *          resiliencia ante redes inestables (timeouts, reintentos e indicador de conectividad de red),
- *          manejo reactivo de estado Offline en UI mediante event listeners 'online'/'offline',
- *          unificación atómica de edición de perfil a través de AjustesPerfil y authService,
- *          guards estrictos de validación de saldo operativo ($2.000 COP) y comisión del 10% previa a la emisión Socket,
- *          limpieza atómica de hooks (watchPosition, listeners WebSocket y suscripciones Firestore)
- *          para prevención de fugas de memoria y centralización de trazabilidad mediante logger condicional.
- * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx[cite: 10]
+ * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real[cite: 10],
+ *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo)[cite: 10], integración fluida
+ *          con AjustesPerfil[cite: 10], validación local rigurosa de expiración JWT (Anti-401) con padding seguro[cite: 10],
+ *          captura explícita de error HTTP 401 por nodo de identidad extinto con logout defensivo[cite: 10],
+ *          sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409)[cite: 10],
+ *          resiliencia ante redes inestables (timeouts, reintentos e indicador de conectividad de red)[cite: 10],
+ *          manejo reactivo de estado Offline en UI mediante event listeners 'online'/'offline'[cite: 10],
+ *          unificación atómica de edición de perfil a través de AjustesPerfil y authService[cite: 10],
+ *          guards estrictos de validación de saldo operativo ($2.000 COP) y comisión del 10% previa a la emisión Socket[cite: 10],
+ *          limpieza atómica de hooks (watchPosition, listeners WebSocket y suscripciones Firestore)[cite: 10]
+ *          para prevención de fugas de memoria y centralización de trazabilidad mediante logger condicional[cite: 10].
+ * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5)[cite: 10].
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -55,6 +55,7 @@ const isTokenExpired = (rawToken) => {
 };
 
 const UMBRAL_MINIMO_COP = 2000;
+const OPENSTREETMAP_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 
 export default function HomeMototaxi() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA

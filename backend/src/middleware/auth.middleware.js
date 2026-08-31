@@ -1,7 +1,7 @@
-// Versión Arquitectura: V17.4 - Estandarización de Bearer Token y Telemetría de JWT_SECRET en Entornos Multicloud
+// Versión Arquitectura: V17.5 - Verificación de Decodificación de Encabezado Authorization para Puerto Local 3000 y Multicloud
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\auth.middleware.js
- * Misión: Securización estricta de JWT, inspección de tokens, estandarización de cabecera Bearer, 
+ * Misión: Securización estricta de JWT, inspección de tokens, estandarización de cabecera Bearer (soporte puerto 3000 local), 
  *          telemetría de depuración para sincronización Vercel/Railway/Render, bypass local, 
  *          compatibilidad multipart/form-data y verificación de existencia en BD (HTTP 401).
  * Integridad: Fusión Atómica. Preserva la retrocompatibilidad, normalización de payloads, guardas de seguridad y el manejo unificado de errores.
@@ -113,7 +113,7 @@ export const validateRegisterPayload = (req, res, next) => {
 
 /**
  * Middleware Principal: Verificar Autenticidad del Token (CIMCO-NEXUS)
- * Intercepta y valida el JSON Web Token inyectado en las cabeceras HTTP.
+ * Intercepta y valida el JSON Web Token inyectado en las cabeceras HTTP desde puerto 3000 / cliente Axios.
  */
 export const verificarToken = async (req, res, next) => {
     // 🛡️ GUARDA ELECTIVA PARA CONCURRENCIA DE ENTORNO LOCAL (Bypass de Automatización)
@@ -156,8 +156,8 @@ export const verificarToken = async (req, res, next) => {
         return res.status(401).json({ success: false, message: '❌ Acceso Denegado: Encabezados HTTP corruptos o inexistentes.' });
     }
 
-    // 🛡️ Estandarización y normalización del token Bearer desde req.headers['authorization']
-    const rawAuthHeader = req.headers['authorization'] || req.headers['Authorization'] || '';
+    // 🛡️ Estandarización y normalización del token Bearer desde req.headers['authorization'] (Soporte Express / Axios puerto 3000)
+    const rawAuthHeader = req.headers['authorization'] || req.headers['Authorization'] || req.headers['authorization-token'] || '';
     let token = null;
 
     if (typeof rawAuthHeader === 'string' && rawAuthHeader.trim()) {
@@ -168,6 +168,11 @@ export const verificarToken = async (req, res, next) => {
             // Retrocompatibilidad con clientes que omiten el prefijo 'Bearer'
             token = parts[0];
         }
+    }
+
+    // Sanitización adicional anti-comillas dobles o comillas simples encapsuladas
+    if (token) {
+        token = token.replace(/^["']|["']$/g, '').trim();
     }
 
     if (!token) {

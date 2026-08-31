@@ -1,9 +1,8 @@
-// Versión Arquitectura: V20.1 - Corrección de Importación Leaflet y Preservación del Ciclo de Vida del Viaje
+// Versión Arquitectura: V20.2 - Migración de Proveedor de Mapa a OpenStreetMap Público
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V20.1: Corrección de sintaxis limpia en la importación de react-leaflet (Línea 16),
- *               preservación de ciclo de vida completo (EN_RUTA, FINALIZADO) y exportación por defecto.
+ * Ajuste V20.2: Reemplazo de la capa de tiles de carto.com por el tile layer público de OpenStreetMap.
  */
 
 import React, { useState, useEffect, useRef } from 'react';

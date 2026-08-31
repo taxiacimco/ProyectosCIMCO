@@ -1,9 +1,9 @@
-// Versión Arquitectura: V19.6 - Fusión Atómica, Exportación Default y Blindaje de Payload Transaccional Completo
+// Versión Arquitectura: V19.7 - Reemplazo de TileLayer a OpenStreetMap Público
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones con identidad completa, calcomanía QR de autogestión,
  * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
- * Ajuste V19.6: Exportación por defecto para React.lazy() e inclusión garantizada del payload de identidad completo en WebSocket y REST.
+ * Ajuste V19.7: Actualización de la capa del mapa satelital/operativo a la fuente pública de OpenStreetMap.
  */
 
 import React, { useEffect, useState, Suspense } from "react";
@@ -570,7 +570,10 @@ export default function HomeDespachador() {
                     <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-500">Cargando Mapa Satelital...</span>
                   </div>
                 }>
-                  <MapaOperativo filtroCooperativa={cooperativaDespachador} />
+                  <MapaOperativo 
+                    filtroCooperativa={cooperativaDespachador} 
+                    tileLayerUrl="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
                 </Suspense>
               </div>
             </div>

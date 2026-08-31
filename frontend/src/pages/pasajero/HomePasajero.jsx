@@ -1,7 +1,7 @@
-// Versión Arquitectura: V21.46 - Corrección de Importación SDK Modular Firebase
+// Versión Arquitectura: V21.47 - Migración de Capa TileLayer a OpenStreetMap Public Layer
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
- * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (CartoDB Voyager),
+ * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (OpenStreetMap),
  *         integración atómica de telemetría, sockets, billetera smart, selector dinámico de flota (4 modalidades + Cooperativas < 5km),
  *         monitoreo de hardware GPS, entrada de dirección editable con botón de recalibración GPS, subasta dinámica
  *         de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil centralizada mediante authService,
@@ -672,7 +672,7 @@ export default function HomePasajero() {
         </div>
       </header>
 
-      {/* ---------------- CUERPO PRINCIPAL (PANEL CONTROL + MAPA VOYAGER) ---------------- */}
+      {/* ---------------- CUERPO PRINCIPAL (PANEL CONTROL + MAPA OPENSTREETMAP) ---------------- */}
       <div className="pt-[65px] flex-1 flex flex-col md:flex-row h-[calc(100vh-65px)] relative">
         
         {/* ---------------- BARRA LATERAL / PANEL DE CONTROL ---------------- */}
@@ -1107,7 +1107,7 @@ export default function HomePasajero() {
           </div>
         </aside>
 
-        {/* ---------------- MAPA VISUALMENTE CLARO & MODERNO (CARTO VOYAGER) ---------------- */}
+        {/* ---------------- MAPA VISUALMENTE CLARO & MODERNO (OPENSTREETMAP) ---------------- */}
         <main className="flex-1 h-[50vh] md:h-auto relative bg-slate-950 z-10">
           
           <MapContainer
@@ -1116,10 +1116,10 @@ export default function HomePasajero() {
             zoomControl={false}
             className="w-full h-full z-10"
           >
-            {/* CARTO VOYAGER TILE LAYER (Vías claras, contrastadas y legibles) */}
+            {/* OPENSTREETMAP TILE LAYER (Capa Pública) */}
             <TileLayer
-              attribution='&copy; <a href="https://carto.com/">CARTO</a> Voyager'
-              url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               maxZoom={19}
             />
 

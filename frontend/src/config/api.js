@@ -1,7 +1,7 @@
-// Versión Arquitectura: V24.4 - Configuración Dinámica de Axios con Interceptores JWT y Excepción de Endpoints Opcionales
+// Versión Arquitectura: V24.9 - Consumo Dinámico de VITE_API_URL e Interceptor JWT Blindado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
- * Misión: Centralización de Axios, inyección de cabeceras anti-caché, interceptores JWT multi-capa, gestión de FormData y manejo global de errores HTTP.
+ * Misión: Centralización de Axios, consumo de VITE_API_URL, inyección de cabeceras anti-caché, interceptores JWT multi-capa, gestión de FormData y manejo global de errores HTTP.
  */
 
 import axios from 'axios';
@@ -156,7 +156,7 @@ api.interceptors.response.use(
             if (status === 429) {
                 if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('cimco:rate_limit', {
-                        detail: { status, message: message || 'Excesso de solicitudes al servidor. Por favor, espere un momento.' }
+                        detail: { status, message: message || 'Exceso de solicitudes al servidor. Por favor, espere un momento.' }
                     }));
                 }
             }

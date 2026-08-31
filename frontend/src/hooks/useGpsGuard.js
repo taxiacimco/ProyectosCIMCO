@@ -1,13 +1,12 @@
-// Versión Arquitectura: V16.4 - Sincronización Radial Homologada con Alias @ de useSocket
+// Versión Arquitectura: V16.5 - Consolidación de importaciones con alias absoluto @/hooks/useLocation
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useGpsGuard.js
- * Misión: Centinela Perimetral de Rutas con control de ráfagas para Sockets.
- * Ajuste V16.4: Migración de importación de useSocket a alias absoluto @/hooks/useSocket.
+ * Misión: Centinela Perimetral de Rutas con control de ráfagas para Sockets y uso de alias absolutos.
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { useSocket } from '@/hooks/useSocket'; 
-import { useLocation } from './useLocation';   
+import { useLocation } from '@/hooks/useLocation';   
 
 export const useGpsGuard = (maxAccuracyThreshold = 1500) => {
   const [showGpsModal, setShowGpsModal] = useState(false);

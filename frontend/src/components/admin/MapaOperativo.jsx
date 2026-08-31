@@ -1,9 +1,9 @@
-// Versión Arquitectura: V19.6 - Integración Táctica de Control de Saldo Operativo y Estado de Marcadores
+// Versión Arquitectura: V19.7 - Migración a Capa Pública OpenStreetMap y Preservación CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
  * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled, prevención 
- *         de colisiones de contenedor en React 18 / React-Leaflet, recalibración de tiles (invalidateSize) 
- *         y evaluación de saldo operativo para inhabilitación visual de marcadores.
+ *         de colisiones de contenedor en React 18 / React-Leaflet, recalibración de tiles (invalidateSize),
+ *         uso de capa base pública OpenStreetMap (OSM) y evaluación de saldo operativo para marcadores.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -225,8 +225,8 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                     <MapReferenceBinder onMapReady={(map) => { mapInstanceRef.current = map; }} />
 
                     <TileLayer
-                        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     />
 
                     <MarkerClusterGroup

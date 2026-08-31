@@ -1,8 +1,7 @@
-// Versión Arquitectura: V2.0 - Resiliencia Satelital Urbana y Fallback Tolerante a Microcortes de Red
+// Versión Arquitectura: V2.1 - Actualización de Opciones de Geolocalización a Parámetros de Rendimiento Rápido
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useLocation.js
- * Misión: Consumir el sensor GPS del dispositivo con opciones optimizadas (enableHighAccuracy: false, timeout: 10000ms, maximumAge: 30000ms)
- * para garantizar respuestas inmediatas sin bloqueos por alta precisión ni desconexiones por microcortes.
+ * Misión: Consumir el sensor GPS del dispositivo con opciones optimizadas solicitadas ({ enableHighAccuracy: false, timeout: 15000, maximumAge: 5000 }).
  */
 import { useState, useEffect, useRef } from 'react';
 
@@ -23,11 +22,11 @@ export const useLocation = (maxAccuracyThreshold = 1500) => {
             return;
         }
 
-        // 🛡️ Opciones de baja latencia y alta tolerancia a cortes de red / GPS
+        // 🛡️ Opciones de geolocalización ajustadas exactamente al requerimiento técnico
         const opcionesGpsResiliente = {
-            enableHighAccuracy: false, // Desactivado para evitar bloqueos por GPS satelital puro en caídas de red
-            timeout: 10000,            // 10 segundos máximo de espera
-            maximumAge: 30000          // Reutiliza posiciones guardadas en caché de hasta 30 segundos
+            enableHighAccuracy: false,
+            timeout: 15000,
+            maximumAge: 5000
         };
 
         const handleSuccess = (position) => {
@@ -39,7 +38,7 @@ export const useLocation = (maxAccuracyThreshold = 1500) => {
 
             const { latitude, longitude, accuracy } = position.coords;
 
-            // 🛡️ Filtro Adaptativo: Acepta lecturas dentro del umbral (predeterminado 1500m para soporte de laptops/Wi-Fi)
+            // 🛡️ Filtro Adaptativo: Acepta lecturas dentro del umbral
             if (typeof accuracy === 'number' && accuracy > maxAccuracyThreshold) {
                 console.warn(`⚠️ [GPS-REBOTE] Lectura descartada. Precisión actual: ${Math.round(accuracy)}m (Umbral: ${maxAccuracyThreshold}m)`);
                 setEscaneandoPrecision(true);
@@ -79,7 +78,7 @@ export const useLocation = (maxAccuracyThreshold = 1500) => {
             setEscaneandoPrecision(false);
         };
 
-        // Obtener lectura inicial inmediata utilizando caché
+        // Obtener lectura inicial inmediata
         navigator.geolocation.getCurrentPosition(
             handleSuccess,
             handleError,

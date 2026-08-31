@@ -1,7 +1,7 @@
-// Versión Arquitectura: V24.1 - Servicio Centralizado de Billetera y Finanzas (CIMCO-WALLET-SERVICE)
+// Versión Arquitectura: V24.9 - Verificación e Integración de Instancia Centralizada Axios en Billetera
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\walletService.js
- * Misión: Gestión de saldos, recargas, historial de transacciones y transferencias entre cuentas.
+ * Misión: Gestión de saldos, recargas, historial de transacciones y transferencias entre cuentas mediante la instancia centralizada de Axios con interceptores JWT.
  */
 
 import api from '@/config/api';
@@ -10,14 +10,19 @@ const WALLET_BASE = '/billetera';
 
 export const walletService = {
     /**
-     * Consulta el saldo actual y estado de la billetera digital
+     * Consulta el saldo actual y estado de la billetera digital garantizando el paso por interceptores JWT
      * @param {AbortSignal} [signal] - Control de cancelación HTTP
      */
     async getSaldo(signal = null) {
-        const config = {};
-        if (signal) config.signal = signal;
-        const response = await api.get(`${WALLET_BASE}/saldo`, config);
-        return response?.data || { saldo: 0, activo: true };
+        try {
+            const config = {};
+            if (signal) config.signal = signal;
+            const response = await api.get(`${WALLET_BASE}/saldo`, config);
+            return response?.data || { saldo: 0, activo: true };
+        } catch (error) {
+            console.error('🚨 [CIMCO-WALLET] Error al obtener saldo:', error);
+            throw error;
+        }
     },
 
     /**
@@ -26,10 +31,15 @@ export const walletService = {
      * @param {AbortSignal} [signal]
      */
     async getTransacciones(params = {}, signal = null) {
-        const config = { params: params && typeof params === 'object' ? params : {} };
-        if (signal) config.signal = signal;
-        const response = await api.get(`${WALLET_BASE}/transacciones`, config);
-        return response?.data || [];
+        try {
+            const config = { params: params && typeof params === 'object' ? params : {} };
+            if (signal) config.signal = signal;
+            const response = await api.get(`${WALLET_BASE}/transacciones`, config);
+            return response?.data || [];
+        } catch (error) {
+            console.error('🚨 [CIMCO-WALLET] Error al obtener transacciones:', error);
+            throw error;
+        }
     },
 
     /**
@@ -40,8 +50,13 @@ export const walletService = {
         if (!recargaPayload || typeof recargaPayload !== 'object' || !recargaPayload.monto || Number(recargaPayload.monto) <= 0) {
             throw new Error('El monto de la recarga es requerido y debe ser mayor a cero.');
         }
-        const response = await api.post(`${WALLET_BASE}/recargar`, recargaPayload);
-        return response?.data || {};
+        try {
+            const response = await api.post(`${WALLET_BASE}/recargar`, recargaPayload);
+            return response?.data || {};
+        } catch (error) {
+            console.error('🚨 [CIMCO-WALLET] Error al solicitar recarga:', error);
+            throw error;
+        }
     },
 
     /**
@@ -58,8 +73,13 @@ export const walletService = {
         if (!transferPayload.monto || Number(transferPayload.monto) <= 0) {
             throw new Error('El monto a transferir debe ser mayor a cero.');
         }
-        const response = await api.post(`${WALLET_BASE}/transferir`, transferPayload);
-        return response?.data || {};
+        try {
+            const response = await api.post(`${WALLET_BASE}/transferir`, transferPayload);
+            return response?.data || {};
+        } catch (error) {
+            console.error('🚨 [CIMCO-WALLET] Error al ejecutar transferencia:', error);
+            throw error;
+        }
     }
 };
 

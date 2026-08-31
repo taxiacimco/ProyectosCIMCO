@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.23 - Limpieza de Sintaxis Residual y Confirmación de Exportación por Defecto
+// Versión Arquitectura: V12.24 - Validación de capa cartográfica OSM (TileLayer no implementado en este nodo) y blindaje de referencias
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
@@ -85,7 +85,7 @@ export default function HomeMotocarga() {
     // 2. Fallback secundario a Firestore NoSQL con ordenamiento local para evitar errores de índice
     try {
       const q = query(
-        collection(db, FIRESTORE_PATHS.rides || FIRESTORE_PATHS.viajes || 'viajes'),
+        collection(db, FIRESTORE_PATHS?.rides || FIRESTORE_PATHS?.viajes || 'viajes'),
         where('conductorId', '==', idOperador),
         where('estado', '==', 'COMPLETADO')
       );
@@ -261,7 +261,7 @@ export default function HomeMotocarga() {
     } else {
       desconectarEcosistema();
     }
-  }, [isOnline, conductorId, socket, iniciarTrackingGPS, desconectarEcosistema, user?.email]);
+  }, [isOnline, conductorId, socket, iniciarTrackingGPS, desconectarEcosistema, user?.email, saldoVivo, servicioActivo, solicitudViaje]);
 
   // ==================================================================
   // 5. ESCUCHA ATÓMICA DE FLETES EN RADAR FIRESTORE
@@ -327,7 +327,7 @@ export default function HomeMotocarga() {
     });
 
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [user?.uid, servicioActivo]);
 
   // ==================================================================
   // 7. ACCIONES DE GESTIÓN LOGÍSTICA CON DEPURACIÓN CONTABLE
@@ -424,16 +424,16 @@ export default function HomeMotocarga() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0e0e11] text-zinc-100 font-mono antialiased pb-28 relative selection:bg-amber-400 selection:text-black">
+    <div className="min-h-screen bg-[#121214]/80 backdrop-blur-md text-zinc-100 font-mono antialiased pb-28 relative selection:bg-amber-400 selection:text-black">
       
       {/* 🔝 ENCABEZADO DE CONTROL MAESTRO */}
-      <header className="sticky top-0 z-50 bg-zinc-900 border-b-4 border-black p-4 flex justify-between items-center shadow-[0_4px_0px_0px_#000]">
+      <header className="sticky top-0 z-50 bg-[#121214]/90 backdrop-blur-lg border-b border-white/5 p-4 flex justify-between items-center">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           {/* BOTÓN OPERATIVO PARA ABRIR MODAL DESDE EL ICONO */}
           <button 
             onClick={() => setMostrarModalPerfil(true)}
             title="Editar Perfil y Vehículo"
-            className="p-2 bg-amber-400 text-black border-2 border-black font-black text-base flex items-center justify-center shadow-[2px_2px_0px_0px_#000] select-none shrink-0 rounded-none hover:bg-amber-300 transition-colors active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+            className="p-2 bg-amber-400/90 text-black border border-white/10 font-black text-base flex items-center justify-center rounded-lg hover:bg-amber-400 transition-colors shrink-0"
           >
             🚚
           </button>
@@ -451,14 +451,14 @@ export default function HomeMotocarga() {
         <div className="flex items-center gap-2 shrink-0 ml-2">
           <button
             onClick={() => setIsOnline(!isOnline)}
-            className={`px-3 py-1.5 rounded-none font-black text-[10px] uppercase tracking-wider border-2 border-black transition-all duration-150 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none shadow-[2px_2px_0px_0px_#000] ${
-              isOnline ? 'bg-amber-400 text-black font-black' : 'bg-zinc-800 text-zinc-400 border-black hover:bg-zinc-700'
+            className={`px-3 py-1.5 rounded-lg font-black text-[10px] uppercase tracking-wider border border-white/5 transition-all duration-150 ${
+              isOnline ? 'bg-amber-400/90 text-black font-black' : 'bg-zinc-800/50 text-zinc-400 hover:bg-zinc-700/50'
             }`}
           >
             {isOnline ? 'ONLINE' : 'OFFLINE'}
           </button>
 
-          <div className="flex items-center gap-2 bg-black border-2 border-black px-2.5 py-1.5 rounded-none shadow-[2px_2px_0px_0px_#000]">
+          <div className="flex items-center gap-2 bg-black/50 border border-white/5 px-2.5 py-1.5 rounded-lg">
             <Wallet size={13} className="text-amber-400" strokeWidth={2.5} />
             <span className="text-[10px] font-black text-zinc-200">
               {walletLoading ? '...' : `$${Number(saldoVivo).toLocaleString('es-CO')}`}
@@ -467,7 +467,7 @@ export default function HomeMotocarga() {
 
           <button 
             onClick={handleCerrarSesion}
-            className="p-2 bg-red-500 text-black border-2 border-black rounded-none hover:bg-red-600 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all flex items-center justify-center shadow-[2px_2px_0px_0px_#000] shrink-0"
+            className="p-2 bg-red-500/80 text-white border border-white/5 rounded-lg hover:bg-red-600 transition-all flex items-center justify-center shrink-0"
           >
             <LogOut size={13} strokeWidth={3} />
           </button>
@@ -476,7 +476,7 @@ export default function HomeMotocarga() {
 
       {/* BLOQUEO POR SALDO INSOLVENTE */}
       {Number(saldoVivo) < 2000 && !walletLoading && (
-        <div className="m-4 p-3 bg-red-500 text-black border-4 border-black rounded-none flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider shadow-[4px_4px_0px_0px_#000] relative z-10 animate-pulse">
+        <div className="m-4 p-3 bg-red-500/20 backdrop-blur-md text-red-200 border border-red-500/30 rounded-lg flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider relative z-10 animate-pulse">
           <AlertCircle size={16} strokeWidth={2.5} className="shrink-0" />
           <span>Radar Inactivo: Recargar saldo para fletes ($2.000 COP mín)</span>
         </div>
@@ -486,8 +486,8 @@ export default function HomeMotocarga() {
       <main className="p-4 z-10 relative max-w-md mx-auto space-y-6">
         
         {!isOnline && (
-          <div className="text-center p-6 bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none my-8">
-            <div className="w-12 h-12 bg-black border-2 border-black rounded-none flex items-center justify-center mx-auto mb-4 shadow-[2px_2px_0px_0px_#000]">
+          <div className="text-center p-6 bg-zinc-900/40 backdrop-blur-md border border-white/5 rounded-xl my-8">
+            <div className="w-12 h-12 bg-black/50 border border-white/10 rounded-full flex items-center justify-center mx-auto mb-4">
               <Package className="text-zinc-500" size={20} strokeWidth={2.5} />
             </div>
             <p className="text-zinc-300 text-xs leading-relaxed uppercase font-bold tracking-wide">
@@ -500,20 +500,20 @@ export default function HomeMotocarga() {
           <>
             {/* CASO 1: ORDEN DE CARGA EN PROCESO (FIRESTORE) */}
             {servicioActivo ? (
-              <div className="bg-zinc-900 p-5 border-4 border-black shadow-[4px_4px_0px_0px_#000] rounded-none space-y-4">
-                <div className="flex justify-between items-center border-b-4 border-black pb-3">
+              <div className="bg-zinc-900/60 backdrop-blur-lg p-5 border border-white/5 rounded-xl space-y-4">
+                <div className="flex justify-between items-center border-b border-white/10 pb-3">
                   <div className="flex items-center gap-1.5">
                     <Truck className="text-amber-400 animate-pulse" size={14} strokeWidth={3} />
-                    <span className="text-[9px] font-black tracking-widest bg-yellow-400 text-black border-2 border-black px-2 py-0.5 uppercase">
+                    <span className="text-[9px] font-black tracking-widest bg-yellow-400/20 text-yellow-400 border border-yellow-400/30 rounded px-2 py-0.5 uppercase">
                       FLETE: {servicioActivo.estado}
                     </span>
                   </div>
-                  <span className="text-[9px] font-bold bg-black text-zinc-400 px-2 py-0.5 border border-zinc-800">
+                  <span className="text-[9px] font-bold bg-black/50 text-zinc-400 px-2 py-0.5 border border-white/5 rounded">
                     ID: ...{String(servicioActivo?.id || "").slice(-6).toUpperCase()}
                   </span>
                 </div>
 
-                <div className="space-y-3 text-xs bg-black/40 p-3 border-2 border-black">
+                <div className="space-y-3 text-xs bg-black/30 p-3 rounded-lg border border-white/5">
                   <div className="flex items-start gap-2.5">
                     <MapPin size={14} className="text-emerald-400 mt-0.5 shrink-0" strokeWidth={2.5} />
                     <div>
@@ -522,7 +522,7 @@ export default function HomeMotocarga() {
                     </div>
                   </div>
 
-                  <div className="border-t border-dashed border-zinc-800 my-2"></div>
+                  <div className="border-t border-dashed border-white/10 my-2"></div>
 
                   <div className="flex items-start gap-2.5">
                     <Navigation size={14} className="text-cyan-400 mt-0.5 shrink-0" strokeWidth={2.5} />
@@ -533,17 +533,17 @@ export default function HomeMotocarga() {
                   </div>
 
                   {servicioActivo.detallesCarga && (
-                    <div className="bg-black/60 p-2.5 border border-zinc-800 text-[10px] text-zinc-400 font-bold uppercase tracking-wide">
+                    <div className="bg-black/40 p-2.5 border border-white/5 rounded-lg text-[10px] text-zinc-300 font-bold uppercase tracking-wide">
                       <span className="text-amber-400 font-black">📦 Manifiesto:</span> {servicioActivo.detallesCarga}
                     </div>
                   )}
 
-                  <div className="border-t border-4 border-black pt-3 mt-2 flex justify-between items-center">
+                  <div className="border-t border-white/10 pt-3 mt-2 flex justify-between items-center">
                     <div className="flex items-center gap-1.5 text-zinc-400 text-[10px] uppercase font-black">
                       <CircleDollarSign size={14} className="text-amber-500" strokeWidth={2.5} />
                       <span>Valor Liquidado:</span>
                     </div>
-                    <span className="text-xs font-black text-white bg-black border border-zinc-800 px-2.5 py-1">
+                    <span className="text-xs font-black text-white bg-black/50 border border-white/10 rounded-md px-2.5 py-1">
                       ${Number(servicioActivo.valor || 0).toLocaleString('es-CO')} COP
                     </span>
                   </div>
@@ -553,7 +553,7 @@ export default function HomeMotocarga() {
                   {servicioActivo.estado === 'ACEPTADO' && (
                     <button 
                       onClick={() => transicionarEstadoViaje('EN_SITIO')}
-                      className="w-full bg-amber-400 hover:bg-amber-500 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                      className="w-full bg-amber-400/90 hover:bg-amber-400 text-black text-xs font-black uppercase py-3.5 border border-white/10 rounded-lg tracking-widest transition-all shadow-lg shadow-amber-400/20"
                     >
                       Confirmar: Llegada a Punto de Carga
                     </button>
@@ -561,7 +561,7 @@ export default function HomeMotocarga() {
                   {servicioActivo.estado === 'EN_SITIO' && (
                     <button 
                       onClick={() => transicionarEstadoViaje('EN_VIAJE')}
-                      className="w-full bg-orange-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                      className="w-full bg-orange-400/90 text-black text-xs font-black uppercase py-3.5 border border-white/10 rounded-lg tracking-widest transition-all shadow-lg shadow-orange-400/20"
                     >
                       Iniciar Ruta de Reparto
                     </button>
@@ -569,7 +569,7 @@ export default function HomeMotocarga() {
                   {servicioActivo.estado === 'EN_VIAJE' && (
                     <button 
                       onClick={() => transicionarEstadoViaje('FINALIZADO')}
-                      className="w-full bg-emerald-400 text-black text-xs font-black uppercase py-3.5 border-2 border-black rounded-none tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[2px_2px_0px_0px_#000] transition-all"
+                      className="w-full bg-emerald-400/90 text-black text-xs font-black uppercase py-3.5 border border-white/10 rounded-lg tracking-widest transition-all shadow-lg shadow-emerald-400/20"
                     >
                       Finalizar Entrega y Cobrar
                     </button>
@@ -580,22 +580,22 @@ export default function HomeMotocarga() {
               <>
                 {/* CASO 2: CARD FLOTANTE DE ENTRADA WEBSOCKET EN VIVO */}
                 {solicitudViaje && (
-                  <div className="w-full bg-zinc-900 border-4 border-amber-400 p-5 rounded-none shadow-[6px_6px_0px_0px_#000] space-y-4 mb-6 animate-pulse">
-                    <div className="flex justify-between items-start border-b-2 border-black pb-3">
-                      <span className="bg-amber-400 text-black text-[9px] font-black px-2 py-1 border border-black uppercase tracking-wider">
+                  <div className="w-full bg-zinc-900/80 backdrop-blur-xl border border-amber-400/50 p-5 rounded-xl shadow-2xl shadow-amber-500/10 space-y-4 mb-6 animate-pulse">
+                    <div className="flex justify-between items-start border-b border-white/10 pb-3">
+                      <span className="bg-amber-400/20 text-amber-400 text-[9px] font-black px-2 py-1 border border-amber-400/30 rounded uppercase tracking-wider">
                         📦 SOLICITUD DE FLETE REAL-TIME
                       </span>
-                      <span className="text-sm font-black text-amber-400 bg-black px-2.5 py-0.5 border border-zinc-800">
+                      <span className="text-sm font-black text-amber-400 bg-black/50 rounded-lg px-2.5 py-0.5 border border-white/5">
                         ${Number(solicitudViaje?.tarifa || solicitudViaje?.valor || 0).toLocaleString('es-CO')}
                       </span>
                     </div>
                     
-                    <div className="space-y-2.5 text-xs text-zinc-300 bg-black/40 p-3 border-2 border-black">
+                    <div className="space-y-2.5 text-xs text-zinc-300 bg-black/40 p-3 rounded-lg border border-white/5">
                       <p className="flex items-start gap-1.5">
                         <span className="text-amber-500 font-black shrink-0">📍</span>
                         <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Origen:</strong> {solicitudViaje?.origenTexto || solicitudViaje?.origenDireccion || "Punto de Carga"}</span>
                       </p>
-                      <div className="border-t border-dashed border-zinc-800 my-1.5"></div>
+                      <div className="border-t border-dashed border-white/10 my-1.5"></div>
                       <p className="flex items-start gap-1.5">
                         <span className="text-cyan-400 font-black shrink-0">🏁</span>
                         <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Destino:</strong> {solicitudViaje?.destinoTexto || solicitudViaje?.destinoDireccion || "Destino de Despacho"}</span>
@@ -606,14 +606,14 @@ export default function HomeMotocarga() {
                       <button
                         onClick={() => setSolicitudViaje(null)}
                         disabled={loading}
-                        className="bg-zinc-700 hover:bg-zinc-600 text-zinc-200 py-2 rounded-none font-bold text-xs uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                        className="bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 py-2 rounded-lg font-bold text-xs uppercase tracking-wider border border-white/5 transition-all disabled:opacity-50"
                       >
                         Ignorar
                       </button>
                       <button
                         onClick={aceptarViaje}
                         disabled={loading}
-                        className="bg-amber-400 hover:bg-amber-500 text-black py-2 rounded-none font-black text-xs uppercase tracking-widest border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                        className="bg-amber-400/90 hover:bg-amber-400 text-black py-2 rounded-lg font-black text-xs uppercase tracking-widest border border-white/10 transition-all disabled:opacity-50 shadow-lg shadow-amber-400/20"
                       >
                         {loading ? 'ASIGNANDO...' : 'TOMAR FLETE'}
                       </button>
@@ -623,25 +623,25 @@ export default function HomeMotocarga() {
 
                 {/* CASO 3: HISTORIAL EN RADAR FIRESTORE DE OFERTAS DISPONIBLES */}
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between px-1 border-b-2 border-black pb-2">
+                  <div className="flex items-center justify-between px-1 border-b border-white/10 pb-2">
                     <div className="flex items-center gap-2">
                       <TrendingUp size={14} className="text-amber-500 animate-pulse" strokeWidth={2.5} />
                       <h2 className="text-[10px] uppercase font-black tracking-widest text-zinc-400">
                         Fletes Libres en Radar ({ofertasDisponibles.length})
                       </h2>
                     </div>
-                    <span className="text-[9px] text-zinc-400 bg-zinc-900 px-2 py-1 border-2 border-black flex items-center gap-1.5 font-bold shadow-[1px_1px_0px_0px_#000]">
+                    <span className="text-[9px] text-zinc-400 bg-zinc-900/50 px-2 py-1 rounded-md border border-white/5 flex items-center gap-1.5 font-bold">
                       <MapPin size={11} className="text-amber-400" strokeWidth={3} />
                       GPS: [{coordenadas?.lng?.toFixed(4)}, {coordenadas?.lat?.toFixed(4)}]
                     </span>
                   </div>
 
                   {cargandoOfertas ? (
-                    <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-zinc-900 border-4 border-black shadow-[4px_4px_0px_0px_#000] flex items-center justify-center gap-3">
+                    <div className="text-center py-12 text-zinc-500 font-bold text-xs uppercase tracking-wider bg-zinc-900/40 backdrop-blur-md border border-white/5 rounded-xl flex items-center justify-center gap-3">
                       <Loader size={14} className="animate-spin text-amber-400" /> Sincronizando malla de fletes...
                     </div>
                   ) : ofertasDisponibles.length === 0 ? (
-                    <div className="bg-zinc-900 border-4 border-black rounded-none p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black shadow-[4px_4px_0px_0px_#000]">
+                    <div className="bg-zinc-900/40 backdrop-blur-md border border-white/5 rounded-xl p-8 text-center text-zinc-500 text-xs uppercase tracking-widest font-black">
                       Sin solicitudes de carga pendientes en la zona.
                     </div>
                   ) : (
@@ -649,16 +649,16 @@ export default function HomeMotocarga() {
                       {ofertasDisponibles.map((oferta) => (
                         <div 
                           key={oferta.id} 
-                          className="bg-zinc-900 p-4 border-4 border-black rounded-none flex flex-col gap-3 shadow-[4px_4px_0px_0px_#000] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#000] transition-all duration-150"
+                          className="bg-zinc-900/60 backdrop-blur-lg p-4 border border-white/5 rounded-xl flex flex-col gap-3 hover:bg-zinc-800/60 transition-all duration-150"
                         >
                           <div className="text-xs space-y-2">
-                            <div className="flex items-center justify-between border-b-2 border-black pb-2">
-                              <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest bg-black px-2 py-0.5 border border-zinc-800">
+                            <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                              <span className="text-[9px] font-black text-amber-400 uppercase tracking-widest bg-black/40 px-2 py-0.5 rounded border border-white/5">
                                 MOTOCARGA
                               </span>
                               <span className="font-black text-white text-sm">${Number(oferta.valor || 0).toLocaleString('es-CO')}</span>
                             </div>
-                            <div className="space-y-1 bg-black/30 p-2 border border-zinc-800">
+                            <div className="space-y-1 bg-black/30 p-2 rounded-lg border border-white/5">
                               <p className="text-zinc-300 font-bold text-[11px] truncate flex items-center gap-1.5">
                                 <MapPin size={12} className="text-emerald-400 shrink-0" strokeWidth={2.5} /> {oferta.origenDireccion || "Ubicación Base"}
                               </p>
@@ -671,7 +671,7 @@ export default function HomeMotocarga() {
                             <button 
                               onClick={() => capturarOferta(oferta.id)}
                               disabled={Number(saldoVivo) < 2000}
-                              className="w-full bg-amber-400 text-black disabled:bg-zinc-800 disabled:border-zinc-700 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-none uppercase tracking-wider border-2 border-black shadow-[2px_2px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all"
+                              className="w-full bg-amber-400/90 text-black disabled:bg-zinc-800/50 disabled:border-white/5 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-lg uppercase tracking-wider border border-white/10 transition-all"
                             >
                               {Number(saldoVivo) < 2000 ? 'SALDO BLOQUEADO' : 'CAPTURAR FLETE'}
                             </button>
@@ -687,18 +687,18 @@ export default function HomeMotocarga() {
         )}
       </main>
 
-      {/* 🛠️ MODAL NEO-BRUTALISTA DE AJUSTE DE DATOS PERSONALES / VEHÍCULO */}
+      {/* 🛠️ MODAL GLASSMORPHISM DE AJUSTE DE DATOS PERSONALES / VEHÍCULO */}
       {mostrarModalPerfil && (
-        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-zinc-900 border-4 border-black shadow-[8px_8px_0px_0px_#000] p-5 space-y-4 font-mono">
-            <div className="flex justify-between items-center border-b-4 border-black pb-2">
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4 font-mono">
+            <div className="flex justify-between items-center border-b border-white/10 pb-2">
               <div className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-widest">
                 <UserSquare2 size={16} className="text-amber-400" />
                 <span>Perfil Operador</span>
               </div>
               <button 
                 onClick={() => setMostrarModalPerfil(false)}
-                className="text-[10px] font-black bg-zinc-800 border-2 border-black text-zinc-400 px-2 py-0.5 uppercase hover:bg-zinc-700 active:translate-x-[1px]"
+                className="text-[10px] font-black bg-zinc-800/50 border border-white/5 text-zinc-400 px-2 py-0.5 rounded uppercase hover:bg-zinc-700/50"
               >
                 Cerrar [X]
               </button>
@@ -712,7 +712,7 @@ export default function HomeMotocarga() {
                   required
                   value={datosPerfil.nombre}
                   onChange={(e) => setDatosPerfil({...datosPerfil, nombre: e.target.value})}
-                  className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-amber-400 rounded-none placeholder-zinc-700 uppercase"
+                  className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 uppercase transition-colors"
                   placeholder="Ej: MARCOS DIAZ"
                 />
               </div>
@@ -724,7 +724,7 @@ export default function HomeMotocarga() {
                   required
                   value={datosPerfil.telefono}
                   onChange={(e) => setDatosPerfil({...datosPerfil, telefono: e.target.value})}
-                  className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-amber-400 rounded-none placeholder-zinc-700"
+                  className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 transition-colors"
                   placeholder="Ej: 3157654321"
                 />
               </div>
@@ -737,7 +737,7 @@ export default function HomeMotocarga() {
                     required
                     value={datosPerfil.placa}
                     onChange={(e) => setDatosPerfil({...datosPerfil, placa: e.target.value})}
-                    className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-amber-400 rounded-none placeholder-zinc-700 uppercase"
+                    className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 uppercase transition-colors"
                     placeholder="Ej: ABC45F"
                   />
                 </div>
@@ -748,7 +748,7 @@ export default function HomeMotocarga() {
                     required
                     value={datosPerfil.motoModelo}
                     onChange={(e) => setDatosPerfil({...datosPerfil, motoModelo: e.target.value})}
-                    className="w-full bg-black text-zinc-100 border-2 border-black p-2 font-bold focus:outline-none focus:border-amber-400 rounded-none placeholder-zinc-700"
+                    className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 transition-colors"
                     placeholder="Ej: Torito RE 205"
                   />
                 </div>
@@ -758,7 +758,7 @@ export default function HomeMotocarga() {
                 <button
                   type="submit"
                   disabled={guardandoPerfil}
-                  className="w-full bg-amber-400 hover:bg-amber-500 text-black font-black uppercase py-3 border-2 border-black tracking-widest shadow-[3px_3px_0px_0px_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition-all disabled:opacity-50"
+                  className="w-full bg-amber-400/90 hover:bg-amber-400 text-black font-black uppercase py-3 border border-white/10 rounded-lg tracking-widest shadow-lg shadow-amber-400/20 transition-all disabled:opacity-50"
                 >
                   {guardandoPerfil ? 'GUARDANDO CAMBIOS...' : 'ACTUALIZAR DATOS'}
                 </button>
@@ -769,7 +769,7 @@ export default function HomeMotocarga() {
       )}
 
       {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR */}
-      <footer className="fixed bottom-0 left-0 w-full bg-zinc-900 border-t-4 border-black p-3 flex justify-around items-center z-50 shadow-[0_-4px_0px_0px_#000]">
+      <footer className="fixed bottom-0 left-0 w-full bg-[#121214]/90 backdrop-blur-lg border-t border-white/5 p-3 flex justify-around items-center z-50">
         <button className="text-amber-400 flex flex-col items-center gap-0.5 transition-transform active:scale-95">
           <Truck size={18} strokeWidth={2.5} />
           <span className="text-[9px] font-black uppercase tracking-wider">Radar Fletes</span>
