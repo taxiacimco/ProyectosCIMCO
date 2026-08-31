@@ -1,14 +1,12 @@
-// Versión Arquitectura: V25.0 - Integración de Flag de Operatividad, Validación Previa canAcceptService y Cabecera X-Idempotency-Key
+// Versión Arquitectura: V25.1 - Manejo Silencioso de Errores REST 401/Auth y Resiliencia en useWallet
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
  * Misión: Hook centralizado para la gobernanza del saldo de la billetera.
- * Ajustes V25.0:
- *  1. Flag de Operatividad:
- *     - Pasajero / Intermunicipal: estaHabilitadoParaOperar = true
- *     - Mototaxi, Motoparrillero, Motocarga, Despachador: estaHabilitadoParaOperar = (saldoWallet >= 2000)
- *  2. Método canAcceptService(valorCarrera):
- *     - Comprueba si el saldo remanente tras descontar la comisión del rol (10% o $500 COP) mantendrá el saldo >= $2.000 COP.
- *  3. Garantizar la cabecera X-Idempotency-Key en todas las peticiones de actualización/débito de saldo.
+ * Ajustes V25.1:
+ *  1. Envolver llamadas REST a walletService/api dentro de bloques try/catch robustos utilizando la instancia configurada de api.js.
+ *  2. Capturar explícitamente errores 401 / 403 / Auth de la billetera para evitar la propagación de excepciones que deslogueen al usuario o bloqueen la UI.
+ *  3. Asignación de estado degradado seguro (mantener el saldo local o valor seguro) con registro en alerta silenciosa.
+ *  4. Preservación estricta de las funciones canAcceptService, estaHabilitadoParaOperar, idempotencia y la integración dual REST + Firestore.
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -75,13 +73,13 @@ export const useWallet = () => {
 
     /**
      * 🌐 Consulta SSOT directa a la API REST consumiendo el servicio walletService
-     * Resiliente con timeout de 5000ms y preservación del saldo previo ante latencia o fallos de red.
+     * Resiliente con aislamiento de errores 401/403 para evitar la expulsión/deslogueo del usuario.
      */
     const obtenerSaldoDesdeBackend = useCallback(async () => {
         if (!idDocumentoUnificado) return 0;
 
         try {
-            // Consumo centralizado del servicio walletService
+            // Consumo centralizado del servicio walletService protegido por try/catch
             const respuestaBackend = await walletService.getSaldo();
             const datosBackend = respuestaBackend?.conductor || respuestaBackend?.pasajero || respuestaBackend?.usuario || respuestaBackend?.user || respuestaBackend;
             
@@ -102,12 +100,21 @@ export const useWallet = () => {
                 return saldoValido;
             }
         } catch (apiErr) {
+            const statusHTTP = apiErr?.response?.status;
+            
+            // Captura explícita de fallos de autorización (401/403) para degradación segura silenciosa
+            if (statusHTTP === 401 || statusHTTP === 403) {
+                console.warn("🛡️ [CIMCO-WALLET-SILENT-AUTH] Fallo de autorización (401/403) al consultar saldo. Asignando estado degradado seguro de billetera sin romper la sesión.");
+                // Se conserva el saldo actual o se retorna un fallback seguro sin propagar la excepción hacia el AuthProvider
+                return Number(saldo) || 0;
+            }
+
             console.warn("⚠️ [CIMCO-WALLET] Error/Timeout consultando Backend REST. Conservando saldo local previo:", apiErr?.message);
             return null;
         }
 
         return null;
-    }, [idDocumentoUnificado]);
+    }, [idDocumentoUnificado, saldo]);
 
     useEffect(() => {
         if (!idDocumentoUnificado) {
@@ -118,8 +125,12 @@ export const useWallet = () => {
         let unsubscribeFirestore = null;
 
         const sincronizarBoveda = async () => {
-            // 1. Carga prioritaria inmediata desde MongoDB (SSOT)
-            await obtenerSaldoDesdeBackend();
+            // 1. Carga prioritaria inmediata desde MongoDB (SSOT) con captura interna de fallos
+            try {
+                await obtenerSaldoDesdeBackend();
+            } catch (errBackend) {
+                console.warn("⚠️ [CIMCO-WALLET] Fallo no fatal en sincronización inicial de saldo REST:", errBackend?.message);
+            }
 
             // 2. Suscripción en tiempo real vía Firestore
             try {
@@ -193,7 +204,7 @@ export const useWallet = () => {
 
     /**
      * ⚡ MUTACIÓN TRANSACCIONAL DUAL (MongoDB REST Primario + Firestore Backup)
-     * 3. Incluye X-Idempotency-Key obligatoria para evitar duplicados en cobros de red.
+     * Captura aislada de errores de autorización con preservación de estado e idempotencia.
      */
     const procesarDebitoTransaccional = async (montoDebito, motivo = "DEBITO_OPERATIVO") => {
         if (!idDocumentoUnificado) throw new Error("No hay un identificador de usuario válido para la transacción.");
@@ -264,14 +275,19 @@ export const useWallet = () => {
             setIsMutating(false);
             return true;
         } catch (err) {
-            console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Error en el débito:", err?.message);
+            const statusHTTP = err?.response?.status;
+            if (statusHTTP === 401 || statusHTTP === 403) {
+                console.warn("🛡️ [CIMCO-WALLET-MUTATION-AUTH] Fallo 401/403 durante débito. Transacción abortada de forma segura.");
+            } else {
+                console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Error en el débito:", err?.message);
+            }
             setIsMutating(false);
             throw err;
         }
     };
 
     /**
-     * 3. Método para recargas/créditos con X-Idempotency-Key obligatoria
+     * 3. Método para recargas/créditos con X-Idempotency-Key obligatoria y manejo resiliente
      */
     const procesarRecargaTransaccional = async (montoRecarga, motivo = "RECARGA_MANUAL_CEO") => {
         if (!idDocumentoUnificado) throw new Error("No hay un identificador de usuario válido para la transacción.");
@@ -304,7 +320,12 @@ export const useWallet = () => {
             setIsMutating(false);
             return true;
         } catch (err) {
-            console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Error en la recarga:", err?.message);
+            const statusHTTP = err?.response?.status;
+            if (statusHTTP === 401 || statusHTTP === 403) {
+                console.warn("🛡️ [CIMCO-WALLET-MUTATION-AUTH] Fallo 401/403 durante recarga. Transacción abortada de forma segura.");
+            } else {
+                console.error("❌ [CIMCO-WALLET-MUTATION-ERROR] Error en la recarga:", err?.message);
+            }
             setIsMutating(false);
             throw err;
         }

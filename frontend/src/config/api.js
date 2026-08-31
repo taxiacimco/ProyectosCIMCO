@@ -1,4 +1,4 @@
-// Versión Arquitectura: V24.3 - Configuración Dinámica de Axios con Soporte FormData y Guardas JWT
+// Versión Arquitectura: V24.4 - Configuración Dinámica de Axios con Interceptores JWT y Excepción de Endpoints Opcionales
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
  * Misión: Centralización de Axios, inyección de cabeceras anti-caché, interceptores JWT multi-capa, gestión de FormData y manejo global de errores HTTP.
@@ -55,7 +55,7 @@ api.interceptors.request.use(
             }
 
             if (typeof window !== 'undefined' && window.localStorage) {
-                // 1. Búsqueda primaria de token en almacenamiento
+                // 1. Búsqueda primaria de token dinámico en almacenamiento (cimco_token o token)
                 let token = localStorage.getItem('cimco_token') || localStorage.getItem('token');
 
                 // 2. Fallback de resiliencia: Extracción desde objeto de usuario persistido
@@ -113,10 +113,21 @@ api.interceptors.response.use(
         if (error && error.response) {
             const status = error.response.status;
             const message = error.response.data?.message || 'Error en la solicitud al servidor';
-            console.error(`🚨 [CIMCO-NEXUS-RESPONSE] Error de Servidor [${status}]:`, error.response.data);
+            const requestUrl = error.config?.url || '';
+
+            console.error(`🚨 [CIMCO-NEXUS-RESPONSE] Error de Servidor [${status}] en [${requestUrl}]:`, error.response.data);
+
+            // Lista de endpoints secundarios opcionales cuyos errores 401/403 no deben expulsar al usuario
+            const ENDPOINTS_SECUNDARIOS_OPCIONALES = [
+                '/pasajeros/saldo',
+                '/billetera/saldo',
+                '/saldo'
+            ];
+
+            const esEndpointOpcional = ENDPOINTS_SECUNDARIOS_OPCIONALES.some(endpoint => requestUrl.includes(endpoint));
 
             // 401 / 403: No Autorizado / Prohibido - Expiración o invalidez de credenciales
-            if (status === 401 || status === 403) {
+            if ((status === 401 || status === 403) && !esEndpointOpcional) {
                 try {
                     if (typeof window !== 'undefined' && window.localStorage) {
                         localStorage.removeItem('token');
@@ -145,7 +156,7 @@ api.interceptors.response.use(
             if (status === 429) {
                 if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('cimco:rate_limit', {
-                        detail: { status, message: message || 'Exceso de solicitudes al servidor. Por favor, espere un momento.' }
+                        detail: { status, message: message || 'Excesso de solicitudes al servidor. Por favor, espere un momento.' }
                     }));
                 }
             }
