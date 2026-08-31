@@ -1,12 +1,12 @@
-// Versión Arquitectura: V15.3 - Sincronización de Rutas con Query Params
+// Versión Arquitectura: V15.4 - Exportación por Defecto y Sincronización de Rutas Gerenciales
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminPanel.jsx
  * Misión: Panel Central de Control Administrativo / CEO
- * Ajuste V15.3: Actualización de redirecciones de tarjetas gerenciales mediante Query Parameters (?tab=...) para integración con la Consola Dashboard.
+ * Ajuste V15.4: Exportación por defecto para React.lazy() y soporte de lectura/parseo de Query Params con useSearchParams / useLocation.
  */
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, auth, FIRESTORE_PATHS } from '@/config/firebase';
@@ -24,9 +24,14 @@ import {
   ShieldCheck
 } from 'lucide-react';
 
-const AdminPanel = () => {
+export default function AdminPanel() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+
+  // 🛡️ PARSEO Y CAPTURA DE PARÁMETROS DE BÚSQUEDA GERENCIALES (?tab=admins, ?tab=operadores, ?tab=billeteras)
+  const tabActiva = searchParams.get('tab') || new URLSearchParams(location.search).get('tab') || 'overview';
 
   // 🛡️ ESTADOS DE METRICAS DEL SISTEMA
   const [metricas, setMetricas] = useState({
@@ -153,6 +158,11 @@ const AdminPanel = () => {
     };
   }, [user]);
 
+  const handleNavegacionTab = (tabTarget) => {
+    setSearchParams({ tab: tabTarget });
+    navigate(`/admin/dashboard?tab=${tabTarget}`);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center space-y-4">
@@ -187,7 +197,7 @@ const AdminPanel = () => {
             <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Estado del Nodo Central</p>
             <p className="text-xs text-emerald-400 font-extrabold uppercase flex items-center justify-end gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-              En Línea / Seguro
+              En Línea / Seguro (Tab: {tabActiva})
             </p>
           </div>
           <div className="w-9 h-9 rounded-lg bg-zinc-800 border border-white/10 flex items-center justify-center font-black text-white text-sm uppercase">
@@ -287,8 +297,10 @@ const AdminPanel = () => {
             
             {/* TARJETA 1: GESTIÓN DE CREDENCIALES */}
             <button 
-              onClick={() => navigate('/admin/dashboard?tab=admins')}
-              className="p-4 rounded-xl bg-[#0c0c0e] border border-amber-500/20 hover:border-amber-500/50 text-left transition-all duration-300 group hover:shadow-lg hover:shadow-amber-500/5 cursor-pointer"
+              onClick={() => handleNavegacionTab('admins')}
+              className={`p-4 rounded-xl bg-[#0c0c0e] border text-left transition-all duration-300 group hover:shadow-lg hover:shadow-amber-500/5 cursor-pointer ${
+                tabActiva === 'admins' ? 'border-amber-500 bg-amber-500/5' : 'border-amber-500/20 hover:border-amber-500/50'
+              }`}
             >
               <KeyRound className="w-5 h-5 text-amber-400 group-hover:scale-110 transition-transform mb-2" />
               <p className="font-bold text-xs text-white uppercase tracking-wider">Credenciales de Oficina & Admins</p>
@@ -297,8 +309,10 @@ const AdminPanel = () => {
 
             {/* TARJETA 2: CONTROL DE COOPERATIVAS */}
             <button 
-              onClick={() => navigate('/admin/dashboard?tab=operadores')}
-              className="p-4 rounded-xl bg-[#0c0c0e] border border-white/[0.03] hover:border-amber-500/30 text-left transition-all duration-300 group cursor-pointer"
+              onClick={() => handleNavegacionTab('operadores')}
+              className={`p-4 rounded-xl bg-[#0c0c0e] border text-left transition-all duration-300 group cursor-pointer ${
+                tabActiva === 'operadores' ? 'border-amber-500 bg-amber-500/5' : 'border-white/[0.03] hover:border-amber-500/30'
+              }`}
             >
               <Settings className="w-5 h-5 text-zinc-500 group-hover:text-amber-400 mb-2 transition-colors" />
               <p className="font-bold text-xs text-white uppercase tracking-wider">Control de Cooperativas</p>
@@ -307,8 +321,10 @@ const AdminPanel = () => {
 
             {/* TARJETA 3: AUDITORÍA DE SALDOS */}
             <button 
-              onClick={() => navigate('/admin/dashboard?tab=billeteras')}
-              className="p-4 rounded-xl bg-[#0c0c0e] border border-white/[0.03] hover:border-amber-500/30 text-left transition-all duration-300 group cursor-pointer"
+              onClick={() => handleNavegacionTab('billeteras')}
+              className={`p-4 rounded-xl bg-[#0c0c0e] border text-left transition-all duration-300 group cursor-pointer ${
+                tabActiva === 'billeteras' ? 'border-amber-500 bg-amber-500/5' : 'border-white/[0.03] hover:border-amber-500/30'
+              }`}
             >
               <TrendingUp className="w-5 h-5 text-zinc-500 group-hover:text-amber-400 mb-2 transition-colors" />
               <p className="font-bold text-xs text-white uppercase tracking-wider">Auditoría Híbrida de Saldos</p>
@@ -332,6 +348,4 @@ const AdminPanel = () => {
       </div>
     </div>
   );
-};
-
-export default AdminPanel;
+}

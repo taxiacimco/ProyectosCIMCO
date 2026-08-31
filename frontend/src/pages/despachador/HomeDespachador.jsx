@@ -1,9 +1,9 @@
-// Versión Arquitectura: V19.5 - Carga Perezosa de MapaOperativo con React.lazy() y React.Suspense
+// Versión Arquitectura: V19.6 - Fusión Atómica, Exportación Default y Blindaje de Payload Transaccional Completo
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
- * Misión: Registro manual de solicitudes, inyección de asignaciones con empresaId, calcomanía QR de autogestión,
+ * Misión: Registro manual de solicitudes, inyección de asignaciones con identidad completa, calcomanía QR de autogestión,
  * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
- * Ajuste V19.5: Carga perezosa (React.lazy) del componente MapaOperativo para optimizar el bundle principal.
+ * Ajuste V19.6: Exportación por defecto para React.lazy() e inclusión garantizada del payload de identidad completo en WebSocket y REST.
  */
 
 import React, { useEffect, useState, Suspense } from "react";
@@ -28,7 +28,7 @@ import AjustesPerfil from "@/components/shared/AjustesPerfil";
 // 💳 CONSTANTE DE NEGOCIO: UMBRAL MÍNIMO OPERATIVO DE BILLETERA DE DESPACHADOR
 const UMBRAL_MINIMO_SALDO = 2000;
 
-const HomeDespachador = () => {
+export default function HomeDespachador() {
   // 🛡️ Guardas de Seguridad y Consumo del Contexto Centralizado
   const authContext = useAuth ? useAuth() : {};
   const user = authContext?.user || null;
@@ -196,7 +196,7 @@ const HomeDespachador = () => {
     return () => unsubscribe();
   }, [cooperativaDespachador]);
 
-  // 🚀 DISPARADOR TRANSACCIONAL: Registro centralizado e inyección del viaje en el pool logístico con empresaId
+  // 🚀 DISPARADOR TRANSACCIONAL: Registro centralizado e inyección del viaje en el pool logístico con payload de identidad completo
   const handleRegistrarYDistribuirViaje = async (conductorSeleccionado) => {
     if (saldoInsuficiente) {
       setMensajeError(`Operación bloqueada. Billetera por debajo del umbral mínimo ($${UMBRAL_MINIMO_SALDO.toLocaleString('es-CO')} COP). Recargue saldo.`);
@@ -212,21 +212,21 @@ const HomeDespachador = () => {
     setMensajeExito("");
     setMensajeError("");
 
-    // 🛡️ Payload estandardizado inyectando explícitamente empresaId y canal operativo
+    // 🛡️ Payload estandardizado inyectando el objeto de identidad completo
     const payloadInyeccion = {
       conductorId: conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "",
       conductor: conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "",
-      despachadorId: idOperadorLogistico,
-      despachador: idOperadorLogistico,
-      empresaId: String(empresaId),
-      empresa: cooperativaDespachador,
+      despachadorId: String(idOperadorLogistico || ""),
+      despachador: String(idOperadorLogistico || ""),
+      empresaId: String(empresaId || ""),
+      cooperativa: String(cooperativaDespachador || ""),
+      empresa: String(cooperativaDespachador || ""),
+      terminal: String(terminalDespachador || ""),
       origen: origen.trim().toUpperCase(),
       destino: destino.trim().toUpperCase(),
       valorPasaje: Number(valorPasaje),
       tarifa: Number(valorPasaje),
       tipoViaje: "intermunicipal",
-      cooperativa: cooperativaDespachador,
-      terminal: terminalDespachador,
       creadoManualmente: true,
       estado: "asignado"
     };
@@ -254,15 +254,19 @@ const HomeDespachador = () => {
           socket.emit("nuevo_viaje", {
             viaje: viajeCreado,
             payload: payloadInyeccion,
-            cooperativa: cooperativaDespachador,
-            empresaId: String(empresaId),
+            empresaId: String(empresaId || ""),
+            cooperativa: String(cooperativaDespachador || ""),
+            terminal: String(terminalDespachador || ""),
+            despachadorId: String(idOperadorLogistico || ""),
             timestamp: new Date().toISOString()
           });
 
           socket.emit("alerta_despacho_central", {
             mensaje: `Nueva ruta asignada a la unidad ${conductorSeleccionado?.placaVehiculo || ''}`,
-            cooperativa: cooperativaDespachador,
-            empresaId: String(empresaId),
+            empresaId: String(empresaId || ""),
+            cooperativa: String(cooperativaDespachador || ""),
+            terminal: String(terminalDespachador || ""),
+            despachadorId: String(idOperadorLogistico || ""),
             conductorId: conductorSeleccionado?.id
           });
         }
@@ -284,7 +288,7 @@ const HomeDespachador = () => {
     }
   };
 
-  // 🔨 ASIGNACIÓN DE OFERTA / PUJA DESDE LA TABLA EN TIEMPO REAL
+  // 🔨 ASIGNACIÓN DE OFERTA / PUJA DESDE LA TABLA EN TIEMPO REAL CON IDENTIDAD COMPLETA
   const handleAceptarOfertaPuja = async (ofertaItem) => {
     if (saldoInsuficiente) {
       setMensajeError(`Asignación bloqueada. Billetera por debajo del umbral mínimo ($${UMBRAL_MINIMO_SALDO.toLocaleString('es-CO')} COP). Recargue saldo.`);
@@ -303,8 +307,10 @@ const HomeDespachador = () => {
         ofertaId: ofertaId,
         viajeId: ofertaItem?.viajeId || ofertaItem?.solicitudId,
         conductorId: ofertaItem?.conductorId || ofertaItem?.conductor?.id || ofertaItem?.uid,
-        despachadorId: idOperadorLogistico,
-        empresaId: String(empresaId),
+        despachadorId: String(idOperadorLogistico || ""),
+        empresaId: String(empresaId || ""),
+        cooperativa: String(cooperativaDespachador || ""),
+        terminal: String(terminalDespachador || ""),
         monto: ofertaItem?.monto || ofertaItem?.valor || ofertaItem?.tarifa,
         timestamp: new Date().toISOString()
       };
@@ -733,6 +739,4 @@ const HomeDespachador = () => {
       />
     </div>
   );
-};
-
-export default HomeDespachador;
+}

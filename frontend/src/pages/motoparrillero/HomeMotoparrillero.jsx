@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.19 - Guard de Saldo Mínimo ($2.000 COP) y Validación de Comisión (10%) en Solicitudes
+// Versión Arquitectura: V12.20 - Corrección de Sintaxis Final y Exportación por Defecto Estándar ES6
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 

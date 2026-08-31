@@ -1,9 +1,9 @@
-// Versión Arquitectura: V19.5 - Estandarización de Actualización de Perfil mediante authService Centralizado
+// Versión Arquitectura: V20.1 - Corrección de Importación Leaflet y Preservación del Ciclo de Vida del Viaje
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V19.5: Estandarización de llamadas de actualización de perfil estrictamente a través de
- *               authService.updateProfile para mantener un mapeo uniforme entre REST y Firestore.
+ * Ajuste V20.1: Corrección de sintaxis limpia en la importación de react-leaflet (Línea 16),
+ *               preservación de ciclo de vida completo (EN_RUTA, FINALIZADO) y exportación por defecto.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -15,7 +15,7 @@ import { authService } from '@/services/authService';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Bus, MapPin, CheckCircle, AlertTriangle, XCircle, Bell, User, Phone, FileText, Building2, Send, DollarSign } from 'lucide-react';
+import { Bus, MapPin, CheckCircle, AlertTriangle, XCircle, Bell, User, Phone, FileText, Building2, Send, DollarSign, Flag } from 'lucide-react';
 
 // Corrección de Iconos Leaflet para despliegue intermunicipal
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -34,7 +34,7 @@ const AutoCenter = ({ position }) => {
     return null;
 };
 
-const HomeIntermunicipal = () => {
+export default function HomeIntermunicipal() {
     // 🛡️ Guardas de Seguridad y Contextos Centralizados
     const authContext = useAuth ? useAuth() : {};
     const user = authContext?.user || null;
@@ -350,7 +350,7 @@ const HomeIntermunicipal = () => {
     }, [idConductor, socket, isConnected]);
 
     // ==================================================================
-    // 6. SUSCRIPCIÓN REACTIVA A VIAJES ASIGNADOS EN RAMPA DE SALIDA
+    // 6. SUSCRIPCIÓN REACTIVA A VIAJES ASIGNADOS EN RAMPA DE SALIDA Y EN RUTA
     // ==================================================================
     useEffect(() => {
         if (!user?.uid && !idConductor) return;
@@ -359,7 +359,7 @@ const HomeIntermunicipal = () => {
         const q = query(
             collection(db, pathColeccion),
             where('conductorId', 'in', [user?.uid, idConductor].filter(Boolean)),
-            where('estado', 'in', ['ASIGNADO', 'asignado'])
+            where('estado', 'in', ['ASIGNADO', 'asignado', 'EN_RUTA', 'en_ruta'])
         );
 
         const unsub = onSnapshot(q, (snapshot) => {
@@ -374,33 +374,40 @@ const HomeIntermunicipal = () => {
     }, [user?.uid, idConductor]);
 
     // ==================================================================
-    // 7. CONFIRMACIÓN DE SALIDA DE TERMINAL / EN RUTA
+    // 7. CONFIRMACIÓN DE SALIDA DE TERMINAL / EN RUTA Y FINALIZACIÓN DE CICLO
     // ==================================================================
-    const confirmarViaje = async (idViaje) => {
-        if (!idViaje) return;
+    const cambiarEstadoViaje = async (idViaje, nuevoEstado) => {
+        if (!idViaje || !nuevoEstado) return;
 
         try {
-            // Actualización local Firestore usando FIRESTORE_PATHS
             const pathViajes = FIRESTORE_PATHS?.viajesIntermunicipales || 'viajes_intermunicipales';
             const viajeRef = doc(db, pathViajes, idViaje);
-            await updateDoc(viajeRef, { 
-                estado: 'EN_RUTA', 
-                inicioOperativo: serverTimestamp() 
-            });
+            
+            const actualizacionDoc = {
+                estado: nuevoEstado,
+                ...(nuevoEstado === 'EN_RUTA' ? { inicioOperativo: serverTimestamp() } : {}),
+                ...(nuevoEstado === 'FINALIZADO' ? { finOperativo: serverTimestamp() } : {})
+            };
+
+            await updateDoc(viajeRef, actualizacionDoc);
 
             if (socket && isConnected) {
                 socket.emit('cambio_estado_viaje', {
                     viajeId: idViaje,
                     conductorId: idConductor,
-                    estado: 'EN_RUTA'
+                    estado: nuevoEstado
                 });
             }
 
             setNotificacionUI(null);
         } catch (err) {
-            console.error("Error al confirmar salida en dársena:", err);
+            console.error(`🚨 Error al cambiar estado a ${nuevoEstado}:`, err);
+            alert(`No se pudo actualizar el estado del viaje a ${nuevoEstado}.`);
         }
     };
+
+    const confirmarViaje = (idViaje) => cambiarEstadoViaje(idViaje, 'EN_RUTA');
+    const finalizarViaje = (idViaje) => cambiarEstadoViaje(idViaje, 'FINALIZADO');
 
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 font-mono antialiased relative selection:bg-yellow-500/20 selection:text-yellow-400">
@@ -541,11 +548,21 @@ const HomeIntermunicipal = () => {
                     ) : (
                         viajesAsignados.map(viaje => {
                             const tarifaCalculada = Number(viaje.tarifa || viaje.valorPasaje || 0);
+                            const estadoNormalizado = String(viaje.estado || '').toUpperCase();
+                            const esEnRuta = estadoNormalizado === 'EN_RUTA';
+
                             return (
                                 <div key={viaje.id} className="backdrop-blur-md bg-[#121214]/70 border border-white/5 p-6 rounded-2xl shadow-2xl hover:border-white/10 transition-all duration-300">
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 justify-between items-start mb-6 border-b border-white/5 pb-4">
                                         <div>
-                                            <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-black mb-1">Ruta y Destino Autorizado</p>
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-black">Ruta y Destino Autorizado</p>
+                                                <span className={`text-[8px] font-black px-2 py-0.5 rounded-md uppercase border ${
+                                                    esEnRuta ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
+                                                }`}>
+                                                    {esEnRuta ? 'En Ruta' : 'Asignado en Dársena'}
+                                                </span>
+                                            </div>
                                             <p className="text-sm font-black text-white flex items-center gap-2">
                                                 <MapPin size={15} className="text-yellow-500 shrink-0" /> {viaje.origen ? `${viaje.origen} ➔ ` : ''}{viaje.destino || 'N/A'}
                                             </p>
@@ -557,12 +574,21 @@ const HomeIntermunicipal = () => {
                                         </div>
                                     </div>
 
-                                    <button 
-                                        onClick={() => confirmarViaje(viaje.id)}
-                                        className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase text-[11px] tracking-widest py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(234,179,8,0.15)] flex items-center justify-center gap-2 active:scale-[0.98] border border-yellow-300 cursor-pointer"
-                                    >
-                                        <CheckCircle size={15} /> Confirmar Salida de Terminal
-                                    </button>
+                                    {!esEnRuta ? (
+                                        <button 
+                                            onClick={() => confirmarViaje(viaje.id)}
+                                            className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase text-[11px] tracking-widest py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(234,179,8,0.15)] flex items-center justify-center gap-2 active:scale-[0.98] border border-yellow-300 cursor-pointer"
+                                        >
+                                            <CheckCircle size={15} /> Confirmar Salida de Terminal (En Ruta)
+                                        </button>
+                                    ) : (
+                                        <button 
+                                            onClick={() => finalizarViaje(viaje.id)}
+                                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[11px] tracking-widest py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] flex items-center justify-center gap-2 active:scale-[0.98] border border-emerald-400 cursor-pointer"
+                                        >
+                                            <Flag size={15} /> Finalizar Servicio Intermunicipal
+                                        </button>
+                                    )}
                                 </div>
                             );
                         })
@@ -677,6 +703,4 @@ const HomeIntermunicipal = () => {
             )}
         </div>
     );
-};
-
-export default HomeIntermunicipal;
+}

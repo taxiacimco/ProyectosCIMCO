@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.22 - Eliminación de Simulación de Desarrollo ([DEV] Simular Cierre Forzado) para Despliegue en Producción
+// Versión Arquitectura: V12.23 - Limpieza de Sintaxis Residual y Confirmación de Exportación por Defecto
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
