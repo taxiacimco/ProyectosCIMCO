@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.47 - Migración de Capa TileLayer a OpenStreetMap Public Layer
+// Versión Arquitectura: V21.48 - Integración de Selector de Pasajeros y Tarifa Propuesta con Comisión CIMCO-UI V9.3
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (OpenStreetMap),
@@ -150,6 +150,8 @@ export default function HomePasajero() {
   const [origenText, setOrigenText] = useState('Ubicación actual (GPS)');
   const [destinoText, setDestinoText] = useState('');
   const [valorEstimado, setValorEstimado] = useState(0);
+  const [numeroPasajeros, setNumeroPasajeros] = useState(1);
+  const [tarifaPropuesta, setTarifaPropuesta] = useState('');
   const [estadoViaje, setEstadoViaje] = useState('IDLE'); 
   const [datosConductor, setDatosConductor] = useState(null);
   const [rideId, setRideId] = useState(null);
@@ -484,6 +486,10 @@ export default function HomePasajero() {
       const esIntermunicipal = tipoServicio === 'intermunicipal';
       const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
       
+      const tarifaNum = Number(tarifaPropuesta) || 0;
+      const comisionCimco = tarifaNum * 0.10;
+      const tarifaNeta = tarifaNum * 0.90;
+
       const payload = {
         pasajeroId: uidUsuario,
         nombrePasajero: perfilFirestore.nombre,
@@ -494,6 +500,10 @@ export default function HomePasajero() {
         origen: origenText.trim() || 'Ubicación actual (GPS)',
         destino: destinoText.trim(),
         valorEstimado,
+        numeroPasajeros,
+        tarifaPropuesta: tarifaNum,
+        comisionCimco,
+        tarifaNeta,
         estado: 'BUSCANDO',
         coordenadasInicio: { lat: coordsActuales[0], lng: coordsActuales[1] },
         fechaCreacion: serverTimestamp()
@@ -776,6 +786,52 @@ export default function HomePasajero() {
                         />
                       </div>
                     </div>
+
+                    {/* Selector Numérico de Pasajeros y Tarifa Propuesta */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
+                          PASAJEROS
+                        </label>
+                        <select
+                          value={numeroPasajeros}
+                          onChange={(e) => setNumeroPasajeros(Number(e.target.value))}
+                          className="w-full p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-100 font-medium focus:outline-none focus:border-amber-500"
+                        >
+                          <option value={1}>1 Pasajero</option>
+                          <option value={2}>2 Pasajeros</option>
+                          <option value={3}>3 Pasajeros</option>
+                          <option value={4}>4 Pasajeros</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
+                          TARIFA PROPUESTA (COP)
+                        </label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-amber-500 font-mono text-xs">$</span>
+                          <input
+                            type="number"
+                            required
+                            placeholder="Ej: 8000"
+                            value={tarifaPropuesta}
+                            onChange={(e) => {
+                              setTarifaPropuesta(e.target.value);
+                              setValorEstimado(Number(e.target.value) || 0);
+                            }}
+                            className="w-full pl-7 pr-3 py-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {tarifaPropuesta > 0 && (
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[10px] font-mono text-amber-300 flex justify-between items-center">
+                        <span>Comisión Plataforma (10%):</span>
+                        <span className="font-bold">${(Number(tarifaPropuesta) * 0.10).toLocaleString()} COP</span>
+                      </div>
+                    )}
 
                     {/* 🚖 SELECCIÓN DE MODALIDAD ORGANIZADA (4 SERVICIOS) */}
                     <div>
