@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.24 - Validación de capa cartográfica OSM (TileLayer no implementado en este nodo) y blindaje de referencias
+// Versión Arquitectura: V12.25 - Sincronización estricta con esquema estandarizado de perfil (telefonoMovil, nombre, foto_perfil) y directrices CIMCO-UI V9.3
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
@@ -27,7 +27,8 @@ export default function HomeMotocarga() {
     nombre: '',
     telefono: '',
     placa: '',
-    motoModelo: ''
+    motoModelo: '',
+    foto_perfil: ''
   });
 
   const [isOnline, setIsOnline] = useState(false);
@@ -124,7 +125,8 @@ export default function HomeMotocarga() {
           nombre: nombreCompleto || '',
           telefono: data?.telefonoMovil || data?.telefono || '',
           placa: data?.placa || data?.vehiculo?.placa || '',
-          motoModelo: data?.motoModelo || data?.vehiculo?.modelo || ''
+          motoModelo: data?.motoModelo || data?.vehiculo?.modelo || '',
+          foto_perfil: data?.foto_perfil || data?.photoURL || ''
         });
       }
     }, (error) => {
@@ -146,6 +148,7 @@ export default function HomeMotocarga() {
       await authService.updateProfile({
         nombre: datosPerfil.nombre,
         telefonoMovil: datosPerfil.telefono,
+        foto_perfil: datosPerfil.foto_perfil || '',
         placa: datosPerfil.placa.toUpperCase(),
         motoModelo: datosPerfil.motoModelo
       });
@@ -158,6 +161,7 @@ export default function HomeMotocarga() {
         nombreCompleto: datosPerfil.nombre,
         telefono: datosPerfil.telefono,
         telefonoMovil: datosPerfil.telefono,
+        foto_perfil: datosPerfil.foto_perfil || '',
         placa: datosPerfil.placa.toUpperCase(),
         motoModelo: datosPerfil.motoModelo,
         fechaActualizacion: serverTimestamp()
@@ -718,7 +722,7 @@ export default function HomeMotocarga() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Celular / Contacto</label>
+                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Celular / Contacto (telefonoMovil)</label>
                 <input 
                   type="tel" 
                   required
@@ -726,6 +730,17 @@ export default function HomeMotocarga() {
                   onChange={(e) => setDatosPerfil({...datosPerfil, telefono: e.target.value})}
                   className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 transition-colors"
                   placeholder="Ej: 3157654321"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">URL Foto Perfil (foto_perfil)</label>
+                <input 
+                  type="url" 
+                  value={datosPerfil.foto_perfil}
+                  onChange={(e) => setDatosPerfil({...datosPerfil, foto_perfil: e.target.value})}
+                  className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 transition-colors"
+                  placeholder="https://..."
                 />
               </div>
 

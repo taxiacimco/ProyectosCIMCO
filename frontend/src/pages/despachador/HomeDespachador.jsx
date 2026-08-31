@@ -1,9 +1,9 @@
-// Versión Arquitectura: V19.7 - Reemplazo de TileLayer a OpenStreetMap Público
+// Versión Arquitectura: V19.7 - Reemplazo de TileLayer a OpenStreetMap Público con Auditoría de Despacho Central
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones con identidad completa, calcomanía QR de autogestión,
  * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
- * Ajuste V19.7: Actualización de la capa del mapa satelital/operativo a la fuente pública de OpenStreetMap.
+ * Ajuste V19.7: Actualización de la capa del mapa satelital/operativo a la fuente pública de OpenStreetMap y blindaje de permisos de control central.
  */
 
 import React, { useEffect, useState, Suspense } from "react";
