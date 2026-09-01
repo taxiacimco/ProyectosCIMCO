@@ -1,11 +1,11 @@
-// Versión Arquitectura: V12.5 - Integración de Edición de Perfil Unificado y Navegación Reactiva
+// Versión Arquitectura: V12.6 - Integración de Callback de Refresco Unificado onUpdateSuccess
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\PerfilPasajero.jsx
- * Misión: Expediente de identidad del pasajero con integración al editor unificado AjustesPerfil y consumo seguro mediante Axios.
+ * Misión: Expediente de identidad del pasajero con integración al editor unificado AjustesPerfil, refresco dinámico post-mutación y consumo seguro mediante Axios.
  * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import api from '@/config/api';
@@ -22,59 +22,77 @@ const PerfilPasajero = () => {
     const [esModoLocal, setEsModoLocal] = useState(false);
     const [modoEdicion, setModoEdicion] = useState(false);
 
-    useEffect(() => {
+    const obtenerDatosPerfil = useCallback(async () => {
         const uid = user?.uid || user?.id || user?._id;
         if (!uid) {
             setLoading(false);
             return;
         }
 
-        const obtenerDatosPerfil = async () => {
-            try {
-                setLoading(true);
-                setEsModoLocal(false);
+        try {
+            setLoading(true);
+            setEsModoLocal(false);
 
-                // 📡 Consumo unificado mediante instancia Axios con token JWT inyectado automáticamente en interceptores
-                const respuesta = await api.get(`/usuarios/perfil/${uid}`);
+            // 📡 Consumo unificado mediante instancia Axios con token JWT inyectado automáticamente en interceptores
+            const respuesta = await api.get(`/usuarios/perfil/${uid}`);
 
-                if (respuesta.data?.success && respuesta.data?.perfil) {
-                    const payload = respuesta.data.perfil;
-                    // Normalización de esquema de datos (Anti-Undefined)
-                    setPerfil({
-                        nombre: payload?.nombre || payload?.name || payload?.displayName || 'Pasajero CIMCO',
-                        correo: payload?.correo || payload?.email || 'sin-correo@taxiacimco.com',
-                        rol: payload?.rol || payload?.role || 'pasajero',
-                        telefono: payload?.telefono || payload?.phone || 'Sin registrar',
-                        nivelSeguridad: payload?.nivelSeguridad || payload?.securityLevel || 'Verificado Root',
-                        viajesTotales: Number(payload?.viajesTotales || payload?.totalRides || 0),
-                        fotoUrl: payload?.fotoUrl || payload?.foto || ''
-                    });
-                } else {
-                    throw new Error("Estructura de respuesta no válida o no mapeada por el core.");
-                }
-            } catch (err) {
-                console.warn("💡 [CIMCO-RESILIENCIA] Fallo al consultar API, activando modo local para:", uid, err);
-                setEsModoLocal(true);
-                // 🛡️ Guardas de Seguridad contra desbordamientos de UI (Fallback Resiliente)
+            if (respuesta.data?.success && respuesta.data?.perfil) {
+                const payload = respuesta.data.perfil;
+                // Normalización de esquema de datos (Anti-Undefined)
                 setPerfil({
-                    nombre: user?.nombre || user?.name || user?.displayName || 'Pasajero CIMCO',
-                    correo: user?.correo || user?.email || 'sin-correo@taxiacimco.com',
-                    rol: user?.rol || user?.role || 'pasajero',
-                    telefono: user?.telefono || user?.phone || 'Sin registrar',
-                    nivelSeguridad: 'Verificado Local',
-                    viajesTotales: 0,
-                    fotoUrl: user?.fotoUrl || user?.foto || ''
+                    nombre: payload?.nombre || payload?.name || payload?.displayName || 'Pasajero CIMCO',
+                    correo: payload?.correo || payload?.email || 'sin-correo@taxiacimco.com',
+                    rol: payload?.rol || payload?.role || 'pasajero',
+                    telefono: payload?.telefono || payload?.phone || payload?.telefonoMovil || 'Sin registrar',
+                    nivelSeguridad: payload?.nivelSeguridad || payload?.securityLevel || 'Verificado Root',
+                    viajesTotales: Number(payload?.viajesTotales || payload?.totalRides || 0),
+                    fotoUrl: payload?.fotoUrl || payload?.foto || payload?.foto_perfil || ''
                 });
-            } finally {
-                setLoading(false);
+            } else {
+                throw new Error("Estructura de respuesta no válida o no mapeada por el core.");
             }
-        };
-
-        obtenerDatosPerfil();
+        } catch (err) {
+            console.warn("💡 [CIMCO-RESILIENCIA] Fallo al consultar API, activando modo local para:", uid, err);
+            setEsModoLocal(true);
+            // 🛡️ Guardas de Seguridad contra desbordamientos de UI (Fallback Resiliente)
+            setPerfil({
+                nombre: user?.nombre || user?.name || user?.displayName || 'Pasajero CIMCO',
+                correo: user?.correo || user?.email || 'sin-correo@taxiacimco.com',
+                rol: user?.rol || user?.role || 'pasajero',
+                telefono: user?.telefono || user?.phone || user?.telefonoMovil || 'Sin registrar',
+                nivelSeguridad: 'Verificado Local',
+                viajesTotales: 0,
+                fotoUrl: user?.fotoUrl || user?.foto || user?.foto_perfil || ''
+            });
+        } fontFinal: {
+            setLoading(false);
+        }
     }, [user]);
 
+    useEffect(() => {
+        obtenerDatosPerfil();
+    }, [obtenerDatosPerfil]);
+
+    const handleUpdateSuccess = async (datosActualizados) => {
+        setModoEdicion(false);
+        if (datosActualizados) {
+            setPerfil((prev) => ({
+                ...prev,
+                nombre: datosActualizados.nombre || datosActualizados.name || prev?.nombre,
+                telefono: datosActualizados.telefonoMovil || datosActualizados.telefono || prev?.telefono,
+                fotoUrl: datosActualizados.foto_perfil || datosActualizados.fotoUrl || prev?.fotoUrl
+            }));
+        }
+        await obtenerDatosPerfil();
+    };
+
     if (modoEdicion) {
-        return <AjustesPerfil onBack={() => setModoEdicion(false)} />;
+        return (
+            <AjustesPerfil 
+                onBack={() => setModoEdicion(false)} 
+                onUpdateSuccess={handleUpdateSuccess} 
+            />
+        );
     }
 
     if (loading) {

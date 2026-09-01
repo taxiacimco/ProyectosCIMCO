@@ -1,4 +1,4 @@
-// Versión Arquitectura: V24.2 - Servicio Centralizado de Gestión de Viajes con Transición PATCH de Estado (CIMCO-VIAJE-SERVICE)
+// Versión Arquitectura: V24.3 - Servicio Centralizado de Gestión de Viajes Desacoplado de Perfil (CIMCO-VIAJE-SERVICE)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\viajeService.js
  * Misión: Control centralizado de solicitudes, despachos, asignaciones, cambios de estado y carreras.

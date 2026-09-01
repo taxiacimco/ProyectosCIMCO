@@ -1,11 +1,12 @@
-// Versión Arquitectura: V21.30 - Homologación de Interfaz Operativa con Método puedeOperar
+// Versión Arquitectura: V21.31 - Soporte de Alias Virtual y Mapeo Físico para fotoPerfil / foto_perfil
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva cifrado Bcrypt con guarda anti-doble hashing (isModified('password')
  * y detección de prefijo hash $2a$/$2b$), esquema de direcciones favoritas, soporte GeoJSON 2dsphere,
- * aprobación automática inmediata, URL de foto_perfil, normalización de variables e índice UID disperso.
- * Ajuste V21.30: Inyección del método de instancia helper 'puedeOperar()' retornando siempre true para homologar la API polimórfica del ecosistema.
+ * aprobación automática inmediata, normalización de variables, método puedeOperar() e índice UID disperso.
+ * Ajuste V21.31: Adición de la propiedad/alias `fotoPerfil` (campo físico y getter/setter virtual con toJSON/toObject getters)
+ * para asegurar la compatibilidad fluida con controladores que leen o escriben `fotoPerfil` y `foto_perfil`.
  */
 
 import mongoose from 'mongoose';
@@ -65,6 +66,10 @@ const pasajeroSchema = new mongoose.Schema({
         type: String,
         default: null
     },
+    fotoPerfil: {
+        type: String,
+        default: null
+    },
     // 🟢 APROBACIÓN AUTOMÁTICA: Nace APROBADO/activo por defecto para evitar fricciones de registro
     estado: {
         type: String,
@@ -114,8 +119,16 @@ const pasajeroSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true,
-    versionKey: false
+    versionKey: false,
+    toJSON: { virtuals: true, getters: true },
+    toObject: { virtuals: true, getters: true }
 });
+
+// Alias virtual para garantizar sincronía bidireccional entre fotoPerfil y foto_perfil
+pasajeroSchema.virtual('avatarUrl')
+    .get(function () {
+        return this.fotoPerfil || this.foto_perfil || null;
+    });
 
 // Índices optimizados
 pasajeroSchema.index({ "coordenadas.coordinates": "2dsphere" }, { background: true });
@@ -139,6 +152,17 @@ pasajeroSchema.pre('save', async function (next) {
             this.telefonoMovil = this.telefono;
         } else if (this.isModified('telefonoMovil') && this.telefonoMovil) {
             this.telefono = this.telefonoMovil;
+        }
+
+        // Homologación y sincronización mutua de foto_perfil y fotoPerfil
+        if (this.isModified('fotoPerfil') && this.fotoPerfil && !this.isModified('foto_perfil')) {
+            this.foto_perfil = this.fotoPerfil;
+        } else if (this.isModified('foto_perfil') && this.foto_perfil && !this.isModified('fotoPerfil')) {
+            this.fotoPerfil = this.foto_perfil;
+        } else if (!this.foto_perfil && this.fotoPerfil) {
+            this.foto_perfil = this.fotoPerfil;
+        } else if (!this.fotoPerfil && this.foto_perfil) {
+            this.fotoPerfil = this.foto_perfil;
         }
 
         if (isNaN(this.saldo) || this.saldo < 0) {

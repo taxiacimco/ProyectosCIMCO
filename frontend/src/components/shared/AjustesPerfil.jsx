@@ -1,4 +1,4 @@
-// Versión Arquitectura: V16.3 - Módulo Unificado de Gestión de Perfil Multi-Rol
+// Versión Arquitectura: V16.4 - Módulo Unificado de Gestión de Perfil Multi-Rol alineado con Multipart/FormData
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -44,12 +44,12 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
       setPlaca(user?.placa || user?.vehiculo?.placa || '');
       setNumeroInterno(user?.numeroInterno || user?.vehiculo?.numeroInterno || '');
       setCooperativa(user?.cooperativa || user?.empresa || '');
-      setPreviewUrl(user?.fotoUrl || user?.foto || '');
+      setPreviewUrl(user?.fotoUrl || user?.foto || user?.foto_perfil || user?.fotoPerfil || '');
       setMensajeStatus({ tipo: '', texto: '' });
     }
   }, [user, isOpen]);
 
-  // Si se utiliza como modal yisOpen viene definido como false, se oculta
+  // Si se utiliza como modal y isOpen viene definido como false, se oculta
   if (isOpen === false) return null;
 
   // Sanitización en tiempo real para el teléfono (solo dígitos, máximo 10)
@@ -89,6 +89,7 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
 
     const nombreSanitizado = nombre.trim();
     const telefonoLimpio = telefono.trim();
+    const correoSanitizado = correo.trim();
 
     if (!nombreSanitizado) {
       setMensajeStatus({ tipo: 'error', texto: 'El nombre completo es obligatorio.' });
@@ -109,14 +110,22 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
 
     try {
       const formData = new FormData();
+      
+      // Mapeo redundante con compatibilidad total para controladores (pasajero.controller.js y auth.controller.js)
       formData.append('nombre', nombreSanitizado);
+      formData.append('fullName', nombreSanitizado);
+      
       formData.append('telefono', telefonoLimpio);
       formData.append('telefonoMovil', telefonoLimpio);
-      formData.append('correo', correo.trim());
+      
+      formData.append('correo', correoSanitizado);
+      formData.append('email', correoSanitizado);
+      
       formData.append('rol', rolUsuario);
       
       if (clave.trim() !== '') {
         formData.append('clave', clave);
+        formData.append('password', clave);
       }
 
       if (esVehicular) {
@@ -127,13 +136,22 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
       } else if (esDespachador) {
         formData.append('cooperativa', cooperativa.trim());
         formData.append('empresa', cooperativa.trim());
+        formData.append('terminal_sede', cooperativa.trim());
+      } else {
+        // Asignación genérica para pasajeros u otros roles
+        if (cooperativa.trim() !== '') {
+          formData.append('cooperativa', cooperativa.trim());
+          formData.append('empresa', cooperativa.trim());
+        }
       }
 
+      // Inyección del archivo binario con ambas llaves conocidas por upload.service.js / Multer
       if (fotoPerfil) {
         formData.append('fotoPerfil', fotoPerfil);
+        formData.append('foto_perfil', fotoPerfil);
       }
 
-      // Inyección explícita del token de autorización
+      // Inyección explícita de cabeceras y token de autorización
       const token = localStorage.getItem('cimco_token') || localStorage.getItem('token') || user?.token;
       const requestHeaders = {
         'Content-Type': 'multipart/form-data',
@@ -146,11 +164,14 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
         }
       }
 
-      const response = await api.put('/auth/update-profile', formData, {
+      // Determinar la ruta correspondiente según la arquitectura del backend
+      const endpoint = rolUsuario === 'pasajero' ? '/pasajeros/perfil' : '/auth/update-profile';
+
+      const response = await api.put(endpoint, formData, {
         headers: requestHeaders,
       });
 
-      const usuarioActualizado = response?.data?.usuario || response?.data?.user || response?.data || {};
+      const usuarioActualizado = response?.data?.usuario || response?.data?.user || response?.data?.pasajero || response?.data || {};
 
       if (typeof updateUser === 'function') {
         updateUser(usuarioActualizado);

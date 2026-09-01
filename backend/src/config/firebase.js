@@ -1,7 +1,8 @@
-// Versión Arquitectura: V4.8 - Inclusión del Helper de Auditoría Financiera y Extensión de Rutas Firestore
+// Versión Arquitectura: V4.9 - Sincronización Estricta de Ruta de Credenciales y Firestore Paths
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\config\firebase.js
- * Misión: Configuración del Firebase Admin SDK con soporte híbrido (Emulador/Producción) y auditoría centralizada en Firestore.
+ * Misión: Configuración del Firebase Admin SDK apuntando a /config/serviceAccountKey.json,
+ *         soporte híbrido (Emulador/Producción) y auditoría centralizada en Firestore.
  */
 
 import admin from 'firebase-admin';
@@ -44,16 +45,16 @@ if (!admin.apps.length) {
             projectId: process.env.FIREBASE_PROJECT_ID || process.env.CIMCO_PROJECT_ID || 'pelagic-chalice-467818-e1'
         });
     } else {
-        // 🔒 PRODUCCIÓN REAL: Consumo seguro por estrategia implícita o lectura de serviceAccountKey.json perimetral
+        // 🔒 PRODUCCIÓN REAL: Apuntado directo a backend/config/serviceAccountKey.json
         console.log("📡 [CIMCO-CONFIG] Inicializando Firebase Admin SDK con Credenciales de Producción...");
-        const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || resolve(__dirname, '..', '..', 'serviceAccountKey.json');
+        const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || resolve(__dirname, '..', '..', 'config', 'serviceAccountKey.json');
         
         try {
             admin.initializeApp({
                 credential: admin.credential.applicationDefault()
             });
         } catch (e) {
-            // Fallback directo cargando el JSON físico si el método implícito no encuentra la variable de entorno
+            // Fallback directo cargando el JSON físico desde backend/config/serviceAccountKey.json
             try {
                 const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
                 admin.initializeApp({
@@ -91,7 +92,6 @@ if (esEntornoDesarrollo) {
 
 /**
  * 💻 HELPER CENTRALIZADO PARA AUDITORÍA EN FIRESTORE
- * Registra movimientos de recargas, débitos y ajustes en la colección de transacciones.
  */
 export const registrarTransaccionFirestore = async ({
     idUsuario,
@@ -100,7 +100,7 @@ export const registrarTransaccionFirestore = async ({
     monto,
     saldoAnterior,
     saldoNuevo,
-    tipoOperacion, // 'RECARGA', 'DEBITO', 'AJUSTE'
+    tipoOperacion,
     autorizadoPor,
     referencia
 }) => {

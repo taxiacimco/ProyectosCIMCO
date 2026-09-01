@@ -1,10 +1,12 @@
-// Versión Arquitectura: V21.31 - Integración de Método Operativo de Billetera (puedeOperar) para Control de Saldos en Conductores
+// Versión Arquitectura: V21.32 - Estandarización de foto_perfil con Compatibilidad Virtual para fotoPerfil
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
  * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales, cifrado Bcrypt anti-doble hashing,
- * índice UID disperso) e inyecta la evaluación de umbral financiero de operabilidad (puedeOperar).
+ * índice UID disperso, método de negocio puedeOperar).
+ * Ajuste V21.32: Estandarización del campo principal `foto_perfil` con soporte para alias/virtual `fotoPerfil` y sincronización
+ * automática pre-save para prevenir inconsistencias entre controladores o clientes que envíen `fotoPerfil`.
  */
 
 import mongoose from 'mongoose';
@@ -93,8 +95,12 @@ const ConductorSchema = new mongoose.Schema({
         trim: true,
         default: 'Particular'
     },
-    // 📷 DOCUMENTACIÓN Y ADJUNTOS MULTIMEDIA (URLs de almacenamiento)
+    // 📷 DOCUMENTACIÓN Y ADJUNTOS MULTIMEDIA (Estándar Único: foto_perfil)
     foto_perfil: {
+        type: String,
+        default: null
+    },
+    fotoPerfil: {
         type: String,
         default: null
     },
@@ -164,15 +170,23 @@ const ConductorSchema = new mongoose.Schema({
     }
 }, { 
     timestamps: true,
-    strict: true // 🚀 Bloquea la persistencia de campos no definidos en el esquema (como saldoWallet)
+    strict: true, // 🚀 Bloquea la persistencia de campos no definidos en el esquema (como saldoWallet)
+    toJSON: { virtuals: true, getters: true },
+    toObject: { virtuals: true, getters: true }
 });
+
+// Alias virtual para garantizar compatibilidad con fotoPerfil manteniendo foto_perfil como estándar único de Mongoose
+ConductorSchema.virtual('avatarUrl')
+    .get(function () {
+        return this.foto_perfil || this.fotoPerfil || null;
+    });
 
 // Índices optimizados para el motor de geolocalización y bloqueos transaccionales
 ConductorSchema.index({ ubicacion: "2dsphere" });
 ConductorSchema.index({ estadoOperativo: 1 });
 ConductorSchema.index({ estadoAdministrativo: 1 });
 
-// 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados, Geometría, Cifrado de Password y Sanitización Financiera
+// 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados, Geometría, Cifrado de Password, Naming foto_perfil y Sanitización Financiera
 ConductorSchema.pre('save', async function(next) {
     try {
         const cond = this;
@@ -182,6 +196,17 @@ ConductorSchema.pre('save', async function(next) {
             cond.telefonoMovil = cond.telefono;
         } else if (cond.telefonoMovil && !cond.telefono) {
             cond.telefono = cond.telefonoMovil;
+        }
+
+        // 📷 Estandarización de naming: Sincronización de foto_perfil y fotoPerfil
+        if (cond.isModified('fotoPerfil') && cond.fotoPerfil && !cond.isModified('foto_perfil')) {
+            cond.foto_perfil = cond.fotoPerfil;
+        } else if (cond.isModified('foto_perfil') && cond.foto_perfil && !cond.isModified('fotoPerfil')) {
+            cond.fotoPerfil = cond.foto_perfil;
+        } else if (!cond.foto_perfil && cond.fotoPerfil) {
+            cond.foto_perfil = cond.fotoPerfil;
+        } else if (!cond.fotoPerfil && cond.foto_perfil) {
+            cond.fotoPerfil = cond.foto_perfil;
         }
 
         // Normalización de Estado Administrativo vs Estado Operativo
@@ -258,6 +283,15 @@ ConductorSchema.pre('save', async function(next) {
 ConductorSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function(next) {
     const update = this.getUpdate();
     if (!update) return next();
+
+    // Sincronización de fotoPerfil -> foto_perfil en updates directos
+    if (update.$set) {
+        if (update.$set.fotoPerfil && !update.$set.foto_perfil) {
+            update.$set.foto_perfil = update.$set.fotoPerfil;
+        } else if (update.$set.foto_perfil && !update.$set.fotoPerfil) {
+            update.$set.fotoPerfil = update.$set.foto_perfil;
+        }
+    }
 
     // Eliminar saldoWallet de $set para impedir inyecciones accidentales en updates
     if (update.$set && update.$set.saldoWallet !== undefined) {

@@ -1,7 +1,7 @@
-// Versión Arquitectura: V24.9 - Consumo Dinámico de VITE_API_URL e Interceptor JWT Blindado
+// Versión Arquitectura: V25.0 - Consumo Dinámico de VITE_API_URL, Interceptor JWT Blindado y Sincronización Dual de Sesión (token / cimco_token)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
- * Misión: Centralización de Axios, consumo de VITE_API_URL, inyección de cabeceras anti-caché, interceptores JWT multi-capa, gestión de FormData y manejo global de errores HTTP.
+ * Misión: Centralización de Axios, consumo de VITE_API_URL, inyección de cabeceras anti-caché, interceptores JWT multi-capa, gestión de FormData, sincronización dual de claves de sesión (token / cimco_token) y manejo global de errores HTTP.
  */
 
 import axios from 'axios';
@@ -88,15 +88,18 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
-// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA, PURGA DE SESIÓN Y MANEJO GLOBAL DE ERRORES (401, 429, 500)
+// 🛡️ INTERCEPTOR DE RESPUESTAS: PERSISTENCIA SÍNCRONA, SINCRONIZACIÓN DUAL DE SESIÓN, PURGA Y MANEJO GLOBAL DE ERRORES (401, 429, 500)
 api.interceptors.response.use(
     (response) => {
         try {
             if (response && response.data) {
                 const payload = response.data;
-                if (payload.token) {
-                    localStorage.setItem('token', payload.token);
-                    localStorage.setItem('cimco_token', payload.token);
+                // Sincronización dual activa para clientes cliente/servidor y WebSockets heredados
+                const nuevoToken = payload.token || payload.cimco_token || payload.accessToken;
+                if (nuevoToken) {
+                    const cleanToken = String(nuevoToken).replace(/^"|"$/g, '').trim();
+                    localStorage.setItem('token', cleanToken);
+                    localStorage.setItem('cimco_token', cleanToken);
                 }
                 if (payload.usuario) {
                     localStorage.setItem('cimco_user', JSON.stringify(payload.usuario));
@@ -184,7 +187,8 @@ export const AUTH_ENDPOINTS = {
     register: '/auth/register',
     logout: '/auth/logout',
     me: '/auth/me',
-    verificar: '/auth/verificar'
+    verificar: '/auth/verificar',
+    updateProfile: '/auth/update-profile'
 };
 
 export const VIAJES_ENDPOINTS = {

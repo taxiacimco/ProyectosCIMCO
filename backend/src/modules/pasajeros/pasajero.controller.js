@@ -1,8 +1,8 @@
-// Versión Arquitectura: V20.02 - Consulta Opcional de Saldo de Billetera y Ajustes sin Umbral Mínimo para Pasajeros
+// Versión Arquitectura: V20.03 - Expansión de Perfil Extendido Corporativo e Institucional en Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
  * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera y blindaje contra colisiones de duplicidad E11000/Firebase Auth en peticiones concurrentes.
- * Ajuste V20.02: Implementación de verificación para pagos vía WALLET (saldoPasajero >= tarifaTotal) y acreditación libre de saldo por Administrador/CEO sin restricción de umbral mínimo ($0 COP permitido).
+ * Ajuste V20.03: Validación, persistencia y replicación hacia Firestore del perfil extendido corporativo (fullName, cooperativa, empresa, terminal_sede, coordenadas).
  */
 
 import mongoose from 'mongoose';
@@ -135,17 +135,72 @@ export const obtenerPasajeros = async (req, res, next) => {
  */
 export const registrarPasajero = async (req, res, next) => {
     try {
-        const { nombre, email, telefono, telefonoMovil, password, uid, direccion, fotoPerfil } = req.body || {};
+        const { 
+            nombre, 
+            fullName, 
+            email, 
+            telefono, 
+            telefonoMovil, 
+            password, 
+            uid, 
+            direccion, 
+            fotoPerfil,
+            cooperativa,
+            empresa,
+            terminal_sede,
+            coordenadas
+        } = req.body || {};
+
+        const nombreFinal = (fullName || nombre) ? String(fullName || nombre).trim() : null;
         const telContacto = (telefonoMovil || telefono) ? String(telefonoMovil || telefono).trim() : null;
         const emailSanitizado = email ? String(email).toLowerCase().trim() : null;
 
         // 1. Validar campos requeridos mínimos
-        if (!nombre || (!emailSanitizado && !telContacto)) {
+        if (!nombreFinal || (!emailSanitizado && !telContacto)) {
             return res.status(400).json({
                 success: false,
                 code: 'MISSING_REQUIRED_FIELDS',
                 message: "⚠️ El nombre y al menos un método de contacto (correo o teléfono) son obligatorios."
             });
+        }
+
+        // Validaciones de perfil extendido institucional/corporativo
+        if (cooperativa !== undefined && typeof cooperativa !== 'string') {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_COOPERATIVA',
+                message: '⚠️ El campo cooperativa debe ser una cadena de texto válida.'
+            });
+        }
+
+        if (empresa !== undefined && typeof empresa !== 'string') {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_EMPRESA',
+                message: '⚠️ El campo empresa debe ser una cadena de texto válida.'
+            });
+        }
+
+        if (terminal_sede !== undefined && typeof terminal_sede !== 'string') {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_TERMINAL_SEDE',
+                message: '⚠️ El campo terminal_sede debe ser una cadena de texto válida.'
+            });
+        }
+
+        let coordenadasValidas = undefined;
+        if (coordenadas !== undefined && coordenadas !== null) {
+            const lat = Number(coordenadas.latitud ?? coordenadas.lat);
+            const lng = Number(coordenadas.longitud ?? coordenadas.lng);
+            if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_COORDENADAS',
+                    message: '⚠️ Estructura de coordenadas geográfica inválida. Debe contener latitud y longitud numéricas válidas.'
+                });
+            }
+            coordenadasValidas = { latitud: lat, longitud: lng };
         }
 
         // 2. Comprobar duplicados previos en MongoDB (Pasajero y Usuario)
@@ -181,7 +236,7 @@ export const registrarPasajero = async (req, res, next) => {
                         try {
                             const nuevoUsuarioAuth = await admin.auth().createUser({
                                 email: emailSanitizado,
-                                displayName: String(nombre).trim(),
+                                displayName: nombreFinal,
                                 phoneNumber: (telContacto && telContacto.startsWith('+')) ? telContacto : undefined,
                                 password: password || undefined,
                                 disabled: false
@@ -202,7 +257,7 @@ export const registrarPasajero = async (req, res, next) => {
                     if (authErr.code === 'auth/user-not-found') {
                         try {
                             const nuevoUsuarioAuth = await admin.auth().createUser({
-                                displayName: String(nombre).trim(),
+                                displayName: nombreFinal,
                                 phoneNumber: telContacto,
                                 disabled: false
                             });
@@ -217,35 +272,50 @@ export const registrarPasajero = async (req, res, next) => {
 
         // 4. Crear el documento en MongoDB
         const nuevoPasajero = new Pasajero({
-            nombre: String(nombre).trim(),
+            nombre: nombreFinal,
+            fullName: nombreFinal,
             email: emailSanitizado || undefined,
             telefonoMovil: telContacto || undefined,
             telefono: telContacto || undefined,
             uid: targetUid,
             direccion: direccion ? String(direccion).trim() : '',
             fotoPerfil: fotoPerfil || '',
+            cooperativa: cooperativa ? String(cooperativa).trim() : '',
+            empresa: empresa ? String(empresa).trim() : '',
+            terminal_sede: terminal_sede ? String(terminal_sede).trim() : '',
+            coordenadas: coordenadasValidas,
             rol: 'pasajero',
             saldo: 0
         });
 
         await nuevoPasajero.save();
 
-        // 5. Réplica de perfil inicial en Firebase Firestore
+        // 5. Réplica de perfil inicial y extendido en Firebase Firestore
         try {
             const docFirestoreId = nuevoPasajero.uid || nuevoPasajero._id.toString();
             const coleccionUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
-            await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set({
+            
+            const payloadFirestore = {
                 id: docFirestoreId,
                 nombre: nuevoPasajero.nombre,
                 fullName: nuevoPasajero.nombre,
                 email: nuevoPasajero.email || '',
                 telefono: telContacto || '',
                 telefonoMovil: telContacto || '',
+                cooperativa: nuevoPasajero.cooperativa || '',
+                empresa: nuevoPasajero.empresa || '',
+                terminal_sede: nuevoPasajero.terminal_sede || '',
                 rol: 'pasajero',
                 saldo: 0,
                 balance: 0,
                 createdAt: new Date().toISOString()
-            }, { merge: true });
+            };
+
+            if (coordenadasValidas) {
+                payloadFirestore.coordenadas = coordenadasValidas;
+            }
+
+            await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set(payloadFirestore, { merge: true });
         } catch (fsErr) {
             console.warn("⚠️ [CIMCO-PASAJERO-REG-FS-WARN] No se pudo replicar perfil inicial en Firestore:", fsErr.message);
         }
@@ -361,7 +431,7 @@ export const obtenerPerfilPasajero = async (req, res, next) => {
 };
 
 /**
- * 🔄 Actualización de Perfil con Validaciones Homologadas y Sincronización a Firestore
+ * 🔄 Actualización de Perfil con Validaciones Homologadas, Perfil Extendido y Sincronización a Firestore
  */
 export const actualizarPerfilPasajero = async (req, res, next) => {
     try {
@@ -370,12 +440,26 @@ export const actualizarPerfilPasajero = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente para la actualización." });
         }
 
-        const { nombre, email, telefono, telefonoMovil, direccion, fotoPerfil } = req.body || {};
+        const { 
+            nombre, 
+            fullName, 
+            email, 
+            telefono, 
+            telefonoMovil, 
+            direccion, 
+            fotoPerfil,
+            cooperativa,
+            empresa,
+            terminal_sede,
+            coordenadas 
+        } = req.body || {};
+        
         const updateData = {};
 
-        // Validaciones de entrada homologadas
-        if (nombre !== undefined) {
-            const nombreLimpio = String(nombre).trim();
+        // Validaciones de entrada homologadas para nombre / fullName
+        const entradaNombre = fullName !== undefined ? fullName : nombre;
+        if (entradaNombre !== undefined) {
+            const nombreLimpio = String(entradaNombre).trim();
             if (nombreLimpio.length < 2) {
                 return res.status(400).json({
                     success: false,
@@ -384,6 +468,7 @@ export const actualizarPerfilPasajero = async (req, res, next) => {
                 });
             }
             updateData.nombre = nombreLimpio;
+            updateData.fullName = nombreLimpio;
         }
 
         if (email !== undefined) {
@@ -420,6 +505,57 @@ export const actualizarPerfilPasajero = async (req, res, next) => {
             updateData.fotoPerfil = String(fotoPerfil).trim();
         }
 
+        // Validaciones del Perfil Extendido Corporativo e Institucional
+        if (cooperativa !== undefined) {
+            if (typeof cooperativa !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_COOPERATIVA',
+                    message: '⚠️ El campo cooperativa debe ser una cadena de texto válida.'
+                });
+            }
+            updateData.cooperativa = String(cooperativa).trim();
+        }
+
+        if (empresa !== undefined) {
+            if (typeof empresa !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_EMPRESA',
+                    message: '⚠️ El campo empresa debe ser una cadena de texto válida.'
+                });
+            }
+            updateData.empresa = String(empresa).trim();
+        }
+
+        if (terminal_sede !== undefined) {
+            if (typeof terminal_sede !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    code: 'INVALID_TERMINAL_SEDE',
+                    message: '⚠️ El campo terminal_sede debe ser una cadena de texto válida.'
+                });
+            }
+            updateData.terminal_sede = String(terminal_sede).trim();
+        }
+
+        if (coordenadas !== undefined) {
+            if (coordenadas === null) {
+                updateData.coordenadas = null;
+            } else {
+                const lat = Number(coordenadas.latitud ?? coordenadas.lat);
+                const lng = Number(coordenadas.longitud ?? coordenadas.lng);
+                if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                    return res.status(400).json({
+                        success: false,
+                        code: 'INVALID_COORDENADAS',
+                        message: '⚠️ Estructura de coordenadas geográfica inválida. Debe contener latitud y longitud numéricas válidas.'
+                    });
+                }
+                updateData.coordenadas = { latitud: lat, longitud: lng };
+            }
+        }
+
         if (Object.keys(updateData).length === 0) {
             return res.status(400).json({
                 success: false,
@@ -443,7 +579,7 @@ export const actualizarPerfilPasajero = async (req, res, next) => {
             return res.status(404).json({ success: false, message: 'Pasajero no encontrado' });
         }
 
-        // Espejo en Firebase Firestore
+        // Espejo extendido en Firebase Firestore
         try {
             const docFirestoreId = pasajero.uid || pasajero._id.toString();
             const coleccionUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
@@ -458,8 +594,20 @@ export const actualizarPerfilPasajero = async (req, res, next) => {
                 payloadFs.telefono = tel;
                 payloadFs.telefonoMovil = tel;
             }
-            if (pasajero.email) {
-                payloadFs.email = pasajero.email;
+            if (pasajero.email !== undefined) {
+                payloadFs.email = pasajero.email || '';
+            }
+            if (pasajero.cooperativa !== undefined) {
+                payloadFs.cooperativa = pasajero.cooperativa || '';
+            }
+            if (pasajero.empresa !== undefined) {
+                payloadFs.empresa = pasajero.empresa || '';
+            }
+            if (pasajero.terminal_sede !== undefined) {
+                payloadFs.terminal_sede = pasajero.terminal_sede || '';
+            }
+            if (pasajero.coordenadas !== undefined) {
+                payloadFs.coordenadas = pasajero.coordenadas || null;
             }
 
             await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set(payloadFs, { merge: true });

@@ -1,9 +1,9 @@
-// Versión Arquitectura: V17.5 - Verificación de Decodificación de Encabezado Authorization para Puerto Local 3000 y Multicloud
+// Versión Arquitectura: V17.6 - Verificación de Decodificación de Encabezado Authorization y Validación Estricta de Identidad en BD
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\auth.middleware.js
  * Misión: Securización estricta de JWT, inspección de tokens, estandarización de cabecera Bearer (soporte puerto 3000 local), 
  *          telemetría de depuración para sincronización Vercel/Railway/Render, bypass local, 
- *          compatibilidad multipart/form-data y verificación de existencia en BD (HTTP 401).
+ *          compatibilidad multipart/form-data, validación estricta de existencia actual de usuario en BD y emisión de respuestas HTTP 401 limpias.
  * Integridad: Fusión Atómica. Preserva la retrocompatibilidad, normalización de payloads, guardas de seguridad y el manejo unificado de errores.
  */
 
@@ -180,7 +180,7 @@ export const verificarToken = async (req, res, next) => {
     }
 
     try {
-        // Decodificación atómica del token
+        // Decodificación atómica del token usando el secreto JWT_SECRET validado
         const decodificado = jwt.verify(token, JWT_SECRET);
         
         if (!decodificado || (!decodificado.id && !decodificado._id && !decodificado.uid)) {
@@ -189,7 +189,7 @@ export const verificarToken = async (req, res, next) => {
 
         const idBúsqueda = decodificado.id || decodificado._id || decodificado.uid;
         
-        // Búsqueda por _id o uid en la base de datos central de MongoDB Atlas
+        // Búsqueda por _id o uid en la base de datos central
         let usuarioEncontrado = null;
         if (idBúsqueda) {
             usuarioEncontrado = await Usuario.findOne({
@@ -197,11 +197,11 @@ export const verificarToken = async (req, res, next) => {
             }).select('-password');
         }
 
-        // 🛡️ Validación explícita de existencia en BD y emisión limpia de HTTP 401
+        // 🛡️ Validación explícita de existencia actual en BD y emisión de código 401 limpio
         if (!usuarioEncontrado) {
             return res.status(401).json({
                 success: false,
-                message: '❌ Acceso Denegado: El nodo de identidad ya no existe en el clúster central.'
+                message: '❌ Acceso Denegado: El usuario no existe en la base de datos o su cuenta fue revocada.'
             });
         }
 
@@ -220,13 +220,13 @@ export const verificarToken = async (req, res, next) => {
 
         next();
     } catch (error) {
-        // 🕵️ Si el error proviene puramente de la validación del JWT
+        // 🕵️ Si el error proviene puramente de la validación del JWT (Firma inválida, alterado o expirado)
         if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
             console.error(`🚨 [CIMCO-AUTH] Ruptura criptográfica [${error.name}]: ${error.message}`);
             console.error(`🔍 [CIMCO-DIAGNOSTIC] Secret activo huella: ${secretFingerprint} | Token (inicio): ${token ? token.substring(0, 15) + '...' : 'N/A'}`);
-            return res.status(403).json({
+            return res.status(401).json({
                 success: false,
-                message: '❌ Acceso Prohibido: Token de sesión alterado, expirado o corrupto.'
+                message: '❌ Acceso Denegado: Token de sesión alterado, expirado o con firma no válida.'
             });
         }
 

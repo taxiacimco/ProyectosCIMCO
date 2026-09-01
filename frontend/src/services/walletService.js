@@ -1,4 +1,4 @@
-// Versión Arquitectura: V24.9 - Verificación e Integración de Instancia Centralizada Axios en Billetera
+// Versión Arquitectura: V25.0 - Servicio Billetera Digital Aislado de Mutaciones Multimedia (CIMCO-WALLET-SERVICE)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\walletService.js
  * Misión: Gestión de saldos, recargas, historial de transacciones y transferencias entre cuentas mediante la instancia centralizada de Axios con interceptores JWT.

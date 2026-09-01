@@ -1,10 +1,10 @@
-// Versión Arquitectura: V21.49 - Eliminación visual del bloque de comisión de plataforma en HomePasajero CIMCO-UI V9.3
+// Versión Arquitectura: V21.50 - Integración Atómica de Componente AjustesPerfil Unificado en HomePasajero
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (OpenStreetMap),
  *         integración atómica de telemetría, sockets, billetera smart, selector dinámico de flota (4 modalidades + Cooperativas < 5km),
  *         monitoreo de hardware GPS, entrada de dirección editable con botón de recalibración GPS, subasta dinámica
- *         de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil centralizada mediante authService,
+ *         de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil unificada mediante AjustesPerfil,
  *         guard de validación previa al envío para método de pago 'BILLETERA' contra saldo suficiente y paleta CIMCO-UI V9.3.
  */
 
@@ -54,6 +54,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import GpsRequiredModal from '@/components/shared/GpsRequiredModal';
+import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -168,7 +169,8 @@ export default function HomePasajero() {
   const [perfilFirestore, setPerfilFirestore] = useState({
     nombre: 'Cargando...',
     telefono: '',
-    saldoBilletera: 0
+    saldoBilletera: 0,
+    foto_perfil: null
   });
 
   // Consolidación atómica de saldo
@@ -176,9 +178,6 @@ export default function HomePasajero() {
     ? saldoHook 
     : (typeof perfilFirestore.saldoBilletera === 'number' ? perfilFirestore.saldoBilletera : 0);
 
-  // Inputs editables del perfil
-  const [inputNombre, setInputNombre] = useState('');
-  const [inputTelefono, setInputTelefono] = useState('');
   const [montoRecargaSimulada, setMontoRecargaSimulada] = useState('20000');
   
   const uidUsuario = user?.uid || user?.id || user?._id || 'ANÓNIMO';
@@ -277,22 +276,23 @@ export default function HomePasajero() {
       let nombreBase = user?.nombre || user?.displayName || 'Pasajero CIMCO';
       let telefonoBase = '';
       let saldoBase = 0;
+      let fotoBase = user?.foto_perfil || user?.fotoPerfil || null;
 
       if (snapshotUser.exists()) {
         const dataUser = snapshotUser.data();
-        nombreBase = dataUser.nombre || nombreBase;
+        nombreBase = dataUser.nombre || dataUser.fullName || nombreBase;
         telefonoBase = dataUser.telefonoMovil || dataUser.telefono || '';
         saldoBase = typeof dataUser.saldoBilletera === 'number' ? dataUser.saldoBilletera : (typeof dataUser.balance === 'number' ? dataUser.balance : 0);
+        fotoBase = dataUser.foto_perfil || dataUser.fotoPerfil || dataUser.fotoUrl || fotoBase;
       }
 
       setPerfilFirestore((prev) => ({
         ...prev,
         nombre: nombreBase,
         telefono: telefonoBase,
-        saldoBilletera: saldoBase
+        saldoBilletera: saldoBase,
+        foto_perfil: fotoBase
       }));
-      setInputNombre(nombreBase);
-      setInputTelefono(telefonoBase);
     }, (error) => {
       console.error("❌ [PERFIL-FIRESTORE] Error cargando perfil:", error);
     });
@@ -391,28 +391,17 @@ export default function HomePasajero() {
     });
   };
 
-  // Actualización de Datos Personales del Pasajero mediante Servicio Centralizado
-  const handleActualizarPerfil = async (e) => {
-    e.preventDefault();
-    if (!inputNombre.trim()) {
-      setErrorInterno("⚠️ El nombre de perfil no puede quedar vacío.");
-      return;
+  // Callback ejecutado tras mutación de perfil exitosa desde AjustesPerfil
+  const handleProfileUpdateSuccess = (updatedData) => {
+    if (updatedData) {
+      setPerfilFirestore((prev) => ({
+        ...prev,
+        nombre: updatedData.nombre || updatedData.fullName || prev.nombre,
+        telefono: updatedData.telefonoMovil || updatedData.telefono || prev.telefono,
+        foto_perfil: updatedData.foto_perfil || updatedData.fotoPerfil || updatedData.fotoUrl || prev.foto_perfil
+      }));
     }
-
-    try {
-      await authService.updateProfile({
-        nombre: inputNombre.trim(),
-        telefonoMovil: inputTelefono.trim(),
-        foto_perfil: perfilFirestore.foto_perfil || user?.foto_perfil || null
-      });
-
-      setMostrarModalPerfil(false);
-      setErrorInterno('');
-      console.log("🔒 [PERFIL-CIMCO] Datos de usuario actualizados mediante authService.");
-    } catch (err) {
-      console.error("❌ [PERFIL-ERROR] Fallo al actualizar el perfil centralizado:", err);
-      setErrorInterno("No se pudieron actualizar tus datos personales.");
-    }
+    setMostrarModalPerfil(false);
   };
 
   // 💰 Inyección de saldo simulando consola de administración Central
@@ -665,7 +654,7 @@ export default function HomePasajero() {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => setMostrarModalPerfil(true)} 
-            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-slate-200 text-xs font-bold transition-all"
+            className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-slate-200 text-xs font-bold transition-all cursor-pointer"
           >
             <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
             <span>{perfilFirestore.nombre}</span>
@@ -692,8 +681,12 @@ export default function HomePasajero() {
           <div className="p-4 border-b border-slate-800/80 bg-slate-950/40">
             <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">
-                  <UserCheck className="w-4 h-4" />
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold overflow-hidden">
+                  {perfilFirestore.foto_perfil ? (
+                    <img src={perfilFirestore.foto_perfil} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <UserCheck className="w-4 h-4" />
+                  )}
                 </div>
                 <div>
                   <p className="text-xs font-bold text-white leading-snug">{perfilFirestore.nombre}</p>
@@ -1258,49 +1251,13 @@ export default function HomePasajero() {
         </button>
       </footer>
 
-      {/* MODAL DE EDICIÓN DE PERFIL/DATOS PERSONALES */}
+      {/* MODAL UNIFICADO DE AJUSTES DE PERFIL (SOPORTE MULTIPART/FORMDATA, FOTO DE PERFIL Y CORREO) */}
       {mostrarModalPerfil && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-[5000] p-4">
-          <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl relative font-sans">
-            <button 
-              onClick={() => setMostrarModalPerfil(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            >
-              <X size={16} />
-            </button>
-            <h3 className="text-xs font-black uppercase tracking-widest text-amber-500 mb-4 flex items-center gap-2">
-              <User size={14} /> AJUSTES DE PERFIL PASAJERO
-            </h3>
-            <form onSubmit={handleActualizarPerfil} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">NOMBRE COMPLETO</label>
-                <input 
-                  type="text"
-                  value={inputNombre}
-                  onChange={(e) => setInputNombre(e.target.value)}
-                  placeholder="Tu nombre completo"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">TELÉFONO DE CONTACTO</label>
-                <input 
-                  type="tel"
-                  value={inputTelefono}
-                  onChange={(e) => setInputTelefono(e.target.value)}
-                  placeholder="Número celular"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full mt-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all cursor-pointer"
-              >
-                GUARDAR CAMBIOS
-              </button>
-            </form>
-          </div>
-        </div>
+        <AjustesPerfil
+          isOpen={mostrarModalPerfil}
+          onClose={() => setMostrarModalPerfil(false)}
+          onUpdateSuccess={handleProfileUpdateSuccess}
+        />
       )}
 
       {/* MODAL DE CALIFICACIÓN TRANSACCIONAL */}
