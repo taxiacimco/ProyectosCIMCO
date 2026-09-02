@@ -1,4 +1,4 @@
-// Versión Arquitectura: V2.0 - Incorporación de endpoint gestor de recargas/débitos manuales con revaluación de estado en tiempo real y auditoría atómica doble (MongoDB + Firestore)
+// Versión Arquitectura: V2.1 - Extracción flexibilizada y validación estandarizada de targetUserId
 
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\billetera\wallet.controller.js
@@ -11,13 +11,14 @@ import mongoose from 'mongoose';
 import { getFirestore } from 'firebase-admin/firestore';
 
 /**
- * Obtiene el saldo actual del usuario autenticado de forma ultrarrápida mediante Promise.all.
+ * Obtiene el saldo actual del usuario autenticado o especificado de forma ultrarrápida mediante Promise.all.
  */
 export const obtenerSaldo = async (req, res) => {
     try {
-        const userId = req.user?.id || req.user?.uid;
-        if (!userId) {
-            return res.status(401).json({ success: false, message: "No autorizado. Token inválido o ausente." });
+        const targetUserId = req.body?.targetUserId || req.body?.usuarioId || req.body?.id || req.query?.targetUserId || req.query?.usuarioId || req.query?.id || req.params?.id || req.user?.id || req.user?.uid;
+
+        if (!targetUserId) {
+            return res.status(400).json({ success: false, message: "ID de usuario objetivo no proporcionado (targetUserId)" });
         }
 
         const db = mongoose.connection.db;
@@ -27,9 +28,9 @@ export const obtenerSaldo = async (req, res) => {
 
         // Paralelización de consultas secuenciales por UID
         const [usuarioUid, pasajeroUid, conductorUid] = await Promise.all([
-            db.collection('usuarios').findOne({ uid: userId }),
-            db.collection('pasajeros').findOne({ uid: userId }),
-            db.collection('conductores').findOne({ uid: userId })
+            db.collection('usuarios').findOne({ uid: targetUserId }),
+            db.collection('pasajeros').findOne({ uid: targetUserId }),
+            db.collection('conductores').findOne({ uid: targetUserId })
         ]);
 
         let usuario = usuarioUid || pasajeroUid || conductorUid;
@@ -37,8 +38,8 @@ export const obtenerSaldo = async (req, res) => {
         if (!usuario) {
             // Intento secundario paralelizado buscando por ObjectId si el uid no arrojó resultados
             try {
-                if (mongoose.Types.ObjectId.isValid(userId)) {
-                    const objectId = new mongoose.Types.ObjectId(userId);
+                if (mongoose.Types.ObjectId.isValid(targetUserId)) {
+                    const objectId = new mongoose.Types.ObjectId(targetUserId);
                     const [usuarioId, pasajeroId, conductorId] = await Promise.all([
                         db.collection('usuarios').findOne({ _id: objectId }),
                         db.collection('pasajeros').findOne({ _id: objectId }),
@@ -88,12 +89,13 @@ export const gestionarSaldoManual = async (req, res) => {
             return res.status(403).json({ success: false, message: "Acceso denegado. Se requieren privilegios de Admin/CEO." });
         }
 
-        const { targetUserId, tipoOperacion, monto, motivo } = req.body || {};
+        const targetUserId = req.body?.targetUserId || req.body?.usuarioId || req.body?.id || req.query?.targetUserId || req.query?.usuarioId || req.query?.id;
+        const { tipoOperacion, monto, motivo } = req.body || {};
 
         // Validaciones defensivas de payload
         if (!targetUserId) {
             await session.endSession();
-            return res.status(400).json({ success: false, message: "El ID del usuario objetivo (targetUserId) es obligatorio." });
+            return res.status(400).json({ success: false, message: "ID de usuario objetivo no proporcionado (targetUserId)" });
         }
 
         if (!['RECARGA', 'DEBITO'].includes(tipoOperacion?.toUpperCase())) {

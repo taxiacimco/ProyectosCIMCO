@@ -1,10 +1,11 @@
-// Versión Arquitectura: V19.4 - Integración de Método Operativo de Billetera (puedeOperar) para Control de Saldos
+// Versión Arquitectura: V19.6 - Depuración de Índice Duplicado en Campo UID
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva la sincronización bidireccional (rol ↔ role, saldo ↔ balance), persistencia estricta,
- * indices GeoJSON, encriptación bcrypt única en el hook pre-save controlando isModified('password') y evaluación de umbral
+ * índices GeoJSON, encriptación bcrypt única en el hook pre-save controlando isModified('password') y evaluación de umbral
  * financiero de operabilidad (puedeOperar).
+ * Ajuste V19.6: Remoción de 'index: true' en la propiedad 'uid' para desduplicar la indexación declarada implícitamente con 'unique: true'.
  */
 
 import mongoose from 'mongoose';
@@ -75,7 +76,7 @@ const usuarioSchema = new mongoose.Schema({
         type: Number,
         default: 1
     },
-    uid: {
+    uid: { 
         type: String,
         unique: true,
         sparse: true

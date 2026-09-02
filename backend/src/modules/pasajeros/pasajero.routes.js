@@ -1,8 +1,8 @@
-// Versión Arquitectura: V20.0 - Integración Opción Multer/Upload Middleware para Gestión Multimedia de Perfil
+// Versión Arquitectura: V20.04 - Verificación y Garantía de Parámetros Dinámicos :id / :uid en Rutas de Saldo y Perfil de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.routes.js
  * Misión: Exposición de endpoints para perfil, direcciones favoritas, historial, registro y billetera virtual de pasajeros.
- * Ajuste V20.0: Integración condicional y segura de middleware de carga multipart/form-data (Multer) en endpoints de perfil y registro ('/perfil', '/:id', '/', '/registro'), permitiendo la recepción transparente de binarios de imagen (foto_perfil / fotoPerfil) manteniendo compatibilidad con payloads JSON.
+ * Ajuste V20.04: Homologación y garantía de enrutamiento dinámico para parámetros :id y :uid en consultas de saldo y perfil, manteniendo compatibilidad total con middleware Multer, Firebase Auth y Mongoose ObjectId.
  */
 
 import { Router } from 'express';
@@ -76,6 +76,7 @@ router.post('/validar-unico', validarPasajeroUnico);
 // 💰 RUTAS DE SALDO Y BILLETERA (Definidas antes de parámetros dinámicos)
 router.get('/saldo/me', verificarToken, obtenerSaldoPasajero);
 router.get('/saldo/:id', verificarToken, obtenerSaldoPasajero);
+router.get('/saldo/uid/:uid', verificarToken, obtenerSaldoPasajero);
 router.post('/saldo/recargar', verificarToken, esAdmin, recargarSaldoPasajero);
 
 // 👤 GESTIÓN DE PERFIL CON ALIAS DE COMPATIBILIDAD Y SOPORTE DE IMÁGENES
@@ -89,7 +90,7 @@ router.delete('/direcciones/:direccionId', verificarToken, eliminarDireccionFavo
 // 📜 HISTORIAL DE TRAYECTOS
 router.get('/historial/viajes', verificarToken, obtenerHistorialViajesPasajero);
 
-// 🔍 RUTAS DINÁMICAS Y COMPATIBILIDAD CON ID DE PARÁMETRO
+// 🔍 RUTAS DINÁMICAS Y COMPATIBILIDAD CON ID / UID DE PARÁMETRO
 router.get('/:id', verificarToken, obtenerPerfilPasajero);
 router.put('/:id', verificarToken, cargaFotoPerfilOpcional, actualizarPerfilPasajero);
 router.post('/:id/direcciones', verificarToken, agregarDireccionFavorita);

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.03 - Validación y actualización de estado operativo según umbral de saldo ($2.000 COP)
+// Versión Arquitectura: V20.04 - Consolidador unívoco de extracción de parámetros de ID (params, body, user context)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
  * Misión: Controlador unificado de usuarios (Admin, Despachador, Pasajero, Staff) desacoplado mediante servicios y repositorios (SRP).
@@ -10,6 +10,32 @@ import usuarioService from './usuario.service.js';
 
 // Roles operativos sujetos al umbral mínimo de saldo ($2.000 COP)
 const ROLES_OPERATIVOS = ['Mototaxi', 'Motoparrillero', 'Motocarga', 'Despachador', 'Conductor', 'mototaxi', 'motoparrillero', 'motocarga', 'despachador', 'conductor'];
+
+/**
+ * Auxiliar interno para consolidar unívocamente el identificador de usuario objetivo
+ * priorizando parámetros de ruta, payload HTTP (req.body) y contexto de usuario autenticado.
+ */
+const extraerTargetId = (req, campoEspecificoBody = null) => {
+    if (!req) return null;
+    const body = req.body || {};
+    const params = req.params || {};
+    const user = req.user || {};
+
+    return (
+        params.id ||
+        params.uid ||
+        (campoEspecificoBody ? body[campoEspecificoBody] : null) ||
+        body.usuarioId ||
+        body.idTarget ||
+        body.despachadorId ||
+        body.id ||
+        body.uid ||
+        user.id ||
+        user._id ||
+        user.uid ||
+        null
+    );
+};
 
 /**
  * Auxiliar interno para evaluar y sincronizar el estado operativo según el saldo resultante
@@ -41,7 +67,8 @@ const evaluarEstadoOperativoPorSaldo = async (usuario, nuevoSaldo) => {
                 actualizacion.estado = nuevoEstadoGeneral;
             }
 
-            const usuarioActualizado = await usuarioService.actualizarUsuario(usuario._id || usuario.id || usuario.uid, actualizacion);
+            const targetId = usuario._id || usuario.id || usuario.uid;
+            const usuarioActualizado = await usuarioService.actualizarUsuario(targetId, actualizacion);
             return usuarioActualizado || usuario;
         } catch (err) {
             console.error(`⚠️ [CIMCO-ESTADO-OPERATIVO] Error al sincronizar estado por saldo para ${usuario._id}:`, err);
@@ -161,7 +188,7 @@ export const crearUsuario = registrarUsuario;
  */
 export const obtenerUsuarioPorId = async (req, res, next) => {
     try {
-        const targetId = req.params?.id || req.params?.uid || req.user?.id || req.user?._id || req.user?.uid;
+        const targetId = extraerTargetId(req);
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de usuario ausente." });
         }
@@ -183,7 +210,7 @@ export const obtenerUsuarioPorId = async (req, res, next) => {
  */
 export const actualizarUsuario = async (req, res, next) => {
     try {
-        const targetId = req.params?.id || req.params?.uid || req.user?.id || req.user?._id || req.user?.uid;
+        const targetId = extraerTargetId(req);
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de usuario ausente para actualización." });
         }
@@ -213,7 +240,7 @@ export const actualizarUsuario = async (req, res, next) => {
  */
 export const eliminarUsuario = async (req, res, next) => {
     try {
-        const targetId = req.params?.id || req.params?.uid;
+        const targetId = extraerTargetId(req);
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de usuario ausente para eliminación." });
         }
@@ -251,11 +278,11 @@ export const obtenerDespachadores = async (req, res, next) => {
  */
 export const asignarTerminalDespachador = async (req, res, next) => {
     try {
-        const { despachadorId, id, uid, terminal_id, codigoDespachador } = req.body || {};
-        const targetId = despachadorId || id || uid;
+        const { terminal_id, codigoDespachador } = req.body || {};
+        const targetId = extraerTargetId(req, 'despachadorId');
 
         if (!targetId || !terminal_id) {
-            return res.status(400).json({ success: false, message: "⚠️ `despachadorId` y `terminal_id` son requeridos." });
+            return res.status(400).json({ success: false, message: "⚠️ `despachadorId` (o `usuarioId`/`id`) y `terminal_id` son requeridos." });
         }
 
         const usuario = await usuarioService.asignarTerminalDespachador({ targetId, terminal_id, codigoDespachador });
@@ -283,7 +310,7 @@ export const asignarTerminalDespachador = async (req, res, next) => {
  */
 export const obtenerSaldoDespachador = async (req, res, next) => {
     try {
-        const targetId = req.params?.id || req.user?.id || req.user?._id;
+        const targetId = extraerTargetId(req);
         if (!targetId) {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de despachador ausente." });
         }
@@ -312,8 +339,8 @@ export const obtenerSaldoDespachador = async (req, res, next) => {
  */
 export const recargarSaldoDespachador = async (req, res, next) => {
     try {
-        const { despachadorId, id, uid, monto, referencia, nota } = req.body || {};
-        const targetId = despachadorId || id || uid;
+        const { monto, referencia, nota } = req.body || {};
+        const targetId = extraerTargetId(req, 'despachadorId');
         const montoNum = parseFloat(monto);
         const adminId = req.user?.id || req.user?._id || 'ADMIN_CENTRAL';
 
@@ -355,8 +382,8 @@ export const recargarSaldoDespachador = async (req, res, next) => {
  */
 export const ajustarSaldoBilletera = async (req, res, next) => {
     try {
-        const { usuarioId, idTarget, monto, concepto, rol } = req.body || {};
-        const targetId = usuarioId || idTarget || req.params?.id;
+        const { monto, concepto, rol } = req.body || {};
+        const targetId = extraerTargetId(req, 'usuarioId');
 
         if (!targetId) {
             return res.status(400).json({ success: false, message: "El ID del destinatario es requerido." });
@@ -409,7 +436,7 @@ export const ajustarSaldoBilletera = async (req, res, next) => {
  */
 export const recargarSaldo = async (req, res, next) => {
     try {
-        const targetId = req.params?.id || req.body?.id || req.body?.uid;
+        const targetId = extraerTargetId(req);
         const { monto, tipoOperacion = 'RECARGA', motivo = 'Ajuste Gerencial' } = req.body || {};
         const adminId = req.user?.id || req.user?._id || 'ADMIN_CENTRAL';
 

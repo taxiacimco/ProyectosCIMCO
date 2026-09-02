@@ -1,7 +1,8 @@
-// Versión Arquitectura: V1.2 - Protección JWT y Perfil Administrativo en Rutas de Cooperativa
+// Versión Arquitectura: V1.3 - Soporte Dinámico y Compatibilidad para Búsqueda Flexible BSON, Firebase UID y NIT en Cooperativas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\cooperativas\cooperativa.routes.js
  * Misión: Definición y securización de las rutas de gestión de cooperativas.
+ * Ajuste V1.3: Incorporación de compatibilidad explícita de identificadores dinámicos (:id y :uid) para consultas, actualizaciones y estados de cooperativas/empresas en entornos híbridos MongoDB / Firebase.
  */
 
 import { Router } from 'express';
@@ -32,13 +33,33 @@ const verificarPayloadModificacion = (req, res, next) => {
 // RUTAS SECTORIZADAS DE COOPERATIVAS
 // ==================================================================
 
-// 1. Lecturas
+// 1. Lecturas (Soporte para BSON ObjectId, Firebase UID, NIT e Identificadores Custom)
 router.get('/', verificarToken, obtenerCooperativas);
 router.get('/:id', verificarToken, obtenerCooperativaPorId);
+router.get('/uid/:uid', verificarToken, (req, res, next) => {
+  if (req.params && req.params.uid) {
+    req.params.id = req.params.uid;
+  }
+  return obtenerCooperativaPorId(req, res, next);
+});
 
 // 2. Operaciones Administrativas (Protegidas con Token y Rol Admin Central)
 router.post('/', verificarToken, esAdminCentral, verificarPayloadModificacion, crearCooperativa);
+
 router.patch('/:id/estado', verificarToken, esAdminCentral, verificarPayloadModificacion, cambiarEstadoCooperativa);
+router.patch('/uid/:uid/estado', verificarToken, esAdminCentral, verificarPayloadModificacion, (req, res, next) => {
+  if (req.params && req.params.uid) {
+    req.params.id = req.params.uid;
+  }
+  return cambiarEstadoCooperativa(req, res, next);
+});
+
 router.put('/:id', verificarToken, esAdminCentral, verificarPayloadModificacion, actualizarCooperativa);
+router.put('/uid/:uid', verificarToken, esAdminCentral, verificarPayloadModificacion, (req, res, next) => {
+  if (req.params && req.params.uid) {
+    req.params.id = req.params.uid;
+  }
+  return actualizarCooperativa(req, res, next);
+});
 
 export default router;

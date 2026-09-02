@@ -1,10 +1,12 @@
-// Versión Arquitectura: V3.0 - Polimorfismo Transaccional de Saldo para Soporte Mulit-Entidad (Conductor/Usuario)
+// Versión Arquitectura: V3.1 - Indexación Compuesta para Auditoría y Reportes Cronológicos Multientidad
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\HistorialSaldo.js
  * Misión: Persistir cada movimiento financiero y auditoría contable ejecutada en el sistema,
  * extendiendo el soporte relacional a Conductores y Usuarios (Despachadores/Pasajeros).
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks de guardas anti-NaN/undefined,
  * compatibilidad de campos heredados conductorId/entidadId, refPath dinámico y registro explícito de modelos).
+ * Ajuste V3.1: Incorporación de índices compuestos { entidadId: 1, createdAt: -1 } y { conductorId: 1, createdAt: -1 }
+ * para acelerar reportes financieros, trazabilidad de extractos y consultas de auditoría de saldo.
  */
 
 import mongoose from 'mongoose';
@@ -65,6 +67,10 @@ const HistorialSaldoSchema = new mongoose.Schema({
 }, {
     timestamps: true // Trazabilidad temporal automática (createdAt, updatedAt)
 });
+
+// 🚀 ÍNDICES COMPUESTOS: Optimización de consultas de auditoría, kardex y reportes cronológicos por entidad/conductor
+HistorialSaldoSchema.index({ entidadId: 1, createdAt: -1 });
+HistorialSaldoSchema.index({ conductorId: 1, createdAt: -1 });
 
 // 🛡️ GUARDA DE SEGURIDAD Y SINCRONIZACIÓN POLIMÓRFICA (Anti-Undefined / Multi-Modelo)
 HistorialSaldoSchema.pre('save', function(next) {

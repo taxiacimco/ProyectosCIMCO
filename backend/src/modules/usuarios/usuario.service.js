@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.04 - Lógica de actualización de estadoOperativo/isActive según umbral de saldo ($2.000 COP)
+// Versión Arquitectura: V20.05 - Filtro flexible y seguro de targetId (_id / uid) con validación ObjectId
 // Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.service.js
 
 import mongoose from 'mongoose';
@@ -12,6 +12,21 @@ const ROLES_OPERATIVOS = [
 ];
 
 const UMBRAL_MINIMO_OPERATIVO = 2000;
+
+/**
+ * Auxiliar interno para construir consultas seguras por ID (_id o uid).
+ * Evita fallos CastError de Mongoose cuando se envían UIDs alfanuméricos de Firebase Auth.
+ */
+const buildTargetQuery = (targetId) => {
+    if (!targetId) return { _id: null, uid: null };
+    const isObjectId = mongoose.Types.ObjectId.isValid(targetId);
+    return {
+        $or: [
+            { _id: isObjectId ? targetId : null },
+            { uid: targetId }
+        ]
+    };
+};
 
 /**
  * Obtención dinámica del modelo de Usuario para evitar fallos de importación por rutas relativas.
@@ -80,8 +95,8 @@ export class UsuarioService {
         
         const mapaUnico = new Map();
         for (const u of usuariosMongo) {
-            const key = u.email || u.telefono || u.uid || u._id.toString();
-            if (!mapaUnico.has(key)) {
+            const key = u.email || u.telefono || u.uid || u._id?.toString();
+            if (key && !mapaUnico.has(key)) {
                 mapaUnico.set(key, u);
             }
         }
@@ -144,9 +159,7 @@ export class UsuarioService {
 
     async obtenerUsuarioPorId(targetId) {
         const Usuario = getUsuarioModel();
-        return await Usuario.findOne({
-            $or: [{ _id: targetId }, { uid: targetId }]
-        }).lean();
+        return await Usuario.findOne(buildTargetQuery(targetId)).lean();
     }
 
     async actualizarUsuario(targetId, datos) {
@@ -166,7 +179,7 @@ export class UsuarioService {
         }
 
         return await Usuario.findOneAndUpdate(
-            { $or: [{ _id: targetId }, { uid: targetId }] },
+            buildTargetQuery(targetId),
             { $set: datos },
             { new: true, runValidators: true }
         );
@@ -174,9 +187,7 @@ export class UsuarioService {
 
     async eliminarUsuario(targetId) {
         const Usuario = getUsuarioModel();
-        return await Usuario.findOneAndDelete({
-            $or: [{ _id: targetId }, { uid: targetId }]
-        });
+        return await Usuario.findOneAndDelete(buildTargetQuery(targetId));
     }
 
     async obtenerDespachadores() {
@@ -187,7 +198,7 @@ export class UsuarioService {
     async asignarTerminalDespachador({ targetId, terminal_id, codigoDespachador }) {
         const Usuario = getUsuarioModel();
         return await Usuario.findOneAndUpdate(
-            { $or: [{ _id: targetId }, { uid: targetId }] },
+            buildTargetQuery(targetId),
             { 
                 $set: { 
                     terminal_id, 
@@ -200,14 +211,14 @@ export class UsuarioService {
 
     async obtenerSaldoDespachador(targetId) {
         const Usuario = getUsuarioModel();
-        return await Usuario.findOne({
-            $or: [{ _id: targetId }, { uid: targetId }]
-        }).select('saldoWallet saldo nombre rol estadoOperativo isActive').lean();
+        return await Usuario.findOne(buildTargetQuery(targetId))
+            .select('saldoWallet saldo nombre rol estadoOperativo isActive')
+            .lean();
     }
 
     async recargarSaldoDespachador({ targetId, montoNum }) {
         const Usuario = getUsuarioModel();
-        let usuario = await Usuario.findOne({ $or: [{ _id: targetId }, { uid: targetId }] });
+        let usuario = await Usuario.findOne(buildTargetQuery(targetId));
 
         if (!usuario) return null;
 
@@ -226,11 +237,12 @@ export class UsuarioService {
 
     async ajustarSaldoBilletera({ targetId, montoNumerico }) {
         const Usuario = getUsuarioModel();
-        let usuario = await Usuario.findOne({ $or: [{ _id: targetId }, { uid: targetId }] });
+        const targetQuery = buildTargetQuery(targetId);
+        let usuario = await Usuario.findOne(targetQuery);
         let esColeccionConductor = false;
 
         if (!usuario && mongoose.models.Conductor) {
-            usuario = await mongoose.models.Conductor.findOne({ $or: [{ _id: targetId }, { uid: targetId }] });
+            usuario = await mongoose.models.Conductor.findOne(targetQuery);
             esColeccionConductor = true;
         }
 
@@ -263,7 +275,7 @@ export class UsuarioService {
         const Usuario = getUsuarioModel();
         const delta = tipoOperacion === 'DEBITO' ? -Math.abs(montoNumerico) : Math.abs(montoNumerico);
 
-        const usuario = await Usuario.findOne({ $or: [{ _id: targetId }, { uid: targetId }] });
+        const usuario = await Usuario.findOne(buildTargetQuery(targetId));
         if (!usuario) {
             const err = new Error("Usuario no encontrado.");
             err.code = 'USER_NOT_FOUND';

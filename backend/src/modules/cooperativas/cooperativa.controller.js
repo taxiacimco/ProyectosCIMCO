@@ -1,9 +1,9 @@
-// Versión Arquitectura: V21.36 - Control de Lotes por Trozos (Chunking) para Sincronización en Firestore (Límite 500 Ops)
+// Versión Arquitectura: V21.37 - Búsqueda Flexible BSON/Firebase UID/NIT para Identificadores de Cooperativa
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\cooperativas\cooperativa.controller.js
  * Misión: Administrar entidades de cooperativas, asignaciones de flota, estados operativos
  * e inyección de suspensión en cascada sobre los conductores vinculados mediante sesión ACID y espejo Firebase.
- * Ajuste V21.36: Implementación de procesamiento por lotes (max 500 ops) para garantizar escrituras seguras en Firestore durante la desactivación masiva.
+ * Ajuste V21.37: Incorporación de resolvedor de consulta flexible BSON/Firebase UID/NIT/idCooperativa para búsquedas dinámicas de cooperativa en consultas, recargas y asignaciones.
  */
 
 import mongoose from 'mongoose';
@@ -13,6 +13,36 @@ import { dbFirestore, FIRESTORE_PATHS } from '../../config/firebase.js';
 
 // ESTADOS PERMITIDOS EN LA ENTIDAD
 const ESTADOS_PERMITIDOS = ['activa', 'inactiva', 'suspendida'];
+
+/**
+ * 🛠️ Helper para construir consulta flexible por ID, MongoDB ObjectId, Firebase UID, NIT o identificador personalizado
+ */
+const construirQueryBusquedaCooperativa = (id) => {
+  if (!id) return null;
+  const idLimpio = String(id).trim();
+  if (!idLimpio) return null;
+
+  if (mongoose.Types.ObjectId.isValid(idLimpio)) {
+    return {
+      $or: [
+        { _id: idLimpio },
+        { uid: idLimpio },
+        { firebaseUID: idLimpio },
+        { nit: idLimpio },
+        { idCooperativa: idLimpio }
+      ]
+    };
+  }
+
+  return {
+    $or: [
+      { uid: idLimpio },
+      { firebaseUID: idLimpio },
+      { nit: idLimpio },
+      { idCooperativa: idLimpio }
+    ]
+  };
+};
 
 /**
  * 📋 Obtener todas las cooperativas con sus despachadores y conductores poblados
@@ -27,8 +57,8 @@ export const obtenerCooperativas = async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      contador: cooperativas.length,
-      data: cooperativas
+      contador: cooperativas ? cooperativas.length : 0,
+      data: cooperativas || []
     });
   } catch (error) {
     console.error('🚨 [CIMCO-COOPERATIVAS-ERR]:', error);
@@ -37,17 +67,18 @@ export const obtenerCooperativas = async (req, res, next) => {
 };
 
 /**
- * 🔍 Obtener cooperativa por ID
+ * 🔍 Obtener cooperativa por ID (Soporta MongoDB ObjectId, Firebase UID, NIT)
  */
 export const obtenerCooperativaPorId = async (req, res, next) => {
   try {
     const { id } = req.params || {};
+    const query = construirQueryBusquedaCooperativa(id);
 
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: 'Identificador BSON de cooperativa inválido.' });
+    if (!query) {
+      return res.status(400).json({ success: false, error: 'Identificador de cooperativa no proporcionado o inválido.' });
     }
 
-    const cooperativa = await Cooperativa.findById(id)
+    const cooperativa = await Cooperativa.findOne(query)
       .populate('despachadores', 'nombre email telefonoMovil rol')
       .populate('conductoresAsignados', 'nombre nombres apellidos placa telefonoMovil estado saldo')
       .lean();
@@ -93,7 +124,7 @@ export const crearCooperativa = async (req, res, next) => {
       nombre: String(nombre).trim(),
       nit: nitLimpio,
       telefono: telefono ? String(telefono).trim() : '',
-      ciudad: ciudad || 'La Jagua de Ibirico',
+      ciudad: ciudad ? String(ciudad).trim() : 'La Jagua de Ibirico',
       limiteFlota: Number(limiteFlota || limiteVehiculos) || 50,
       estado: 'activa'
     });
@@ -124,10 +155,12 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
     const { id } = req.params || {};
     const { estado } = req.body || {};
 
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
+    const query = construirQueryBusquedaCooperativa(id);
+
+    if (!query) {
       await session.abortTransaction();
       session.endSession();
-      return res.status(400).json({ success: false, error: 'Identificador BSON de cooperativa inválido.' });
+      return res.status(400).json({ success: false, error: 'Identificador de cooperativa no proporcionado o inválido.' });
     }
 
     const estadoNormalizado = String(estado || '').toLowerCase().trim();
@@ -140,8 +173,8 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
       });
     }
 
-    const coop = await Cooperativa.findByIdAndUpdate(
-      id,
+    const coop = await Cooperativa.findOneAndUpdate(
+      query,
       { estado: estadoNormalizado },
       { new: true, session }
     );
@@ -160,11 +193,16 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
         $or: [
           { cooperativa: coop.nombre },
           { empresa: coop.nombre },
-          { conductoresAsignados: { $in: coop.conductoresAsignados || [] } }
+          { cooperativaId: coop._id },
+          { cooperativaId: String(coop._id) }
         ]
       };
 
-      if (coop.conductoresAsignados && coop.conductoresAsignados.length > 0) {
+      if (coop.uid) {
+        queryConductores.$or.push({ cooperativaId: coop.uid });
+      }
+
+      if (coop.conductoresAsignados && Array.isArray(coop.conductoresAsignados) && coop.conductoresAsignados.length > 0) {
         queryConductores.$or.push({ _id: { $in: coop.conductoresAsignados } });
       }
 
@@ -241,8 +279,10 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
 export const actualizarCooperativa = async (req, res, next) => {
   try {
     const { id } = req.params || {};
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, error: 'Identificador BSON de cooperativa inválido.' });
+    const query = construirQueryBusquedaCooperativa(id);
+
+    if (!query) {
+      return res.status(400).json({ success: false, error: 'Identificador de cooperativa no proporcionado o inválido.' });
     }
 
     const { nombre, telefono, ciudad, limiteFlota, limiteVehiculos } = req.body || {};
@@ -255,8 +295,8 @@ export const actualizarCooperativa = async (req, res, next) => {
       updateData.limiteFlota = Number(limiteFlota || limiteVehiculos);
     }
 
-    const cooperativaActualizada = await Cooperativa.findByIdAndUpdate(
-      id,
+    const cooperativaActualizada = await Cooperativa.findOneAndUpdate(
+      query,
       { $set: updateData },
       { new: true }
     );

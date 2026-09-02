@@ -1,12 +1,11 @@
-// Versión Arquitectura: V21.31 - Soporte de Alias Virtual y Mapeo Físico para fotoPerfil / foto_perfil
+// Versión Arquitectura: V21.33 - Depuración de Índice Duplicado en Campo UID
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva cifrado Bcrypt con guarda anti-doble hashing (isModified('password')
  * y detección de prefijo hash $2a$/$2b$), esquema de direcciones favoritas, soporte GeoJSON 2dsphere,
  * aprobación automática inmediata, normalización de variables, método puedeOperar() e índice UID disperso.
- * Ajuste V21.31: Adición de la propiedad/alias `fotoPerfil` (campo físico y getter/setter virtual con toJSON/toObject getters)
- * para asegurar la compatibilidad fluida con controladores que leen o escriben `fotoPerfil` y `foto_perfil`.
+ * Ajuste V21.33: Remoción de 'index: true' en la propiedad 'uid' para desduplicar la indexación declarada implícitamente con 'unique: true'.
  */
 
 import mongoose from 'mongoose';
@@ -103,7 +102,7 @@ const pasajeroSchema = new mongoose.Schema({
         trim: true,
         default: 'Particular'
     },
-    uid: {
+    uid: { 
         type: String,
         unique: true,
         sparse: true

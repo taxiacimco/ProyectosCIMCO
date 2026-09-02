@@ -1,12 +1,12 @@
-// Versión Arquitectura: V15.1 - Reglas de Comisión Dinámicas e Indicador de Saldo Crítico
+// Versión Arquitectura: V15.3 - Integración Endpoint Manual Wallet Admin POST /api/billetera/admin/operacion-manual
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
  * Misión: Monitoreo global de saldos y ejecución de ajustes de capital (Abono / Débito Manual) para todos los actores:
  *         Pasajeros, Mototaxistas, Motoparrilleros, Montacargas, Despachadores y Conductores.
- * Ajuste V15.1:
- *   1. Integración de la matriz de reglas de comisión en la tarjeta de detalle del destinatario.
- *   2. Indicador visual dinámico de alerta en la grilla para saldos inferiores a $2.000 COP (Rojo/Amarillo).
- *   3. Mantenimiento estricto del estándar CIMCO-UI V9.3 (Glassmorphism), alias absolutos y seguridad REST.
+ * Ajuste V15.3:
+ *   1. Integración del endpoint estandarizado POST `/api/billetera/admin/operacion-manual` según wallet.routes.js.
+ *   2. Alineación del contrato de payload transaccional: { targetUserId, monto, tipoOperacion, concepto }.
+ *   3. Mantenimiento del estándar visual CIMCO-UI V9.3 (Glassmorphism), alias absolutos y defensa anti-undefined.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -32,7 +32,7 @@ const deduplicarUsuarios = (lista) => {
     const mapaUnico = new Map();
     lista.forEach((item) => {
         if (!item) return;
-        const key = item._id || item.id || item.email || item.telefono;
+        const key = item._id || item.uid || item.id || item.email || item.telefono;
         if (key && !mapaUnico.has(key)) {
             mapaUnico.set(key, item);
         }
@@ -103,7 +103,7 @@ export const GestionBilleteras = () => {
     const obtenerReglaComision = (rol, subrol) => {
         const val = (subrol || rol || '').toUpperCase();
         if (val.includes('MOTOTAXI') || val.includes('PARRILLERO')) {
-            return "Comisión: 10% por servicio accepted | Min $2.000 COP";
+            return "Comisión: 10% por servicio aceptado | Min $2.000 COP";
         }
         if (val.includes('CARGA')) {
             return "Comisión: $500 COP fijo por servicio | Min $2.000 COP";
@@ -145,9 +145,11 @@ export const GestionBilleteras = () => {
                 if (isMounted.current) {
                     const listaProcesada = listaUsuarios.map(u => {
                         const rawSaldo = u.saldoWallet !== undefined ? u.saldoWallet : (u.billetera?.saldo !== undefined ? u.billetera.saldo : (u.saldo || u.balance || 0));
+                        const idResuelto = u.id || u._id || u.uid;
                         return {
-                            id: u._id || u.id,
-                            uid: u._id || u.id,
+                            _id: idResuelto,
+                            uid: idResuelto,
+                            id: idResuelto,
                             nombre: obtenerNombreMostrar(u),
                             telefono: u.telefono || 'N/A',
                             email: u.email || 'SIN_CORREO',
@@ -181,11 +183,13 @@ export const GestionBilleteras = () => {
                 const listaUsersBruta = snapshot.docs.map(docSnap => {
                     const u = docSnap.data();
                     const idDoc = docSnap.id;
+                    const idResuelto = u.id || u._id || u.uid || idDoc;
                     const rawSaldo = u.saldoWallet !== undefined ? u.saldoWallet : (u.billetera?.saldo !== undefined ? u.billetera.saldo : (u.saldo || u.balance || 0));
                     return {
-                        id: idDoc,
-                        uid: idDoc,
-                        nombre: obtenerNombreMostrar({ id: idDoc, ...u }),
+                        _id: idResuelto,
+                        uid: idResuelto,
+                        id: idResuelto,
+                        nombre: obtenerNombreMostrar({ id: idResuelto, ...u }),
                         telefono: u.telefono || 'N/A',
                         email: u.email || 'SIN_CORREO',
                         rol: u.rol || u.role || 'USUARIO',
@@ -245,14 +249,15 @@ export const GestionBilleteras = () => {
 
     // Sincronización de saldos dinámicos combinados entre backend y mapas Firestore
     const cuentasMapeadas = cuentas.map(c => {
-        const wData = walletsMap[c.id] || {};
+        const keyId = c.id || c._id || c.uid;
+        const wData = walletsMap[keyId] || {};
         const rawSaldo = wData.balance !== undefined ? wData.balance : (wData.saldo !== undefined ? wData.saldo : c.saldo);
         const saldoFinal = Math.round(Number(rawSaldo) || 0);
         return {
             ...c,
             saldo: saldoFinal,
             saldoWallet: saldoFinal,
-            existeEnWallets: Boolean(walletsMap[c.id])
+            existeEnWallets: Boolean(walletsMap[keyId])
         };
     });
 
@@ -262,9 +267,10 @@ export const GestionBilleteras = () => {
     // Mantener la selección sincronizada en vivo ante variaciones de saldo
     useEffect(() => {
         if (cuentaSeleccionada) {
-            const actualizada = cuentasUnificadas.find(c => c.id === cuentaSeleccionada.id);
+            const idSel = cuentaSeleccionada.id || cuentaSeleccionada._id || cuentaSeleccionada.uid;
+            const actualizada = cuentasUnificadas.find(c => (c.id || c._id || c.uid) === idSel);
             if (actualizada && isMounted.current) {
-                if (actualizada.saldo !== cuentaSeleccionada.saldo || actualizada.id !== cuentaSeleccionada.id) {
+                if (actualizada.saldo !== cuentaSeleccionada.saldo || (actualizada.id !== cuentaSeleccionada.id)) {
                     setCuentaSeleccionada(actualizada);
                 }
             }
@@ -279,7 +285,7 @@ export const GestionBilleteras = () => {
         const email = (c.email || '').toLowerCase();
         const rol = (c.rol || '').toLowerCase();
         const subrol = (c.subrol || '').toLowerCase();
-        const id = (c.id || '').toLowerCase();
+        const id = String(c.id || c._id || c.uid || '').toLowerCase();
 
         return (
             nombre.includes(queryStr) ||
@@ -322,30 +328,36 @@ export const GestionBilleteras = () => {
         // 🔑 Generar Clave de Idempotencia Única por transacción
         const idempotencyKey = generarIdempotencyKey();
 
-        // 🎯 RUTA UNIVERSAL DE SALDOS REST
-        const endpointDestino = `${API_BASE_URL}/api/usuarios/${cuentaSeleccionada.id}/saldo`;
+        // 🎯 RESOLUCIÓN FLEXIBLE DE IDENTIFICADOR DE DESTINATARIO (MongoDB / Firebase Auth)
+        const destinatario = cuentaSeleccionada;
+        const idTarget = destinatario.id || destinatario._id || destinatario.uid;
+        const motivoOperacion = tipoOperacion === 'DEBITO' ? 'Devolución de Saldo' : 'Recarga de Saldo';
+
+        // 🎯 ENDPOINT CENTRALIZADO Y PAYLOAD ESTANDARIZADO DE WALLET ADMIN
+        const endpointDestino = `${API_BASE_URL}/api/billetera/admin/operacion-manual`;
+
+        const payload = {
+            targetUserId: idTarget,
+            monto: Number(montoNumerico),
+            tipoOperacion, // 'RECARGA' | 'DEBITO'
+            concepto: motivoOperacion
+        };
 
         try {
             const token = localStorage.getItem('cimco_token');
             const res = await fetch(endpointDestino, {
-                method: 'PUT',
+                method: 'POST',
                 headers: {
                     'Authorization': token ? `Bearer ${token}` : '',
                     'Content-Type': 'application/json',
                     'X-Idempotency-Key': idempotencyKey
                 },
-                body: JSON.stringify({
-                    monto: montoNumerico,
-                    montoRecarga: montoNumerico,
-                    tipoOperacion,
-                    idempotencyKey,
-                    motivo: tipoOperacion === 'DEBITO' ? 'Devolución de Saldo' : 'Abono de Saldo'
-                })
+                body: JSON.stringify(payload)
             });
 
             const respuesta = await res.json().catch(() => ({}));
 
-            if (res.ok && (respuesta.success || res.status === 200)) {
+            if (res.ok && (respuesta.success || res.status === 200 || res.status === 201)) {
                 if (isMounted.current) {
                     const msgConfirmacion = tipoOperacion === 'DEBITO'
                         ? `Devolución exitosa de $${montoNumerico.toLocaleString('es-CO')} COP a ${cuentaSeleccionada.nombre}`
@@ -449,13 +461,15 @@ export const GestionBilleteras = () => {
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[520px] overflow-y-auto pr-1">
                             {cuentasFiltradas.map((cuenta) => {
-                                const esSeleccionado = cuentaSeleccionada?.id === cuenta.id;
+                                const idCuenta = cuenta.id || cuenta._id || cuenta.uid;
+                                const idSel = cuentaSeleccionada?.id || cuentaSeleccionada?._id || cuentaSeleccionada?.uid;
+                                const esSeleccionado = idSel === idCuenta;
                                 const esSaldoBajo = cuenta.saldo < 2000;
                                 const esSaldoCero = cuenta.saldo <= 0;
 
                                 return (
                                     <div 
-                                        key={cuenta.id}
+                                        key={idCuenta}
                                         onClick={() => setCuentaSeleccionada(cuenta)}
                                         className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
                                             esSeleccionado 
@@ -545,7 +559,9 @@ export const GestionBilleteras = () => {
                                         {renderBadgeRol(cuentaSeleccionada.rol, cuentaSeleccionada.subrol)}
                                     </div>
                                     <p className="text-xs font-black text-white uppercase">{cuentaSeleccionada.nombre}</p>
-                                    <p className="text-[10px] text-zinc-400 truncate">ID: {cuentaSeleccionada.id}</p>
+                                    <p className="text-[10px] text-zinc-400 truncate">
+                                        ID: {cuentaSeleccionada.id || cuentaSeleccionada._id || cuentaSeleccionada.uid}
+                                    </p>
                                     <div className="pt-2 flex justify-between items-center text-[10px] border-t border-white/5 text-zinc-400">
                                         <span>Saldo Actual:</span>
                                         <span className={`font-bold ${

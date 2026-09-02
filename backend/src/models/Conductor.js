@@ -1,12 +1,11 @@
-// Versión Arquitectura: V21.32 - Estandarización de foto_perfil con Compatibilidad Virtual para fotoPerfil
+// Versión Arquitectura: V21.35 - Depuración de Índice Duplicado en Campo UID
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
  * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales, cifrado Bcrypt anti-doble hashing,
- * índice UID disperso, método de negocio puedeOperar).
- * Ajuste V21.32: Estandarización del campo principal `foto_perfil` con soporte para alias/virtual `fotoPerfil` y sincronización
- * automática pre-save para prevenir inconsistencias entre controladores o clientes que envíen `fotoPerfil`.
+ * índice UID disperso e indexado a nivel de esquema, método de negocio puedeOperar).
+ * Ajuste V21.35: Remoción de 'unique: true' de la propiedad uid para desduplicar la indexación declarada en ConductorSchema.index.
  */
 
 import mongoose from 'mongoose';
@@ -89,7 +88,6 @@ const ConductorSchema = new mongoose.Schema({
         trim: true,
         default: 'Particular'
     },
-    // 🚀 AGREGADO: Campo homologado para prevenir descalce documental en updateProfile
     empresa: {
         type: String,
         trim: true,
@@ -142,7 +140,6 @@ const ConductorSchema = new mongoose.Schema({
     },
     uid: { 
         type: String,
-        unique: true,
         sparse: true
     },
     flota_id: { 
@@ -170,7 +167,7 @@ const ConductorSchema = new mongoose.Schema({
     }
 }, { 
     timestamps: true,
-    strict: true, // 🚀 Bloquea la persistencia de campos no definidos en el esquema (como saldoWallet)
+    strict: true,
     toJSON: { virtuals: true, getters: true },
     toObject: { virtuals: true, getters: true }
 });
@@ -181,10 +178,11 @@ ConductorSchema.virtual('avatarUrl')
         return this.foto_perfil || this.fotoPerfil || null;
     });
 
-// Índices optimizados para el motor de geolocalización y bloqueos transaccionales
+// Índices optimizados para el motor de geolocalización, bloqueos transaccionales y lookup acelerado por UID
 ConductorSchema.index({ ubicacion: "2dsphere" });
 ConductorSchema.index({ estadoOperativo: 1 });
 ConductorSchema.index({ estadoAdministrativo: 1 });
+ConductorSchema.index({ uid: 1 }, { sparse: true, unique: true });
 
 // 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados, Geometría, Cifrado de Password, Naming foto_perfil y Sanitización Financiera
 ConductorSchema.pre('save', async function(next) {
@@ -236,7 +234,6 @@ ConductorSchema.pre('save', async function(next) {
                 coordinates: [cond.coordenadas.longitud, cond.coordenadas.latitud]
             };
         } else {
-            // Salvaguarda geométrica GeoJSON Point nativa predeterminada
             cond.ubicacion = { type: 'Point', coordinates: [-73.3332, 9.5661] };
             cond.coordenadas = { longitud: -73.3332, latitud: 9.5661, ultimaActualizacion: new Date() };
         }
@@ -244,16 +241,14 @@ ConductorSchema.pre('save', async function(next) {
         // 🛡️ UNIFICACIÓN Y SANITIZACIÓN FINANCIERA ATÓMICA
         let saldoConsolidado = cond.saldo;
         
-        // Si detectamos un valor residual en saldoWallet, migramos su valor a saldo si saldo estaba en 0
         if (cond._doc.saldoWallet !== undefined && cond._doc.saldoWallet !== null) {
             const valorWallet = Number(cond._doc.saldoWallet);
             if (!isNaN(valorWallet) && (saldoConsolidado === undefined || saldoConsolidado === 0)) {
                 saldoConsolidado = valorWallet;
             }
-            delete cond._doc.saldoWallet; // Remoción inmediata del buffer Mongoose
+            delete cond._doc.saldoWallet;
         }
 
-        // Guardas de seguridad contra valores nulos o corruptos
         saldoConsolidado = Number(saldoConsolidado);
         cond.saldo = isNaN(saldoConsolidado) || saldoConsolidado < 0 ? 0 : saldoConsolidado;
 
@@ -279,12 +274,11 @@ ConductorSchema.pre('save', async function(next) {
     }
 });
 
-// 🛠️ HOOK PRE-UPDATE: Sanitización en operaciones de actualización directa (findOneAndUpdate, updateOne, etc.)
+// 🛠️ HOOK PRE-UPDATE: Sanitización en operaciones de actualización directa
 ConductorSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function(next) {
     const update = this.getUpdate();
     if (!update) return next();
 
-    // Sincronización de fotoPerfil -> foto_perfil en updates directos
     if (update.$set) {
         if (update.$set.fotoPerfil && !update.$set.foto_perfil) {
             update.$set.foto_perfil = update.$set.fotoPerfil;
@@ -293,7 +287,6 @@ ConductorSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function(ne
         }
     }
 
-    // Eliminar saldoWallet de $set para impedir inyecciones accidentales en updates
     if (update.$set && update.$set.saldoWallet !== undefined) {
         if (update.$set.saldo === undefined && update.$set.saldoWallet !== null) {
             const valorWallet = Number(update.$set.saldoWallet);
@@ -304,7 +297,6 @@ ConductorSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function(ne
         delete update.$set.saldoWallet;
     }
 
-    // Forzar $unset de saldoWallet para limpiar el documento en la base de datos durante cualquier mutación
     if (!update.$unset) {
         update.$unset = {};
     }

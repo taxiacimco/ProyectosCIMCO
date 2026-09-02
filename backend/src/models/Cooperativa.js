@@ -1,3 +1,12 @@
+// Versión Arquitectura: V1.2 - Eliminación de Index Redundante en Campo NIT
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Cooperativa.js
+ * Misión: Mapeo y gestión de la colección de cooperativas asociadas dentro del ecosistema TAXIA CIMCO.
+ * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Relaciones con Usuarios/Despachadores y Conductores,
+ * enums de estado, límites de flota y trazabilidad temporal).
+ * Ajuste V1.2: Remoción de 'index: true' en el campo 'nit' para eliminar redundancia de indexación con 'unique: true'.
+ */
+
 import mongoose from 'mongoose';
 
 const cooperativaSchema = new mongoose.Schema({
@@ -41,4 +50,4 @@ const cooperativaSchema = new mongoose.Schema({
   timestamps: true
 });
 
-export default mongoose.model('Cooperativa', cooperativaSchema);
+export default mongoose.models.Cooperativa || mongoose.model('Cooperativa', cooperativaSchema);

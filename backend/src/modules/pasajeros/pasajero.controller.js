@@ -1,8 +1,8 @@
-// Versión Arquitectura: V20.03 - Expansión de Perfil Extendido Corporativo e Institucional en Pasajeros
+// Versión Arquitectura: V20.04 - Aplicación Unificada del Filtro $or con Validación de ObjectId en Consultas Individuales de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
  * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera y blindaje contra colisiones de duplicidad E11000/Firebase Auth en peticiones concurrentes.
- * Ajuste V20.03: Validación, persistencia y replicación hacia Firestore del perfil extendido corporativo (fullName, cooperativa, empresa, terminal_sede, coordenadas).
+ * Ajuste V20.04: Aplicación del filtro $or con validación de ObjectId en todos los métodos de consulta individual.
  */
 
 import mongoose from 'mongoose';
@@ -700,6 +700,8 @@ export const eliminarDireccionFavorita = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "⚠️ Parámetros insuficientes para eliminar la dirección." });
         }
 
+        const filtroDireccionId = mongoose.Types.ObjectId.isValid(direccionId) ? direccionId : null;
+
         const pasajero = await Pasajero.findOneAndUpdate(
             {
                 $or: [
@@ -707,7 +709,13 @@ export const eliminarDireccionFavorita = async (req, res, next) => {
                     { uid: targetId }
                 ]
             },
-            { $pull: { direccionesFavoritas: { _id: direccionId } } },
+            { 
+                $pull: { 
+                    direccionesFavoritas: { 
+                        _id: filtroDireccionId || direccionId 
+                    } 
+                } 
+            },
             { new: true }
         ).select('-password').lean();
 
@@ -752,9 +760,15 @@ export const obtenerHistorialViajesPasajero = async (req, res, next) => {
         });
 
         const queryId = pasajero ? pasajero._id : targetId;
+        const isQueryIdObjectId = mongoose.Types.ObjectId.isValid(queryId);
 
         const viajes = await Viaje.find({
-            $or: [{ pasajeroId: queryId }, { pasajero: queryId }]
+            $or: [
+                { pasajeroId: isQueryIdObjectId ? queryId : null },
+                { pasajero: isQueryIdObjectId ? queryId : null },
+                { pasajeroId: queryId },
+                { pasajero: queryId }
+            ]
         }).sort({ createdAt: -1 }).lean();
 
         return res.status(200).json({ success: true, contador: viajes.length, data: viajes });
