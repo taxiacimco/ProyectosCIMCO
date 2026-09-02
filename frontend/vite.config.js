@@ -1,4 +1,4 @@
-// Versión Arquitectura: V10.3.0 - Configuración Proxy Server REST API y Socket.IO sin Advertencias SSL
+// Versión Arquitectura: V10.4.0 - Resolución de alias (@) y orquestación SPA optimizada para despliegue en Vercel
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\vite.config.js
  * Misión: Orquestación de empaquetado Vite, resolución de alias de rutas (@), 

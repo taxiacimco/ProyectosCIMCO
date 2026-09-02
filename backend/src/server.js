@@ -1,4 +1,4 @@
-// Versión Arquitectura: V19.9 - Integración quirúrgica y centralizada del submódulo de billetera en el núcleo HTTP
+// Versión Arquitectura: V20.0 - Inclusión de cabeceras de idempotencia X-Idempotency-Key en política CORS y cabeceras expuestas[cite: 27]
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración del módulo de billetera (/api/billetera) manteniendo todas las políticas de seguridad perimetral,
@@ -97,7 +97,14 @@ const corsOptions = {
         'Expires', 
         'Cache-Control', 
         'Pragma',
-        'x-access-token'
+        'x-access-token',
+        'X-Idempotency-Key',
+        'x-idempotency-key'
+    ],
+    exposedHeaders: [
+        'X-Idempotency-Key',
+        'x-idempotency-key',
+        'X-Response-Time'
     ]
 };
 
