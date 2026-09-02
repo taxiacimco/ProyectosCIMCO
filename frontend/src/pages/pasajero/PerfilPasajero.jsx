@@ -1,7 +1,7 @@
-// Versión Arquitectura: V12.6 - Integración de Callback de Refresco Unificado onUpdateSuccess
+// Versión Arquitectura: V12.8 - Verificación de Importación Unificada AjustesPerfil y Sincronización de Contexto
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\PerfilPasajero.jsx
- * Misión: Expediente de identidad del pasajero con integración al editor unificado AjustesPerfil, refresco dinámico post-mutación y consumo seguro mediante Axios.
+ * Misión: Expediente de identidad del pasajero con integración al editor unificado AjustesPerfil, refresco dinámico post-mutación, consumo seguro mediante Axios y navegación alineada a /pasajero.
  * UI Standard: CIMCO-UI V9.3 Pure Dark Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 
@@ -64,7 +64,7 @@ const PerfilPasajero = () => {
                 viajesTotales: 0,
                 fotoUrl: user?.fotoUrl || user?.foto || user?.foto_perfil || ''
             });
-        } fontFinal: {
+        } finally {
             setLoading(false);
         }
     }, [user]);
@@ -118,8 +118,8 @@ const PerfilPasajero = () => {
                     <button
                         type="button"
                         onClick={() => navigate('/pasajero')}
-                        className="p-2 bg-zinc-900/80 hover:bg-zinc-800 rounded-xl transition-colors border border-white/5 text-zinc-400 hover:text-white"
-                        title="Volver"
+                        className="p-2 bg-zinc-900/80 hover:bg-zinc-800 rounded-xl transition-colors border border-white/5 text-zinc-400 hover:text-white cursor-pointer"
+                        title="Volver al panel principal"
                     >
                         <ArrowLeft size={16} />
                     </button>
@@ -127,7 +127,7 @@ const PerfilPasajero = () => {
                     <button
                         type="button"
                         onClick={() => setModoEdicion(true)}
-                        className="p-2 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 rounded-xl transition-all duration-200 flex items-center gap-1.5 active:scale-95"
+                        className="p-2 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 rounded-xl transition-all duration-200 flex items-center gap-1.5 active:scale-95 cursor-pointer"
                         title="Configuración de Perfil"
                     >
                         <Settings size={16} />

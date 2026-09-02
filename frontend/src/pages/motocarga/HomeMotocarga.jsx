@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.25 - Sincronización estricta con esquema estandarizado de perfil (telefonoMovil, nombre, foto_perfil) y directrices CIMCO-UI V9.3
+// Versión Arquitectura: V12.26 - Refactorización de modal de perfil a componente centralizado AjustesPerfil con callback de sincronización
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
@@ -8,6 +8,7 @@ import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api'; 
 import authService from '@/services/authService';
 import ModalCalificacion from '@/components/ModalCalificacion';
+import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
   CircleDollarSign, Signal, LogOut, Package, Truck, Loader, UserSquare2
@@ -33,7 +34,6 @@ export default function HomeMotocarga() {
 
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
   const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
   const [solicitudViaje, setSolicitudViaje] = useState(null); 
   const [servicioActivo, setServicioActivo] = useState(null); 
@@ -120,7 +120,7 @@ export default function HomeMotocarga() {
           setNombreConductor(nombreCompleto.toUpperCase());
         }
 
-        // Sincronizar datos locales para el formulario de edición
+        // Sincronizar datos locales para el perfil si es necesario
         setDatosPerfil({
           nombre: nombreCompleto || '',
           telefono: data?.telefonoMovil || data?.telefono || '',
@@ -137,48 +137,7 @@ export default function HomeMotocarga() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 2. ACTUALIZACIÓN MUTABLE DE DATOS VIA SERVICIO CENTRALIZADO
-  // ==================================================================
-  const handleGuardarPerfil = async (e) => {
-    e.preventDefault();
-    if (!user?.uid) return;
-    setGuardandoPerfil(true);
-    
-    try {
-      await authService.updateProfile({
-        nombre: datosPerfil.nombre,
-        telefonoMovil: datosPerfil.telefono,
-        foto_perfil: datosPerfil.foto_perfil || '',
-        placa: datosPerfil.placa.toUpperCase(),
-        motoModelo: datosPerfil.motoModelo
-      });
-
-      const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-      const conductorRef = doc(db, pathConductores, user.uid);
-      
-      await updateDoc(conductorRef, {
-        nombre: datosPerfil.nombre,
-        nombreCompleto: datosPerfil.nombre,
-        telefono: datosPerfil.telefono,
-        telefonoMovil: datosPerfil.telefono,
-        foto_perfil: datosPerfil.foto_perfil || '',
-        placa: datosPerfil.placa.toUpperCase(),
-        motoModelo: datosPerfil.motoModelo,
-        fechaActualizacion: serverTimestamp()
-      });
-      
-      setMostrarModalPerfil(false);
-      alert("✅ PERFIL Y VEHÍCULO DE CARGA ACTUALIZADOS EN RED");
-    } catch (error) {
-      console.error("🚨 [CIMCO-CARGA-PROFILE-UPDATE-ERR] No se pudieron salvar los datos:", error);
-      alert(error?.response?.data?.message || "Error al actualizar los datos en el servidor de carga.");
-    } finally {
-      setGuardandoPerfil(false);
-    }
-  };
-
-  // ==================================================================
-  // 3. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA (MOTOCARGA)
+  // 2. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA (MOTOCARGA)
   // ==================================================================
   const iniciarTrackingGPS = useCallback(() => {
     if (!navigator.geolocation) {
@@ -268,7 +227,7 @@ export default function HomeMotocarga() {
   }, [isOnline, conductorId, socket, iniciarTrackingGPS, desconectarEcosistema, user?.email, saldoVivo, servicioActivo, solicitudViaje]);
 
   // ==================================================================
-  // 5. ESCUCHA ATÓMICA DE FLETES EN RADAR FIRESTORE
+  // 3. ESCUCHA ATÓMICA DE FLETES EN RADAR FIRESTORE
   // ==================================================================
   useEffect(() => {
     if (!user?.uid || !isOnline) {
@@ -301,7 +260,7 @@ export default function HomeMotocarga() {
   }, [user?.uid, isOnline]);
 
   // ==================================================================
-  // 6. MONITOR DE FLETE ACTIVO ASIGNADO A ESTA UNIDAD
+  // 4. MONITOR DE FLETE ACTIVO ASIGNADO A ESTA UNIDAD
   // ==================================================================
   useEffect(() => {
     if (!user?.uid) return;
@@ -334,7 +293,7 @@ export default function HomeMotocarga() {
   }, [user?.uid, servicioActivo]);
 
   // ==================================================================
-  // 7. ACCIONES DE GESTIÓN LOGÍSTICA CON DEPURACIÓN CONTABLE
+  // 5. ACCIONES DE GESTIÓN LOGÍSTICA CON DEPURACIÓN CONTABLE
   // ==================================================================
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
@@ -691,97 +650,14 @@ export default function HomeMotocarga() {
         )}
       </main>
 
-      {/* 🛠️ MODAL GLASSMORPHISM DE AJUSTE DE DATOS PERSONALES / VEHÍCULO */}
-      {mostrarModalPerfil && (
-        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-zinc-900/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4 font-mono">
-            <div className="flex justify-between items-center border-b border-white/10 pb-2">
-              <div className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-widest">
-                <UserSquare2 size={16} className="text-amber-400" />
-                <span>Perfil Operador</span>
-              </div>
-              <button 
-                onClick={() => setMostrarModalPerfil(false)}
-                className="text-[10px] font-black bg-zinc-800/50 border border-white/5 text-zinc-400 px-2 py-0.5 rounded uppercase hover:bg-zinc-700/50"
-              >
-                Cerrar [X]
-              </button>
-            </div>
-
-            <form onSubmit={handleGuardarPerfil} className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Nombre Completo</label>
-                <input 
-                  type="text" 
-                  required
-                  value={datosPerfil.nombre}
-                  onChange={(e) => setDatosPerfil({...datosPerfil, nombre: e.target.value})}
-                  className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 uppercase transition-colors"
-                  placeholder="Ej: MARCOS DIAZ"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Celular / Contacto (telefonoMovil)</label>
-                <input 
-                  type="tel" 
-                  required
-                  value={datosPerfil.telefono}
-                  onChange={(e) => setDatosPerfil({...datosPerfil, telefono: e.target.value})}
-                  className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 transition-colors"
-                  placeholder="Ej: 3157654321"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">URL Foto Perfil (foto_perfil)</label>
-                <input 
-                  type="url" 
-                  value={datosPerfil.foto_perfil}
-                  onChange={(e) => setDatosPerfil({...datosPerfil, foto_perfil: e.target.value})}
-                  className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 transition-colors"
-                  placeholder="https://..."
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Placa Motocarga</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={datosPerfil.placa}
-                    onChange={(e) => setDatosPerfil({...datosPerfil, placa: e.target.value})}
-                    className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 uppercase transition-colors"
-                    placeholder="Ej: ABC45F"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Cilindraje / Modelo</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={datosPerfil.motoModelo}
-                    onChange={(e) => setDatosPerfil({...datosPerfil, motoModelo: e.target.value})}
-                    className="w-full bg-black/50 text-zinc-100 border border-white/10 p-2 rounded-lg font-bold focus:outline-none focus:border-amber-400/50 placeholder-zinc-700 transition-colors"
-                    placeholder="Ej: Torito RE 205"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={guardandoPerfil}
-                  className="w-full bg-amber-400/90 hover:bg-amber-400 text-black font-black uppercase py-3 border border-white/10 rounded-lg tracking-widest shadow-lg shadow-amber-400/20 transition-all disabled:opacity-50"
-                >
-                  {guardandoPerfil ? 'GUARDANDO CAMBIOS...' : 'ACTUALIZAR DATOS'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* 🛠️ MODAL DE AJUSTE DE DATOS PERSONALES / VEHÍCULO CENTRALIZADO */}
+      <AjustesPerfil
+        isOpen={mostrarModalPerfil}
+        onClose={() => setMostrarModalPerfil(false)}
+        onUpdateSuccess={() => {
+          setMostrarModalPerfil(false);
+        }}
+      />
 
       {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR */}
       <footer className="fixed bottom-0 left-0 w-full bg-[#121214]/90 backdrop-blur-lg border-t border-white/5 p-3 flex justify-around items-center z-50">

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.50 - Integración Atómica de Componente AjustesPerfil Unificado en HomePasajero
+// Versión Arquitectura: V21.52 - Sincronización Interfaz AjustesPerfil (isOpen, onClose, onUpdateSuccess) y Alias Absolutos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (OpenStreetMap),
@@ -646,7 +646,7 @@ export default function HomePasajero() {
             </h1>
             <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              SISTEMA ACTIVO • PASAJERO V15.1 (UI V9.3)
+              <span className="hidden md:inline">SISTEMA ACTIVO • PASAJERO V15.1 (UI V9.3)</span>
             </span>
           </div>
         </div>
@@ -672,24 +672,35 @@ export default function HomePasajero() {
       </header>
 
       {/* ---------------- CUERPO PRINCIPAL (PANEL CONTROL + MAPA OPENSTREETMAP) ---------------- */}
-      <div className="pt-[65px] flex-1 flex flex-col md:flex-row h-[calc(100vh-65px)] relative">
+      <div className="pt-[60px] flex-1 flex flex-col md:flex-row h-[calc(100vh-60px)] justify-between relative">
         
         {/* ---------------- BARRA LATERAL / PANEL DE CONTROL ---------------- */}
         <aside className="w-full md:w-[420px] bg-slate-900/90 backdrop-blur-2xl border-r border-slate-800 flex flex-col justify-between z-20 shadow-2xl relative overflow-hidden">
           
-          {/* Tarjeta de Perfil Pasajero Integrada */}
+          {/* Tarjeta de Perfil Pasajero Integrada (Interactiva) */}
           <div className="p-4 border-b border-slate-800/80 bg-slate-950/40">
-            <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-3 flex items-center justify-between">
+            <div 
+              onClick={() => setMostrarModalPerfil(true)}
+              className="bg-slate-950/70 border border-slate-800 hover:border-amber-500/40 rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all relative group"
+            >
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold overflow-hidden">
-                  {perfilFirestore.foto_perfil ? (
-                    <img src={perfilFirestore.foto_perfil} alt="Avatar" className="w-full h-full object-cover" />
-                  ) : (
-                    <UserCheck className="w-4 h-4" />
-                  )}
+                <div className="relative">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold overflow-hidden">
+                    {perfilFirestore.foto_perfil ? (
+                      <img src={perfilFirestore.foto_perfil} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <UserCheck className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 p-0.5 rounded-full bg-amber-500 text-slate-950 border border-slate-950 shadow-md">
+                    <Edit3 className="w-2.5 h-2.5" />
+                  </div>
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-white leading-snug">{perfilFirestore.nombre}</p>
+                  <p className="text-xs font-bold text-white leading-snug flex items-center gap-1">
+                    <span>{perfilFirestore.nombre}</span>
+                    <Edit3 className="w-3 h-3 text-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </p>
                   <p className="text-[10px] font-mono text-slate-400">ID: {idPasajeroCorto}</p>
                 </div>
               </div>
@@ -819,7 +830,7 @@ export default function HomePasajero() {
                       </div>
                     </div>
 
-                    {/* 🚖 SELECCIÓN DE MODALIDAD ORGANIZADA (4 SERVICIOS) */}
+                    {/* 🚖 SELECCIÓN DE MODALIDAD ORGANIZADA (4 SERVICIOS - OPTIMIZADO py-2 text-xs) */}
                     <div>
                       <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
                         MODALIDAD DE SERVICIO
@@ -829,7 +840,7 @@ export default function HomePasajero() {
                         <button
                           type="button"
                           onClick={() => setTipoServicio('mototaxi')}
-                          className={`py-3 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                          className={`py-2 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
                             tipoServicio === 'mototaxi'
                               ? 'bg-amber-500/10 border-amber-500 text-amber-400 shadow-md shadow-amber-500/10'
                               : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -843,7 +854,7 @@ export default function HomePasajero() {
                         <button
                           type="button"
                           onClick={() => setTipoServicio('motoparrillero')}
-                          className={`py-3 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                          className={`py-2 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
                             tipoServicio === 'motoparrillero'
                               ? 'bg-amber-500/10 border-amber-500 text-amber-400 shadow-md shadow-amber-500/10'
                               : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -857,7 +868,7 @@ export default function HomePasajero() {
                         <button
                           type="button"
                           onClick={() => setTipoServicio('motocarga')}
-                          className={`py-3 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                          className={`py-2 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
                             tipoServicio === 'motocarga'
                               ? 'bg-amber-500/10 border-amber-500 text-amber-400 shadow-md shadow-amber-500/10'
                               : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -871,7 +882,7 @@ export default function HomePasajero() {
                         <button
                           type="button"
                           onClick={() => setTipoServicio('intermunicipal')}
-                          className={`py-3 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                          className={`py-2 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
                             tipoServicio === 'intermunicipal'
                               ? 'bg-amber-500/10 border-amber-500 text-amber-400 shadow-md shadow-amber-500/10'
                               : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -1139,13 +1150,13 @@ export default function HomePasajero() {
             </div>
           )}
 
-          {/* Consola de Estado Radial Inferior */}
-          <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
-            <div className="flex items-center gap-2">
-              <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
-              <span>RADAR CIMCO: <strong className="text-slate-200">CONECTADO</strong></span>
+          {/* Consola de Estado Radial Inferior Compacta con Dot Pulsante */}
+          <div className="p-2.5 bg-slate-950 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-bold text-slate-300">RADAR CONECTADO</span>
             </div>
-            <span className="font-mono text-[10px] text-slate-500">SALA: SALA_PASAJEROS</span>
+            <span className="font-mono text-[9px] text-slate-500">SALA_PASAJEROS</span>
           </div>
         </aside>
 

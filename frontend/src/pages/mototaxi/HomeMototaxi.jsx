@@ -1,9 +1,9 @@
-// Versión Arquitectura: V21.48 - Alineación de tarifas y comisiones de mototaxi en paralelo con V21.48 del pasajero
+// Versión Arquitectura: V21.49 - Unificación de actualización de perfil de mototaxi con AjustesPerfil compartido mediante callback onUpdateSuccess
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
  *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo), integración fluida
- *          con AjustesPerfil, validación local rigurosa de expiración JWT (Anti-401) con padding seguro,
+ *          con AjustesPerfil (vía prop onUpdateSuccess), validación local rigurosa de expiración JWT (Anti-401) con padding seguro,
  *          captura explícita de error HTTP 401 por nodo de identidad extinto con logout defensivo,
  *          sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409),
  *          resiliencia ante redes inestables (timeouts, reintentos e indicador de conectividad de red),
@@ -830,7 +830,29 @@ export default function HomeMototaxi() {
 
   // Renderizado condicional unificado para la vista global de AjustesPerfil preservando el estado de Socket.io
   if (modoEdicionAjustes) {
-    return <AjustesPerfil onBack={() => setModoEdicionAjustes(false)} />;
+    return (
+      <AjustesPerfil
+        onBack={() => setModoEdicionAjustes(false)}
+        onUpdateSuccess={(datosActualizados) => {
+          if (datosActualizados && typeof datosActualizados === 'object') {
+            const nuevoNombre = datosActualizados.nombre || datosActualizados.displayName || datosActualizados.nombreCompleto;
+            if (nuevoNombre) {
+              setNombreConductor(String(nuevoNombre).toUpperCase());
+            }
+            setFormData((prev) => ({
+              ...prev,
+              nombre: nuevoNombre || prev.nombre,
+              telefono: datosActualizados.telefonoMovil || datosActualizados.telefono || datosActualizados.lineaContacto || prev.telefono,
+              placa: datosActualizados.placa || prev.placa,
+              vehiculoModelo: datosActualizados.vehiculoModelo || datosActualizados.modelo || prev.vehiculoModelo,
+              vehiculoColor: datosActualizados.vehiculoColor || datosActualizados.color || prev.vehiculoColor,
+              modalidad: datosActualizados.modalidad || datosActualizados.tipoServicio || prev.modalidad
+            }));
+          }
+          setModoEdicionAjustes(false);
+        }}
+      />
+    );
   }
 
   return (

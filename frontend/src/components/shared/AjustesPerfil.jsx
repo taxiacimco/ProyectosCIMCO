@@ -1,5 +1,5 @@
-// Versión Arquitectura: V16.4 - Módulo Unificado de Gestión de Perfil Multi-Rol alineado con Multipart/FormData
-import React, { useState, useEffect } from 'react';
+// Versión Arquitectura: V16.5 - Módulo Unificado de Gestión de Perfil Multi-Rol Optimizado (Memory & Timer Safety)
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   User, Phone, Mail, Lock, Camera, ShieldCheck, 
@@ -30,6 +30,10 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
   const [numeroInterno, setNumeroInterno] = useState('');
   const [cooperativa, setCooperativa] = useState('');
 
+  // Referencias para limpieza de memoria y temporizadores
+  const closeTimerRef = useRef(null);
+  const blobUrlRef = useRef(null);
+
   // Identificación dinámica del rol
   const rolUsuario = (user?.rol || user?.role || user?.tipoUsuario || 'pasajero').toLowerCase();
   const esVehicular = ['mototaxi', 'motoparrillero', 'motocarga', 'intermunicipal', 'conductor'].includes(rolUsuario);
@@ -47,6 +51,16 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
       setPreviewUrl(user?.fotoUrl || user?.foto || user?.foto_perfil || user?.fotoPerfil || '');
       setMensajeStatus({ tipo: '', texto: '' });
     }
+
+    // Limpieza de temporizadores al desmontar el componente
+    return () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+      }
+    };
   }, [user, isOpen]);
 
   // Si se utiliza como modal y isOpen viene definido como false, se oculta
@@ -58,7 +72,7 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
     setTelefono(valorLimpio);
   };
 
-  // Previsualización y validación de peso de imagen
+  // Previsualización y validación de peso de imagen con liberación de memoria (Ajuste 1)
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -66,13 +80,25 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
         setMensajeStatus({ tipo: 'error', texto: 'La imagen supera el límite permitido de 5MB.' });
         return;
       }
+
+      // Revocar URL blob previa si existía para prevenir fugas de memoria
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+      }
+
+      const newBlobUrl = URL.createObjectURL(file);
+      blobUrlRef.current = newBlobUrl;
+
       setFotoPerfil(file);
-      setPreviewUrl(URL.createObjectURL(file));
+      setPreviewUrl(newBlobUrl);
       setMensajeStatus({ tipo: '', texto: '' });
     }
   };
 
   const handleBackNavigation = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+    }
     if (typeof onClose === 'function') {
       onClose();
     } else if (typeof onBack === 'function') {
@@ -151,24 +177,14 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
         formData.append('foto_perfil', fotoPerfil);
       }
 
-      // Inyección explícita de cabeceras y token de autorización
-      const token = localStorage.getItem('cimco_token') || localStorage.getItem('token') || user?.token;
-      const requestHeaders = {
-        'Content-Type': 'multipart/form-data',
-      };
-
-      if (token) {
-        const cleanToken = String(token).replace(/^"|"$/g, '').trim();
-        if (cleanToken) {
-          requestHeaders['Authorization'] = `Bearer ${cleanToken}`;
-        }
-      }
-
       // Determinar la ruta correspondiente según la arquitectura del backend
       const endpoint = rolUsuario === 'pasajero' ? '/pasajeros/perfil' : '/auth/update-profile';
 
+      // Petición delegando la autorización al interceptor global de Axios (Ajuste 3)
       const response = await api.put(endpoint, formData, {
-        headers: requestHeaders,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
       });
 
       const usuarioActualizado = response?.data?.usuario || response?.data?.user || response?.data?.pasajero || response?.data || {};
@@ -184,8 +200,12 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
       setMensajeStatus({ tipo: 'exito', texto: 'Perfil actualizado correctamente.' });
       setClave('');
 
+      // Programar auto-cierre rastreable con ref para evitar memory leaks (Ajuste 2)
       if (isOpen !== undefined && typeof onClose === 'function') {
-        setTimeout(() => onClose(), 1000);
+        if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = setTimeout(() => {
+          onClose();
+        }, 1000);
       }
 
     } catch (error) {

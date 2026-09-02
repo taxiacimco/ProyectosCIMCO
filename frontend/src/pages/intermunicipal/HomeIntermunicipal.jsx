@@ -1,8 +1,8 @@
-// Versión Arquitectura: V20.2 - Migración de Proveedor de Mapa a OpenStreetMap Público
+// Versión Arquitectura: V20.3 - Integración Compartida de AjustesPerfil con Callback onUpdateSuccess
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V20.2: Reemplazo de la capa de tiles de carto.com por el tile layer público de OpenStreetMap.
+ * Ajuste V20.3: Sustitución del modal JSX local por el componente compartido @/components/shared/AjustesPerfil y sincronización reactiva de contexto.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -11,6 +11,7 @@ import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp }
 import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
 import { authService } from '@/services/authService';
+import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -54,7 +55,6 @@ export default function HomeIntermunicipal() {
     const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "OPERADOR FLOTA";
     const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback);
     const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
-    const [guardandoPerfil, setGuardandoPerfil] = useState(false);
     const [datosPerfil, setDatosPerfil] = useState({
         nombre: '',
         telefono: '',
@@ -127,54 +127,22 @@ export default function HomeIntermunicipal() {
     }, [user]);
 
     // ==================================================================
-    // 2. ACTUALIZACIÓN MUTABLE DE DATOS MEDIANTE authService CENTRALIZADO
+    // 2. REFRESCO DINÁMICO POST-MUTACIÓN CON COMPONENTE COMPARTIDO
     // ==================================================================
-    const handleGuardarPerfil = async (e) => {
-        e.preventDefault();
-        if (!idConductor) return;
-        setGuardandoPerfil(true);
-
-        try {
-            // Esquema estandarizado obligatorio (telefonoMovil, nombre, foto_perfil)
-            const payloadPerfil = {
-                nombre: datosPerfil.nombre,
-                telefonoMovil: datosPerfil.telefono,
-                foto_perfil: user?.foto_perfil || user?.photoURL || '',
-                empresa: datosPerfil.empresa,
-                empresaTransporte: datosPerfil.empresa,
-                empresaId: datosPerfil.empresaId,
-                terminal: datosPerfil.terminal,
-                terminalOrigen: datosPerfil.terminal,
-                placaVehiculo: datosPerfil.placaVehiculo.toUpperCase(),
-                numeroInterno: datosPerfil.numeroInterno
-            };
-
-            // Invocación estandarizada y centralizada a través de authService.updateProfile
-            if (typeof authService?.updateProfile === 'function') {
-                await authService.updateProfile(payloadPerfil);
-            } else if (typeof authContext?.updateProfile === 'function') {
-                await authContext.updateProfile(payloadPerfil);
-            } else {
-                console.warn("⚠️ Servicio updateProfile no disponible, aplicando respaldo en Firestore.");
+    const handleUpdateSuccess = async (datosActualizados) => {
+        setMostrarModalPerfil(false);
+        if (datosActualizados) {
+            setDatosPerfil((prev) => ({
+                ...prev,
+                nombre: datosActualizados.nombre || datosActualizados.displayName || prev.nombre,
+                telefono: datosActualizados.telefonoMovil || datosActualizados.telefono || prev.telefono,
+                empresa: datosActualizados.empresa || datosActualizados.empresaTransporte || prev.empresa,
+                placaVehiculo: datosActualizados.placaVehiculo || datosActualizados.placa || prev.placaVehiculo,
+                numeroInterno: datosActualizados.numeroInterno || prev.numeroInterno
+            }));
+            if (datosActualizados.nombre) {
+                setNombreConductor(datosActualizados.nombre.toUpperCase());
             }
-
-            // Sincronización secundaria en Firestore usando FIRESTORE_PATHS
-            if (user?.uid) {
-                const pathUsuarios = FIRESTORE_PATHS?.usuarios || FIRESTORE_PATHS?.users || 'usuarios';
-                const conductorRef = doc(db, pathUsuarios, user.uid);
-                await updateDoc(conductorRef, {
-                    ...payloadPerfil,
-                    fechaActualizacionPerfil: serverTimestamp()
-                });
-            }
-
-            setMostrarModalPerfil(false);
-            alert("✅ PARÁMETROS OPERATIVOS Y DATOS DE VEHÍCULO INTERMUNICIPAL SINCRONIZADOS");
-        } catch (error) {
-            console.error("🚨 [CIMCO-INTER-PROFILE-ERR] Error al actualizar datos:", error);
-            alert("Error al salvar las modificaciones en el servidor central.");
-        } finally {
-            setGuardandoPerfil(false);
         }
     };
 
@@ -595,110 +563,14 @@ export default function HomeIntermunicipal() {
                 </div>
             </div>
 
-            {/* 🛠️ MODAL DE EDICIÓN FLUIDO - DATOS COMPAÑÍA Y VEHÍCULO */}
+            {/* 🛠️ MODAL DE EDICIÓN FLUIDO - DATOS COMPAÑÍA Y VEHÍCULO (COMPONENTE COMPARTIDO) */}
             {mostrarModalPerfil && (
-                <div className="fixed inset-0 z-[10000] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-                    <div className="w-full max-w-md bg-[#121214] border border-white/10 rounded-2xl p-6 shadow-2xl space-y-5">
-                        <div className="flex justify-between items-center border-b border-white/5 pb-3">
-                            <div className="flex items-center gap-2 text-xs font-black text-yellow-400 uppercase tracking-widest">
-                                <Bus size={16} />
-                                <span>Ajustar Datos de Ruta y Operación</span>
-                            </div>
-                            <button 
-                                onClick={() => setMostrarModalPerfil(false)}
-                                className="text-[10px] bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-2.5 py-1 rounded-md uppercase transition-colors cursor-pointer"
-                            >
-                                Cerrar
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleGuardarPerfil} className="space-y-4 text-xs uppercase">
-                            <div className="space-y-1">
-                                <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><User size={11} /> Nombre del Conductor</label>
-                                <input 
-                                    type="text" 
-                                    required
-                                    value={datosPerfil.nombre}
-                                    onChange={(e) => setDatosPerfil({...datosPerfil, nombre: e.target.value})}
-                                    className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors uppercase"
-                                    placeholder="Nombre completo"
-                                />
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><Phone size={11} /> Teléfono Móvil</label>
-                                <input 
-                                    type="tel" 
-                                    required
-                                    value={datosPerfil.telefono}
-                                    onChange={(e) => setDatosPerfil({...datosPerfil, telefono: e.target.value})}
-                                    className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors"
-                                    placeholder="Número de celular"
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><Building2 size={11} /> Empresa / Cooperativa</label>
-                                    <input 
-                                        type="text" 
-                                        required
-                                        value={datosPerfil.empresa}
-                                        onChange={(e) => setDatosPerfil({...datosPerfil, empresa: e.target.value})}
-                                        className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors uppercase"
-                                        placeholder="Ej: Copetran"
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><MapPin size={11} /> Terminal Base</label>
-                                    <input 
-                                        type="text" 
-                                        required
-                                        value={datosPerfil.terminal}
-                                        onChange={(e) => setDatosPerfil({...datosPerfil, terminal: e.target.value})}
-                                        className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors uppercase"
-                                        placeholder="Ej: Terminal Central"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><FileText size={11} /> Placa de Vehículo</label>
-                                    <input 
-                                        type="text" 
-                                        required
-                                        value={datosPerfil.placaVehiculo}
-                                        onChange={(e) => setDatosPerfil({...datosPerfil, placaVehiculo: e.target.value})}
-                                        className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors uppercase"
-                                        placeholder="Ej: STR543"
-                                    />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-zinc-500 tracking-wider flex items-center gap-1"><Bus size={11} /> Número Interno</label>
-                                    <input 
-                                        type="text" 
-                                        required
-                                        value={datosPerfil.numeroInterno}
-                                        onChange={(e) => setDatosPerfil({...datosPerfil, numeroInterno: e.target.value})}
-                                        className="w-full bg-zinc-950 text-white border border-white/5 rounded-xl p-3 font-bold focus:outline-none focus:border-yellow-500 transition-colors"
-                                        placeholder="Ej: 045"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="pt-2">
-                                <button
-                                    type="submit"
-                                    disabled={guardandoPerfil}
-                                    className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase text-[11px] tracking-widest py-3.5 rounded-xl transition-all shadow-[0_4px_12px_rgba(234,179,8,0.2)] disabled:opacity-50 cursor-pointer"
-                                >
-                                    {guardandoPerfil ? 'Sincronizando...' : 'Actualizar Datos de Flota'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                <AjustesPerfil
+                    isOpen={mostrarModalPerfil}
+                    onClose={() => setMostrarModalPerfil(false)}
+                    onBack={() => setMostrarModalPerfil(false)}
+                    onUpdateSuccess={handleUpdateSuccess}
+                />
             )}
         </div>
     );

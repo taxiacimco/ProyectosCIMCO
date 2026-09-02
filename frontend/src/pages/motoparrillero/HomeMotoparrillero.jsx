@@ -1,13 +1,13 @@
-// Versión Arquitectura: V12.21 - Actualización Capa Mapas OpenStreetMap y Gobernanza CIMCO-UI V9.3
+// Versión Arquitectura: V12.22 - Migración a Componente Compartido AjustesPerfil y Gobernanza CIMCO-UI V9.3
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
 import { useSocket } from '@/hooks/useSocket';
-import authService from '@/services/authService';
 import api from '@/config/api'; 
 import ModalCalificacion from '@/components/ModalCalificacion';
+import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import {
   MapPin, Navigation, Wallet, TrendingUp, AlertCircle, 
   CircleDollarSign, Signal, LogOut, Loader, UserSquare2
@@ -23,19 +23,9 @@ export default function HomeMotoparrillero() {
 
   const nombreInicialFallback = user?.email ? user.email.split('@')[0].toUpperCase() : "CIMCO PARRILLERO";
   const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback); 
-  
-  // 📝 ESTADOS COMPLEMENTARIOS DE VEHÍCULO / PERFIL
-  const [datosPerfil, setDatosPerfil] = useState({
-    nombre: '',
-    telefonoMovil: '',
-    foto_perfil: '',
-    placa: '',
-    motoModelo: ''
-  });
 
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
   const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
   const [solicitudViaje, setSolicitudViaje] = useState(null); 
   const [servicioActivo, setServicioActivo] = useState(null); 
@@ -77,15 +67,6 @@ export default function HomeMotoparrillero() {
         if (nombreCompleto) {
           setNombreConductor(nombreCompleto.toUpperCase());
         }
-        
-        // Sincronizar datos locales para el formulario de edición
-        setDatosPerfil({
-          nombre: nombreCompleto,
-          telefonoMovil: data?.telefonoMovil || data?.telefono || '',
-          foto_perfil: data?.foto_perfil || data?.photoURL || '',
-          placa: data?.placa || data?.vehiculo?.placa || '',
-          motoModelo: data?.motoModelo || data?.vehiculo?.modelo || ''
-        });
       }
     }, (error) => {
       console.error("🚨 [CIMCO-IDENTITY-ERROR] Fallo en lectura de perfil Parrillero:", error);
@@ -95,43 +76,7 @@ export default function HomeMotoparrillero() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 2. ACTUALIZACIÓN MUTABLE DE DATOS CENTRALIZADA (authService)
-  // ==================================================================
-  const handleGuardarPerfil = async (e) => {
-    e.preventDefault();
-    if (!user?.uid) return;
-    setGuardandoPerfil(true);
-    
-    try {
-      // 1. Actualización centralizada de credenciales y perfil básico
-      await authService.updateProfile({
-        nombre: datosPerfil.nombre,
-        telefonoMovil: datosPerfil.telefonoMovil,
-        foto_perfil: datosPerfil.foto_perfil
-      });
-
-      // 2. Actualización de atributos de vehículo específicos en la colección Firestore
-      const pathConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-      const conductorRef = doc(db, pathConductores, user.uid);
-      
-      await updateDoc(conductorRef, {
-        placa: datosPerfil.placa.toUpperCase(),
-        motoModelo: datosPerfil.motoModelo,
-        fechaActualizacion: serverTimestamp()
-      });
-      
-      setMostrarModalPerfil(false);
-      alert("✅ PERFIL Y VEHÍCULO ACTUALIZADOS EN RED");
-    } catch (error) {
-      console.error("🚨 [CIMCO-PROFILE-UPDATE-ERR] No se pudieron salvar los datos:", error);
-      alert("Error al actualizar los datos en el servidor.");
-    } finally {
-      setGuardandoPerfil(false);
-    }
-  };
-
-  // ==================================================================
-  // 3. GOBERNANZA DEL CANAL WEBSOCKET E INYECCIÓN 'motoparrillero'
+  // 2. GOBERNANZA DEL CANAL WEBSOCKET E INYECCIÓN 'motoparrillero'
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
@@ -185,7 +130,7 @@ export default function HomeMotoparrillero() {
   }, [isOnline, conductorId, token, socket, puedeOperar]);
 
   // ==================================================================
-  // 4. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
+  // 3. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
   // ==================================================================
   const iniciarTrackingGPS = () => {
     if (!navigator.geolocation) {
@@ -237,7 +182,7 @@ export default function HomeMotoparrillero() {
   };
 
   // ==================================================================
-  // 5. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
+  // 4. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
   // ==================================================================
   useEffect(() => {
     if (!user?.uid || !isOnline) {
@@ -269,7 +214,7 @@ export default function HomeMotoparrillero() {
   }, [user?.uid, isOnline]);
 
   // ==================================================================
-  // 6. MONITOR DE VIAJE ACTIVO EN HILO DEL CONDUCTOR
+  // 5. MONITOR DE VIAJE ACTIVO EN HILO DEL CONDUCTOR
   // ==================================================================
   useEffect(() => {
     if (!user?.uid) return;
@@ -302,7 +247,7 @@ export default function HomeMotoparrillero() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 7. ACCIONES DE GESTIÓN DE DESPACHOS CONTABLES ACID
+  // 6. ACCIONES DE GESTIÓN DE DESPACHOS CONTABLES ACID
   // ==================================================================
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
@@ -729,96 +674,12 @@ export default function HomeMotoparrillero() {
         )}
       </main>
 
-      {/* 🛠️ MODAL GLASSMORPHISM DE AJUSTE DE DATOS PERSONALES / VEHÍCULO */}
+      {/* 🛠️ COMPONENTE COMPARTIDO DE AJUSTE DE PERFIL / VEHÍCULO */}
       {mostrarModalPerfil && (
-        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-[#121214]/90 border border-white/10 rounded-2xl p-5 space-y-4 font-mono animate-in fade-in zoom-in-95 duration-150 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-white/5 pb-2">
-              <div className="flex items-center gap-2 text-xs font-black text-white uppercase tracking-widest">
-                <UserSquare2 size={16} className="text-cyan-400" />
-                <span>Perfil Operador</span>
-              </div>
-              <button 
-                onClick={() => setMostrarModalPerfil(false)}
-                className="text-[10px] font-black bg-zinc-800/60 border border-white/5 text-zinc-400 px-2 py-0.5 rounded uppercase hover:bg-zinc-800 active:scale-95 transition-all"
-              >
-                Cerrar [X]
-              </button>
-            </div>
-
-            <form onSubmit={handleGuardarPerfil} className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Nombre Completo</label>
-                <input 
-                  type="text" 
-                  required
-                  value={datosPerfil.nombre}
-                  onChange={(e) => setDatosPerfil({...datosPerfil, nombre: e.target.value})}
-                  className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700 uppercase"
-                  placeholder="Ej: JUAN PÉREZ"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Celular / Contacto</label>
-                <input 
-                  type="tel" 
-                  required
-                  value={datosPerfil.telefonoMovil}
-                  onChange={(e) => setDatosPerfil({...datosPerfil, telefonoMovil: e.target.value})}
-                  className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700"
-                  placeholder="Ej: 3001234567"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">URL Foto de Perfil</label>
-                <input 
-                  type="url" 
-                  value={datosPerfil.foto_perfil}
-                  onChange={(e) => setDatosPerfil({...datosPerfil, foto_perfil: e.target.value})}
-                  className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700"
-                  placeholder="https://..."
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Placa Vehículo</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={datosPerfil.placa}
-                    onChange={(e) => setDatosPerfil({...datosPerfil, placa: e.target.value})}
-                    className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700 uppercase"
-                    placeholder="Ej: XYZ123"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-zinc-400 uppercase tracking-wider block">Cilindraje / Modelo</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={datosPerfil.motoModelo}
-                    onChange={(e) => setDatosPerfil({...datosPerfil, motoModelo: e.target.value})}
-                    className="w-full bg-black/40 text-zinc-100 border border-white/5 p-2 font-bold focus:outline-none focus:border-cyan-500/50 rounded-lg placeholder-zinc-700"
-                    placeholder="Ej: Pulsar NS 200"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={guardandoPerfil}
-                  className="w-full bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 font-black uppercase py-3 border border-cyan-500/30 rounded-lg tracking-widest active:scale-[0.98] transition-all disabled:opacity-50"
-                >
-                  {guardandoPerfil ? 'GUARDANDO NODO...' : 'ACTUALIZAR DATOS'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <AjustesPerfil 
+          isOpen={mostrarModalPerfil} 
+          onClose={() => setMostrarModalPerfil(false)} 
+        />
       )}
 
       {/* 🧭 BARRA DE NAVEGACIÓN INFERIOR */}
