@@ -1,10 +1,10 @@
-// Versión Arquitectura: V21.52 - Sincronización Interfaz AjustesPerfil (isOpen, onClose, onUpdateSuccess) y Alias Absolutos
+// Versión Arquitectura: V21.53 - Integración Atómica de Campo origenManual y Fix GPS Bloqueado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (OpenStreetMap),
  *         integración atómica de telemetría, sockets, billetera smart, selector dinámico de flota (4 modalidades + Cooperativas < 5km),
- *         monitoreo de hardware GPS, entrada de dirección editable con botón de recalibración GPS, subasta dinámica
- *         de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil unificada mediante AjustesPerfil,
+ *         monitoreo de hardware GPS, entrada de dirección manual (origenManual) con fix de GPS bloqueado y recalibración,
+ *         subasta dinámica de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil unificada mediante AjustesPerfil,
  *         guard de validación previa al envío para método de pago 'BILLETERA' contra saldo suficiente y paleta CIMCO-UI V9.3.
  */
 
@@ -149,6 +149,7 @@ export default function HomePasajero() {
   
   const [metodoPago, setMetodoPago] = useState('EFECTIVO'); // 'EFECTIVO' | 'BILLETERA'
   const [origenText, setOrigenText] = useState('Ubicación actual (GPS)');
+  const [origenManual, setOrigenManual] = useState('');
   const [destinoText, setDestinoText] = useState('');
   const [valorEstimado, setValorEstimado] = useState(0);
   const [numeroPasajeros, setNumeroPasajeros] = useState(1);
@@ -444,10 +445,17 @@ export default function HomePasajero() {
   const handleSolicitarServicio = async (e) => {
     if (e) e.preventDefault();
     if (procesandoPeticion) return;
+
+    if (!origenManual.trim()) {
+      setErrorInterno("⚠️ Por favor ingresa el punto de recogida o dirección de referencia.");
+      return;
+    }
+
     if (!destinoText.trim()) {
       setErrorInterno("⚠️ Por favor ingresa una dirección de destino válida.");
       return;
     }
+
     if (tipoServicio === 'intermunicipal' && !cooperativaSeleccionada) {
       setErrorInterno("⚠️ Selecciona una cooperativa intermunicipal disponible dentro del rango de 5 Km.");
       return;
@@ -479,14 +487,23 @@ export default function HomePasajero() {
       const comisionCimco = tarifaNum * 0.10;
       const tarifaNeta = tarifaNum * 0.90;
 
+      const origenGpsPayload = { lat: coordsActuales[0], lng: coordsActuales[1] };
+
       const payload = {
+        clienteId: user?.uid || uidUsuario,
         pasajeroId: uidUsuario,
         nombrePasajero: perfilFirestore.nombre,
+        origenGps: origenGpsPayload,
+        origenManual: origenManual.trim(),
+        destinoTexto: destinoText.trim(),
+        tarifa: tarifaNum,
+        modalidad: tipoServicio,
+        pasarelaPago: metodoPago,
         tipoServicio, // 'mototaxi' | 'motoparrillero' | 'motocarga' | 'intermunicipal'
         tipoTrayecto: esIntermunicipal ? 'INTERMUNICIPAL' : 'URBANO',
         cooperativa: esIntermunicipal ? cooperativaSeleccionada : null,
         metodoPago,
-        origen: origenText.trim() || 'Ubicación actual (GPS)',
+        origen: origenManual.trim() || origenText.trim() || 'Ubicación actual (GPS)',
         destino: destinoText.trim(),
         valorEstimado,
         numeroPasajeros,
@@ -494,7 +511,7 @@ export default function HomePasajero() {
         comisionCimco,
         tarifaNeta,
         estado: 'BUSCANDO',
-        coordenadasInicio: { lat: coordsActuales[0], lng: coordsActuales[1] },
+        coordenadasInicio: origenGpsPayload,
         fechaCreacion: serverTimestamp()
       };
 
@@ -616,6 +633,7 @@ export default function HomePasajero() {
     setRideId(null);
     setDatosConductor(null);
     setDestinoText('');
+    setOrigenManual('');
     setMensajeExpirado('');
     setOfertas([]);
   };
@@ -733,41 +751,60 @@ export default function HomePasajero() {
                   </div>
 
                   <form onSubmit={handleSolicitarServicio} className="space-y-4">
-                    {/* 📍 PUNTO DE RECOGIDA (Texto Libre + Botón GPS) */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1.5">
-                        <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
-                          PUNTO DE RECOGIDA
-                        </label>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const coords = await obtenerUbicacionHardware();
-                              setCoordenadas(coords);
-                              setOrigenText("Ubicación actual (GPS)");
-                            } catch (err) {
-                              setErrorInterno("No se logró recalibrar la señal GPS.");
-                            }
-                          }}
-                          className="text-[9px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 transition-all cursor-pointer"
-                        >
-                          <Crosshair className="w-3 h-3" />
-                          <span>USAR GPS ACTUAL</span>
-                        </button>
-                      </div>
-                      <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-emerald-400">
-                          <MapPin className="w-4 h-4" />
+                    {/* 📍 UBICACIÓN GPS BLOQUEADA & DIRECCIÓN MANUAL DE RECOGIDA */}
+                    <div className="space-y-3">
+                      <div>
+                        <div className="flex justify-between items-center mb-1.5">
+                          <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                            UBICACIÓN GPS (BLOQUEADA)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const coords = await obtenerUbicacionHardware();
+                                setCoordenadas(coords);
+                              } catch (err) {
+                                setErrorInterno("No se logró recalibrar la señal GPS.");
+                              }
+                            }}
+                            className="text-[9px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 transition-all cursor-pointer"
+                          >
+                            <Crosshair className="w-3 h-3" />
+                            <span>RECALIBRAR GPS</span>
+                          </button>
                         </div>
-                        <input
-                          type="text"
-                          required
-                          placeholder="Ej: Cra 4 # 12-30 / Frente a la Tienda Don Pedro"
-                          value={origenText}
-                          onChange={(e) => setOrigenText(e.target.value)}
-                          className="w-full pl-10 pr-4 py-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-medium"
-                        />
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-emerald-400">
+                            <MapPin className="w-4 h-4" />
+                          </div>
+                          <input
+                            type="text"
+                            readOnly
+                            disabled
+                            value={`Lat: ${coordenadas[0]?.toFixed(5) || 0}, Lng: ${coordenadas[1]?.toFixed(5) || 0} (GPS Fijado)`}
+                            className="w-full pl-10 pr-4 py-2.5 bg-slate-950/40 border border-emerald-500/30 rounded-xl text-xs text-emerald-400 font-mono font-medium cursor-not-allowed select-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1.5">
+                          PUNTO DE RECOGIDA / REFERENCIA (MANUAL)
+                        </label>
+                        <div className="relative">
+                          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-emerald-400">
+                            <Edit3 className="w-4 h-4" />
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Ej: Cra 4 # 12-30 / Frente a la Tienda Don Pedro"
+                            value={origenManual}
+                            onChange={(e) => setOrigenManual(e.target.value)}
+                            className="w-full pl-10 pr-4 py-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-medium"
+                          />
+                        </div>
                       </div>
                     </div>
 
