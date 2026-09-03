@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.0 - Inclusión de cabeceras de idempotencia X-Idempotency-Key en política CORS y cabeceras expuestas[cite: 27]
+// Versión Arquitectura: V20.1 - Optimización de política CORS para soporte perimetral Vercel y Railway preflight
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración del módulo de billetera (/api/billetera) manteniendo todas las políticas de seguridad perimetral,
@@ -98,6 +98,7 @@ const corsOptions = {
         'Cache-Control', 
         'Pragma',
         'x-access-token',
+        'x-token',
         'X-Idempotency-Key',
         'x-idempotency-key'
     ],
