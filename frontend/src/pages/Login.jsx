@@ -1,8 +1,9 @@
-// Versión Arquitectura: V11.1 - Autenticación con Memorización Automática en LocalStorage
+// Versión Arquitectura: V11.2 - Anti-Loop Navigation Defense & Anti-Re-render Guard
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\Login.jsx
- * Misión: Pantalla de Autenticación de Usuarios con persistencia inteligente del último identificador,
- * soporte de AbortController, sanitización de prefijo +57 y cumplimiento estricto del estándar CIMCO-UI V9.3.
+ * Misión: Pantalla de Autenticación de Usuarios con protección anti-bucle mediante redirectLockRef,
+ * persistencia inteligente del último identificador, soporte de AbortController,
+ * sanitización de prefijo +57 y cumplimiento estricto del estándar CIMCO-UI V9.3.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -30,6 +31,7 @@ const Login = () => {
   const loginLocal = authContext.loginLocal;
   const user = authContext.user || null;
   const authLoading = authContext.loading || false;
+  const isAuthenticated = authContext.isAuthenticated || !!user;
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -48,6 +50,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
 
   const abortControllerRef = useRef(null);
+  const redirectLockRef = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -55,14 +58,16 @@ const Login = () => {
 
     if (authLoading) return;
 
-    if (user) {
-      const activeRole = (user?.rol || user?.role || 'pasajero').toLowerCase();
+    if (isAuthenticated && user && !redirectLockRef.current) {
+      redirectLockRef.current = true; // Bloquea re-redirecciones múltiples en el mismo ciclo de vida
+      const activeRole = (user?.rol || user?.role || 'pasajero').toString().toLowerCase();
+
       if (!controller.signal.aborted) {
         if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(activeRole)) {
           navigate('/conductor/home', { replace: true });
         } else if (activeRole === 'despachador') {
           navigate('/despachador/dashboard', { replace: true });
-        } else if (['admin', 'superadmin'].includes(activeRole)) {
+        } else if (['admin', 'superadmin', 'ceo', 'administrador'].includes(activeRole)) {
           navigate('/admin/dashboard', { replace: true });
         } else if (activeRole === 'central') {
           navigate('/central/dashboard', { replace: true });
@@ -75,7 +80,7 @@ const Login = () => {
     return () => {
       controller.abort();
     };
-  }, [user, authLoading, navigate]);
+  }, [user, isAuthenticated, authLoading, navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -132,18 +137,20 @@ const Login = () => {
         }
 
         const userData = resData.user || resData.data?.user || {};
-        const userRole = (userData?.rol || userData?.role || roleParam || 'pasajero').toLowerCase();
+        const userRole = (userData?.rol || userData?.role || roleParam || 'pasajero').toString().toLowerCase();
+
+        redirectLockRef.current = true; // Previene colisiones con el useEffect post-login
 
         if (['conductor', 'moto', 'mototaxi', 'motocarga', 'conductor_moto'].includes(userRole)) {
-          navigate('/conductor/home');
+          navigate('/conductor/home', { replace: true });
         } else if (userRole === 'despachador') {
-          navigate('/despachador/dashboard');
-        } else if (['admin', 'superadmin'].includes(userRole)) {
-          navigate('/admin/dashboard');
+          navigate('/despachador/dashboard', { replace: true });
+        } else if (['admin', 'superadmin', 'ceo', 'administrador'].includes(userRole)) {
+          navigate('/admin/dashboard', { replace: true });
         } else if (userRole === 'central') {
-          navigate('/central/dashboard');
+          navigate('/central/dashboard', { replace: true });
         } else {
-          navigate('/pasajero/home');
+          navigate('/pasajero/home', { replace: true });
         }
       } else {
         setError(resData?.message || 'Error al validar credenciales en la central.');
