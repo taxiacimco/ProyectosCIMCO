@@ -1,9 +1,9 @@
-// Versión Arquitectura: V2.6 - Inyección Quirúrgica de Índices Compuestos contra Concurrencia Masiva y Ráfagas de Telemetría
+// Versión Arquitectura: V2.7 - Desduplicación de Índices Simples para Optimización de Memoria RAM
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Viaje.js
  * Misión: Esquema de transacciones de despacho logístico con referencias cruzadas indexadas por Subpath Imports.
- * Ajuste V2.6: Preservación absoluta de la lógica polimórfica de sincronización de atributos (valor/tarifa, estado/estadoViaje) 
- * e inyección atómica del índice compuesto optimizado para ráfagas concurrentes en la cola del despachador central y administración.
+ * Ajuste V2.7: Remoción de índices simples redundantes (pasajeroId, conductorId, estado) para liberar memoria RAM
+ * y reducir latencia de escritura en MongoDB Atlas, al estar ya cubiertos por los índices compuestos de alta concurrencia.
  */
 
 import mongoose from 'mongoose';
@@ -82,10 +82,7 @@ const ViajeSchema = new mongoose.Schema({
    🛡️ MATRIZ DE ÍNDICES: OPTIMIZACIÓN Y BLINDAJE CONTRA WRITE-CONFLICTS
    ================================================================== */
 
-// Índices Simples Existentes
-ViajeSchema.index({ pasajeroId: 1 });
-ViajeSchema.index({ conductorId: 1 });
-ViajeSchema.index({ estado: 1 });
+// Índice Simple Restante
 ViajeSchema.index({ estadoViaje: 1 });
 
 // 🛠️ Índice Compuesto 1: Optimización de colas de despacho concurrentes y telemetría reciente

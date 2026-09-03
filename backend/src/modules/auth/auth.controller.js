@@ -1,13 +1,14 @@
-// Versión Arquitectura: V21.39 - Bloqueo Preventivo de Saldo Restringido en Registro e Integración de Restricción Automática
+// Versión Arquitectura: V21.41 - Firma JWT e Inyección de Claims subrol y access_level en Login, Register y GetProfile
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
+ * firma de JWT unificada incorporando subrol y access_level en login, register y getProfile,
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
  * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono), actualización segura de perfiles (updateProfile / actualizarPerfil)
  * con soporte para hashes de clave opcionales, atributos de vehículo (placa/numeroInterno) y archivos binarios.
  * NOTA: Gestión de archivos delegada a upload.service y sincronización a firebase.service.
- * Ajuste V21.39: Asignación de bloqueo preventivo por saldo inicial (< $2.000 COP) en registro de conductores y helper centralizado para restricción de estado.
+ * Ajuste V21.41: Firma de JWT centralizada e inclusión garantizada de claims subrol y access_level en login, register y getProfile.
  */
 
 import jwt from 'jsonwebtoken';
@@ -50,6 +51,31 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 /**
+ * 🛡️ HELPER DE ARQUITECTURA: GENERACIÓN Y FIRMA DE JWT CON CLAIMS COMPLETOS
+ * Genera el JWT incorporando id, uid, email, rol, subrol, access_level y terminal_sede.
+ */
+const generarTokenJWT = (usuario) => {
+    const rolFinal = usuario.rol || usuario.role || 'pasajero';
+    const subrolFinal = usuario.subrol || (rolFinal === 'conductor' ? 'mototaxi' : rolFinal);
+    const levelFinal = usuario.access_level !== undefined 
+        ? Number(usuario.access_level) 
+        : ((rolFinal === 'admin' || rolFinal === 'ceo') ? 99 : (rolFinal === 'staff' ? 50 : (rolFinal === 'despachador' ? 30 : 1)));
+
+    const tokenPayload = {
+        id: String(usuario._id),
+        uid: String(usuario.uid || usuario.firebaseUid || usuario._id),
+        email: usuario.email,
+        rol: rolFinal,
+        subrol: subrolFinal,
+        access_level: levelFinal,
+        terminal_sede: usuario.terminal_sede || usuario.cooperativa || null
+    };
+
+    const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '7d' });
+    return { token, rolFinal, subrolFinal, levelFinal };
+};
+
+/**
  * 🛡️ HELPER DE ARQUITECTURA: EVALUACIÓN DE RESTRICCIÓN AUTOMÁTICA DE SALDO
  * Evalúa si el saldo de un conductor cae por debajo del umbral mínimo ($2.000 COP).
  * Si es así, restringe su estado administrativo a 'RESTRINGIDO_POR_SALDO' o 'BLOQUEADO'
@@ -82,6 +108,7 @@ export const evaluarRestriccionSaldoConductor = (conductorDoc, saldoEvaluar) => 
  * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO Y SINCRO FIREBASE AUTH
  * Lógica anti-doble hashing: Se delega el cifrado al middleware pre('save') del modelo Mongoose.
  * Inyección Aprovisionada de UID / firebaseUid vía Firebase Admin SDK delegado.
+ * Firma token JWT e incluye subrol y access_level en la respuesta.
  */
 export const register = async (req, res, next) => {
     try {
@@ -114,10 +141,10 @@ export const register = async (req, res, next) => {
         const telInput = (telefono || telefonoMovil || '').toString().trim();
 
         if (!emailLimpioInput || !telInput) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 success: false, 
                 error: 'Correo y teléfono son campos obligatorios.',
-                message: 'Correo y teléfono son campos obligatorios.' 
+                message: 'Correo y teléfono son campos obligatorios.'
             });
         }
 
@@ -132,7 +159,7 @@ export const register = async (req, res, next) => {
 
         const emailLimpio = emailLimpioInput.toLowerCase();
         const rolNormalizado = String(rolSuministrado).toLowerCase().trim();
-        const subrolFinal = subrol ? String(subrol).toLowerCase().trim() : (rolNormalizado === 'conductor' ? 'mototaxi' : rolNormalizado);
+        const subrolFinalCalculado = subrol ? String(subrol).toLowerCase().trim() : (rolNormalizado === 'conductor' ? 'mototaxi' : rolNormalizado);
         
         // Asignación extendida de sede / terminal
         const terminalSedeFinal = (terminal_sede || terminalSede || cooperativa || empresa || (ROLES_OPERATIVOS.includes(rolNormalizado) ? 'Particular' : 'TAXIA')).toString().trim();
@@ -208,6 +235,7 @@ export const register = async (req, res, next) => {
                     telefono: telFinal,
                     rol: 'pasajero',
                     role: 'pasajero',
+                    subrol: subrolFinalCalculado,
                     firebaseUid: finalUid || undefined,
                     uid: finalUid || undefined,
                     estado: 'APROBADO',
@@ -235,9 +263,9 @@ export const register = async (req, res, next) => {
         // 🔴 ROL: CONDUCTOR (Requiere Aprobación Manual y Evaluación Preventiva de Saldo Inicial)
         else if (ROLES_CONDUCTORES.includes(rolNormalizado)) {
             if (!placa || !numeroInterno) {
-                return res.status(400).json({ 
+                return res.status(400).json({
                     success: false, 
-                    message: "Para el registro de un conductor se requiere la placa y el número interno del vehículo." 
+                    message: "Para el registro de un conductor se requiere la placa y el número interno del vehículo."
                 });
             }
 
@@ -259,7 +287,7 @@ export const register = async (req, res, next) => {
                 telefono: telFinal,
                 rol: rolNormalizado,
                 role: rolNormalizado,
-                subrol: subrolFinal,
+                subrol: subrolFinalCalculado,
                 placa: String(placa).toUpperCase().trim(),
                 numeroInterno: String(numeroInterno).trim(),
                 cooperativa: terminalSedeFinal,
@@ -301,6 +329,7 @@ export const register = async (req, res, next) => {
                 telefono: telFinal,
                 rol: rolNormalizado,
                 role: rolNormalizado,
+                subrol: subrolFinalCalculado,
                 cooperativa: terminalSedeFinal,
                 empresa: terminalSedeFinal,
                 terminal_sede: terminalSedeFinal,
@@ -329,7 +358,7 @@ export const register = async (req, res, next) => {
                 fullName: nuevoUsuario.nombre,
                 telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
                 rol: nuevoUsuario.rol,
-                subrol: nuevoUsuario.subrol || subrolFinal || null,
+                subrol: nuevoUsuario.subrol || subrolFinalCalculado || null,
                 estado: nuevoUsuario.estado,
                 isActive: nuevoUsuario.isActive,
                 cooperativa: nuevoUsuario.cooperativa || 'Particular',
@@ -369,6 +398,26 @@ export const register = async (req, res, next) => {
             console.warn("⚠️ [CIMCO-AUTH-SYNC-WARN] Falló el espejo en Firebase Firestore (Persistencia MongoDB exitosa):", firestoreError.message);
         }
 
+        // 🔑 GENERACIÓN DE JWT Y CONSTRUCCIÓN DE PAYLOAD CON SUBROL Y ACCESS_LEVEL
+        const { token, rolFinal, subrolFinal, levelFinal } = generarTokenJWT(nuevoUsuario);
+
+        const userPayload = {
+            id: nuevoUsuario._id,
+            uid: nuevoUsuario.uid || nuevoUsuario.firebaseUid || finalUid || nuevoUsuario._id,
+            nombre: nuevoUsuario.nombre,
+            email: nuevoUsuario.email,
+            telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
+            rol: rolFinal,
+            subrol: subrolFinal,
+            access_level: levelFinal,
+            estado: nuevoUsuario.estado,
+            estadoAdministrativo: nuevoUsuario.estadoAdministrativo || null,
+            saldo: nuevoUsuario.saldo ?? 0,
+            isActive: nuevoUsuario.isActive,
+            terminal_sede: nuevoUsuario.terminal_sede || nuevoUsuario.cooperativa,
+            foto_perfil: nuevoUsuario.foto_perfil || nuevoUsuario.fotoUrl || null
+        };
+
         // Respuesta diferenciada según la categoría del onboarding
         if (esConductor) {
             const mensajeConductor = nuevoUsuario.estadoAdministrativo === 'RESTRINGIDO_POR_SALDO'
@@ -378,27 +427,22 @@ export const register = async (req, res, next) => {
             return res.status(201).json({
                 success: true,
                 message: mensajeConductor,
-                data: {
-                    id: nuevoUsuario._id,
-                    uid: nuevoUsuario.uid || nuevoUsuario.firebaseUid || finalUid || nuevoUsuario._id,
-                    nombre: nuevoUsuario.nombre,
-                    email: nuevoUsuario.email,
-                    telefono: nuevoUsuario.telefonoMovil || nuevoUsuario.telefono,
-                    rol: nuevoUsuario.rol,
-                    estado: nuevoUsuario.estado,
-                    estadoAdministrativo: nuevoUsuario.estadoAdministrativo,
-                    isActive: nuevoUsuario.isActive,
-                    saldo: nuevoUsuario.saldo,
-                    terminal_sede: nuevoUsuario.terminal_sede || nuevoUsuario.cooperativa,
-                    foto_perfil: nuevoUsuario.foto_perfil || null
-                }
+                token,
+                subrol: subrolFinal,
+                access_level: levelFinal,
+                user: userPayload,
+                data: userPayload
             });
         }
 
         return res.status(201).json({
             success: true,
             message: "Usuario registrado y sincronizado en Firebase Auth.",
-            data: nuevoUsuario
+            token,
+            subrol: subrolFinal,
+            access_level: levelFinal,
+            user: userPayload,
+            data: userPayload
         });
 
     } catch (error) {
@@ -409,6 +453,7 @@ export const register = async (req, res, next) => {
 
 /**
  * 🔑 INICIO DE SESIÓN DUAL (CORREO O CELULAR) CON TRIPLE COMPROBACIÓN Y SELECT('+PASSWORD')
+ * Firma token JWT e incluye subrol y access_level tanto en la respuesta como en la firma del token.
  */
 export const login = async (req, res, next) => {
     try {
@@ -417,10 +462,10 @@ export const login = async (req, res, next) => {
         const password = body.password;
 
         if (!loginInput || !password) {
-            return res.status(400).json({ 
-                success: false, 
+            return res.status(400).json({
+                success: false,
                 code: 'MISSING_FIELDS',
-                message: "Por favor ingresa tu celular/correo y contraseña." 
+                message: "Por favor ingresa tu celular/correo y contraseña."
             });
         }
 
@@ -454,10 +499,10 @@ export const login = async (req, res, next) => {
 
         // 1️⃣ VALIDACIÓN 1: El usuario NO existe en ninguna colección
         if (!cuentaEncontrada) {
-            return res.status(404).json({ 
-                success: false, 
+            return res.status(404).json({
+                success: false,
                 code: 'USER_NOT_FOUND',
-                message: "No existe una cuenta asociada a este correo o celular." 
+                message: "No existe una cuenta asociada a este correo o celular."
             });
         }
 
@@ -475,10 +520,10 @@ export const login = async (req, res, next) => {
         const estadoAdmin = cuentaEncontrada.estadoAdministrativo ? String(cuentaEncontrada.estadoAdministrativo).toUpperCase() : '';
 
         if (estadoEvaluado === 'PENDIENTE' || estadoAdmin === 'PENDIENTE') {
-            return res.status(403).json({ 
-                success: false, 
+            return res.status(403).json({
+                success: false,
                 code: 'ACCOUNT_PENDING_APPROVAL',
-                message: "Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación." 
+                message: "Su cuenta está en proceso de revisión por la Secretaría / Administración. Intente nuevamente tras la aprobación."
             });
         }
 
@@ -493,9 +538,9 @@ export const login = async (req, res, next) => {
         const estaActivo = cuentaEncontrada.isActive !== undefined ? cuentaEncontrada.isActive : (['activo', 'APROBADO', 'active'].includes(cuentaEncontrada.estado));
 
         if (!estaActivo) {
-            return res.status(403).json({ 
-                success: false, 
-                message: "Esta cuenta se encuentra inactiva o suspendida. Contacte soporte administrativo." 
+            return res.status(403).json({
+                success: false,
+                message: "Esta cuenta se encuentra inactiva o suspendida. Contacte soporte administrativo."
             });
         }
 
@@ -504,9 +549,9 @@ export const login = async (req, res, next) => {
 
         if (!hashAlmacenada) {
             console.warn(`⚠️ [CIMCO-AUTH-WARN] La cuenta ID ${cuentaEncontrada._id} (${cuentaEncontrada.email}) carece de contraseña encriptada.`);
-            return res.status(401).json({ 
-                success: false, 
-                message: "El usuario no tiene una contraseña configurada o activa." 
+            return res.status(401).json({
+                success: false,
+                message: "El usuario no tiene una contraseña configurada o activa."
             });
         }
 
@@ -514,46 +559,41 @@ export const login = async (req, res, next) => {
         const passwordMatch = await bcrypt.compare(String(password), hashAlmacenada);
 
         if (!passwordMatch) {
-            return res.status(401).json({ 
-                success: false, 
+            return res.status(401).json({
+                success: false,
                 code: 'INVALID_PASSWORD',
-                message: "La contraseña ingresada es incorrecta." 
+                message: "La contraseña ingresada es incorrecta."
             });
         }
 
-        // 3️⃣ GENERACIÓN DE TOKEN JWT DE PRODUCCIÓN
-        const rolFinal = cuentaEncontrada.rol || cuentaEncontrada.role || 'pasajero';
+        // 3️⃣ GENERACIÓN DE TOKEN JWT DE PRODUCCIÓN Y PAYLOAD CON SUBROL Y ACCESS_LEVEL
+        const { token, rolFinal, subrolFinal, levelFinal } = generarTokenJWT(cuentaEncontrada);
 
-        const tokenPayload = {
-            id: String(cuentaEncontrada._id),
-            uid: String(cuentaEncontrada.uid || cuentaEncontrada.firebaseUid || cuentaEncontrada._id),
+        const userPayload = {
+            id: cuentaEncontrada._id,
+            uid: cuentaEncontrada.uid || cuentaEncontrada.firebaseUid || cuentaEncontrada._id,
+            nombre: cuentaEncontrada.nombre || cuentaEncontrada.fullName,
             email: cuentaEncontrada.email,
+            telefono: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono,
             rol: rolFinal,
-            subrol: cuentaEncontrada.subrol || null,
-            terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa || null
+            subrol: subrolFinal,
+            access_level: levelFinal,
+            estado: cuentaEncontrada.estado,
+            estadoAdministrativo: cuentaEncontrada.estadoAdministrativo,
+            saldo: cuentaEncontrada.saldo ?? 0,
+            isActive: cuentaEncontrada.isActive,
+            terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa,
+            foto_perfil: cuentaEncontrada.foto_perfil || cuentaEncontrada.fotoUrl || null
         };
-
-        const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: '7d' });
 
         return res.status(200).json({
             success: true,
             message: "Autenticación exitosa.",
             token,
-            user: {
-                id: cuentaEncontrada._id,
-                uid: cuentaEncontrada.uid || cuentaEncontrada.firebaseUid || cuentaEncontrada._id,
-                nombre: cuentaEncontrada.nombre || cuentaEncontrada.fullName,
-                email: cuentaEncontrada.email,
-                telefono: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono,
-                rol: rolFinal,
-                subrol: cuentaEncontrada.subrol || null,
-                estado: cuentaEncontrada.estado,
-                estadoAdministrativo: cuentaEncontrada.estadoAdministrativo,
-                saldo: cuentaEncontrada.saldo ?? 0,
-                isActive: cuentaEncontrada.isActive,
-                terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa,
-                foto_perfil: cuentaEncontrada.foto_perfil || cuentaEncontrada.fotoUrl || null
-            }
+            subrol: subrolFinal,
+            access_level: levelFinal,
+            user: userPayload,
+            data: userPayload
         });
 
     } catch (error) {
@@ -561,6 +601,77 @@ export const login = async (req, res, next) => {
         next(error);
     }
 };
+
+/**
+ * 👤 CONSULTA DE PERFIL Y RE-FIRMA DE JWT (GET PROFILE)
+ * Localiza la entidad en las colecciones Mongoose, firma un JWT actualizado e inyecta subrol y access_level.
+ */
+export const getProfile = async (req, res, next) => {
+    try {
+        const userId = req.usuario?.id || req.usuario?._id || req.user?.id || req.user?._id || req.user?.uid || req.body?.id || req.query?.id;
+
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "No se encontró un identificador de sesión válido."
+            });
+        }
+
+        // Búsqueda polimórfica concurrente en las tres colecciones
+        const [usuarioAdmin, usuarioConductor, usuarioPasajero] = await Promise.all([
+            Usuario.findById(userId),
+            Conductor.findById(userId),
+            Pasajero.findById(userId)
+        ]);
+
+        const cuentaEncontrada = usuarioAdmin || usuarioConductor || usuarioPasajero;
+
+        if (!cuentaEncontrada) {
+            return res.status(404).json({
+                success: false,
+                message: "No se encontró la cuenta del usuario solicitado."
+            });
+        }
+
+        // Firma token JWT actualizado e inyección de claims
+        const { token, rolFinal, subrolFinal, levelFinal } = generarTokenJWT(cuentaEncontrada);
+
+        const userPayload = {
+            id: cuentaEncontrada._id,
+            uid: cuentaEncontrada.uid || cuentaEncontrada.firebaseUid || cuentaEncontrada._id,
+            nombre: cuentaEncontrada.nombre || cuentaEncontrada.fullName,
+            email: cuentaEncontrada.email,
+            telefono: cuentaEncontrada.telefonoMovil || cuentaEncontrada.telefono,
+            rol: rolFinal,
+            subrol: subrolFinal,
+            access_level: levelFinal,
+            estado: cuentaEncontrada.estado,
+            estadoAdministrativo: cuentaEncontrada.estadoAdministrativo || null,
+            saldo: cuentaEncontrada.saldo ?? 0,
+            isActive: cuentaEncontrada.isActive,
+            terminal_sede: cuentaEncontrada.terminal_sede || cuentaEncontrada.cooperativa,
+            foto_perfil: cuentaEncontrada.foto_perfil || cuentaEncontrada.fotoUrl || null,
+            placa: cuentaEncontrada.placa || undefined,
+            numeroInterno: cuentaEncontrada.numeroInterno || undefined
+        };
+
+        return res.status(200).json({
+            success: true,
+            message: "Perfil obtenido exitosamente.",
+            token,
+            subrol: subrolFinal,
+            access_level: levelFinal,
+            user: userPayload,
+            data: userPayload
+        });
+
+    } catch (error) {
+        console.error("🚨 [CIMCO-GET-PROFILE-FATAL] Error obteniendo el perfil:", error);
+        next(error);
+    }
+};
+
+export const obtenerPerfil = getProfile;
 
 /**
  * 📲 SOLICITUD DE CÓDIGO OTP (RECUPERACIÓN DE CONTRASEÑA)
@@ -571,9 +682,9 @@ export const solicitarOTP = async (req, res, next) => {
         const loginInput = body.loginInput || body.identifier || body.email || body.telefono;
 
         if (!loginInput) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "El identificador (correo o teléfono celular) es requerido." 
+            return res.status(400).json({
+                success: false,
+                message: "El identificador (correo o teléfono celular) es requerido."
             });
         }
 
@@ -605,9 +716,9 @@ export const solicitarOTP = async (req, res, next) => {
         const usuarioExistente = u || c || p;
 
         if (!usuarioExistente) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "No se localizó ninguna cuenta asociada a dicho identificador." 
+            return res.status(404).json({
+                success: false,
+                message: "No se localizó ninguna cuenta asociada a dicho identificador."
             });
         }
 
@@ -650,9 +761,9 @@ export const verificarOTPyRestablecer = async (req, res, next) => {
         const nuevaPassword = body.nuevaPassword || body.password || body.newPassword;
 
         if (!loginInput || !codigo || !nuevaPassword) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "El identificador, el código OTP y la nueva contraseña son requeridos." 
+            return res.status(400).json({
+                success: false,
+                message: "El identificador, el código OTP y la nueva contraseña son requeridos."
             });
         }
 
@@ -684,9 +795,9 @@ export const verificarOTPyRestablecer = async (req, res, next) => {
         const usuario = u || c || p;
 
         if (!usuario) {
-            return res.status(404).json({ 
-                success: false, 
-                message: "Identificador de cuenta inválido." 
+            return res.status(404).json({
+                success: false,
+                message: "Identificador de cuenta inválido."
             });
         }
 
@@ -694,24 +805,24 @@ export const verificarOTPyRestablecer = async (req, res, next) => {
         const registroOTP = otpStore.get(telefonoContacto);
 
         if (!registroOTP) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "No se ha solicitado ningún código para esta cuenta o ya expiró." 
+            return res.status(400).json({
+                success: false,
+                message: "No se ha solicitado ningún código para esta cuenta o ya expiró."
             });
         }
 
         if (Date.now() > registroOTP.expira) {
             otpStore.delete(telefonoContacto);
-            return res.status(400).json({ 
-                success: false, 
-                message: "El código de verificación ha expirado. Solicite uno nuevo." 
+            return res.status(400).json({
+                success: false,
+                message: "El código de verificación ha expirado. Solicite uno nuevo."
             });
         }
 
         if (registroOTP.codigo !== String(codigo).trim()) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Código de verificación o OTP incorrecto." 
+            return res.status(400).json({
+                success: false,
+                message: "Código de verificación o OTP incorrecto."
             });
         }
 
@@ -749,11 +860,11 @@ export const checkPhone = async (req, res, next) => {
         const telefonoInput = body.telefono || body.phone || body.telefonoMovil;
 
         if (!telefonoInput) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 ok: false,
-                success: false, 
+                success: false,
                 message: 'El número de teléfono es requerido.',
-                mensaje: 'El número de teléfono es requerido.' 
+                mensaje: 'El número de teléfono es requerido.'
             });
         }
 
@@ -784,23 +895,23 @@ export const checkPhone = async (req, res, next) => {
         const usuarioExistente = uExistente || cExistente || pExistente;
 
         if (usuarioExistente) {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 ok: false,
-                success: true, 
-                existe: true, 
-                disponible: false, 
+                success: true,
+                existe: true,
+                disponible: false,
                 message: 'El número de celular ya se encuentra registrado.',
-                mensaje: 'El número de celular ya se encuentra registrado.' 
+                mensaje: 'El número de celular ya se encuentra registrado.'
             });
         }
 
-        return res.status(200).json({ 
+        return res.status(200).json({
             ok: true,
-            success: true, 
-            existe: false, 
-            disponible: true, 
+            success: true,
+            existe: false,
+            disponible: true,
             message: 'Número disponible para registro.',
-            mensaje: 'Número disponible para registro.' 
+            mensaje: 'Número disponible para registro.'
         });
 
     } catch (error) {
@@ -822,10 +933,10 @@ export const updateProfile = async (req, res, next) => {
         const rolExtraido = req.usuario?.rol || req.user?.rol || req.body?.rol;
 
         if (!userId) {
-            return res.status(400).json({ 
-                success: false, 
+            return res.status(400).json({
+                success: false,
                 mensaje: "No se encontró un identificador de sesión válido.",
-                message: "No se encontró un identificador de sesión válido." 
+                message: "No se encontró un identificador de sesión válido."
             });
         }
 
@@ -937,10 +1048,10 @@ export const updateProfile = async (req, res, next) => {
         }
 
         if (!usuarioActualizado) {
-            return res.status(404).json({ 
-                success: false, 
+            return res.status(404).json({
+                success: false,
                 mensaje: "No se encontró la cuenta de usuario para actualizar.",
-                message: "No se encontró la cuenta de usuario para actualizar." 
+                message: "No se encontró la cuenta de usuario para actualizar."
             });
         }
 
@@ -976,6 +1087,10 @@ export const updateProfile = async (req, res, next) => {
             console.warn(`⚠️ [CIMCO-UPDATE-SYNC-WARN] Error de replicación en Firebase delegado: ${firestoreErr.message}`);
         }
 
+        const rolFinal = usuarioActualizado.rol || usuarioActualizado.role || rolNormalizado;
+        const subrolFinal = usuarioActualizado.subrol || (rolFinal === 'conductor' ? 'mototaxi' : rolFinal);
+        const levelFinal = usuarioActualizado.access_level !== undefined ? Number(usuarioActualizado.access_level) : 1;
+
         return res.status(200).json({
             success: true,
             mensaje: 'Perfil actualizado exitosamente',
@@ -986,7 +1101,9 @@ export const updateProfile = async (req, res, next) => {
                 uid: usuarioActualizado.uid || usuarioActualizado.firebaseUid || usuarioActualizado._id,
                 nombre: usuarioActualizado.nombre,
                 email: usuarioActualizado.email || usuarioActualizado.correo,
-                rol: usuarioActualizado.rol || usuarioActualizado.role || rolNormalizado,
+                rol: rolFinal,
+                subrol: subrolFinal,
+                access_level: levelFinal,
                 telefonoMovil: usuarioActualizado.telefonoMovil || usuarioActualizado.telefono || "",
                 cooperativa: usuarioActualizado.cooperativa || usuarioActualizado.empresa || "",
                 terminal_sede: usuarioActualizado.terminal_sede || usuarioActualizado.cooperativa || "",
@@ -1024,6 +1141,8 @@ export const logout = async (req, res, next) => {
 export default {
     register,
     login,
+    getProfile,
+    obtenerPerfil,
     solicitarOTP,
     forgotPassword,
     verificarOTPyRestablecer,

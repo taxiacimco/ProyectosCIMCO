@@ -1,4 +1,4 @@
-// Versión Arquitectura: V24.1 - Integración Quirúrgica con Servicio Centralizado authService
+// Versión Arquitectura: V24.2 - Normalización Atómica de Subrol y Preservación de AccessLevel Numérico
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
  * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO con soporte para auto-cleanup, refresco de tokens, sanitización de entrada y consumo centralizado de authService.
@@ -200,7 +200,12 @@ export const AuthProvider = ({ children }) => {
                     userData._id = userData._id || userData.uid || userData.id || userData.conductorId;
                     userData.role = userData.role || userData.rol || ROLES.PASAJERO;
                     userData.rol = userData.rol || userData.role || ROLES.PASAJERO;
-                    userData.access_level = userData.access_level || DEFAULT_ACCESS_LEVELS[userData.role] || 1;
+                    userData.subrol = userData.subrol || userData.role || (userData.rol === 'conductor' ? 'mototaxi' : userData.rol);
+                    
+                    // Respetar explícitamente access_level numérico antes de aplicar el fallback por rol
+                    userData.access_level = (userData.access_level !== undefined && userData.access_level !== null)
+                        ? Number(userData.access_level)
+                        : (DEFAULT_ACCESS_LEVELS[userData.role] || 1);
                 }
 
                 if (typeof window !== 'undefined' && window.localStorage) {

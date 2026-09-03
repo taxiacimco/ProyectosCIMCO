@@ -1,4 +1,4 @@
-// Versión Arquitectura: V17.6 - Verificación de Decodificación de Encabezado Authorization y Validación Estricta de Identidad en BD
+// Versión Arquitectura: V17.7 - Inyección Unificada de Contexto req.user y Retrocompatibilidad Subrol/AccessLevel
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\auth.middleware.js
  * Misión: Securización estricta de JWT, inspección de tokens, estandarización de cabecera Bearer (soporte puerto 3000 local), 
@@ -119,7 +119,7 @@ export const verificarToken = async (req, res, next) => {
     // 🛡️ GUARDA ELECTIVA PARA CONCURRENCIA DE ENTORNO LOCAL (Bypass de Automatización)
     if (process.env.NODE_ENV !== 'production' && req.headers && req.headers['x-stress-test'] === 'true') {
         console.log("⚡ [CIMCO-BYPASS] Agente de concurrencia autenticado automáticamente como Despachador de Andén.");
-        req.usuario = {
+        const usuarioBypass = {
             _id: "6a3880eb8d45b416cb92c531",
             uid: "6a3880eb8d45b416cb92c531",
             id: "6a3880eb8d45b416cb92c531",
@@ -127,8 +127,11 @@ export const verificarToken = async (req, res, next) => {
             email: "despacho_central_lajagua@taxiacimco.com",
             role: "despachador",
             rol: "despachador",
+            subrol: "despachador",
             access_level: 30
         };
+        req.usuario = usuarioBypass;
+        req.user = usuarioBypass;
         return next();
     }
 
@@ -138,7 +141,7 @@ export const verificarToken = async (req, res, next) => {
 
     if (esEntornoDesarrollo && esStressTestAgent) {
         console.log("⚡ [CIMCO-BYPASS] Agente StressTestAgent autenticado automáticamente por regla de desarrollo local.");
-        req.usuario = {
+        const usuarioBypass = {
             _id: "660000000000000000000001",
             uid: "660000000000000000000001",
             id: "660000000000000000000001",
@@ -146,8 +149,11 @@ export const verificarToken = async (req, res, next) => {
             email: "stress_test_local@taxiacimco.com",
             role: "staff",
             rol: "staff",
+            subrol: "staff",
             access_level: 99
         };
+        req.usuario = usuarioBypass;
+        req.user = usuarioBypass;
         return next();
     }
 
@@ -207,16 +213,24 @@ export const verificarToken = async (req, res, next) => {
 
         // Inyección unificada del payload del usuario sincronizando propiedades críticas (Anti-Undefined)
         const rolEfectivo = (usuarioEncontrado.rol || usuarioEncontrado.role || decodificado.rol || decodificado.role || 'pasajero').toLowerCase();
-        
-        req.usuario = {
+        const subrolEfectivo = usuarioEncontrado.subrol || decodificado.subrol || (rolEfectivo === 'conductor' ? 'mototaxi' : rolEfectivo);
+        const levelEfectivo = usuarioEncontrado.access_level !== undefined 
+            ? Number(usuarioEncontrado.access_level)
+            : (decodificado.access_level !== undefined ? Number(decodificado.access_level) : 1);
+
+        const usuarioContexto = {
             ...usuarioEncontrado.toObject(),
             _id: usuarioEncontrado._id,
             id: usuarioEncontrado._id.toString(),
             uid: usuarioEncontrado.uid || usuarioEncontrado._id.toString(),
             rol: rolEfectivo,
             role: rolEfectivo,
-            access_level: usuarioEncontrado.access_level !== undefined ? usuarioEncontrado.access_level : 1
+            subrol: subrolEfectivo,
+            access_level: levelEfectivo
         };
+
+        req.usuario = usuarioContexto;
+        req.user = usuarioContexto; // Garantiza retrocompatibilidad con controladores que consumen req.user
 
         next();
     } catch (error) {
@@ -243,12 +257,13 @@ export const verificarToken = async (req, res, next) => {
  * Middleware 2: Escudo de Máxima Jerarquía (Nodo Root / Nivel 99)
  */
 export const esAdminCentral = (req, res, next) => {
-    // 🛡️ GUARDA DE SEGURIDAD: Previene ruptura si req.usuario no fue inyectado en la aduana
-    if (!req || !req.usuario || req.usuario.access_level === undefined) {
+    const usuario = req.usuario || req.user;
+    // 🛡️ GUARDA DE SEGURIDAD: Previene ruptura si req.usuario/req.user no fue inyectado en la aduana
+    if (!req || !usuario || usuario.access_level === undefined) {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Contexto de identidad no disponible para el Nodo Root.' });
     }
 
-    if (req.usuario.access_level < 99 && req.usuario.rol !== 'admin' && req.usuario.rol !== 'ceo') {
+    if (usuario.access_level < 99 && usuario.rol !== 'admin' && usuario.rol !== 'ceo') {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Se requieren privilegios del Nodo Root.' });
     }
     next();
@@ -258,12 +273,13 @@ export const esAdminCentral = (req, res, next) => {
  * Middleware 3: Escudo Intermedio (Staff / Operaciones)
  */
 export const esStaffOAdmin = (req, res, next) => {
+    const usuario = req.usuario || req.user;
     // 🛡️ GUARDA DE SEGURIDAD: Previene ruptura por falta de privilegios
-    if (!req || !req.usuario || req.usuario.access_level === undefined) {
+    if (!req || !usuario || usuario.access_level === undefined) {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Contexto de identidad no disponible.' });
     }
 
-    if (req.usuario.access_level < 50 && req.usuario.rol !== 'admin' && req.usuario.rol !== 'staff' && req.usuario.rol !== 'ceo') {
+    if (usuario.access_level < 50 && usuario.rol !== 'admin' && usuario.rol !== 'staff' && usuario.rol !== 'ceo') {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Privilegios de Staff insuficientes.' });
     }
     next();
@@ -273,12 +289,13 @@ export const esStaffOAdmin = (req, res, next) => {
  * Middleware 4: Escudo Logístico (Despachador / Nivel 30+)
  */
 export const esDespachador = (req, res, next) => {
-    // 🛡️ GUARDA DE SEGURIDAD: Previene ruptura si req.usuario no fue inyectado
-    if (!req || !req.usuario || req.usuario.access_level === undefined) {
+    const usuario = req.usuario || req.user;
+    // 🛡️ GUARDA DE SEGURIDAD: Previene ruptura si req.usuario/req.user no fue inyectado
+    if (!req || !usuario || usuario.access_level === undefined) {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Contexto de identidad no disponible.' });
     }
 
-    if (req.usuario.access_level < 30 && req.usuario.rol !== 'despachador' && req.usuario.rol !== 'admin' && req.usuario.rol !== 'ceo') {
+    if (usuario.access_level < 30 && usuario.rol !== 'despachador' && usuario.rol !== 'admin' && usuario.rol !== 'ceo') {
         return res.status(403).json({ success: false, message: '❌ Acceso Denegado: Privilegios de Despacho insuficientes.' });
     }
     next();

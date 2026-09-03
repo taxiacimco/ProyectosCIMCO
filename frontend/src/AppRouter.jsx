@@ -1,13 +1,15 @@
-// Versión Arquitectura: V9.8 - Optimización de Rutas Administrativas con Carga Perezosa (React.lazy) y Suspense Fallback
+// Versión Arquitectura: V9.9 - Envolvente Centralizado de Rutas Privadas mediante ProtectedRoute de Shared Component
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
- * Misión: Conservar el componente ProtectedRoute para homologar los roles generales de conductor hacia sus subroles específicos (mototaxi, motoparrillero, motocarga, intermunicipal), integrando React.lazy() y Suspense para optimización de bundle en vistas administrativas.
- * Estilo: CIMCO-UI V9.3 Glassmorphism.
+ * Misión: Integrar el componente centralizado ProtectedRoute para la protección perimetral de rutas privadas (pasajero, mototaxi, motoparrillero, motocarga, intermunicipal, despachador y admin), conservando la carga perezosa (React.lazy), la reorientación por roles (RoleRedirect) y el estilo CIMCO-UI V9.3.
  */
 
 import React, { Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+
+// Componente de Seguridad Perimetral Compartido
+import ProtectedRoute from '@/components/shared/ProtectedRoute';
 
 // Componentes Compartidos y Vistas Principales
 import AjustesPerfil from '@/components/shared/AjustesPerfil';
@@ -51,7 +53,7 @@ const AdminPanel = React.lazy(() => import('@/pages/admin/AdminPanel'));
 const Cooperativas = React.lazy(() => import('@/pages/admin/Cooperativas'));
 const QrGenerator = React.lazy(() => import('@/pages/admin/QrGenerator'));
 
-// Pantalla de Carga Glassmorphism con Guardas Anti-Undefined
+// Pantalla de Carga Glassmorphism con Guardas Anti-Undefined (CIMCO-UI V9.3)
 const LoadingScreen = () => (
   <div className="min-h-screen bg-[#080d1a] bg-gradient-to-br from-[#080d1a] via-[#0f172a] to-[#1e1b4b] flex items-center justify-center p-4">
     <div className="flex flex-col items-center gap-4 bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 p-8 rounded-3xl shadow-2xl">
@@ -60,46 +62,6 @@ const LoadingScreen = () => (
     </div>
   </div>
 );
-
-// Guardián de Rutas Protegidas con Detección Dinámica de Subroles y Homologación de Conductor
-const ProtectedRoute = ({ children, allowedRoles }) => {
-  const authContext = useAuth() || {};
-  const user = authContext.user || null;
-  const loading = authContext.loading || false;
-
-  if (loading) {
-    return <LoadingScreen />;
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (allowedRoles && Array.isArray(allowedRoles) && allowedRoles.length > 0) {
-    const primaryRole = (user.rol || user.tipoUsuario || '').toLowerCase();
-    const secondaryRole = (user.subrol || user.tipoConductor || user.tipoVehiculo || '').toLowerCase();
-
-    // Homologación de roles efectivos del usuario
-    const effectiveRoles = [primaryRole, secondaryRole].filter(Boolean);
-
-    // Mapeo defensivo: Si el rol es 'conductor' genérico sin subrol explícito, se homologa a servicios de conducción
-    if (primaryRole === 'conductor') {
-      if (!secondaryRole) {
-        effectiveRoles.push('mototaxi', 'motoparrillero', 'motocarga', 'intermunicipal');
-      }
-    }
-
-    const isAllowed = allowedRoles.some((allowed) =>
-      effectiveRoles.some((eRole) => eRole === allowed.toLowerCase())
-    );
-
-    if (!isAllowed) {
-      return <Navigate to="/" replace />;
-    }
-  }
-
-  return children;
-};
 
 // Redireccionador por Rol Activo con Mapeo Inteligente Anti-Bucle
 const RoleRedirect = () => {
@@ -147,7 +109,7 @@ const AppRouter = () => {
     <BrowserRouter>
       <Suspense fallback={<LoadingScreen />}>
         <Routes>
-          {/* Rutas Públicas de Autenticación y Registro (SIN ProtectedRoute, Slugs Planos) */}
+          {/* Rutas Públicas de Autenticación y Registro */}
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/register-pasajero" element={<RegisterPasajero />} />

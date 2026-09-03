@@ -1,11 +1,11 @@
-// Versión Arquitectura: V19.6 - Depuración de Índice Duplicado en Campo UID
+// Versión Arquitectura: V19.7 - Depuración de Índices Duplicados Mongoose en Campo UID
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva la sincronización bidireccional (rol ↔ role, saldo ↔ balance), persistencia estricta,
  * índices GeoJSON, encriptación bcrypt única en el hook pre-save controlando isModified('password') y evaluación de umbral
  * financiero de operabilidad (puedeOperar).
- * Ajuste V19.6: Remoción de 'index: true' en la propiedad 'uid' para desduplicar la indexación declarada implícitamente con 'unique: true'.
+ * Ajuste V19.7: Depuración total de declaraciones dobles de índices en el esquema para resolver la advertencia de Mongoose.
  */
 
 import mongoose from 'mongoose';

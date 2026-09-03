@@ -1,9 +1,8 @@
-// Versión Arquitectura: V5.3.0 - Rechazo Estricto de Handshake por Expiración/Invalidez JWT
+// Versión Arquitectura: V5.4.0 - Inyección Atómica de Subrol y Access Level en Handshake Socket
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\socketAuth.middleware.js
  * Misión: Interceptar conexiones entrantes de Sockets y validar su autenticidad mediante JWT en la fase de handshake.
- * Ajuste V5.3.0: Rechazo explícito y clasificado de conexiones cuando el token está expirado, corrupto o carece de identidad válida,
- *              impidiendo que clientes desautenticados mantengan canales de tiempo real en el ecosistema CIMCO.
+ * Ajuste V5.4.0: Inyección atómica de subrol y access_level directamente en la instancia de socket para validación perimetral y soporte de gobernanza en tiempo real.
  */
 
 import jwt from 'jsonwebtoken';
@@ -50,7 +49,9 @@ export const socketAuthMiddleware = (socket, next) => {
         
         // Inyección atómica de la identidad en la instancia del socket para uso perimetral
         socket.usuarioId = String(usuarioId);
-        socket.rol = String(rolExtraido).toLowerCase().trim(); // Normaliza de manera segura
+        socket.rol = String(rolExtraido).toLowerCase().trim();
+        socket.subrol = decodificado.subrol ? String(decodificado.subrol).toLowerCase().trim() : socket.rol;
+        socket.access_level = decodificado.access_level !== undefined ? Number(decodificado.access_level) : 1;
         socket.usuario = decodificado; // Contexto completo para escuchas en tiempo real
 
         next(); // Handshake aprobado, se abre el túnel duplex
