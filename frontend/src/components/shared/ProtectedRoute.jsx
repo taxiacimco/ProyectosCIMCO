@@ -1,24 +1,8 @@
-// Versión Arquitectura: V21.40 - Implementación de Guardián de Rutas Protegidas (ProtectedRoute) con Evaluación Anti-Crash de access_level y subrol
-/**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\shared\ProtectedRoute.jsx
- * Misión: Componente de seguridad perimetral para React Router que valida la sesión activa y los privilegios de usuario.
- * Integridad: Evalúa el estado de autenticación (useAuth), nivel de acceso (access_level) y subrol (subrol).
- * Aplica renderizado defensivo con fallback visual basado en el estándar CIMCO-UI V9.3 (Glassmorphism).
- */
-
+// Versión Arquitectura: V21.41 - Corrección de Bucle Infinito de Redirección Anti-Crash
 import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 
-/**
- * Componente ProtectedRoute
- * @param {Object} props
- * @param {Array<string|number>} [props.allowedAccessLevels] - Niveles de acceso requeridos para renderizar
- * @param {Array<string>} [props.allowedSubroles] - Subroles permitidos para acceso a la vista
- * @param {Array<string>} [props.allowedRoles] - Roles principales permitidos (compatibilidad legacy)
- * @param {string} [props.redirectTo="/login"] - Ruta alternativa de redirección en caso de no autenticación
- * @param {React.ReactNode} [props.children] - Subcomponentes opcionales a renderizar
- */
 const ProtectedRoute = ({
   allowedAccessLevels = [],
   allowedSubroles = [],
@@ -29,7 +13,6 @@ const ProtectedRoute = ({
   const { user, loading, isAuthenticated } = useAuth();
   const location = useLocation();
 
-  // 🛡️ ESTADO DE CARGA: Fallback visual estandardizado CIMCO-UI V9.3 (Glassmorphism)
   if (loading) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-[#09090b] text-white p-4">
@@ -43,53 +26,55 @@ const ProtectedRoute = ({
     );
   }
 
-  // 🛡️ VERIFICACIÓN DE SESIÓN ACTIVA
+  // 1. Sin sesión: Redirigir a login
   if (!isAuthenticated || !user) {
     return <Navigate to={redirectTo} state={{ from: location }} replace />;
   }
 
-  // 🛡️ BLINDAJE Y EXTRACCIÓN DEFENSIVA DE PROPIEDADES DE USUARIO
+  // Extracción defensiva de roles y niveles de acceso
   const userAccessLevel = user?.access_level ?? user?.nivelAcceso ?? user?.level;
-  const userSubrol = user?.subrol ?? user?.subRole ?? user?.sub_rol;
-  const userRole = user?.rol ?? user?.role;
+  const userSubrol = user?.subrol ?? user?.subRole ?? user?.sub_rol ?? user?.tipoConductor;
+  const userRole = (user?.rol ?? user?.role ?? user?.tipoUsuario ?? '').toLowerCase();
 
-  // 🛡️ EVALUACIÓN POR NIVEL DE ACCESO (access_level)
+  // Redirección de respaldo si el usuario ya está autenticado pero no tiene permisos
+  const fallbackRedirect = location.pathname === '/login' ? '/' : '/login';
+
+  // 2. Validación de Nivel de Acceso
   if (allowedAccessLevels.length > 0) {
-    const hasValidLevel = allowedAccessLevels.some((level) => {
-      if (userAccessLevel === undefined || userAccessLevel === null) return false;
-      return String(level).trim() === String(userAccessLevel).trim();
-    });
-
+    const hasValidLevel = allowedAccessLevels.some(
+      (level) => userAccessLevel !== undefined && String(level).trim() === String(userAccessLevel).trim()
+    );
     if (!hasValidLevel) {
-      return <Navigate to="/login" state={{ from: location, reason: 'unauthorized_access_level' }} replace />;
+      return <Navigate to={fallbackRedirect} replace />;
     }
   }
 
-  // 🛡️ EVALUACIÓN POR SUBROL (subrol)
+  // 3. Validación de Subrol
   if (allowedSubroles.length > 0) {
-    const hasValidSubrole = allowedSubroles.some((subrol) => {
-      if (!userSubrol) return false;
-      return String(subrol).trim().toLowerCase() === String(userSubrol).trim().toLowerCase();
-    });
-
+    const hasValidSubrole = allowedSubroles.some(
+      (sub) => userSubrol && String(sub).trim().toLowerCase() === String(userSubrol).trim().toLowerCase()
+    );
     if (!hasValidSubrole) {
-      return <Navigate to="/login" state={{ from: location, reason: 'unauthorized_subrole' }} replace />;
+      return <Navigate to={fallbackRedirect} replace />;
     }
   }
 
-  // 🛡️ EVALUACIÓN POR ROL PRINCIPAL (rol)
+  // 4. Validación de Rol Principal
   if (allowedRoles.length > 0) {
     const hasValidRole = allowedRoles.some((role) => {
-      if (!userRole) return false;
-      return String(role).trim().toLowerCase() === String(userRole).trim().toLowerCase();
+      const targetRole = String(role).trim().toLowerCase();
+      if (userRole === targetRole) return true;
+      if (userRole === 'conductor' && ['mototaxi', 'motoparrillero', 'motocarga', 'intermunicipal'].includes(targetRole)) {
+        return true;
+      }
+      return false;
     });
 
     if (!hasValidRole) {
-      return <Navigate to="/login" state={{ from: location, reason: 'unauthorized_role' }} replace />;
+      return <Navigate to={fallbackRedirect} replace />;
     }
   }
 
-  // 🚀 AUTORIZACIÓN EXITOSA: Renderiza hijos explícitos o el Outlet del enrutador
   return children ? children : <Outlet />;
 };
 

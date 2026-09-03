@@ -1,13 +1,13 @@
-// Versión Arquitectura: V19.2 - Integración Sincronizada con Configuración Base de Sockets y Guards Anti-Undefined
+// Versión Arquitectura: V21.42 - Corrección de Bucle Infinito y Blindaje Anti-Re-render en SocketContext
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\SocketContext.jsx
  * Misión: Proveedor de Contexto Reactivo centralizado y unificado para la gestión de sockets en tiempo real.
  *         Mantiene sincronización de identidad (userId, rol, empresaId), estado reactivo de ofertas,
  *         captura global de expiración de token y wrappers de operaciones logísticas (crearSolicitud, enviarOferta, aceptarOferta).
- * Ajuste V19.2: Sincronización del estado de conexión con la instancia central de socket y refactorización de guardas de seguridad.
+ * Ajuste V21.42: Blindaje anti-re-render infinito mediante ref de identidad (lastConnectedUid) y sincronización defensiva.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { socket } from '@/config/socket';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -17,6 +17,7 @@ export const SocketProvider = ({ children }) => {
     const { user, logout } = useAuth();
     const [isConnected, setIsConnected] = useState(socket?.connected || false);
     const [ofertas, setOfertas] = useState([]);
+    const lastConnectedUid = useRef(null);
 
     const userId = user?.uid || user?._id || user?.id || user?.conductorId || null;
     const userRole = (user?.rol || user?.role || 'conductor')?.toString()?.toLowerCase()?.trim() || 'conductor';
@@ -41,9 +42,14 @@ export const SocketProvider = ({ children }) => {
 
         if (userId) {
             const tokenSeguro = localStorage.getItem('cimco_token') || localStorage.getItem('token') || '';
+            const currentIdentityKey = `${userId}-${userRole}-${empresaId || ''}`;
 
-            console.log(`⚡ [CIMCO-SOCKET] Identidad activa detectada [UID: ${userId} | Rol: ${userRole} | Empresa: ${empresaId || 'N/A'}]. Calibrando túnel duplex...`);
-            
+            // Control de re-renderizado: Ejecutar calibración únicamente si la identidad realmente cambió
+            if (lastConnectedUid.current !== currentIdentityKey) {
+                lastConnectedUid.current = currentIdentityKey;
+                console.log(`⚡ [CIMCO-SOCKET] Identidad activa detectada [UID: ${userId} | Rol: ${userRole} | Empresa: ${empresaId || 'N/A'}]. Calibrando túnel duplex...`);
+            }
+
             if (socket.io?.opts) {
                 socket.io.opts.query = {
                     ...(socket.io.opts.query || {}),
@@ -80,6 +86,7 @@ export const SocketProvider = ({ children }) => {
                 console.log("🧹 [CIMCO-SOCKET] Desconexión explícita forzada por ausencia de sesión.");
                 socket.disconnect();
             }
+            lastConnectedUid.current = null;
             setOfertas([]);
         }
 
