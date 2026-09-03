@@ -1,4 +1,4 @@
-// Versión Arquitectura: V14.2 - Integración de Controlador AbortController en Pestañas Dinámicas (AdminDashboard)
+// Versión Arquitectura: V14.3 - Depuración de Importaciones Lazy Sin Uso y Optimización de Bundle
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\admin\AdminDashboard.jsx
  * Misión: Asegurar que cualquier nueva sub-pestaña o consulta HTTP implemente un AbortController para prevenir fugas de memoria y cancelar peticiones pendientes ante cambios rápidos de vista.
@@ -17,7 +17,6 @@ import { useAuth } from '@/hooks/useAuth';
 import { auth } from '@/config/firebase';
 
 // ⚡ OPTIMIZACIÓN CODE-SPLITTING: Carga perezosa (React.lazy) para optimizar el bundle inicial de la consola
-const AdminPanel = lazy(() => import('@/pages/admin/AdminPanel'));
 const MapaOperativo = lazy(() => import('@/components/admin/MapaOperativo'));
 const QrGenerator = lazy(() => import('@/pages/admin/QrGenerator'));
 const ListaOperadores = lazy(() => import('@/components/admin/ListaOperadores'));

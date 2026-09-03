@@ -1,7 +1,7 @@
-// Versión Arquitectura: V9.9 - Envolvente Centralizado de Rutas Privadas mediante ProtectedRoute de Shared Component
+// Versión Arquitectura: V10.0 - Permisos Perimetrales de Superusuario (admin, ceo, oficina) en Rutas Administrativas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\AppRouter.jsx
- * Misión: Integrar el componente centralizado ProtectedRoute para la protección perimetral de rutas privadas (pasajero, mototaxi, motoparrillero, motocarga, intermunicipal, despachador y admin), conservando la carga perezosa (React.lazy), la reorientación por roles (RoleRedirect) y el estilo CIMCO-UI V9.3.
+ * Misión: Integrar permisos explícitos de roles de superusuario ('admin', 'ceo', 'oficina') en las subrutas administrativas protegidas, conservando la carga perezosa (React.lazy), la reorientación inteligente por roles (RoleRedirect) y el estilo CIMCO-UI V9.3.
  */
 
 import React, { Suspense } from 'react';
@@ -82,6 +82,8 @@ const RoleRedirect = () => {
 
   switch (primaryRole) {
     case 'admin':
+    case 'ceo':
+    case 'oficina':
       return <Navigate to="/admin/dashboard" replace />;
     case 'despachador':
       return <Navigate to="/despachador" replace />;
@@ -289,7 +291,7 @@ const AppRouter = () => {
           <Route
             path="/admin/dashboard"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'ceo', 'oficina']}>
                 <AdminDashboard />
               </ProtectedRoute>
             }
@@ -297,7 +299,7 @@ const AppRouter = () => {
           <Route
             path="/admin/panel"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'ceo', 'oficina']}>
                 <AdminPanel />
               </ProtectedRoute>
             }
@@ -305,7 +307,7 @@ const AppRouter = () => {
           <Route
             path="/admin/cooperativas"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'ceo', 'oficina']}>
                 <Cooperativas />
               </ProtectedRoute>
             }
@@ -313,7 +315,7 @@ const AppRouter = () => {
           <Route
             path="/admin/qr-generator"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'ceo', 'oficina']}>
                 <QrGenerator />
               </ProtectedRoute>
             }

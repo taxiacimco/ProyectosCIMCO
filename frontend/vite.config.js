@@ -1,8 +1,8 @@
-// Versión Arquitectura: V10.4.0 - Resolución de alias (@) y orquestación SPA optimizada para despliegue en Vercel
+// Versión Arquitectura: V10.4.1 - Optimización HMR local para eliminación de advertencias WebSocket
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\vite.config.js
  * Misión: Orquestación de empaquetado Vite, resolución de alias de rutas (@), 
- *         configuración de HMR para túneles y proxy server para redirección de peticiones /api y /socket.io sin fallos SSL.
+ *         configuración de HMR adaptativo para desarrollo local y proxy server para redirección de peticiones /api y /socket.io sin fallos SSL.
  */
 
 import { defineConfig } from 'vite';
@@ -50,10 +50,10 @@ export default defineConfig({
     watch: {
       usePolling: true,
     },
-    // Configuración HMR forzada a WebSocket Seguro (WSS) para compatibilidad con el túnel HTTPS de Cloudflare
+    // Configuración HMR ajustada a protocolo ws sobre localhost para prevenir fallos WebSocket en desarrollo local
     hmr: {
-      protocol: 'wss',
-      clientPort: 443,
+      protocol: 'ws',
+      host: 'localhost',
     }
   },
   build: {
