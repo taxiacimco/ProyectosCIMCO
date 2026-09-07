@@ -1,11 +1,11 @@
-// Versión Arquitectura: V21.53 - Integración Atómica de Campo origenManual y Fix GPS Bloqueado
+// Versión Arquitectura: V21.54 - Integración de Estado isWalletOpen y Botón Gatillo en Sidebar
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (OpenStreetMap),
  *         integración atómica de telemetría, sockets, billetera smart, selector dinámico de flota (4 modalidades + Cooperativas < 5km),
  *         monitoreo de hardware GPS, entrada de dirección manual (origenManual) con fix de GPS bloqueado y recalibración,
  *         subasta dinámica de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil unificada mediante AjustesPerfil,
- *         guard de validación previa al envío para método de pago 'BILLETERA' contra saldo suficiente y paleta CIMCO-UI V9.3.
+ *         disparador y modal interactivo de BilleteraPasajeroModal con control de estado isWalletOpen, y paleta CIMCO-UI V9.3.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -49,12 +49,14 @@ import {
   AlertTriangle,
   Bus,
   Check,
-  Tag
+  Tag,
+  PlusCircle
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import GpsRequiredModal from '@/components/shared/GpsRequiredModal';
 import AjustesPerfil from '@/components/shared/AjustesPerfil';
+import BilleteraPasajeroModal from '@/components/pasajero/BilleteraPasajeroModal';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -162,9 +164,10 @@ export default function HomePasajero() {
   const [mostrarModalCalificacion, setMostrarModalCalificacion] = useState(false);
   const [mensajeExpirado, setMensajeExpirado] = useState('');
   
-  // 🗲 Estados de la UI / Secciones dinámicas
+  // 🗲 Estados de la UI / Secciones dinámicas / Billetera
   const [seccionActiva, setSeccionActiva] = useState('radar'); // 'radar' | 'billetera'
   const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
+  const [isWalletOpen, setIsWalletOpen] = useState(false);
   
   // 🔄 Sincronización dinámica de perfil extendido desde Firestore
   const [perfilFirestore, setPerfilFirestore] = useState({
@@ -695,8 +698,8 @@ export default function HomePasajero() {
         {/* ---------------- BARRA LATERAL / PANEL DE CONTROL ---------------- */}
         <aside className="w-full md:w-[420px] bg-slate-900/90 backdrop-blur-2xl border-r border-slate-800 flex flex-col justify-between z-20 shadow-2xl relative overflow-hidden">
           
-          {/* Tarjeta de Perfil Pasajero Integrada (Interactiva) */}
-          <div className="p-4 border-b border-slate-800/80 bg-slate-950/40">
+          {/* Tarjeta de Perfil Pasajero e Integración de Botón Gatillo Billetera */}
+          <div className="p-4 border-b border-slate-800/80 bg-slate-950/40 space-y-3">
             <div 
               onClick={() => setMostrarModalPerfil(true)}
               className="bg-slate-950/70 border border-slate-800 hover:border-amber-500/40 rounded-2xl p-3 flex items-center justify-between cursor-pointer transition-all relative group"
@@ -727,6 +730,24 @@ export default function HomePasajero() {
                 VERIFICADO
               </div>
             </div>
+
+            {/* 💳 BOTÓN GATILLO BILLETERA EN SIDEBAR */}
+            <button
+              type="button"
+              onClick={() => setIsWalletOpen(true)}
+              className="w-full py-2.5 px-3.5 bg-gradient-to-r from-slate-900 via-slate-900/90 to-slate-950 hover:from-slate-800 hover:to-slate-900 border border-amber-500/30 hover:border-amber-500/60 rounded-xl text-amber-400 text-xs font-bold flex items-center justify-between transition-all duration-300 shadow-md hover:shadow-amber-500/10 active:scale-[0.98] cursor-pointer group"
+            >
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 group-hover:bg-amber-500/20 transition-colors">
+                  <Wallet className="w-4 h-4" />
+                </div>
+                <span className="uppercase tracking-wider text-[11px]">Billetera Digital</span>
+              </div>
+              <div className="flex items-center gap-2 font-mono">
+                <span className="text-white font-black text-xs">${saldoEfectivo.toLocaleString()}</span>
+                <span className="text-[9px] text-amber-500 font-extrabold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">RECARGAR</span>
+              </div>
+            </button>
           </div>
 
           {/* MONITOR DE ERRORES / ALERTAS */}
@@ -1291,8 +1312,8 @@ export default function HomePasajero() {
           <span className="text-[9px] uppercase tracking-wider font-mono">Historial</span>
         </button>
         <button 
-          onClick={() => setSeccionActiva('billetera')}
-          className={`flex flex-col items-center gap-1 transition-all cursor-pointer ${seccionActiva === 'billetera' ? 'text-emerald-400 scale-105 font-bold' : 'text-slate-500'}`}
+          onClick={() => setIsWalletOpen(true)}
+          className={`flex flex-col items-center gap-1 transition-all cursor-pointer text-emerald-400 hover:text-emerald-300 font-bold`}
         >
           <Wallet size={18} />
           <span className="text-[9px] uppercase tracking-wider font-mono">Billetera</span>
@@ -1305,6 +1326,26 @@ export default function HomePasajero() {
           isOpen={mostrarModalPerfil}
           onClose={() => setMostrarModalPerfil(false)}
           onUpdateSuccess={handleProfileUpdateSuccess}
+        />
+      )}
+
+      {/* MODAL BILLETERA DE PASAJERO Y RECARGA DE FONDOS */}
+      {isWalletOpen && (
+        <BilleteraPasajeroModal
+          isOpen={isWalletOpen}
+          onClose={() => setIsWalletOpen(false)}
+          usuarioId={uidUsuario}
+          saldoActual={saldoEfectivo}
+          onSuccess={(nuevoSaldo) => {
+            if (nuevoSaldo !== undefined && !isNaN(Number(nuevoSaldo))) {
+              setPerfilFirestore((prev) => ({ ...prev, saldoBilletera: Number(nuevoSaldo) }));
+            }
+          }}
+          onRecargaCompletada={(nuevoSaldo) => {
+            if (nuevoSaldo !== undefined && !isNaN(Number(nuevoSaldo))) {
+              setPerfilFirestore((prev) => ({ ...prev, saldoBilletera: Number(nuevoSaldo) }));
+            }
+          }}
         />
       )}
 

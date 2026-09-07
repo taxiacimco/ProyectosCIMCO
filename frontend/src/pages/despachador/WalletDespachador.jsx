@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.4 - Control de Umbral Mínimo de Billetera ($2,000 COP) e Interfaz de Despacho
+// Versión Arquitectura: V19.5 - Gobernanza Centralizada con SALDO_MINIMO_OPERATIVO
 /**
  * Ubicación: frontend\src\pages\despachador\WalletDespachador.jsx
  * Misión: Caja de Despachos Vinculada con Tesorería Central en MongoDB y Escucha de Saldo por WebSockets.
- * Ajuste V19.4: Integración del umbral mínimo operativo de $2,000 COP. Validación y bloqueo visual de la interfaz de despacho cuando el saldo de la caja sea inferior a dicho límite.
+ * Ajuste V19.5: Importación e integración centralizada del umbral mínimo operativo (SALDO_MINIMO_OPERATIVO) desde @/config/constants.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -10,13 +10,11 @@ import { useAuth } from '@/hooks/useAuth';
 import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
+import { SALDO_MINIMO_OPERATIVO } from '@/config/constants';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { Wallet, Activity, AlertTriangle, RefreshCw, Loader, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import BotonRecarga from '@/components/wallet/BotonRecarga';
 import TransactionHistory from '@/components/wallet/TransactionHistory';
-
-// 💳 CONSTANTE DE NEGOCIO: UMBRAL MÍNIMO OPERATIVO DE BILLETERA DE DESPACHADOR
-const UMBRAL_MINIMO_SALDO = 2000;
 
 const WalletDespachador = () => {
     // 🛡️ Guardas de Seguridad y Consumo del Contexto Centralizado
@@ -36,8 +34,10 @@ const WalletDespachador = () => {
     const idUsuario = user?.id || user?._id || user?.uid || "";
     const rolVerificado = user?.role || user?.rol;
 
+    const umbralMinimo = Number(SALDO_MINIMO_OPERATIVO) || 2000;
+
     // 🛡️ EVALUACIÓN DE BLOQUEO POR SALDO INSUFICIENTE
-    const saldoInsuficiente = saldo !== null && Number(saldo) < UMBRAL_MINIMO_SALDO;
+    const saldoInsuficiente = saldo !== null && Number(saldo) < umbralMinimo;
 
     // 💰 FUNCIÓN DE OBTENCIÓN DE SALDO DESDE TESORERÍA CENTRAL (REST API MongoDB)
     const obtenerSaldoBackend = useCallback(async () => {
@@ -171,7 +171,7 @@ const WalletDespachador = () => {
                             <div>
                                 <p className="font-black uppercase tracking-wider">Opción de Despacho Bloqueada</p>
                                 <p className="text-[10px] text-red-300/80 uppercase mt-0.5">
-                                    El saldo de caja actual (${Number(saldo).toLocaleString()} COP) es inferior al umbral operativo mínimo de ${UMBRAL_MINIMO_SALDO.toLocaleString()} COP. Recargue la billetera para habilitar la asignación de rutas y pujas.
+                                    El saldo de caja actual (${Number(saldo).toLocaleString()} COP) es inferior al umbral operativo mínimo de ${umbralMinimo.toLocaleString()} COP. Recargue la billetera para habilitar la asignación de rutas y pujas.
                                 </p>
                             </div>
                         </div>
@@ -180,7 +180,7 @@ const WalletDespachador = () => {
                     <div className="backdrop-blur-md bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3 flex items-center gap-3 text-emerald-400 font-mono text-xs shadow-md">
                         <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />
                         <p className="text-[10px] uppercase tracking-wider font-semibold">
-                            Habilitado para Despacho: Saldo sobre el umbral mínimo operativo (${UMBRAL_MINIMO_SALDO.toLocaleString()} COP).
+                            Habilitado para Despacho: Saldo sobre el umbral mínimo operativo (${umbralMinimo.toLocaleString()} COP).
                         </p>
                     </div>
                 )

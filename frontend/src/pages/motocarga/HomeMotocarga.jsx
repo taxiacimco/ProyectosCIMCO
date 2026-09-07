@@ -1,4 +1,4 @@
-// Versión Arquitectura: V12.26 - Refactorización de modal de perfil a componente centralizado AjustesPerfil con callback de sincronización
+// Versión Arquitectura: V21.49 - Instanciación de sala WebSocket unirse_sala_motocarga, saneamiento de consultas por tipoServicio y estandarización iconográfica CIMCO-UI V9.3
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
@@ -71,9 +71,9 @@ export default function HomeMotocarga() {
     }
     setLoading(true);
 
-    // 1. Intento principal a la API REST de MongoDB
+    // 1. Intento principal a la API REST de MongoDB filtrado por tipoServicio
     try {
-      const res = await api.get(`/viajes/historial?conductorId=${idOperador}`);
+      const res = await api.get(`/viajes/historial?conductorId=${idOperador}&tipoServicio=motocarga`);
       if (res.data?.success && Array.isArray(res.data?.viajes)) {
         setHistorial(res.data.viajes);
         setLoading(false);
@@ -88,13 +88,14 @@ export default function HomeMotocarga() {
       const q = query(
         collection(db, FIRESTORE_PATHS?.rides || FIRESTORE_PATHS?.viajes || 'viajes'),
         where('conductorId', '==', idOperador),
+        where('tipoServicio', '==', 'motocarga'),
         where('estado', '==', 'COMPLETADO')
       );
       const snapshot = await getDocs(q);
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
       // Ordenamiento en memoria del cliente
-      docs.sort((a, b) => (b.fechaCreacion?.seconds || 0) - (a.fechaCreacion?.seconds || 0));
+      docs.sort((a, b) => (b.fechaCreacion?.seconds || b.fechacreacion?.seconds || 0) - (a.fechaCreacion?.seconds || a.fechacreacion?.seconds || 0));
       setHistorial(docs);
     } catch (noSqlErr) {
       console.error("❌ Fallo en fallback NoSQL:", noSqlErr);
@@ -206,6 +207,8 @@ export default function HomeMotocarga() {
           email: user?.email || localStorage.getItem('conductorEmail') || ''
         });
 
+        socket.emit('unirse_sala_motocarga', { conductorId });
+
         const handleNuevaSolicitud = (data) => {
           console.log("🔥 [CIMCO-RADAR-CARGA] Flete detectado en el perímetro de asignación!", data);
           if (!servicioActivo && !solicitudViaje) {
@@ -241,7 +244,7 @@ export default function HomeMotocarga() {
       collection(db, pathViajes),
       where('estado', '==', 'SOLICITADO'),
       where('tipoServicio', '==', 'motocarga'),
-      orderBy('fechacreacion', 'desc')
+      orderBy('fechaCreacion', 'desc')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -269,6 +272,7 @@ export default function HomeMotocarga() {
     const q = query(
       collection(db, pathViajes),
       where('conductorId', '==', user.uid),
+      where('tipoServicio', '==', 'motocarga'),
       where('estado', 'in', ['ACEPTADO', 'EN_SITIO', 'EN_VIAJE'])
     );
 
@@ -398,7 +402,7 @@ export default function HomeMotocarga() {
             title="Editar Perfil y Vehículo"
             className="p-2 bg-amber-400/90 text-black border border-white/10 font-black text-base flex items-center justify-center rounded-lg hover:bg-amber-400 transition-colors shrink-0"
           >
-            🚚
+            <Truck size={18} strokeWidth={2.5} />
           </button>
           <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setMostrarModalPerfil(true)}>
             <h1 className="text-xs font-black tracking-widest text-white uppercase truncate flex items-center gap-1.5" title={nombreConductor}>
@@ -496,8 +500,9 @@ export default function HomeMotocarga() {
                   </div>
 
                   {servicioActivo.detallesCarga && (
-                    <div className="bg-black/40 p-2.5 border border-white/5 rounded-lg text-[10px] text-zinc-300 font-bold uppercase tracking-wide">
-                      <span className="text-amber-400 font-black">📦 Manifiesto:</span> {servicioActivo.detallesCarga}
+                    <div className="bg-black/40 p-2.5 border border-white/5 rounded-lg text-[10px] text-zinc-300 font-bold uppercase tracking-wide flex items-center gap-1.5">
+                      <Package size={14} className="text-amber-400 shrink-0" strokeWidth={2.5} />
+                      <span><strong className="text-amber-400 font-black">Manifiesto:</strong> {servicioActivo.detallesCarga}</span>
                     </div>
                   )}
 
@@ -545,8 +550,9 @@ export default function HomeMotocarga() {
                 {solicitudViaje && (
                   <div className="w-full bg-zinc-900/80 backdrop-blur-xl border border-amber-400/50 p-5 rounded-xl shadow-2xl shadow-amber-500/10 space-y-4 mb-6 animate-pulse">
                     <div className="flex justify-between items-start border-b border-white/10 pb-3">
-                      <span className="bg-amber-400/20 text-amber-400 text-[9px] font-black px-2 py-1 border border-amber-400/30 rounded uppercase tracking-wider">
-                        📦 SOLICITUD DE FLETE REAL-TIME
+                      <span className="bg-amber-400/20 text-amber-400 text-[9px] font-black px-2 py-1 border border-amber-400/30 rounded uppercase tracking-wider flex items-center gap-1.5">
+                        <Package size={12} className="text-amber-400" strokeWidth={2.5} />
+                        SOLICITUD DE FLETE REAL-TIME
                       </span>
                       <span className="text-sm font-black text-amber-400 bg-black/50 rounded-lg px-2.5 py-0.5 border border-white/5">
                         ${Number(solicitudViaje?.tarifa || solicitudViaje?.valor || 0).toLocaleString('es-CO')}
@@ -554,15 +560,15 @@ export default function HomeMotocarga() {
                     </div>
                     
                     <div className="space-y-2.5 text-xs text-zinc-300 bg-black/40 p-3 rounded-lg border border-white/5">
-                      <p className="flex items-start gap-1.5">
-                        <span className="text-amber-500 font-black shrink-0">📍</span>
+                      <div className="flex items-start gap-2">
+                        <MapPin size={14} className="text-amber-500 shrink-0 mt-0.5" strokeWidth={2.5} />
                         <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Origen:</strong> {solicitudViaje?.origenTexto || solicitudViaje?.origenDireccion || "Punto de Carga"}</span>
-                      </p>
+                      </div>
                       <div className="border-t border-dashed border-white/10 my-1.5"></div>
-                      <p className="flex items-start gap-1.5">
-                        <span className="text-cyan-400 font-black shrink-0">🏁</span>
+                      <div className="flex items-start gap-2">
+                        <Navigation size={14} className="text-cyan-400 shrink-0 mt-0.5" strokeWidth={2.5} />
                         <span className="leading-tight"><strong className="text-zinc-500 uppercase text-[9px] block">Destino:</strong> {solicitudViaje?.destinoTexto || solicitudViaje?.destinoDireccion || "Destino de Despacho"}</span>
-                      </p>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 pt-1">

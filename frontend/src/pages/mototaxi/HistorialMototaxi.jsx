@@ -1,10 +1,10 @@
-// Versión Arquitectura: V13.0 - Migración Híbrida REST API / Firestore con Resiliencia NoSQL y Rediseño CIMCO-UI Glassmorphism
+// Versión Arquitectura: V13.1 - Filtrado por Tipo de Servicio en Fallback NoSQL y Resiliencia Híbrida CIMCO-UI
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HistorialMototaxi.jsx
  * Misión: Renderizar la bitácora de rutas completadas en la red de mototaxi consumiendo la API REST de Express/MongoDB
  *        con fallback resiliente a Firestore y ordenamiento en memoria para mitigar ausencias de índices compuestos.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Acento Cían/Esmeralda).
- * Ajuste V13.0: Implementación del patrón de carga híbrido REST/NoSQL, saneamiento de errores de índice y erradicación del estilo brutalista.
+ * Ajuste V13.1: Incorporación del filtro `tipoServicio == 'mototaxi'` en la consulta de respaldo de Firestore.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -75,7 +75,8 @@ const HistorialMototaxi = () => {
             const q = query(
                 collection(db, pathColeccion),
                 where('conductorId', '==', conductorId),
-                where('estado', '==', 'COMPLETADO')
+                where('estado', '==', 'COMPLETADO'),
+                where('tipoServicio', '==', 'mototaxi')
             );
 
             const snapshot = await getDocs(q);

@@ -1,6 +1,6 @@
-// Versión Arquitectura: V16.0 - Integración Gestión CEO/Admin & Control de Saldo Crítico (< $2.000 COP)
+// Versión Arquitectura: V16.1 - Parametrización de Teléfono Admin WhatsApp con Fallback CEO (573104180514)
 /**
- * Ubicación: frontend\src\components\wallet\BotonRecarga.jsx
+ * Ubicación: frontend/src/components/wallet/BotonRecarga.jsx
  * Misión: Orquestar solicitudes de recarga directa autorizadas vía CEO/Administración central,
  *         con detección de estado crítico e inoperativo para conductores y despachadores con saldo < $2.000 COP.
  * Estilo: CIMCO-UI V9.3 Glassmorphism (Identidad Naranja & Alerta Crítica Rose Integrada).
@@ -52,8 +52,8 @@ const BotonRecarga = ({
 
         setErrorValidacion('');
         
-        // 📱 NÚMERO DE LA CENTRAL ADMINISTRATIVA TAXIA CIMCO (Parametrización dinámica por Prop/Env con Fallback seguro)
-        const adminPhone = adminPhoneProp || import.meta.env.VITE_ADMIN_WHATSAPP || "573000000000"; 
+        // 📱 NÚMERO DE LA CENTRAL ADMINISTRATIVA TAXIA CIMCO (Parametrización dinámica por Prop/Env con Fallback seguro al CEO)
+        const adminPhone = adminPhoneProp || import.meta.env.VITE_ADMIN_WHATSAPP || "573104180514"; 
         
         // 🏗️ Mapeo estructurado para autorización por Administrador/CEO
         const mensaje = `Hola Central / Administración CEO TAXIA CIMCO.\n\nSoy el *${rol.toUpperCase()}* con ID: *${usuarioId}* ${emailConductor ? `(${emailConductor})` : ''}.\n\nSolicito la *Aprobación y Autorización Directa de Recarga* en mi billetera por valor de: *$${montoNumerico.toLocaleString('es-CO')} COP*.\n\n${esSaldoCritico ? '⚠️ *ESTADO ACTUAL: SALDO INOPERATIVO (< $2.000 COP)* - Solicitud Prioritaria de Reactivación.\n\n' : ''}Adjunto el comprobante de pago/transferencia para verificación de la Administración CEO.`;

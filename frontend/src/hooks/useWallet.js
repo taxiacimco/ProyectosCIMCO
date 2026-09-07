@@ -1,12 +1,11 @@
-// Versión Arquitectura: V25.1 - Manejo Silencioso de Errores REST 401/Auth y Resiliencia en useWallet
+// Versión Arquitectura: V25.2 - Estabilización de Dependencias y Eliminación de Bucle Infinito en useWallet
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
  * Misión: Hook centralizado para la gobernanza del saldo de la billetera.
- * Ajustes V25.1:
- *  1. Envolver llamadas REST a walletService/api dentro de bloques try/catch robustos utilizando la instancia configurada de api.js.
- *  2. Capturar explícitamente errores 401 / 403 / Auth de la billetera para evitar la propagación de excepciones que deslogueen al usuario o bloqueen la UI.
- *  3. Asignación de estado degradado seguro (mantener el saldo local o valor seguro) con registro en alerta silenciosa.
- *  4. Preservación estricta de las funciones canAcceptService, estaHabilitadoParaOperar, idempotencia y la integración dual REST + Firestore.
+ * Ajustes V25.2:
+ *  1. Eliminación de 'saldo' del array de dependencias de 'obtenerSaldoDesdeBackend' en useCallback para romper el bucle infinito de peticiones.
+ *  2. Estabilización de la referencia a 'obtenerSaldoDesdeBackend' para evitar la recreación de listeners y ciclos redundantes en useEffect.
+ *  3. Preservación estricta de las funciones canAcceptService, estaHabilitadoParaOperar, idempotencia y la integración dual REST + Firestore.
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -74,6 +73,7 @@ export const useWallet = () => {
     /**
      * 🌐 Consulta SSOT directa a la API REST consumiendo el servicio walletService
      * Resiliente con aislamiento de errores 401/403 para evitar la expulsión/deslogueo del usuario.
+     * Estabilizado: Sin 'saldo' en el array de dependencias para prevenir loops infinitos.
      */
     const obtenerSaldoDesdeBackend = useCallback(async () => {
         if (!idDocumentoUnificado) return 0;
@@ -105,8 +105,7 @@ export const useWallet = () => {
             // Captura explícita de fallos de autorización (401/403) para degradación segura silenciosa
             if (statusHTTP === 401 || statusHTTP === 403) {
                 console.warn("🛡️ [CIMCO-WALLET-SILENT-AUTH] Fallo de autorización (401/403) al consultar saldo. Asignando estado degradado seguro de billetera sin romper la sesión.");
-                // Se conserva el saldo actual o se retorna un fallback seguro sin propagar la excepción hacia el AuthProvider
-                return Number(saldo) || 0;
+                return 0;
             }
 
             console.warn("⚠️ [CIMCO-WALLET] Error/Timeout consultando Backend REST. Conservando saldo local previo:", apiErr?.message);
@@ -114,7 +113,7 @@ export const useWallet = () => {
         }
 
         return null;
-    }, [idDocumentoUnificado, saldo]);
+    }, [idDocumentoUnificado]);
 
     useEffect(() => {
         if (!idDocumentoUnificado) {

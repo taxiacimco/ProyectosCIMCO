@@ -1,4 +1,4 @@
-// Versión Arquitectura: V1.3 - Módulo CEO para Gestión de Credenciales con Garantía de Acceso GestionBilleteras (access_level >= 8) y Estética CIMCO-UI V9.3
+// Versión Arquitectura: V1.5 - Deduplicación de entidades y key basada en _reactKey
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionAdmins.jsx
  * Misión: Permitir al CEO la creación, asignación de permisos y revocación de administradores/oficinas asegurando el nivel mínimo de acceso para recargas manuales.
@@ -12,7 +12,24 @@ import {
     UserPlus, ShieldCheck, Lock, Mail, User, Building, 
     Search, Loader2, AlertCircle, Trash2, KeyRound, RefreshCw
 } from 'lucide-react';
-import axios from 'axios';
+
+// Helper para deduplicar entidades y garantizar asignación de _reactKey
+const deduplicarEntidades = (lista = []) => {
+    if (!Array.isArray(lista)) return [];
+    const idsVistos = new Set();
+    return lista.reduce((acc, item, idx) => {
+        if (!item) return acc;
+        const idBase = item._id || item.id || item.uid || item.email || `admin-${idx}`;
+        if (!idsVistos.has(idBase)) {
+            idsVistos.add(idBase);
+            acc.push({
+                ...item,
+                _reactKey: item._reactKey || `${idBase}_${idx}`
+            });
+        }
+        return acc;
+    }, []);
+};
 
 const GestionAdmins = () => {
     const { user } = useAuth();
@@ -291,7 +308,7 @@ const GestionAdmins = () => {
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {adminsFiltrados.map((admin) => {
+                    {deduplicarEntidades(adminsFiltrados).map((admin) => {
                         const targetId = admin?._id || admin?.id || admin?.uid;
                         const isRevocando = revocandoId === targetId;
                         const userRole = admin?.role || admin?.rol || 'admin';
@@ -299,7 +316,7 @@ const GestionAdmins = () => {
                         const tieneAccesoBilleteras = currentAccessLevel >= 8;
 
                         return (
-                            <div key={targetId || Math.random()} className="backdrop-blur-md bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-2xl p-5 shadow-xl transition-all relative group">
+                            <div key={admin._reactKey} className="backdrop-blur-md bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-2xl p-5 shadow-xl transition-all relative group">
                                 <div className="flex justify-between items-start mb-2 gap-2">
                                     <h3 className="font-bold text-white text-sm uppercase truncate">
                                         {admin?.nombre || admin?.displayName || 'Usuario'}

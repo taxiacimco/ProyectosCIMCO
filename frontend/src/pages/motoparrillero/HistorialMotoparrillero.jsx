@@ -1,11 +1,11 @@
-// Versión Arquitectura: V13.0 - Migración Híbrida REST API / Firestore con Resiliencia NoSQL y Rediseño CIMCO-UI Glassmorphism
+// Versión Arquitectura: V13.1 - Segregación NoSQL por Tipo de Servicio Motoparrillero y Resiliencia en Fallback
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\motoparrillero\HistorialMotoparrillero.jsx
  * Misión: Renderizar la bitácora de rutas completadas en la red motoparrillero consumiendo la API REST de Express/MongoDB
- *        con fallback resiliente a Firestore y ordenamiento en memoria para mitigar ausencias de índices compuestos.
+ *        con fallback resiliente a Firestore con filtro de servicio estricto y ordenamiento en memoria.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Acento Cían/Esmeralda).
- * Ajuste V13.0: Implementación del patrón de carga híbrido REST/NoSQL, control de excepciones por ausencia de índices NoSQL,
- *               mecanismo de reintento de conexión y transición del estilo brutalista a Glassmorphism.
+ * Ajuste V13.1: Incorporación del filtro where('tipoServicio', '==', 'motoparrillero') en la consulta NoSQL de contingencia 
+ *               para evitar la contaminación de datos con otras modalidades operativas.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -70,12 +70,13 @@ const HistorialMotoparrillero = () => {
             console.warn("⚠️ [CIMCO-PARRILLERO-REST] Fallo en API REST Express, ejecutando respaldo Firestore:", err?.message || err);
         }
 
-        // 🔄 2. FALLBACK SECUNDARIO NOSQL (FIRESTORE) CON ORDENAMIENTO EN MEMORIA
+        // 🔄 2. FALLBACK SECUNDARIO NOSQL (FIRESTORE) CON ORDENAMIENTO EN MEMORIA Y FILTRADO POR SERVICIO
         try {
             const pathColeccion = FIRESTORE_PATHS?.rides || FIRESTORE_PATHS?.viajes || 'rides';
             const q = query(
                 collection(db, pathColeccion),
                 where('conductorId', '==', conductorId),
+                where('tipoServicio', '==', 'motoparrillero'),
                 where('estado', '==', 'COMPLETADO')
             );
 

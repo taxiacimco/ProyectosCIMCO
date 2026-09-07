@@ -1,9 +1,9 @@
-// Versión Arquitectura: V19.7 - Reemplazo de TileLayer a OpenStreetMap Público con Auditoría de Despacho Central
+// Versión Arquitectura: V19.8 - Deduplicación Atómica e Inyección de _reactKey en Listas de Central
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones con identidad completa, calcomanía QR de autogestión,
  * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
- * Ajuste V19.7: Actualización de la capa del mapa satelital/operativo a la fuente pública de OpenStreetMap y blindaje de permisos de control central.
+ * Ajuste V19.8: Envoltorio de deduplicación atómica deduplicarEntidades() para ofertasFiltradas y conductores, e inyección de _reactKey en keys de React.
  */
 
 import React, { useEffect, useState, Suspense } from "react";
@@ -27,6 +27,27 @@ import AjustesPerfil from "@/components/shared/AjustesPerfil";
 
 // 💳 CONSTANTE DE NEGOCIO: UMBRAL MÍNIMO OPERATIVO DE BILLETERA DE DESPACHADOR
 const UMBRAL_MINIMO_SALDO = 2000;
+
+/**
+ * 🛡️ HELPER DE ARQUITECTURA: Deduplica colecciones y asigna _reactKey único por entidad
+ */
+const deduplicarEntidades = (items = []) => {
+  if (!Array.isArray(items)) return [];
+  const mapa = new Map();
+  
+  items.forEach((item, index) => {
+    if (!item) return;
+    const idBase = item.id || item._id || item.uid || item.ofertaId || `entidad-${index}`;
+    if (!mapa.has(idBase)) {
+      mapa.set(idBase, {
+        ...item,
+        _reactKey: item._reactKey || `${idBase}-${index}`
+      });
+    }
+  });
+
+  return Array.from(mapa.values());
+};
 
 export default function HomeDespachador() {
   // 🛡️ Guardas de Seguridad y Consumo del Contexto Centralizado
@@ -357,12 +378,17 @@ export default function HomeDespachador() {
     }
   };
 
-  // Filtrado resiliente de ofertas asociadas a la empresa del despachador
-  const ofertasFiltradas = ofertas.filter((o) => {
-    if (!empresaId) return true;
-    const targetEmpresa = o?.empresaId || o?.empresa_id || o?.empresa || o?.cooperativa || "";
-    return !targetEmpresa || targetEmpresa === empresaId || targetEmpresa === cooperativaDespachador;
-  });
+  // Filtrado y deduplicación resiliente de ofertas asociadas a la empresa del despachador
+  const ofertasFiltradas = deduplicarEntidades(
+    ofertas.filter((o) => {
+      if (!empresaId) return true;
+      const targetEmpresa = o?.empresaId || o?.empresa_id || o?.empresa || o?.cooperativa || "";
+      return !targetEmpresa || targetEmpresa === empresaId || targetEmpresa === cooperativaDespachador;
+    })
+  );
+
+  // Deduplicación resiliente de conductores homologados
+  const conductoresProcesados = deduplicarEntidades(conductores);
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-100 p-4 md:p-8 font-sans antialiased selection:bg-orange-500 selection:text-zinc-950">
@@ -609,7 +635,7 @@ export default function HomeDespachador() {
 
                     return (
                       <div 
-                        key={idOferta || Math.random()} 
+                        key={oferta._reactKey} 
                         className="bg-zinc-950/60 border border-white/5 hover:border-orange-500/20 p-3 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 transition-all"
                       >
                         <div className="flex items-center gap-3">
@@ -649,7 +675,7 @@ export default function HomeDespachador() {
                 <div className="flex items-center gap-2">
                   <Users size={16} className="text-orange-400" />
                   <h2 className="text-[11px] font-black tracking-widest uppercase text-zinc-200">
-                    Malla de Operadores en Rampa ({conductores.length})
+                    Malla de Operadores en Rampa ({conductoresProcesados.length})
                   </h2>
                 </div>
                 
@@ -669,7 +695,7 @@ export default function HomeDespachador() {
                   <AlertCircle size={16} />
                   <span>{errorConductores}</span>
                 </div>
-              ) : conductores.length === 0 ? (
+              ) : conductoresProcesados.length === 0 ? (
                 <div className="py-12 text-center border border-dashed border-white/5 rounded-2xl bg-zinc-950/20">
                   <Bus size={24} className="text-zinc-700 mx-auto mb-2 animate-bounce" />
                   <p className="text-[10px] text-zinc-400 font-black uppercase tracking-wider">No hay unidades en rampa</p>
@@ -677,9 +703,9 @@ export default function HomeDespachador() {
                 </div>
               ) : (
                 <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800">
-                  {conductores.map((conductor) => (
+                  {conductoresProcesados.map((conductor) => (
                     <div 
-                      key={conductor.id} 
+                      key={conductor._reactKey} 
                       className="bg-zinc-950/50 border border-white/5 hover:border-white/10 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all"
                     >
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full sm:w-auto">

@@ -1,8 +1,11 @@
-// Versión Arquitectura: V12.3 - Sanitización Tipográfica de Endpoints y Matriz de Gobernanza
+// Versión Arquitectura: V12.4 - Exportación de Saldo Mínimo Operativo Centralizado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\constants.js
- * Misión: Centralizar los diccionarios, roles oficiales, niveles de acceso jerárquicos y endpoints de API sanitizados del ecosistema.
+ * Misión: Centralizar los diccionarios, roles oficiales, niveles de acceso jerárquicos, umbrales financieros y endpoints de API sanitizados del ecosistema.
  */
+
+// 💰 UMBRALES FINANCIEROS Y OPERATIVOS
+export const SALDO_MINIMO_OPERATIVO = 2000;
 
 // 👥 ROLES PRINCIPALES DEL SISTEMA
 export const ROLES = {
@@ -49,6 +52,7 @@ export const VIAJES_ENDPOINTS = {
 
 // 🔹 EXPORTACIÓN POR DEFECTO PARA SOPORTAR AMBAS FORMAS DE IMPORTACIÓN
 export default {
+    SALDO_MINIMO_OPERATIVO,
     ROLES,
     VEHICLE_TYPES,
     DEFAULT_ACCESS_LEVELS,

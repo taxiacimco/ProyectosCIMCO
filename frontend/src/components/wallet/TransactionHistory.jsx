@@ -1,12 +1,13 @@
-// Versión Arquitectura: V16.0 - Desglose y Formateo Personalizado de Comisiones Deductoras por Rol y Pago Billetera
+// Versión Arquitectura: V16.1 - Optimización de Consumo NoSQL con Límite de Consulta (limit 20) y Desglose por Rol
 /**
  * Ubicación: frontend\src\components\wallet\TransactionHistory.jsx
  * Misión: Auditar y renderizar la trazabilidad financiera con desglose específico de comisiones deductoras por rol
- *         (Mototaxi/Motoparrillero: 10%, Motocarga: $500, Despachador: $500, Intermunicipal: $0, Pasajero: Pago Billetera).
+ *         (Mototaxi/Motoparrillero: 10%, Motocarga: $500, Despachador: $500, Intermunicipal: $0, Pasajero: Pago Billetera)
+ *         limitando el flujo streaming a los últimos 20 registros para proteger cuotas de Firestore.
  * Estilo: CIMCO-UI V9.3 Glassmorphism (backdrop-blur-md, bg-[#121214]/80, border-white/5).
  */
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { Clock, ArrowUpRight, ArrowDownLeft, Loader2, ServerOff, ExternalLink, Coins, Receipt, Wallet, Percent, ShieldCheck } from 'lucide-react';
@@ -33,11 +34,12 @@ const TransactionHistory = ({ targetUid = null }) => {
         const pathColeccion = FIRESTORE_PATHS.transacciones || 'transacciones';
         
         try {
-            // ✅ FILTRADO POLIMÓRFICO V15.5: Consulta bidireccional soportando targetUid o el dispatcherUid de la central
+            // ✅ FILTRADO POLIMÓRFICO V16.1: Consulta bidireccional acotada a las últimas 20 transacciones para optimizar lectura NoSQL
             const q = query(
                 collection(db, pathColeccion),
                 where("targetUid", "==", uidOperativo),
-                orderBy("createdAt", "desc")
+                orderBy("createdAt", "desc"),
+                limit(20)
             );
 
             const unsubscribe = onSnapshot(q, 

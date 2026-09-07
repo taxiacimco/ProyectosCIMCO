@@ -1,9 +1,10 @@
-// Versión Arquitectura: V19.7 - Migración a Capa Pública OpenStreetMap y Preservación CIMCO-UI V9.3
+// Versión Arquitectura: V19.8 - Deduplicación de Conductores e Inyección de _reactKey en Marker
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
  * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled, prevención 
  *         de colisiones de contenedor en React 18 / React-Leaflet, recalibración de tiles (invalidateSize),
- *         uso de capa base pública OpenStreetMap (OSM) y evaluación de saldo operativo para marcadores.
+ *         uso de capa base pública OpenStreetMap (OSM), evaluación de saldo operativo para marcadores
+ *         y deduplicación de conductores con inyección de _reactKey en Marker.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
@@ -163,11 +164,8 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
     }, [cooperativaFiltro]);
 
     const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
-    const marcadoresUnicos = typeof deduplicarEntidades === 'function' 
-        ? deduplicarEntidades(listaMarcadoresSuaves)
-        : listaMarcadoresSuaves;
 
-    const filtrados = marcadoresUnicos.filter(m => {
+    const filtrados = listaMarcadoresSuaves.filter(m => {
         const queryTerm = busqueda.toLowerCase().trim();
         const nombre = (m?.nombre || '').toLowerCase();
         const id = (m?.id || '').toLowerCase();
@@ -177,7 +175,12 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         return nombre.includes(queryTerm) || id.includes(queryTerm) || rol.includes(queryTerm) || placa.includes(queryTerm) || numInterno.includes(queryTerm);
     });
 
-    const usarCanvas = filtrados.length > 50;
+    // 🛡️ DEDUPLICACIÓN ATÓMICA E INYECCIÓN DE METADATOS DE IDENTIDAD
+    const conductoresDeduplicados = typeof deduplicarEntidades === 'function' 
+        ? deduplicarEntidades(filtrados)
+        : filtrados;
+
+    const usarCanvas = conductoresDeduplicados.length > 50;
 
     return (
         <div className="w-full flex flex-col gap-4 font-mono antialiased text-zinc-100">
@@ -196,7 +199,7 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                 <div className="flex gap-4 items-center shrink-0">
                     <span className="text-[10px] bg-zinc-950/60 border border-white/5 px-3 py-1.5 rounded-lg text-zinc-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
                         <Signal className="text-orange-400 animate-pulse" size={12} />
-                        Malla Activa: <span className="text-orange-400">{filtrados.length}</span> Unidades en Mapa
+                        Malla Activa: <span className="text-orange-400">{conductoresDeduplicados.length}</span> Unidades en Mapa
                         {usarCanvas && (
                             <span className="ml-1 text-[8px] bg-orange-500/20 text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded font-black">
                                 CANVAS HIGH-DENSITY
@@ -236,8 +239,8 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                         spiderfyOnMaxZoom={true}
                         showCoverageOnHover={false}
                     >
-                        {filtrados.map((m, index) => {
-                            const keyMarker = m?.id || m?.placa || m?.numeroInterno || `marker-${index}`;
+                        {conductoresDeduplicados.map((m, index) => {
+                            const keyMarker = m?._reactKey || m?.id || m?.placa || m?.numeroInterno || `marker-${index}`;
                             const lat = m?.lat;
                             const lng = m?.lng;
                             const saldo = m?.saldo ?? 0;

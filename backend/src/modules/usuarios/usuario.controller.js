@@ -1,12 +1,14 @@
-// Versión Arquitectura: V20.04 - Consolidador unívoco de extracción de parámetros de ID (params, body, user context)
+// Versión Arquitectura: V20.06 - Jerarquía Administrativa y Validación Anti Auto-Elevación de Permisos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
  * Misión: Controlador unificado de usuarios (Admin, Despachador, Pasajero, Staff) desacoplado mediante servicios y repositorios (SRP).
  * Preserva la deduplicación del directorio global, inyección sincrónica de UID, trazabilidad de transacciones,
- * operaciones de billetera polimórfica y evaluación automática de estado operativo según saldo en recargas/débitos.
+ * operaciones de billetera polimórfica, evaluación automática de estado operativo según saldo y validación rigurosa de
+ * jerarquía administrativa para mitigar auto-elevación de permisos o mutación no autorizada de roles y estados.
  */
 
 import usuarioService from './usuario.service.js';
+import Usuario from '../../models/Usuario.js';
 
 // Roles operativos sujetos al umbral mínimo de saldo ($2.000 COP)
 const ROLES_OPERATIVOS = ['Mototaxi', 'Motoparrillero', 'Motocarga', 'Despachador', 'Conductor', 'mototaxi', 'motoparrillero', 'motocarga', 'despachador', 'conductor'];
@@ -84,6 +86,48 @@ const evaluarEstadoOperativoPorSaldo = async (usuario, nuevoSaldo) => {
 // ==================================================================
 
 /**
+ * 📊 Obtener directorio de usuarios con agregación de saldo $lookup a colección billeteras (Admin / CEO)
+ */
+export const obtenerDirectorioUsuarios = async (req, res, next) => {
+    try {
+        const usuarios = await Usuario.aggregate([
+            {
+                $lookup: {
+                    from: 'billeteras',
+                    localField: '_id',
+                    foreignField: 'usuarioId',
+                    as: 'datosBilletera'
+                }
+            },
+            {
+                $project: {
+                    nombre: 1,
+                    telefono: 1,
+                    email: 1,
+                    rol: 1,
+                    estadoOperativo: 1,
+                    saldoWallet: {
+                        $ifNull: [{ $arrayElemAt: ['$datosBilletera.saldo', 0] }, 0]
+                    }
+                }
+            }
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            status: 'OK',
+            total: usuarios ? usuarios.length : 0,
+            data: usuarios,
+            usuarios: usuarios
+        });
+    } catch (error) {
+        console.error("❌ Error en obtenerDirectorioUsuarios:", error);
+        if (next) return next(error);
+        return res.status(500).json({ status: 'ERROR', message: error.message });
+    }
+};
+
+/**
  * 🌐 Directorio Global Centralizado y Anti-Duplicados
  * Retorna todos los actores del sistema unificados y limpios por ID/Email/Teléfono
  */
@@ -133,7 +177,7 @@ export const validarRegistroUnico = async (req, res, next) => {
             return res.status(400).json({
                 success: false,
                 code: error.code || 'DUPLICATE_USER',
-                message: error.message || "⚠️ El correo, teléfono o UID ingresado ya pertenece a otro usuario."
+                message: "⚠️ El correo, teléfono o UID ingresado ya pertenece a otro usuario."
             });
         }
         next(error);
@@ -206,7 +250,8 @@ export const obtenerUsuarioPorId = async (req, res, next) => {
 };
 
 /**
- * 🔄 Actualizar datos de usuario con sincronización a Firestore y saneamiento de UID
+ * 🔄 Actualizar datos de usuario con sincronización a Firestore, saneamiento de UID y
+ * validaciones estrictas de jerarquía administrativa para prevenir auto-elevación de permisos o mutación de estado no autorizada.
  */
 export const actualizarUsuario = async (req, res, next) => {
     try {
@@ -215,7 +260,48 @@ export const actualizarUsuario = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de usuario ausente para actualización." });
         }
 
-        const usuario = await usuarioService.actualizarUsuario(targetId, req.body || {});
+        const body = req.body || {};
+        const currentUser = req.user || {};
+        const requesterId = currentUser.id || currentUser._id || currentUser.uid;
+
+        // Detección de intento de modificación de campos sensibles, roles o permisos
+        const intentaCambiarRol = body.rol !== undefined || body.role !== undefined || body.roles !== undefined;
+        const intentaCambiarPermisos = body.access_level !== undefined || body.accessLevel !== undefined || body.permisos !== undefined || body.esAdminCentral !== undefined || body.isSuperAdmin !== undefined;
+        const intentaCambiarEstado = body.estado !== undefined || body.estadoOperativo !== undefined || body.activo !== undefined || body.bloqueado !== undefined || body.suspendido !== undefined;
+
+        const esOperacionSensible = intentaCambiarRol || intentaCambiarPermisos || intentaCambiarEstado;
+
+        if (esOperacionSensible) {
+            const esMismoUsuario = Boolean(requesterId && targetId && (String(requesterId) === String(targetId)));
+
+            // 1. Blindaje Anti Auto-Elevación: Un usuario NO puede elevar sus propios permisos, alterarse el rol ni modificar su propio estado
+            if (esMismoUsuario) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'SELF_PERM_ELEVATION_DENIED',
+                    message: "⛔ Acción denegada: No está permitido auto-elevar permisos, modificar el propio rol ni alterar el propio estado de la cuenta."
+                });
+            }
+
+            // 2. Jerarquía Administrativa: Requerir bandera/rol de Administración Central para mutar roles, permisos o estado
+            const esAdminCentral = Boolean(
+                currentUser.esAdminCentral || 
+                currentUser.access_level === 'SUPER_ADMIN' || 
+                currentUser.accessLevel === 'SUPER_ADMIN' || 
+                currentUser.rol === 'ADMIN_CENTRAL' ||
+                currentUser.role === 'ADMIN_CENTRAL'
+            );
+
+            if (!esAdminCentral) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'ADMIN_HIERARCHY_VIOLATION',
+                    message: "⛔ Acción denegada: Se requieren privilegios de Administrador Central para alterar roles, niveles de acceso o estado de cuentas."
+                });
+            }
+        }
+
+        const usuario = await usuarioService.actualizarUsuario(targetId, body);
 
         if (!usuario) {
             return res.status(404).json({ success: false, message: 'Usuario no encontrado' });
@@ -484,6 +570,7 @@ export const recargarSaldo = async (req, res, next) => {
 };
 
 export default {
+    obtenerDirectorioUsuarios,
     obtenerDirectorioGlobal,
     obtenerUsuarios,
     validarRegistroUnico,

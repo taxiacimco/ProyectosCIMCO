@@ -1,9 +1,9 @@
-// Versión Arquitectura: V21.37 - Búsqueda Flexible BSON/Firebase UID/NIT para Identificadores de Cooperativa
+// Versión Arquitectura: V21.38 - Encapsulamiento Transaccional Atómico ACID en Creación y Aprobación/Cambio de Estado de Cooperativas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\cooperativas\cooperativa.controller.js
  * Misión: Administrar entidades de cooperativas, asignaciones de flota, estados operativos
- * e inyección de suspensión en cascada sobre los conductores vinculados mediante sesión ACID y espejo Firebase.
- * Ajuste V21.37: Incorporación de resolvedor de consulta flexible BSON/Firebase UID/NIT/idCooperativa para búsquedas dinámicas de cooperativa en consultas, recargas y asignaciones.
+ * e inyección de suspensión/activación en cascada sobre los conductores vinculados mediante transacciones atómicas ACID y espejo Firebase.
+ * Ajuste V21.38: Encapsulamiento de la creación y aprobación/modificación de estados de cooperativas dentro de transacciones atómicas (sessions Mongoose) para blindar saldos y contadores globales.
  */
 
 import mongoose from 'mongoose';
@@ -98,13 +98,18 @@ export const obtenerCooperativaPorId = async (req, res, next) => {
 };
 
 /**
- * ➕ Registrar nueva cooperativa
+ * ➕ Registrar nueva cooperativa (Encapsulado en Transacción Atómica ACID)
  */
 export const crearCooperativa = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const { nombre, nit, telefono, ciudad, limiteFlota, limiteVehiculos } = req.body || {};
+    const { nombre, nit, telefono, ciudad, limiteFlota, limiteVehiculos, balanceInicial } = req.body || {};
 
     if (!nombre || !nit) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         error: 'El nombre y el NIT son campos requeridos.'
@@ -112,13 +117,17 @@ export const crearCooperativa = async (req, res, next) => {
     }
 
     const nitLimpio = String(nit).trim();
-    const existeNIT = await Cooperativa.findOne({ nit: nitLimpio });
+    const existeNIT = await Cooperativa.findOne({ nit: nitLimpio }).session(session);
     if (existeNIT) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         error: 'Ya existe una cooperativa registrada con este NIT.'
       });
     }
+
+    const balanceNumerico = Math.max(0, Number(balanceInicial) || 0);
 
     const nuevaCooperativa = new Cooperativa({
       nombre: String(nombre).trim(),
@@ -126,12 +135,16 @@ export const crearCooperativa = async (req, res, next) => {
       telefono: telefono ? String(telefono).trim() : '',
       ciudad: ciudad ? String(ciudad).trim() : 'La Jagua de Ibirico',
       limiteFlota: Number(limiteFlota || limiteVehiculos) || 50,
+      balanceGlobal: balanceNumerico,
       estado: 'activa'
     });
 
-    await nuevaCooperativa.save();
+    await nuevaCooperativa.save({ session });
 
-    console.log(`✅ [CIMCO-COOPERATIVAS] Nueva Entidad Creada: ${nuevaCooperativa.nombre} | NIT: ${nuevaCooperativa.nit}`);
+    await session.commitTransaction();
+    session.endSession();
+
+    console.log(`✅ [CIMCO-COOPERATIVAS] Nueva Entidad Creada Transaccionalmente: ${nuevaCooperativa.nombre} | NIT: ${nuevaCooperativa.nit}`);
 
     return res.status(201).json({
       success: true,
@@ -139,13 +152,15 @@ export const crearCooperativa = async (req, res, next) => {
       data: nuevaCooperativa
     });
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error('🚨 [CIMCO-CREAR-COOPERATIVA-ERR]:', error);
     next(error);
   }
 };
 
 /**
- * 🔄 Cambiar estado (activa, inactiva, suspendida) con Propagación en Cascada sobre Conductores
+ * 🔄 Cambiar estado / Aprobación (activa, inactiva, suspendida) con Transacción Atómica y Propagación en Cascada
  */
 export const cambiarEstadoCooperativa = async (req, res, next) => {
   const session = await mongoose.startSession();
@@ -187,7 +202,7 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
 
     let conductoresAfectadosCount = 0;
 
-    // 🔴 ACCIÓN EN CASCADA: Si la cooperativa deja de estar 'activa', se deshabilita la flota vinculada
+    // 🔴 ACCIÓN EN CASCADA: Si la cooperativa se desactiva/suspende, deshabilitar flota vinculada
     if (estadoNormalizado === 'inactiva' || estadoNormalizado === 'suspendida') {
       const queryConductores = {
         $or: [
@@ -206,7 +221,7 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
         queryConductores.$or.push({ _id: { $in: coop.conductoresAsignados } });
       }
 
-      // Obtener IDs de conductores que sufren la desactivación
+      // Obtener IDs de conductores que sufren la desactivación en la sesión actual
       const conductoresAfectados = await Conductor.find(queryConductores).select('_id').session(session).lean();
       const idsConductores = conductoresAfectados.map(c => String(c._id));
       conductoresAfectadosCount = idsConductores.length;
@@ -219,18 +234,18 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
           estadoAdministrativo: estadoNormalizado === 'suspendida' ? 'SUSPENDIDO' : 'INACTIVO'
         };
 
-        // Update atómico en MongoDB
+        // Update atómico dentro de la transacción de MongoDB
         await Conductor.updateMany(
           { _id: { $in: idsConductores } },
           { $set: payloadDesactivacion },
           { session }
         );
 
-        // Replicación en tiempo real hacia Firestore dividida en lotes <= 500 operaciones
+        // Replicación en tiempo real hacia Firestore dividida en lotes <= 450 operaciones
         if (dbFirestore) {
           try {
             const coleccionConductores = FIRESTORE_PATHS?.conductores || 'conductores';
-            const CHUNK_SIZE = 450; // Límite estricto de seguridad por debajo de 500
+            const CHUNK_SIZE = 450; // Límite estricto de seguridad por debajo del tope de Firestore (500)
 
             for (let i = 0; i < idsConductores.length; i += CHUNK_SIZE) {
               const chunk = idsConductores.slice(i, i + CHUNK_SIZE);
@@ -274,18 +289,23 @@ export const cambiarEstadoCooperativa = async (req, res, next) => {
 };
 
 /**
- * 🛠️ Actualización completa / parcial de datos de la cooperativa
+ * 🛠️ Actualización completa / parcial de datos de la cooperativa (Protegida con Transacción Atómica)
  */
 export const actualizarCooperativa = async (req, res, next) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const { id } = req.params || {};
     const query = construirQueryBusquedaCooperativa(id);
 
     if (!query) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({ success: false, error: 'Identificador de cooperativa no proporcionado o inválido.' });
     }
 
-    const { nombre, telefono, ciudad, limiteFlota, limiteVehiculos } = req.body || {};
+    const { nombre, telefono, ciudad, limiteFlota, limiteVehiculos, balanceGlobal } = req.body || {};
     const updateData = {};
 
     if (nombre) updateData.nombre = String(nombre).trim();
@@ -294,16 +314,24 @@ export const actualizarCooperativa = async (req, res, next) => {
     if (limiteFlota || limiteVehiculos) {
       updateData.limiteFlota = Number(limiteFlota || limiteVehiculos);
     }
+    if (balanceGlobal !== undefined) {
+      updateData.balanceGlobal = Math.max(0, Number(balanceGlobal) || 0);
+    }
 
     const cooperativaActualizada = await Cooperativa.findOneAndUpdate(
       query,
       { $set: updateData },
-      { new: true }
+      { new: true, session }
     );
 
     if (!cooperativaActualizada) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({ success: false, error: 'Cooperativa no localizada.' });
     }
+
+    await session.commitTransaction();
+    session.endSession();
 
     return res.status(200).json({
       success: true,
@@ -311,6 +339,8 @@ export const actualizarCooperativa = async (req, res, next) => {
       data: cooperativaActualizada
     });
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error('🚨 [CIMCO-UPDATE-COOPERATIVA-ERR]:', error);
     next(error);
   }

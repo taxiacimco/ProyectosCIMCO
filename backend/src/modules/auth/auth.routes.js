@@ -1,9 +1,9 @@
-// Versión Arquitectura: V21.38 - Enlace de Middlewares validateRegisterPayload en Registros y verificarToken en Gestión de Perfil
+// Versión Arquitectura: V21.42 - Enlace de Middlewares validateRegisterPayload en Registros y verificarToken en Gestión de Perfil
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.routes.js
- * Misión: Enrutador perimetral de autenticación con mapeo completo de subrutas HTTP POST, PUT y PATCH bajo el prefijo /api/auth.
- * Integridad: Define y estandariza las rutas de autenticación, registro y actualización de perfil, integrando
- * los middlewares de validación de payload (validateRegisterPayload), verificación de seguridad por Token (verificarToken)
+ * Misión: Enrutador perimetral de autenticación con mapeo completo de subrutas HTTP GET, POST, PUT y PATCH bajo el prefijo /api/auth.
+ * Integridad: Define y estandariza las rutas de autenticación, registro, recuperación de contraseña y gestión de perfil,
+ * integrando los middlewares de validación de payload (validateRegisterPayload), verificación de seguridad por Token (verificarToken)
  * y el middleware Multer de procesamiento multipart híbrido, garantizando la coexistencia de aliases preexistentes,
  * la prevención de fallos ESM y la recepción fluida de datos y binarios.
  */
@@ -70,6 +70,7 @@ const verificarToken = authMiddleware?.verificarToken || authMiddleware?.verific
 
 const loginHandler = authController?.login;
 const registerHandler = authController?.register;
+const getProfileHandler = authController?.getProfile || authController?.obtenerPerfil;
 const solicitarOTPHandler = authController?.forgotPassword || authController?.solicitarOTP;
 const restablecerHandler = authController?.resetPassword || authController?.verificarOTPyRestablecer;
 const verificarTelefonoHandler = authController?.verificarTelefono || authController?.checkPhone;
@@ -90,6 +91,15 @@ if (typeof registerHandler === 'function') {
 
 if (typeof logoutHandler === 'function') {
     router.post('/logout', logoutHandler);
+}
+
+/**
+ * 👤 CONSULTA DE PERFIL DE USUARIO (Rutas Protegidas con Token JWT)
+ */
+if (typeof getProfileHandler === 'function') {
+    router.get('/profile', verificarToken, getProfileHandler);
+    router.get('/perfil', verificarToken, getProfileHandler);
+    router.get('/me', verificarToken, getProfileHandler);
 }
 
 /**

@@ -1,8 +1,8 @@
-// Versión Arquitectura: V22.1 - Evaluación de Umbral de Saldo ($2.000 COP) para Transición de estadoOperativo en Recargas y Ajustes
+// Versión Arquitectura: V22.2 - Estandarización de Sesiones Atómicas Mongoose con session.withTransaction() y Guarda de Umbral ($2.000 COP)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
- * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, recargas atómicas, métricas de capital circulante y transición automática de estadoOperativo según el umbral de saldo ($2.000 COP).
- * Ajuste V22.1: Integración de la guarda de umbral de saldo de $2.000 COP en recargas y ajustes de saldo. Si nuevoSaldo >= 2000 y el conductor estaba inhabilitado/no disponible por saldo, se conmuta a DISPONIBLE en MongoDB y Firestore. Si nuevoSaldo < 2000, se actualiza a NO_DISPONIBLE.
+ * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, recargas atómicas con transactions avanzadas (session.withTransaction), métricas de capital circulante y transición automática de estadoOperativo según el umbral de saldo ($2.000 COP).
+ * Ajuste V22.2: Estandarización del patrón de transacciones Mongoose en recargarSaldoAdmin y descontarComisionViaje utilizando session.withTransaction() para garantizar el aborto automático y reintentos atómicos ante fallos concurrentes en BD.
  */
 
 import mongoose from 'mongoose';
@@ -506,7 +506,7 @@ export const obtenerCapitalCirculante = async (req, res, next) => {
 
 export const recargarSaldoAdmin = async (req, res, next) => {
     const session = await mongoose.startSession();
-    session.startTransaction();
+    let resultadoContable = null;
     try {
         const targetId = req.params?.id || req.params?.uid || req.body?.conductorId || req.body?.id || req.body?.uid;
         const { monto, referencia, nota } = req.body || {};
@@ -514,64 +514,77 @@ export const recargarSaldoAdmin = async (req, res, next) => {
         const adminId = req.user?.id || req.user?._id || 'ADMIN_SYSTEM';
 
         if (!targetId || isNaN(montoNum) || montoNum <= 0) {
-            await session.abortTransaction();
             return res.status(400).json({ success: false, message: "Datos de recarga inválidos." });
         }
 
-        const query = {
-            $or: [
-                { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
-                { uid: targetId },
-                { conductorId: targetId }
-            ]
-        };
+        await session.withTransaction(async () => {
+            const query = {
+                $or: [
+                    { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                    { uid: targetId },
+                    { conductorId: targetId }
+                ]
+            };
 
-        const conductor = await Conductor.findOne(query).session(session);
+            const conductor = await Conductor.findOne(query).session(session);
 
-        if (!conductor) {
-            await session.abortTransaction();
-            return res.status(404).json({ success: false, message: "Conductor no localizado." });
-        }
-
-        const saldoAnterior = Number(conductor.saldo || 0);
-        const nuevoSaldo = saldoAnterior + montoNum;
-
-        // 🟢 GUARDA DE UMBRAL: Evaluar y actualizar estadoOperativo según cruce de $2.000 COP
-        const estadoAdmin = String(conductor.estado || conductor.estadoAdministrativo || '').toUpperCase();
-        const estaAprobado = (estadoAdmin === 'APROBADO' || estadoAdmin === 'ACTIVO') && conductor.isActive !== false;
-
-        let nuevoEstadoOperativo = conductor.estadoOperativo;
-        if (nuevoSaldo >= UMBRAL_SALDO_MINIMO_COP) {
-            if (conductor.estadoOperativo === 'NO_DISPONIBLE' || !conductor.estadoOperativo) {
-                if (estaAprobado) {
-                    nuevoEstadoOperativo = 'DISPONIBLE';
-                }
+            if (!conductor) {
+                const err = new Error("Conductor no localizado.");
+                err.statusCode = 404;
+                throw err;
             }
-        } else {
-            nuevoEstadoOperativo = 'NO_DISPONIBLE';
+
+            const saldoAnterior = Number(conductor.saldo || 0);
+            const nuevoSaldo = saldoAnterior + montoNum;
+
+            // 🟢 GUARDA DE UMBRAL: Evaluar y actualizar estadoOperativo según cruce de $2.000 COP
+            const estadoAdmin = String(conductor.estado || conductor.estadoAdministrativo || '').toUpperCase();
+            const estaAprobado = (estadoAdmin === 'APROBADO' || estadoAdmin === 'ACTIVO') && conductor.isActive !== false;
+
+            let nuevoEstadoOperativo = conductor.estadoOperativo;
+            if (nuevoSaldo >= UMBRAL_SALDO_MINIMO_COP) {
+                if (conductor.estadoOperativo === 'NO_DISPONIBLE' || !conductor.estadoOperativo) {
+                    if (estaAprobado) {
+                        nuevoEstadoOperativo = 'DISPONIBLE';
+                    }
+                }
+            } else {
+                nuevoEstadoOperativo = 'NO_DISPONIBLE';
+            }
+
+            conductor.saldo = nuevoSaldo;
+            conductor.estadoOperativo = nuevoEstadoOperativo;
+            delete conductor.saldoWallet;
+            await conductor.save({ session });
+
+            const nuevoHistorial = new HistorialSaldo({
+                conductor: conductor._id,
+                tipo: 'recarga',
+                monto: montoNum,
+                saldoAnterior,
+                saldoNuevo: nuevoSaldo,
+                referencia: referencia || `ADM-${Date.now()}`,
+                descripcion: nota || 'Recarga administrativa autorizada'
+            });
+            await nuevoHistorial.save({ session });
+
+            resultadoContable = {
+                conductor,
+                saldoAnterior,
+                nuevoSaldo,
+                nuevoEstadoOperativo,
+                docFirestoreId: conductor.uid || conductor._id.toString(),
+                adminId,
+                referencia: referencia || `ADM-${Date.now()}`
+            };
+        });
+
+        if (!resultadoContable) {
+            return res.status(400).json({ success: false, message: "No se pudo procesar la transacción de recarga." });
         }
 
-        conductor.saldo = nuevoSaldo;
-        conductor.estadoOperativo = nuevoEstadoOperativo;
-        delete conductor.saldoWallet;
-        await conductor.save({ session });
+        const { conductor, saldoAnterior, nuevoSaldo, nuevoEstadoOperativo, docFirestoreId } = resultadoContable;
 
-        const nuevoHistorial = new HistorialSaldo({
-            conductor: conductor._id,
-            tipo: 'recarga',
-            monto: montoNum,
-            saldoAnterior,
-            saldoNuevo: nuevoSaldo,
-            referencia: referencia || `ADM-${Date.now()}`,
-            descripcion: nota || 'Recarga administrativa autorizada'
-        });
-        await nuevoHistorial.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
-        const docFirestoreId = conductor.uid || conductor._id.toString();
-        
         try {
             const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
             await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
@@ -600,7 +613,7 @@ export const recargarSaldoAdmin = async (req, res, next) => {
             saldoNuevo,
             tipoOperacion: 'RECARGA',
             autorizadoPor: adminId,
-            referencia: referencia || `ADM-${Date.now()}`
+            referencia: resultadoContable.referencia
         });
 
         return res.status(200).json({
@@ -612,9 +625,12 @@ export const recargarSaldoAdmin = async (req, res, next) => {
         });
 
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
+        }
         next(error);
+    } finally {
+        session.endSession();
     }
 };
 
@@ -719,63 +735,78 @@ export const ajustarSaldo = async (req, res, next) => {
 
 export const descontarComisionViaje = async (req, res, next) => {
     const session = await mongoose.startSession();
-    session.startTransaction();
+    let resultadoContable = null;
     try {
         if (!req || !req.body) {
-            throw new Error("⚠️ Payload de débito ausente.");
+            return res.status(400).json({ success: false, message: "⚠️ Payload de débito ausente." });
         }
         
         const { conductorId, comision, viajeId } = req.body;
         const comisionNum = parseFloat(comision);
 
         if (!conductorId || isNaN(comisionNum) || comisionNum <= 0) {
-            throw new Error("Parámetros contables de comisión inválidos.");
+            return res.status(400).json({ success: false, message: "Parámetros contables de comisión inválidos." });
         }
 
-        const query = {
-            $or: [
-                { _id: mongoose.Types.ObjectId.isValid(conductorId) ? conductorId : null },
-                { uid: conductorId },
-                { conductorId: conductorId }
-            ],
-            saldo: { $gte: comisionNum }
-        };
+        await session.withTransaction(async () => {
+            const query = {
+                $or: [
+                    { _id: mongoose.Types.ObjectId.isValid(conductorId) ? conductorId : null },
+                    { uid: conductorId },
+                    { conductorId: conductorId }
+                ],
+                saldo: { $gte: comisionNum }
+            };
 
-        const conductor = await Conductor.findOne(query).session(session);
+            const conductor = await Conductor.findOne(query).session(session);
 
-        if (!conductor) {
-            throw new Error("Conductor no localizado o saldo insuficiente.");
-        }
+            if (!conductor) {
+                const err = new Error("Conductor no localizado o saldo insuficiente.");
+                err.statusCode = 402;
+                throw err;
+            }
 
-        const saldoAnterior = Number(conductor.saldo || 0);
-        const nuevoSaldo = saldoAnterior - comisionNum;
+            const saldoAnterior = Number(conductor.saldo || 0);
+            const nuevoSaldo = saldoAnterior - comisionNum;
 
-        let nuevoEstadoOperativo = conductor.estadoOperativo;
-        if (nuevoSaldo < UMBRAL_SALDO_MINIMO_COP) {
-            nuevoEstadoOperativo = 'NO_DISPONIBLE';
-        }
+            let nuevoEstadoOperativo = conductor.estadoOperativo;
+            if (nuevoSaldo < UMBRAL_SALDO_MINIMO_COP) {
+                nuevoEstadoOperativo = 'NO_DISPONIBLE';
+            }
 
-        conductor.saldo = nuevoSaldo;
-        conductor.estadoOperativo = nuevoEstadoOperativo;
-        delete conductor.saldoWallet;
-        await conductor.save({ session });
+            conductor.saldo = nuevoSaldo;
+            conductor.estadoOperativo = nuevoEstadoOperativo;
+            delete conductor.saldoWallet;
+            await conductor.save({ session });
 
-        const historialDescuento = new HistorialSaldo({
-            conductor: conductor._id,
-            tipo: 'debito',
-            monto: comisionNum,
-            saldoAnterior,
-            saldoNuevo,
-            referencia: viajeId ? `VIAJE-${viajeId}` : `DEB-${Date.now()}`,
-            descripcion: `Comisión por servicio de viaje ${viajeId || ''}`
+            const historialDescuento = new HistorialSaldo({
+                conductor: conductor._id,
+                tipo: 'debito',
+                monto: comisionNum,
+                saldoAnterior,
+                saldoNuevo,
+                referencia: viajeId ? `VIAJE-${viajeId}` : `DEB-${Date.now()}`,
+                descripcion: `Comisión por servicio de viaje ${viajeId || ''}`
+            });
+            await historialDescuento.save({ session });
+
+            resultadoContable = {
+                conductor,
+                saldoAnterior,
+                nuevoSaldo,
+                nuevoEstadoOperativo,
+                docFirestoreId: conductor.uid || conductor._id.toString(),
+                viajeId: viajeId || null,
+                comisionNum
+            };
         });
-        await historialDescuento.save({ session });
 
-        await session.commitTransaction();
-        session.endSession();
+        if (!resultadoContable) {
+            return res.status(400).json({ success: false, message: "No se pudo procesar la transacción de comisión." });
+        }
 
-        const docFirestoreId = conductor.uid || conductor._id.toString();
-        
+        const { conductor, saldoAnterior, nuevoSaldo, nuevoEstadoOperativo, docFirestoreId, viajeId: refViaje, comisionNum: montoDebit } = resultadoContable;
+
         try {
             const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
             await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
@@ -797,12 +828,12 @@ export const descontarComisionViaje = async (req, res, next) => {
             idUsuario: docFirestoreId,
             rol: 'conductor',
             subrol: conductor.subrol || conductor.tipoVehiculo || 'mototaxi',
-            monto: comisionNum,
+            monto: montoDebit,
             saldoAnterior,
             saldoNuevo,
             tipoOperacion: 'DEBITO',
             autorizadoPor: 'SISTEMA_VIAJES',
-            referencia: viajeId ? `VIAJE-${viajeId}` : `DEB-${Date.now()}`
+            referencia: refViaje ? `VIAJE-${refViaje}` : `DEB-${Date.now()}`
         });
 
         return res.status(200).json({ 
@@ -814,20 +845,20 @@ export const descontarComisionViaje = async (req, res, next) => {
                 conductorId: conductor._id,
                 saldoAnterior,
                 nuevoSaldo,
-                montoDebitado: comisionNum,
+                montoDebitado: montoDebit,
                 estadoOperativo: nuevoEstadoOperativo,
-                viajeId: viajeId || null
+                viajeId: refViaje
             } 
         });
 
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
         console.error("❌ Error al descontar comisión de viaje:", error);
-        if (error.message?.includes('insuficiente')) {
-            error.statusCode = 402;
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({ success: false, message: error.message });
         }
         next(error);
+    } finally {
+        session.endSession();
     }
 };
 

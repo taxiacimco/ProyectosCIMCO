@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.4 - Unificación de Endpoints de Recarga Administrativa con Revaluación de Estado en Tiempo Real
+// Versión Arquitectura: V22.3 - Migración de Protección de Billeteras y Saldos a esAdminCentralMiddleware
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
  * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría, métricas y recargas auditadas sin provocar CIMCO-ROUTE-MISS.
- * Ajuste V19.4: Mapeo de endpoints de recarga de saldo administrativa (recargarSaldoAdmin, recargarBilleteraPorAdmin) garantizando la revaluación de estado en tiempo real.
+ * Ajuste V22.3: Actualización de endpoints de recarga y ajuste de saldo (/saldos/admin/recargar, /ajustar-saldo y alias administrativos) para emplear esAdminCentralMiddleware.
  */
 
 import express from 'express';
@@ -35,6 +35,7 @@ const verificarRol = authMiddleware.verificarRol
     ? authMiddleware.verificarRol 
     : (rol) => (rol === 'admin' ? (authMiddleware.esAdmin || ((req, res, next) => next())) : (req, res, next) => next());
 const esAdmin = authMiddleware.esAdmin || verificarRol('admin');
+const esAdminCentralMiddleware = authMiddleware.esAdminCentralMiddleware || authMiddleware.esAdmin || verificarRol('admin');
 
 const router = express.Router();
 
@@ -73,17 +74,17 @@ const validarTelemetriaRadar = (req, res, next) => {
 // ==================================================================
 router.get('/', obtenerTodosConductores);
 router.get('/disponibles', obtenerConductoresDisponibles);
-router.get('/capital-circulante', autenticarJWT, verificarRol('admin'), obtenerCapitalCirculante);
+router.get('/capital-circulante', autenticarJWT, esAdminCentralMiddleware, obtenerCapitalCirculante);
 
 /**
- * 🏢 APROBACIÓN Y CAMBIO DE ESTADO (Secretaría / Admin) - BLINDADO CON JWT Y ROL ADMIN
+ * 🏢 APROBACIÓN Y CAMBIO DE ESTADO (Secretaría / Admin) - BLINDADO CON JWT Y ESADMINCENTRALMIDDLEWARE
  */
-router.put('/cambiar-estado/:id', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
-router.patch('/cambiar-estado/:id', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
-router.patch('/:id/estado', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
-router.put('/:id/estado', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
-router.put('/:id/estado-admin', autenticarJWT, verificarRol('admin'), cambiarEstadoConductor);
-router.patch('/:id/aprobar', autenticarJWT, verificarRol('admin'), (req, res) => {
+router.put('/cambiar-estado/:id', autenticarJWT, esAdminCentralMiddleware, cambiarEstadoConductor);
+router.patch('/cambiar-estado/:id', autenticarJWT, esAdminCentralMiddleware, cambiarEstadoConductor);
+router.patch('/:id/estado', autenticarJWT, esAdminCentralMiddleware, cambiarEstadoConductor);
+router.put('/:id/estado', autenticarJWT, esAdminCentralMiddleware, cambiarEstadoConductor);
+router.put('/:id/estado-admin', autenticarJWT, esAdminCentralMiddleware, cambiarEstadoConductor);
+router.patch('/:id/aprobar', autenticarJWT, esAdminCentralMiddleware, (req, res) => {
     if (!req.body) req.body = {};
     req.body.nuevoEstado = 'APROBADO';
     return cambiarEstadoConductor(req, res);
@@ -92,7 +93,7 @@ router.patch('/:id/aprobar', autenticarJWT, verificarRol('admin'), (req, res) =>
 /**
  * 📊 MÉTRICAS ADMINISTRATIVAS
  */
-router.get('/metricas/capital-circulante', autenticarJWT, verificarRol('admin'), obtenerCapitalCirculante);
+router.get('/metricas/capital-circulante', autenticarJWT, esAdminCentralMiddleware, obtenerCapitalCirculante);
 
 /**
  * 📍 RADAR GEOESPACIAL
@@ -116,18 +117,18 @@ router.post('/registrar', validarConductorUnico, registrarConductor);
 router.post('/', validarConductorUnico, registrarConductor);
 
 // ==================================================================
-// 💳 BILLETERA Y RECARGAS ATÓMICAS (UNIFICACIÓN DE RUTAS Y ALIAS ANTI CIMCO-ROUTE-MISS)
+// 💳 BILLETERA Y RECARGAS ATÓMICAS (PROTEGIDAS CON ESADMINCENTRALMIDDLEWARE)
 // ==================================================================
-router.post('/saldos/admin/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
-router.post('/billeteras/admin/recargar', autenticarJWT, verificarRol('admin'), recargarBilleteraPorAdmin);
-router.put('/:id/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
-router.post('/:id/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
-router.put('/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
-router.post('/recargar', autenticarJWT, verificarRol('admin'), recargarSaldoAdmin);
+router.post('/saldos/admin/recargar', autenticarJWT, esAdminCentralMiddleware, recargarSaldoAdmin);
+router.post('/billeteras/admin/recargar', autenticarJWT, esAdminCentralMiddleware, recargarBilleteraPorAdmin);
+router.put('/:id/recargar', autenticarJWT, esAdminCentralMiddleware, recargarSaldoAdmin);
+router.post('/:id/recargar', autenticarJWT, esAdminCentralMiddleware, recargarSaldoAdmin);
+router.put('/recargar', autenticarJWT, esAdminCentralMiddleware, recargarSaldoAdmin);
+router.post('/recargar', autenticarJWT, esAdminCentralMiddleware, recargarSaldoAdmin);
 
-router.put('/ajustar-saldo/:uid', autenticarJWT, verificarRol('admin'), ajustarSaldo);
-router.put('/:id/ajuste', autenticarJWT, verificarRol('admin'), ajustarSaldo);
-router.post('/:id/ajuste', autenticarJWT, verificarRol('admin'), ajustarSaldo);
+router.put('/ajustar-saldo/:uid', autenticarJWT, esAdminCentralMiddleware, ajustarSaldo);
+router.put('/:id/ajuste', autenticarJWT, esAdminCentralMiddleware, ajustarSaldo);
+router.post('/:id/ajuste', autenticarJWT, esAdminCentralMiddleware, ajustarSaldo);
 
 router.post('/descuento-comision', autenticarJWT, descontarComisionViaje);
 router.post('/descontar-comision', autenticarJWT, descontarComisionViaje);
@@ -140,7 +141,7 @@ router.get('/:conductorId/historial', autenticarJWT, obtenerHistorialConductor);
 router.get('/:id', obtenerConductorPorId);
 router.put('/:id', actualizarConductor);
 router.patch('/:id', actualizarConductor);
-router.delete('/:id', autenticarJWT, verificarRol('admin'), eliminarConductor);
+router.delete('/:id', autenticarJWT, esAdminCentralMiddleware, eliminarConductor);
 
 // ==================================================================
 // 🛠️ RUTA DE DEPURACIÓN EN DESARROLLO

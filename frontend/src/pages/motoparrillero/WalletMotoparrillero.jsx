@@ -1,13 +1,12 @@
-// Versión Arquitectura: V12.0 - Integración StatusBanner ($2.000 COP) y Alineación Estética CIMCO-UI V9.3 Glassmorphism
+// Versión Arquitectura: V12.2 - Unificación de Gobernanza Financiera con SALDO_MINIMO_OPERATIVO Centralizado
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
+import { SALDO_MINIMO_OPERATIVO } from '@/config/constants';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { Wallet, Activity } from 'lucide-react';
 import BotonRecarga from '@/components/wallet/BotonRecarga';
 import TransactionHistory from '@/components/wallet/TransactionHistory';
-
-const UMBRAL_MINIMO_COP = 2000;
 
 const WalletMotoparrillero = () => {
     const { user } = useAuth();
@@ -29,6 +28,7 @@ const WalletMotoparrillero = () => {
     }, [user?.uid]);
 
     const saldoEfectivo = Number(balance || 0);
+    const umbralMinimo = Number(SALDO_MINIMO_OPERATIVO) || 2000;
 
     return (
         <div className="min-h-screen bg-[#0e0e11] font-mono text-zinc-100 p-6 flex flex-col gap-6 selection:bg-cyan-400 selection:text-black">
@@ -46,14 +46,14 @@ const WalletMotoparrillero = () => {
 
             {/* 🛡️ BANNER VISUAL DE ESTADO OPERATIVO (StatusBanner) */}
             <div className={`p-4 rounded-xl border backdrop-blur-md transition-all duration-200 ${
-                saldoEfectivo >= UMBRAL_MINIMO_COP 
+                saldoEfectivo >= umbralMinimo 
                     ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
                     : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
             }`}>
                 <p className="font-semibold text-sm">
-                    {saldoEfectivo >= UMBRAL_MINIMO_COP 
-                        ? '✅ Cuenta Operativa - Habilitado para recibir carreras' 
-                        : '🚫 Cuenta Inactiva - Requiere recarga mínima de $2.000 COP'}
+                    {saldoEfectivo >= umbralMinimo 
+                        ? '✅ Cuenta Operativa - Habilitado para recibir servicios de motoparrillero' 
+                        : `🚫 Cuenta Inactiva - Requiere recarga mínima de $${umbralMinimo.toLocaleString('es-CO')} COP`}
                 </p>
             </div>
 
@@ -73,7 +73,7 @@ const WalletMotoparrillero = () => {
                     
                     {/* Botonera Operativa Inyectada */}
                     <div className="flex gap-4 [&_button]:w-full [&_button]:bg-amber-500/20 [&_button]:text-amber-400 [&_button]:hover:bg-amber-500/30 [&_button]:font-black [&_button]:text-xs [&_button]:uppercase [&_button]:tracking-widest [&_button]:py-3.5 [&_button]:px-4 [&_button]:border [&_button]:border-amber-500/30 [&_button]:rounded-lg [&_button]:transition-all [&_button]:active:scale-95">
-                        <BotonRecarga usuarioId={user?.uid} rol={user?.role || user?.rol} />
+                        <BotonRecarga usuarioId={user?.uid} rol={user?.role || user?.rol || 'motoparrillero'} />
                     </div>
                 </div>
             </div>

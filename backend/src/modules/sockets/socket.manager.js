@@ -1,4 +1,4 @@
-// Versión Arquitectura: V22.0 - Filtrado en tiempo real de nuevo_servicio_disponible por umbral de saldo ($2000 COP) y consulta asíncrona de MongoDB/Firestore
+// Versión Arquitectura: V22.01 - Transmisión de Telemetría GPS, Control de Estados y Filtrado por Umbral de Saldo en Tiempo Real
 
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\sockets\socket.manager.js

@@ -1,8 +1,9 @@
-// Versión Arquitectura: V19.5 - Corrección de bypass de Webhook Wompi y alineación defensiva de rutas operacionales
+// Versión Arquitectura: V19.7 - Corrección de Importación por Alias de Cierre Contable Atómico y Resiliencia en Rutas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.routes.js
  * Misión: Enrutador centralizado con interceptación de payloads, inyección de aduana perimetral,
- * reordenamiento de webhooks públicos (Wompi) antes de la autenticación JWT y blindaje defensivo del despacho.
+ * reordenamiento de webhooks públicos (Wompi) antes de autenticación JWT, y resolución de alias
+ * de controladores para la finalización atómica de viajes.
  */
 
 import express from 'express';
@@ -12,6 +13,7 @@ import {
     iniciarViaje,
     cambiarEstadoViaje,
     completarViaje,
+    completarViaje as finalizarViaje,
     cancelarViaje,
     obtenerViajes,
     obtenerViajePorId,
@@ -75,6 +77,24 @@ const verificarPayloadViaje = (req, res, next) => {
     next();
 };
 
+/**
+ * Middleware Defensivo para Finalización y Cierre Transaccional de Viaje
+ * Garantiza la ejecución del controlador atómico de finalización de viaje.
+ */
+const ejecutarFinalizacionSegura = (req, res, next) => {
+    const handlerEfectivo = finalizarViaje || completarViaje;
+
+    if (typeof handlerEfectivo !== 'function') {
+        console.error("🚨 [CIMCO-VIAJE-ROUTES] Error crítico: No se encontró un controlador válido para finalizar el viaje.");
+        return res.status(500).json({
+            success: false,
+            error: "Error interno: El controlador para la finalización atómica del viaje no está disponible."
+        });
+    }
+
+    return handlerEfectivo(req, res, next);
+};
+
 // Logger local de trazabilidad y monitoreo en entorno de desarrollo
 router.use((req, res, next) => {
     if (process.env.NODE_ENV !== 'production') {
@@ -108,10 +128,16 @@ router.get('/historial', obtenerHistorialViajes);
 router.post('/solicitar', verificarPayloadViaje, solicitarViaje);
 router.post('/aceptar', verificarPayloadViaje, aceptarViaje);
 
-// 3. Transición de Estado Operativo y Cierre Contable (Comisiones: 10% Mototaxi/Parrillero, $500 Motocarga, $500 Despachador)
+// 3. Transición de Estado Operativo y Cierre Contable Atómico
+// (Comisiones: 10% Mototaxi/Parrillero, $500 Motocarga, $500 Despachador; Sincronización atómica de saldo Pasajero/Conductor)
 router.post('/iniciar', verificarPayloadViaje, iniciarViaje);
 router.patch('/:viajeId/estado', verificarPayloadViaje, cambiarEstadoViaje);
-router.post('/completar', verificarPayloadViaje, completarViaje);
+
+// Endpoints de Finalización Atómica con Liquidación y Sincronización de Saldos
+router.post('/completar', verificarPayloadViaje, ejecutarFinalizacionSegura);
+router.post('/finalizar', verificarPayloadViaje, ejecutarFinalizacionSegura);
+router.post('/:viajeId/finalizar', verificarPayloadViaje, ejecutarFinalizacionSegura);
+
 router.post('/cancelar', verificarPayloadViaje, cancelarViaje);
 
 // ==================================================================

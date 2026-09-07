@@ -1,17 +1,17 @@
-// Versión Arquitectura: V15.3 - Integración Endpoint Manual Wallet Admin POST /api/billetera/admin/operacion-manual
+// Versión Arquitectura: V15.6 - Asignación de key={cuenta._reactKey} y Garantía de Deduplicación en Tarjetas de Billetera
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
  * Misión: Monitoreo global de saldos y ejecución de ajustes de capital (Abono / Débito Manual) para todos los actores:
  *         Pasajeros, Mototaxistas, Motoparrilleros, Montacargas, Despachadores y Conductores.
- * Ajuste V15.3:
- *   1. Integración del endpoint estandarizado POST `/api/billetera/admin/operacion-manual` según wallet.routes.js.
- *   2. Alineación del contrato de payload transaccional: { targetUserId, monto, tipoOperacion, concepto }.
+ * Ajuste V15.6:
+ *   1. Integración de key={cuenta._reactKey} en la iteración de tarjetas de billeteras/usuarios.
+ *   2. Garantía de asignación de _reactKey en el proceso de deduplicación con fallback.
  *   3. Mantenimiento del estándar visual CIMCO-UI V9.3 (Glassmorphism), alias absolutos y defensa anti-undefined.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, limit } from 'firebase/firestore';
 import { 
     Wallet, Search, RefreshCw, ArrowUpRight, DollarSign, 
     AlertCircle, CheckCircle2, ShieldAlert, ServerOff, Loader, Info
@@ -23,21 +23,27 @@ import { deduplicarEntidades } from '@/utils/deduplicar';
 const RAW_API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 const API_BASE_URL = RAW_API_URL.replace(/\/api\/?$/, '');
 
-// 🛡️ Helper global de desduplicación para el Frontend
+// 🛡️ Helper global de desduplicación para el Frontend con garantía de _reactKey
 const deduplicarUsuarios = (lista) => {
     if (!Array.isArray(lista)) return [];
+    let deduplicados = [];
     if (typeof deduplicarEntidades === 'function') {
-        return deduplicarEntidades(lista);
+        deduplicados = deduplicarEntidades(lista);
+    } else {
+        const mapaUnico = new Map();
+        lista.forEach((item) => {
+            if (!item) return;
+            const key = item._id || item.uid || item.id || item.email || item.telefono;
+            if (key && !mapaUnico.has(key)) {
+                mapaUnico.set(key, item);
+            }
+        });
+        deduplicados = Array.from(mapaUnico.values());
     }
-    const mapaUnico = new Map();
-    lista.forEach((item) => {
-        if (!item) return;
-        const key = item._id || item.uid || item.id || item.email || item.telefono;
-        if (key && !mapaUnico.has(key)) {
-            mapaUnico.set(key, item);
-        }
-    });
-    return Array.from(mapaUnico.values());
+    return deduplicados.map((item, idx) => ({
+        ...item,
+        _reactKey: item._reactKey || `${item.id || item._id || item.uid || item.email || 'cuenta'}_${idx}`
+    }));
 };
 
 // 🔑 Helper de Generación de Claves de Idempotencia (UUID v4 / Cryptographic Fallback)
@@ -147,6 +153,7 @@ export const GestionBilleteras = () => {
                         const rawSaldo = u.saldoWallet !== undefined ? u.saldoWallet : (u.billetera?.saldo !== undefined ? u.billetera.saldo : (u.saldo || u.balance || 0));
                         const idResuelto = u.id || u._id || u.uid;
                         return {
+                            ...u,
                             _id: idResuelto,
                             uid: idResuelto,
                             id: idResuelto,
@@ -186,6 +193,7 @@ export const GestionBilleteras = () => {
                     const idResuelto = u.id || u._id || u.uid || idDoc;
                     const rawSaldo = u.saldoWallet !== undefined ? u.saldoWallet : (u.billetera?.saldo !== undefined ? u.billetera.saldo : (u.saldo || u.balance || 0));
                     return {
+                        ...u,
                         _id: idResuelto,
                         uid: idResuelto,
                         id: idResuelto,
@@ -217,7 +225,8 @@ export const GestionBilleteras = () => {
         );
 
         const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-        const qWallets = query(collection(db, pathBilleteras));
+        // 🎯 Límite corregido a 50 registros
+        const qWallets = query(collection(db, pathBilleteras), limit(50));
 
         const unsubscribeWallets = onSnapshot(qWallets,
             (snapshot) => {
@@ -460,7 +469,7 @@ export const GestionBilleteras = () => {
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[520px] overflow-y-auto pr-1">
-                            {cuentasFiltradas.map((cuenta) => {
+                            {deduplicarUsuarios(cuentasFiltradas).map((cuenta) => {
                                 const idCuenta = cuenta.id || cuenta._id || cuenta.uid;
                                 const idSel = cuentaSeleccionada?.id || cuentaSeleccionada?._id || cuentaSeleccionada?.uid;
                                 const esSeleccionado = idSel === idCuenta;
@@ -469,7 +478,7 @@ export const GestionBilleteras = () => {
 
                                 return (
                                     <div 
-                                        key={idCuenta}
+                                        key={cuenta._reactKey}
                                         onClick={() => setCuentaSeleccionada(cuenta)}
                                         className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-3 ${
                                             esSeleccionado 

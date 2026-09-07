@@ -1,12 +1,12 @@
-// Versión Arquitectura: V2.6.0 - Integración de Saldo Wallet e Indicador de Estado Operativo Mínimo ($2,000 COP)
+// Versión Arquitectura: V2.8.0 - Aplicación de deduplicarEntidades y asignación de key React por _reactKey en tabla de Directorio Global
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\DirectorioGlobal.jsx
- * Misión: Monitoreo, filtrado, auditoría unificada y exportación centralizada a Excel (XLSX) con descarga API y Dynamic Import.
+ * Misión: Monitoreo, filtrado, auditoría unificada, sincronización Socket.io en tiempo real y exportación centralizada a Excel (XLSX).
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajustes V2.6.0:
- *   1. Incorporación de visualización de `saldoWallet` en la tabla de registros del directorio global.
- *   2. Indicador de estado funcional según regla de negocio: Si `saldoWallet` < $2,000 COP para roles operacionales (Mototaxi, Motoparrillero, Motocarga o Despachador), despliega badge de advertencia `<span className="bg-red-500/10 text-red-400 font-bold px-2 py-0.5 rounded text-[9px] border border-red-500/20 uppercase">BLOQUEADO POR SALDO</span>`.
- *   3. Preservación del patrón AbortController, Carga Diferida de XLSX y Gestión 401 Unauthorized.
+ * Ajustes V2.8.0:
+ *   1. Integración de `deduplicarEntidades(usuariosFiltrados)` en el renderizado de la tabla de registros.
+ *   2. Asignación exclusiva de `key={u._reactKey}` en el elemento `<tr>` principal para una reconciliación React optima y segura.
+ *   3. Preservación estricta de la lógica de Socket.io, AbortController, umbral $2,000 COP, exportaciones y Glassmorphism.
  */
 
 import React, { useState, useEffect } from 'react';
@@ -35,7 +35,7 @@ const deduplicarUsuarios = (lista) => {
     return Array.from(mapaUnico.values());
 };
 
-export const DirectorioGlobal = () => {
+export const DirectorioGlobal = ({ socket }) => {
     const [usuarios, setUsuarios] = useState([]);
     const [filtroRol, setFiltroRol] = useState('TODOS');
     const [busqueda, setBusqueda] = useState('');
@@ -81,7 +81,7 @@ export const DirectorioGlobal = () => {
                 setLoading(false);
             }
         } catch (err) {
-            // Manejo limpio de abortos voluntarias al desmontar componente
+            // Manejo limpio de abortos voluntarios al desmontar componente
             if (err.name === 'AbortError') {
                 console.log('🛑 Petición de directorio cancelada por desmontaje de componente.');
                 return;
@@ -100,6 +100,31 @@ export const DirectorioGlobal = () => {
             controller.abort();
         };
     }, []);
+
+    // ⚡ LISTENER SOCKET.IO EN TIEMPO REAL - ACTUALIZACIÓN REACTIVA DE SALDOS GERENCIALES
+    useEffect(() => {
+        if (!socket) return;
+
+        const manejarActualizacionSaldo = (payload) => {
+            if (!payload) return;
+            const { usuarioId, nuevoSaldo } = payload;
+            if (!usuarioId) return;
+
+            setUsuarios((prevUsuarios) =>
+                prevUsuarios.map((user) => {
+                    if (!user) return user;
+                    const esTarget = user._id === usuarioId || user.id === usuarioId || user.uid === usuarioId;
+                    return esTarget ? { ...user, saldoWallet: nuevoSaldo, saldo: nuevoSaldo } : user;
+                })
+            );
+        };
+
+        socket.on('admin_saldo_usuario_actualizado', manejarActualizacionSaldo);
+
+        return () => {
+            socket.off('admin_saldo_usuario_actualizado', manejarActualizacionSaldo);
+        };
+    }, [socket]);
 
     // Helper para normalizar y mostrar el nombre de entidad
     const getNombre = (u) => u?.nombre || u?.fullName || u?.nombreCompleto || u?.nombreUsuario || u?.displayName || 'SIN REGISTRO';
@@ -374,7 +399,7 @@ export const DirectorioGlobal = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5 text-xs">
-                                {usuariosFiltrados.map((u, idx) => {
+                                {deduplicarEntidades(usuariosFiltrados).map((u) => {
                                     const nombre = getNombre(u);
                                     const email = u?.email || 'SIN EMAIL';
                                     const tel = u?.telefono || u?.telefonoMovil || 'N/A';
@@ -382,7 +407,7 @@ export const DirectorioGlobal = () => {
                                     const saldo = getSaldoWallet(u);
 
                                     return (
-                                        <tr key={u?._id || u?.id || idx} className="hover:bg-white/[0.02] transition-colors">
+                                        <tr key={u._reactKey} className="hover:bg-white/[0.02] transition-colors">
                                             <td className="py-3 pl-2">
                                                 <div className="font-bold text-white uppercase">{nombre}</div>
                                                 <div className="text-[9px] text-zinc-500 font-mono">ID: {u?._id || u?.id}</div>

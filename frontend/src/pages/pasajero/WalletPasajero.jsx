@@ -1,23 +1,23 @@
-// Versión Arquitectura: V12.2 - Blindaje de Suscripciones Reactivas de Billetera y Anti-NaN Output
+// Versión Arquitectura: V12.4 - Depuración de Controles Duplicados y Mapeo Estándar de Props en BilleteraPasajeroModal
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\WalletPasajero.jsx
- * Misión: Proveer al pasajero una interfaz para recargar fondos y auditar sus movimientos.
+ * Misión: Proveer al pasajero una interfaz optimizada para consultar saldo y gestionar recargas vía WhatsApp Central.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
- * Ajuste V12.2: Manejo seguro de FIRESTORE_PATHS, blindaje anti-NaN en renderizado de fondos y manejo de errores de snapshot.
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { Wallet, Activity, CreditCard, AlertCircle } from 'lucide-react';
-import BotonRecarga from '@/components/wallet/BotonRecarga';
+import { Wallet, Activity, CreditCard, AlertCircle, PlusCircle } from 'lucide-react';
 import TransactionHistory from '@/components/wallet/TransactionHistory';
+import BilleteraPasajeroModal from '@/components/pasajero/BilleteraPasajeroModal';
 
 const WalletPasajero = () => {
     const { user } = useAuth();
     const [balance, setBalance] = useState(0);
     const [errorReactor, setErrorReactor] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
 
     useEffect(() => {
         const uid = user?.uid || user?.id;
@@ -47,7 +47,15 @@ const WalletPasajero = () => {
     }, [user?.uid, user?.id]);
 
     const uidUsuario = user?.uid || user?.id;
-    const rolUsuario = user?.role || user?.rol || 'pasajero';
+
+    // Handlers para gestión de estado del modal
+    const handleOpenModal = () => {
+        setIsModalOpen(true);
+    };
+
+    const handleCloseModal = () => {
+        setIsModalOpen(false);
+    };
 
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 p-4 md:p-8 font-mono antialiased flex flex-col items-center justify-center relative overflow-hidden">
@@ -91,9 +99,16 @@ const WalletPasajero = () => {
                         </div>
                     </div>
 
-                    <div className="flex gap-4 relative z-10 mt-2 border-t border-white/5 pt-6">
-                        {/* Componente global de recarga con fallback seguro de UID */}
-                        <BotonRecarga usuarioId={uidUsuario} rol={rolUsuario} />
+                    <div className="flex flex-col sm:flex-row gap-3 relative z-10 mt-2 border-t border-white/5 pt-6">
+                        {/* Botón único para apertura del modal de recarga */}
+                        <button
+                            type="button"
+                            onClick={handleOpenModal}
+                            className="w-full py-3.5 px-4 bg-yellow-500 hover:bg-yellow-400 text-black font-black text-xs uppercase tracking-wider rounded-2xl transition-all shadow-[0_0_20px_rgba(234,179,8,0.2)] active:scale-95 flex items-center justify-center gap-2"
+                        >
+                            <PlusCircle size={16} />
+                            <span>Recargar Billetera</span>
+                        </button>
                     </div>
                 </div>
 
@@ -105,11 +120,21 @@ const WalletPasajero = () => {
                     </div>
                     
                     <div className="flex-1 overflow-y-auto h-96 pr-2 custom-scrollbar">
-                        <TransactionHistory usuarioId={uidUsuario} />
+                        <TransactionHistory targetUid={uidUsuario} />
                     </div>
                 </div>
 
             </div>
+
+            {/* MODAL DE RECARGA DE BILLETERA DE PASAJERO */}
+            {isModalOpen && (
+                <BilleteraPasajeroModal
+                    isOpen={isModalOpen}
+                    onClose={handleCloseModal}
+                    saldo={balance}
+                    usuario={user}
+                />
+            )}
         </div>
     );
 };

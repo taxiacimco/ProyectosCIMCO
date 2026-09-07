@@ -1,8 +1,9 @@
-// Versión Arquitectura: V10.4.1 - Optimización HMR local para eliminación de advertencias WebSocket
+// Versión Arquitectura: V10.5.0 - Adaptación HMR y WSS para Túnel Cloudflare
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\vite.config.js
  * Misión: Orquestación de empaquetado Vite, resolución de alias de rutas (@), 
- *         configuración de HMR adaptativo para desarrollo local y proxy server para redirección de peticiones /api y /socket.io sin fallos SSL.
+ *         configuración de HMR adaptativo para desarrollo local y remoto a través de túnel Cloudflare
+ *         y proxy server para redirección de peticiones /api y /socket.io sin fallos SSL.
  */
 
 import { defineConfig } from 'vite';
@@ -22,7 +23,7 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    host: '0.0.0.0', // Escucha en todas las interfaces de red locales
+    host: true, // Escucha en todas las interfaces de red locales y remotas
     historyApiFallback: true,
     allowedHosts: [
       '192.168.100.34',
@@ -50,10 +51,10 @@ export default defineConfig({
     watch: {
       usePolling: true,
     },
-    // Configuración HMR ajustada a protocolo ws sobre localhost para prevenir fallos WebSocket en desarrollo local
+    // Configuración HMR adaptada para tunelización segura WSS sobre Cloudflare
     hmr: {
-      protocol: 'ws',
-      host: 'localhost',
+      clientPort: 443,
+      protocol: 'wss',
     }
   },
   build: {

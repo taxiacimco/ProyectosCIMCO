@@ -1,9 +1,10 @@
-// Versión Arquitectura: V19.2 - Integración de Tipos Especiales de Transacciones y Filtros Contables por Tipo/Rol
+// Versión Arquitectura: V19.3 - Deduplicación de Transacciones e Inyección de _reactKey
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\TablaTransacciones.jsx
  * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism CIMCO-UI V9.3,
  *         soportando paginación por servidor, mapeo/parseo ampliado de tipos de movimiento 
- *         (CEO, Comisiones de Carrera/Fija, Pagos Servicio Pasajero) y filtros avanzados por Tipo y Rol.
+ *         (CEO, Comisiones de Carrera/Fija, Pagos Servicio Pasajero), filtros avanzados por Tipo y Rol,
+ *         deduplicación con deduplicarEntidades() e inyección de _reactKey en cada fila.
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react';
 import { formatFechaColombia } from '@/utils/dateFormatter';
 import { resolverFechaSegura } from '@/utils/dateUtils';
+import { deduplicarEntidades } from '@/utils/deduplicar';
 
 // 🛡️ SINGLETON: Instancia re-utilizable fuera del ciclo de render
 const currencyFormatterCOP = new Intl.NumberFormat('es-CO', {
@@ -224,6 +226,13 @@ const TablaTransacciones = ({
         return transaccionesFiltradas.slice(inicio, inicio + limit);
     }, [transaccionesFiltradas, page, limit, esModoServidor]);
 
+    // 🛡️ DEDUPLICACIÓN ATÓMICA E INYECCIÓN DE _reactKey EN CADA ENTIDAD
+    const transaccionesDeduplicadas = useMemo(() => {
+        return typeof deduplicarEntidades === 'function'
+            ? deduplicarEntidades(transaccionesPaginadas)
+            : transaccionesPaginadas;
+    }, [transaccionesPaginadas]);
+
     const handleCambioPagina = (nuevaPagina) => {
         if (nuevaPagina >= 1 && nuevaPagina <= totalPaginas) {
             setPage(nuevaPagina);
@@ -333,7 +342,7 @@ const TablaTransacciones = ({
                     </div>
                 )}
 
-                {!Array.isArray(transaccionesPaginadas) || transaccionesPaginadas.length === 0 ? (
+                {!Array.isArray(transaccionesDeduplicadas) || transaccionesDeduplicadas.length === 0 ? (
                     <div className="p-12 flex flex-col items-center justify-center text-center gap-2">
                         <Database className="text-zinc-600 animate-pulse" size={28} />
                         <p className="text-[10px] uppercase font-bold tracking-widest text-zinc-500">
@@ -352,8 +361,8 @@ const TablaTransacciones = ({
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5 text-xs text-zinc-300">
-                            {transaccionesPaginadas.map((tx, index) => {
-                                const keyTransaccion = tx?.id || tx?._id || tx?.referencia || `tx-fallback-${index}`;
+                            {transaccionesDeduplicadas.map((tx, index) => {
+                                const keyTransaccion = tx?._reactKey || tx?.id || tx?._id || tx?.referencia || `tx-fallback-${index}`;
                                 const fechaObjetivo = resolverFechaSegura(tx?.fecha || tx?.createdAt || tx?.timestamp);
                                 const tipoString = String(tx?.tipo || tx?.type || '').toUpperCase();
                                 const rolString = tx?.rolUsuario || tx?.userRole || tx?.rol || '';

@@ -1,8 +1,8 @@
-// Versión Arquitectura: V20.04 - Aplicación Unificada del Filtro $or con Validación de ObjectId en Consultas Individuales de Pasajeros
+// Versión Arquitectura: V20.05 - Transacciones Atómicas en MongoDB para Mutación de Billetera y Saldos de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
- * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera y blindaje contra colisiones de duplicidad E11000/Firebase Auth en peticiones concurrentes.
- * Ajuste V20.04: Aplicación del filtro $or con validación de ObjectId en todos los métodos de consulta individual.
+ * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera con aislamiento de transacciones atómicas de MongoDB y auditoría en Firestore.
+ * Ajuste V20.05: Garantía de encapsulamiento en transacciones atómicas de MongoDB para mutaciones directas de saldo de billetera, previniendo condiciones de carrera e inconsistencias con Firestore.
  */
 
 import mongoose from 'mongoose';
@@ -895,7 +895,7 @@ export const validarPagoBilleteraPasajero = async (req, res, next) => {
 };
 
 /**
- * 💳 Recargar/Acreditar saldo a Pasajero libremente por Admin/CEO sin restricción de umbral mínimo ($0 COP válido)
+ * 💳 Recargar/Acreditar saldo a Pasajero libremente por Admin/CEO con sesión de Transacción Atómica de MongoDB
  */
 export const recargarSaldoPasajero = async (req, res, next) => {
     const session = await mongoose.startSession();
@@ -930,7 +930,7 @@ export const recargarSaldoPasajero = async (req, res, next) => {
                 ]
             },
             { $inc: { saldo: montoNum } },
-            { new: false, session } // Devuelve el estado anterior
+            { new: false, session } // Devuelve el estado anterior dentro de la transacción atómica
         );
 
         if (!pasajero) {
@@ -942,7 +942,7 @@ export const recargarSaldoPasajero = async (req, res, next) => {
         const saldoAnterior = Number(pasajero.saldo || 0);
         const saldoNuevo = saldoAnterior + montoNum;
 
-        // ✅ Historial en MongoDB con mapeo semántico limpio (usuario / pasajero) y ObjectId/String sanitizado
+        // ✅ Historial en MongoDB con mapeo semántico limpio (usuario / pasajero) y ObjectId/String sanitizado dentro de la transacción
         const nuevoHistorial = new HistorialSaldo({
             usuario: pasajero._id,
             pasajero: pasajero._id,

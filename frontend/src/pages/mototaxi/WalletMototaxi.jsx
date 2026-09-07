@@ -1,7 +1,8 @@
-// Versión Arquitectura: V12.0 - Ajuste CIMCO-UI V9.3 Glassmorphism e Integración de StatusBanner
+// Versión Arquitectura: V12.1 - Desacoplamiento de Saldo Mínimo Operativo y Consolidación CIMCO-UI V9.3
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
+import { SALDO_MINIMO_OPERATIVO } from '@/config/constants';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { Wallet, Activity } from 'lucide-react';
 import BotonRecarga from '@/components/wallet/BotonRecarga';
@@ -10,6 +11,9 @@ import TransactionHistory from '@/components/wallet/TransactionHistory';
 const WalletMototaxi = () => {
     const { user } = useAuth();
     const [balance, setBalance] = useState(0);
+
+    // 🛡️ Blindaje Anti-Undefined: Evaluación defensiva del límite de configuración global
+    const limiteMinimoOperativo = Number(SALDO_MINIMO_OPERATIVO) || 2000;
 
     useEffect(() => {
         if (!user?.uid) return;
@@ -43,14 +47,14 @@ const WalletMototaxi = () => {
 
             {/* 🚦 StatusBanner: Indicador Visual de Estado (CIMCO-UI V9.3) */}
             <div className={`p-4 rounded-xl border backdrop-blur-md ${
-                saldoEfectivo >= 2000 
+                saldoEfectivo >= limiteMinimoOperativo 
                     ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
                     : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
             }`}>
                 <p className="font-semibold text-sm">
-                    {saldoEfectivo >= 2000 
+                    {saldoEfectivo >= limiteMinimoOperativo 
                         ? '✅ Cuenta Operativa - Habilitado para recibir carreras' 
-                        : '🚫 Cuenta Inactiva - Requiere recarga mínima de $2.000 COP'}
+                        : `🚫 Cuenta Inactiva - Requiere recarga mínima de $${limiteMinimoOperativo.toLocaleString()} COP`}
                 </p>
             </div>
 

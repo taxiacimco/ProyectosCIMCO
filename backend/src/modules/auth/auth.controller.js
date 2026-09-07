@@ -1,14 +1,15 @@
-// Versión Arquitectura: V21.41 - Firma JWT e Inyección de Claims subrol y access_level en Login, Register y GetProfile
+// Versión Arquitectura: V21.42 - Sanitización de access_level en Registro Anti-Inyección de Privilegios y Firma JWT con Claims
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\auth\auth.controller.js
  * Misión: Controlador de autenticación con ruteo polimórfico concurrente hacia 3 colecciones (usuarios, conductores, pasajeros),
  * consulta de login dual ($or) con normalización telefónica anti-prefijo 57, eliminación de doble hashing en registro (delegado a pre-save),
  * firma de JWT unificada incorporando subrol y access_level en login, register y getProfile,
+ * sanitización estricta de access_level en registro público para prevenir inyección no autorizada de privilegios elevados,
  * flujo completo de recuperación vía OTP (solicitarOTP/forgotPassword y verificarOTPyRestablecer/resetPassword),
  * validación de disponibilidad de línea telefónica (checkPhone / verificarTelefono), actualización segura de perfiles (updateProfile / actualizarPerfil)
  * con soporte para hashes de clave opcionales, atributos de vehículo (placa/numeroInterno) y archivos binarios.
  * NOTA: Gestión de archivos delegada a upload.service y sincronización a firebase.service.
- * Ajuste V21.41: Firma de JWT centralizada e inclusión garantizada de claims subrol y access_level en login, register y getProfile.
+ * Ajuste V21.42: Sanitización de access_level durante el registro para restringir la inyección de niveles de acceso superiores al rol asignado.
  */
 
 import jwt from 'jsonwebtoken';
@@ -108,6 +109,7 @@ export const evaluarRestriccionSaldoConductor = (conductorDoc, saldoEvaluar) => 
  * 📦 REGISTRO DE USUARIOS MULTIPROPÓSITO Y SINCRO FIREBASE AUTH
  * Lógica anti-doble hashing: Se delega el cifrado al middleware pre('save') del modelo Mongoose.
  * Inyección Aprovisionada de UID / firebaseUid vía Firebase Admin SDK delegado.
+ * Sanitización estricta de access_level para evitar la inyección no autorizada de niveles elevados.
  * Firma token JWT e incluye subrol y access_level en la respuesta.
  */
 export const register = async (req, res, next) => {
@@ -164,8 +166,16 @@ export const register = async (req, res, next) => {
         // Asignación extendida de sede / terminal
         const terminalSedeFinal = (terminal_sede || terminalSede || cooperativa || empresa || (ROLES_OPERATIVOS.includes(rolNormalizado) ? 'Particular' : 'TAXIA')).toString().trim();
 
-        // Nivel de acceso sugerido/proporcionado
-        const parsedAccessLevel = access_level !== undefined ? Number(access_level) : (accessLevel !== undefined ? Number(accessLevel) : undefined);
+        // 🛡️ SANITIZACIÓN ANTI-INYECCIÓN DE PRIVILEGIOS: Nivel de acceso restringido al máximo permitido por rol
+        const rawAccessLevel = access_level !== undefined ? Number(access_level) : (accessLevel !== undefined ? Number(accessLevel) : undefined);
+        
+        const sanitizarAccessLevel = (nivelSolicitado, nivelMaximoPermitido) => {
+            if (nivelSolicitado === undefined || isNaN(nivelSolicitado)) {
+                return nivelMaximoPermitido;
+            }
+            // Bloquea elevación de privilegios no autorizada, topeando al máximo permitido según el rol
+            return Math.min(Math.max(1, Number(nivelSolicitado)), nivelMaximoPermitido);
+        };
 
         // 📁 EXTRACCIÓN Y EXTRACTION SHIELDING DE ARCHIVOS MULTIPART/FORM-DATA DELEGADO AL SERVICIO DE UPLOADS
         const extractedFiles = uploadService.extractFiles(req.files, req.file, body);
@@ -224,6 +234,8 @@ export const register = async (req, res, next) => {
 
         // 🟢 ROL: PASAJERO (Aprobación e Ingreso Inmediato con Upsert Vinculado)
         if (rolNormalizado === 'pasajero') {
+            const levelPasajero = sanitizarAccessLevel(rawAccessLevel, 1);
+
             nuevoUsuario = await Pasajero.findOneAndUpdate(
                 { email: emailLimpio },
                 {
@@ -248,7 +260,7 @@ export const register = async (req, res, next) => {
                     fotoUrl: foto_perfil || undefined,
                     doc_identificacion,
                     documento_cedula: documento_cedula || doc_identificacion,
-                    access_level: parsedAccessLevel ?? 1
+                    access_level: levelPasajero
                 },
                 { upsert: true, new: true, runValidators: true }
             );
@@ -277,6 +289,8 @@ export const register = async (req, res, next) => {
             const estadoAdminInicial = requiereBloqueoSaldo ? 'RESTRINGIDO_POR_SALDO' : 'PENDIENTE';
             const estadoInicial = requiereBloqueoSaldo ? 'RESTRINGIDO_POR_SALDO' : 'PENDIENTE';
 
+            const levelConductor = sanitizarAccessLevel(rawAccessLevel, 10);
+
             nuevoUsuario = new Conductor({
                 ...(finalUid ? { uid: finalUid, firebaseUid: finalUid } : {}),
                 nombre: nombreFinal,
@@ -302,7 +316,7 @@ export const register = async (req, res, next) => {
                 documento_licencia,
                 doc_tarjeta,
                 doc_identificacion,
-                access_level: parsedAccessLevel ?? 10,
+                access_level: levelConductor,
 
                 // 🔴 RETENCIÓN ADMINISTRATIVA Y EVALUACIÓN DE SALDO INICIAL
                 estadoAdministrativo: estadoAdminInicial,
@@ -318,6 +332,7 @@ export const register = async (req, res, next) => {
         // 🏢 OTROS ROLES DEL SISTEMA (Admins, Secretarías, Despachadores, Staff)
         else {
             const nivelPredeterminado = (rolNormalizado === 'admin' || rolNormalizado === 'ceo') ? 99 : (rolNormalizado === 'staff' ? 50 : (rolNormalizado === 'despachador' ? 30 : 10));
+            const levelOtroRol = sanitizarAccessLevel(rawAccessLevel, nivelPredeterminado);
 
             nuevoUsuario = new Usuario({
                 ...(finalUid ? { uid: finalUid, firebaseUid: finalUid } : {}),
@@ -341,7 +356,7 @@ export const register = async (req, res, next) => {
                 fotoUrl: foto_perfil || undefined,
                 doc_identificacion,
                 documento_cedula: documento_cedula || doc_identificacion,
-                access_level: parsedAccessLevel ?? nivelPredeterminado
+                access_level: levelOtroRol
             });
             await nuevoUsuario.save();
         }

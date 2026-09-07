@@ -1,16 +1,17 @@
-// Versión Arquitectura: V2.0 - Matriz Contable de Comisiones Multimodal y Transacciones ACID para Billeteras
+// Versión Arquitectura: V2.1 - Transacciones Atómicas Mongoose ACID para Finalización de Viajes, Sincronización de Saldos y Débitos de Comisión
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.service.js
  * Misión: Abstraer la lógica contable centralizada, matriz de comisiones por subrol y ejecución de transacciones
  * ACID con Mongoose Session para cobros/abonos en la billetera de Pasajeros, Conductores y Despachadores.
- * Integridad: Fusión Atómica. Mantiene retrocompatibilidad con `calcularComision` previo e implementa el protocolo
- * transaccional anti-saldos negativos y trazabilidad en HistorialSaldo.
+ * Integridad: Fusión Atómica. Mantiene retrocompatibilidad con `calcularComision` y `procesarPagoWalletTransaccional`
+ * previos e implementa el protocolo transaccional de finalización de viajes anti-saldos negativos.
  */
 
 import mongoose from 'mongoose';
 import Conductor from '../../models/Conductor.js';
 import Pasajero from '../../models/Pasajero.js';
 import Usuario from '../../models/Usuario.js';
+import Viaje from '../../models/Viaje.js';
 import HistorialSaldo from '../../models/HistorialSaldo.js';
 
 /**
@@ -208,10 +209,223 @@ export const procesarPagoWalletTransaccional = async ({
     }
 };
 
+/**
+ * ⚡ FINALIZACIÓN TRANSACCIONAL ATÓMICA DE VIAJES Y SINCRONIZACIÓN DE SALDOS
+ * Garantiza la coherencia contable al concluir un servicio:
+ *  - En pago con SALDO/WALLET: Débito atómico a pasajero, abono a conductor y cobro de comisión.
+ *  - En pago EFECTIVO: Débito atómico de la comisión en la billetera del conductor.
+ *  - Actualización atómica de estado del viaje a FINALIZADO y registro en HistorialSaldo.
+ */
+export const finalizarViajeTransaccional = async ({
+    viajeId,
+    conductorId,
+    pasajeroId = null,
+    despachadorId = null,
+    tarifa = 0,
+    metodoPago = 'EFECTIVO',
+    subrolConductor = null,
+    esIntermunicipal = false
+}) => {
+    if (!viajeId) throw new Error('⚠️ Se requiere un viajeId válido para ejecutar la finalización transaccional.');
+    if (!conductorId) throw new Error('⚠️ Se requiere un conductorId válido para imputar cobros.');
+
+    const tarifaMonto = Math.max(0, Number(tarifa) || 0);
+    const metodoPagoLimpio = String(metodoPago || 'EFECTIVO').toUpperCase().trim();
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        // 1. OBTENER Y VALIDAR EL VIAJE
+        let viajeDoc = null;
+        if (mongoose.Types.ObjectId.isValid(viajeId)) {
+            viajeDoc = await Viaje.findById(viajeId).session(session);
+        }
+        if (!viajeDoc) {
+            viajeDoc = await Viaje.findOne({ viajeId }).session(session);
+        }
+
+        if (viajeDoc && viajeDoc.estado === 'FINALIZADO') {
+            await session.abortTransaction();
+            session.endSession();
+            return {
+                exito: true,
+                yaFinalizado: true,
+                mensaje: 'El viaje ya se encontraba en estado FINALIZADO.'
+            };
+        }
+
+        // 2. BUSCAR CONDUCTOR
+        let conductorDoc = null;
+        if (mongoose.Types.ObjectId.isValid(conductorId)) {
+            conductorDoc = await Conductor.findById(conductorId).session(session);
+        }
+        if (!conductorDoc) {
+            conductorDoc = await Conductor.findOne({ uid: conductorId }).session(session);
+        }
+        if (!conductorDoc) {
+            throw new Error(`⚠️ Conductor con identificador [${conductorId}] no fue encontrado.`);
+        }
+
+        const subrolEfectivo = subrolConductor || conductorDoc.subrol;
+        const { comisionConductor, comisionDespachador } = calcularComisionPorSubrol(
+            subrolEfectivo,
+            tarifaMonto,
+            esIntermunicipal,
+            despachadorId
+        );
+
+        let saldoPasajeroNuevo = null;
+        let saldoConductorNuevo = Number(conductorDoc.saldo) || 0;
+
+        // 3. EJECUCIÓN SEGÚN MÉTODO DE PAGO
+        if (metodoPagoLimpio === 'SALDO' || metodoPagoLimpio === 'WALLET' || metodoPagoLimpio === 'DIGITAL') {
+            if (!pasajeroId) {
+                throw new Error('⚠️ Se requiere un pasajeroId válido para procesar pagos con SALDO/WALLET.');
+            }
+
+            let pasajeroDoc = null;
+            if (mongoose.Types.ObjectId.isValid(pasajeroId)) {
+                pasajeroDoc = await Pasajero.findById(pasajeroId).session(session);
+            }
+            if (!pasajeroDoc) {
+                pasajeroDoc = await Pasajero.findOne({ uid: pasajeroId }).session(session);
+            }
+            if (!pasajeroDoc) {
+                throw new Error(`⚠️ Pasajero con identificador [${pasajeroId}] no fue encontrado.`);
+            }
+
+            const saldoPasajeroActual = Number(pasajeroDoc.saldo) || 0;
+            if (saldoPasajeroActual < tarifaMonto) {
+                throw new Error(`⚠️ Saldo insuficiente en la billetera del pasajero ($${saldoPasajeroActual} COP) para tarifa de $${tarifaMonto} COP.`);
+            }
+
+            saldoPasajeroNuevo = saldoPasajeroActual - tarifaMonto;
+            pasajeroDoc.saldo = saldoPasajeroNuevo;
+            if (pasajeroDoc.billetera) pasajeroDoc.billetera.saldo = saldoPasajeroNuevo;
+            await pasajeroDoc.save({ session });
+
+            await HistorialSaldo.create([{
+                entidadId: pasajeroDoc._id,
+                tipoEntidad: 'Usuario',
+                viajeId,
+                tipo: 'descuento_comision',
+                monto: tarifaMonto,
+                saldoAnterior: saldoPasajeroActual,
+                saldoNuevo: saldoPasajeroNuevo,
+                procesadoPor: 'SISTEMA_FINALIZACION_VIAJE',
+                descripcion: `Cobro automático digital por finalización de viaje #${viajeId}.`
+            }], { session });
+
+            // Abono tarifa a Conductor
+            const saldoAnteriorCond = saldoConductorNuevo;
+            saldoConductorNuevo += tarifaMonto;
+
+            await HistorialSaldo.create([{
+                entidadId: conductorDoc._id,
+                tipoEntidad: 'Conductor',
+                conductorId: conductorDoc._id,
+                viajeId,
+                tipo: 'recarga',
+                monto: tarifaMonto,
+                saldoAnterior: saldoAnteriorCond,
+                saldoNuevo: saldoConductorNuevo,
+                procesadoPor: 'SISTEMA_FINALIZACION_VIAJE',
+                descripcion: `Abono tarifa por pago digital en viaje #${viajeId}.`
+            }], { session });
+        }
+
+        // Deducción atómica de comisión de plataforma al conductor
+        if (comisionConductor > 0) {
+            const saldoPreComision = saldoConductorNuevo;
+            saldoConductorNuevo -= comisionConductor;
+
+            await HistorialSaldo.create([{
+                entidadId: conductorDoc._id,
+                tipoEntidad: 'Conductor',
+                conductorId: conductorDoc._id,
+                viajeId,
+                tipo: 'descuento_comision',
+                monto: comisionConductor,
+                saldoAnterior: saldoPreComision,
+                saldoNuevo: saldoConductorNuevo,
+                procesadoPor: 'SISTEMA_FINALIZACION_VIAJE',
+                descripcion: `Débito atómico de comisión por finalización de viaje #${viajeId} (Subrol: ${subrolEfectivo}).`
+            }], { session });
+        }
+
+        conductorDoc.saldo = saldoConductorNuevo;
+        if (conductorDoc.billetera) conductorDoc.billetera.saldo = saldoConductorNuevo;
+        if (conductorDoc.estadisticas) conductorDoc.estadisticas.viajesCompletados = (conductorDoc.estadisticas.viajesCompletados || 0) + 1;
+        await conductorDoc.save({ session });
+
+        // Deducción a Despachador si aplica
+        if (comisionDespachador > 0 && despachadorId) {
+            let despachadorDoc = null;
+            if (mongoose.Types.ObjectId.isValid(despachadorId)) {
+                despachadorDoc = await Usuario.findById(despachadorId).session(session);
+            }
+            if (!despachadorDoc) {
+                despachadorDoc = await Usuario.findOne({ uid: despachadorId }).session(session);
+            }
+
+            if (despachadorDoc) {
+                const saldoDespActual = Number(despachadorDoc.saldo) || 0;
+                const saldoDespNuevo = Math.max(0, saldoDespActual - comisionDespachador);
+                despachadorDoc.saldo = saldoDespNuevo;
+                await despachadorDoc.save({ session });
+
+                await HistorialSaldo.create([{
+                    entidadId: despachadorDoc._id,
+                    tipoEntidad: 'Usuario',
+                    viajeId,
+                    tipo: 'descuento_comision',
+                    monto: comisionDespachador,
+                    saldoAnterior: saldoDespActual,
+                    saldoNuevo: saldoDespNuevo,
+                    procesadoPor: 'SISTEMA_FINALIZACION_VIAJE',
+                    descripcion: `Débito atómico de comisión por asignación de viaje intermunicipal #${viajeId}.`
+                }], { session });
+            }
+        }
+
+        // 4. ACTUALIZACIÓN FINAL DE DOCUMENTO VIAJE
+        if (viajeDoc) {
+            viajeDoc.estado = 'FINALIZADO';
+            viajeDoc.montoComision = comisionConductor;
+            viajeDoc.metodoPago = metodoPagoLimpio;
+            viajeDoc.montoFinal = tarifaMonto;
+            viajeDoc.fechaFinalizacion = new Date();
+            await viajeDoc.save({ session });
+        }
+
+        await session.commitTransaction();
+        session.endSession();
+
+        return {
+            exito: true,
+            viajeId,
+            estado: 'FINALIZADO',
+            tarifa: tarifaMonto,
+            metodoPago: metodoPagoLimpio,
+            comisionConductor,
+            comisionDespachador,
+            saldoFinalPasajero: saldoPasajeroNuevo,
+            saldoFinalConductor: saldoConductorNuevo
+        };
+
+    } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        throw error;
+    }
+};
+
 const viajeService = {
     calcularComision,
     calcularComisionPorSubrol,
-    procesarPagoWalletTransaccional
+    procesarPagoWalletTransaccional,
+    finalizarViajeTransaccional
 };
 
 export default viajeService;

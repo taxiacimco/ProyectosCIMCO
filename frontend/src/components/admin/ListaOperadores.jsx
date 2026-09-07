@@ -1,14 +1,12 @@
-// Versión Arquitectura: V16.1 - Alerta Combinada de Saldo Insuficiente y Bloqueo de Activación para Conductores Suspendidos (< $2.000 COP)
+// Versión Arquitectura: V16.2 - Asignación de Clave Única React por _reactKey y Deduplicación Estricta de Operadores
 /**
  * Ubicación: frontend\src\components\admin\ListaOperadores.jsx
  * Misión: Renderizar la malla virtualizada de operadores recuperando registros desde la API central 
  *         con fallback de lectura reactiva a Firestore.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajuste V16.1:
- *   1. Columna de Estado con Saldo Vinculado: Si estado === 'APROBADO' y saldo < 2000 COP, muestra
- *      alerta combinada `<span className="bg-orange-500/10 text-orange-400">APROBADO (SIN SALDO)</span>`.
- *   2. Bloqueo de Activación para Suspendidos con Saldo < 2000 COP: Deshabilita o advierte al administrador
- *      impidiendo reactivar a un operador suspendido con saldo insuficiente en el Modal y en la lista.
+ * Ajuste V16.2:
+ *   1. Integración de `deduplicarEntidades` para garantizar el decorado de `_reactKey` en la lista filtrada.
+ *   2. Uso directo de `key={c._reactKey}` en la iteración virtualizada del componente para optimizar reconciliación React.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -159,7 +157,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         return `OPERADOR ${(u?.rol || u?.role || '').toUpperCase() || 'REGISTRADO'}`;
     };
 
-    const usuariosFiltrados = listaMapeada.filter(u => {
+    const usuariosFiltrados = deduplicarEntidades(listaMapeada.filter(u => {
         const queryNormalize = busqueda.toLowerCase().trim();
         const nombre = obtenerNombreMostrar(u).toLowerCase();
         const email = (u?.email || '').toLowerCase();
@@ -172,7 +170,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                rol.includes(queryNormalize) ||
                id.includes(queryNormalize) ||
                telefono.includes(queryNormalize);
-    });
+    }));
 
     // 🛡️ Virtualizador de Renderizado para Mallas Extensas
     const rowVirtualizer = useVirtualizer({
@@ -366,14 +364,14 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                                             const c = usuariosFiltrados[virtualRow.index];
                                             if (!c) return null;
                                             const idValido = c.id || c._id;
-                                            const keyEstable = idValido || `${c.telefono || 'op'}-${virtualRow.index}`;
+                                            const keyEstable = c._reactKey || idValido || `op-${virtualRow.index}`;
                                             const subrolVisual = c.subrol || c.rol || c.role || 'Mototaxi';
                                             const estaAprobado = c.estado === 'APROBADO' || c.estado === 'active';
                                             const saldoNum = Number(c.saldoWallet || c.saldo || c.balance || 0);
 
                                             return (
                                                 <div
-                                                    key={keyEstable}
+                                                    key={c._reactKey || keyEstable}
                                                     data-index={virtualRow.index}
                                                     ref={rowVirtualizer.measureElement}
                                                     style={{

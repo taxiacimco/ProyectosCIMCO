@@ -1,11 +1,11 @@
-// Versión Arquitectura: V24.1 - Middleware Global de Manejo de Errores Express (Estructura Unificada CIMCO-RESPONSE)
+// Versión Arquitectura: V24.2 - Middleware Global de Manejo de Errores Express (Migración a ESM Nativo)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\error.middleware.js
  * Misión: Capturar y estandarizar todas las excepciones no controladas en las rutas y controladores Express,
  *         garantizando una respuesta JSON fija: { success: false, message: "...", details: ... }.
  */
 
-const errorHandler = (err, req, res, next) => {
+export const errorHandler = (err, req, res, next) => {
     // 1. Guardas de seguridad y resiliencia para req, res y err
     const safeReq = req || {};
     const safeRes = res || {};
@@ -47,4 +47,4 @@ const errorHandler = (err, req, res, next) => {
     }
 };
 
-module.exports = errorHandler;
+export default errorHandler;

@@ -1,11 +1,12 @@
-// Versión Arquitectura: V21.35 - Depuración de Índice Duplicado en Campo UID
+// Versión Arquitectura: V21.36 - Consolidador de Índice Único UID en Definición de Esquema
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
  * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales, cifrado Bcrypt anti-doble hashing,
- * índice UID disperso e indexado a nivel de esquema, método de negocio puedeOperar).
- * Ajuste V21.35: Remoción de 'unique: true' de la propiedad uid para desduplicar la indexación declarada en ConductorSchema.index.
+ * método de negocio puedeOperar).
+ * Ajuste V21.36: Unificación del atributo 'unique: true' directamente en la propiedad 'uid' del esquema y eliminación
+ * de la declaración duplicada en ConductorSchema.index para corregir la advertencia de Mongoose.
  */
 
 import mongoose from 'mongoose';
@@ -140,6 +141,7 @@ const ConductorSchema = new mongoose.Schema({
     },
     uid: { 
         type: String,
+        unique: true,
         sparse: true
     },
     flota_id: { 
@@ -178,11 +180,10 @@ ConductorSchema.virtual('avatarUrl')
         return this.foto_perfil || this.fotoPerfil || null;
     });
 
-// Índices optimizados para el motor de geolocalización, bloqueos transaccionales y lookup acelerado por UID
+// Índices optimizados para el motor de geolocalización y bloqueos transaccionales
 ConductorSchema.index({ ubicacion: "2dsphere" });
 ConductorSchema.index({ estadoOperativo: 1 });
 ConductorSchema.index({ estadoAdministrativo: 1 });
-ConductorSchema.index({ uid: 1 }, { sparse: true, unique: true });
 
 // 🛠️ HOOK PRE-SAVE: Sincronización Automática de Estados, Geometría, Cifrado de Password, Naming foto_perfil y Sanitización Financiera
 ConductorSchema.pre('save', async function(next) {

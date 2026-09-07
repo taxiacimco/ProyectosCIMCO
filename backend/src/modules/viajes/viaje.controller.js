@@ -1,14 +1,12 @@
-// Versión Arquitectura: V20.1 - Intercepción con 403 Forbidden por Saldo Insuficiente (< $2.000 COP) y Delegación Multimodal a viaje.service.js
+// Versión Arquitectura: V20.2 - Sincronización Atómica Transaccional en Finalización de Viajes y Débitos Wallet/Comisión
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\viajes\viaje.controller.js
  * Misión: Procesar flujos operativos, coordinación logística de viajes, control transaccional de estados,
  *         sincronización con Firestore y delegación contable a la capa de servicio centralizada.
- * Ajustes V20.1:
- *  1. Intercepción estricta en `aceptarViaje`, `crearYDespacharViajeAtomico` y `despacharViajeAtomico`:
- *     Si el saldo del conductor es < 2000 COP, retorna res.status(403).json({ success: false, message: "Saldo insuficiente para operar, saldo mínimo $2.000 COP" }).
- *  2. Delegación completa de liquidación contable en `completarViaje` a `viajeService.procesarPagoWalletTransaccional` o `viajeService.calcularComisionPorSubrol`
- *     para dar soporte a la matriz por subrol (mototaxi, motocarga, conductor_intermunicipal) y pagos por billetera.
- *  3. Preservación estricta del aislamiento ACID, guardas anti-undefined y sincronización atómica con Firestore.
+ * Ajustes V20.2:
+ *  1. Sincronización atómica completa bajo sesión Mongoose ACID en `completarViaje` para cobros Wallet y débitos de comisión.
+ *  2. Garantía de consistencia contable unificada entre Conductor, Pasajero, Despachador y Viaje sin abortos prematuros de sesión.
+ *  3. Preservación estricta de las guardas de saldo mínimo ($2.000 COP), resiliencia ante colisiones de concurrencia y replicación en Firestore.
  */
 
 import crypto from 'crypto';
@@ -581,7 +579,7 @@ export const cambiarEstadoViaje = async (req, res, next) => {
 };
 
 // ==================================================================
-// 3. SUBSISTEMA DE LIQUIDACIÓN Y CIERRE DE SERVICIOS
+// 3. SUBSISTEMA DE LIQUIDACIÓN Y CIERRE ATÓMICO DE SERVICIOS
 // ==================================================================
 export const completarViaje = async (req, res, next) => {
     const MAX_REINTENTOS = 8;
@@ -636,10 +634,7 @@ export const completarViaje = async (req, res, next) => {
             let saldoNuevoConductor = Number(conductorObj.saldo) || 0;
 
             if (esWallet && viajeService?.procesarPagoWalletTransaccional) {
-                // Liberar la sesión actual para delegar la transacción ACID atómica a viajeService
-                await session.abortTransaction();
-                session.endSession();
-
+                // Delegación con inyección de sesión Mongoose para garantizar atomicidad ACID sin desincronización
                 const resultadoWallet = await viajeService.procesarPagoWalletTransaccional({
                     viajeId: viaje._id,
                     pasajeroId: viaje.pasajeroId,
@@ -647,25 +642,31 @@ export const completarViaje = async (req, res, next) => {
                     despachadorId: viaje.despachadorId,
                     tarifa: tarifaMonto,
                     subrolConductor: conductorObj.subrol,
-                    esIntermunicipal
+                    esIntermunicipal,
+                    session
                 });
 
-                comisionConductor = resultadoWallet.comisionConductor;
-                comisionDespachador = resultadoWallet.comisionDespachador;
-                saldoNuevoConductor = resultadoWallet.saldoFinalConductor;
+                comisionConductor = resultadoWallet?.comisionConductor || 0;
+                comisionDespachador = resultadoWallet?.comisionDespachador || 0;
+                saldoNuevoConductor = resultadoWallet?.saldoFinalConductor !== undefined
+                    ? resultadoWallet.saldoFinalConductor
+                    : (Number(conductorObj.saldo) || 0);
 
-                // Marcar viaje finalizado
-                await Viaje.findByIdAndUpdate(viajeId, {
-                    $set: { estado: 'finalizado', estadoViaje: 'FINALIZADO' }
-                });
+                viaje.estado = 'finalizado';
+                viaje.estadoViaje = 'FINALIZADO';
+                await viaje.save({ session });
 
-                // Liberar conductor
-                await Conductor.findByIdAndUpdate(conductorId, {
-                    $set: { estado: 'active', estadoOperativo: 'DISPONIBLE', viajeActualId: null }
-                });
+                await Conductor.findByIdAndUpdate(
+                    conductorId,
+                    { $set: { estado: 'active', estadoOperativo: 'DISPONIBLE', viajeActualId: null } },
+                    { session }
+                );
+
+                await session.commitTransaction();
+                session.endSession();
 
             } else {
-                // LIQUIDACIÓN EN EFECTIVO CON MATRIZ POR SUBROL Y DESPACHO
+                // LIQUIDACIÓN DE MÓDULO CON SOBERANÍA TRANSACCIONAL DENTRO DE LA MISMA SESIÓN ACID
                 const calculo = viajeService?.calcularComisionPorSubrol
                     ? viajeService.calcularComisionPorSubrol(conductorObj.subrol, tarifaMonto, esIntermunicipal, viaje.despachadorId)
                     : { comisionConductor: viajeService?.calcularComision ? viajeService.calcularComision(tarifaMonto) : Math.round(tarifaMonto * 0.10), comisionDespachador: 0 };
@@ -676,6 +677,7 @@ export const completarViaje = async (req, res, next) => {
                 const saldoAnterior = Number(conductorObj.saldo) || 0;
                 saldoNuevoConductor = saldoAnterior - comisionConductor;
 
+                // 1. Débito atómico de comisión a Conductor
                 const conductorActualizado = await Conductor.findOneAndUpdate(
                     { _id: conductorId },
                     { 
@@ -689,6 +691,7 @@ export const completarViaje = async (req, res, next) => {
                     throw new Error('Error al actualizar saldo del conductor.');
                 }
 
+                // 2. Débito/Crédito de comisión a Despachador si aplica
                 if (comisionDespachador > 0 && viaje.despachadorId) {
                     await Usuario.findByIdAndUpdate(
                         viaje.despachadorId,
@@ -697,10 +700,38 @@ export const completarViaje = async (req, res, next) => {
                     );
                 }
 
+                // 3. Débito de tarifa a Pasajero en caso de cobro Wallet directo en contingencia
+                if (esWallet && viaje.pasajeroId) {
+                    const pasajeroActualizado = await Usuario.findOneAndUpdate(
+                        { 
+                            _id: viaje.pasajeroId, 
+                            $or: [{ saldo: { $gte: tarifaMonto } }, { balance: { $gte: tarifaMonto } }] 
+                        },
+                        { $inc: { saldo: -tarifaMonto, balance: -tarifaMonto } },
+                        { new: true, session }
+                    );
+
+                    if (!pasajeroActualizado) {
+                        throw new Error('Saldo insuficiente en la billetera del pasajero para sincronización atómica.');
+                    }
+
+                    await HistorialSaldo.create([{
+                        entidadId: viaje.pasajeroId,
+                        tipoEntidad: 'Usuario',
+                        viajeId,
+                        tipo: 'pago_viaje',
+                        monto: -tarifaMonto,
+                        procesadoPor: 'SISTEMA_DESPACHO_AUTOMATICO',
+                        descripcion: `Débito por servicio de viaje ID: ${viaje._id}`
+                    }], { session });
+                }
+
+                // 4. Actualización de estado del Viaje
                 viaje.estado = 'finalizado';
                 viaje.estadoViaje = 'FINALIZADO';
                 await viaje.save({ session });
 
+                // 5. Auditoría contable de comisión
                 if (comisionConductor > 0) {
                     await HistorialSaldo.create([{
                         entidadId: conductorId,

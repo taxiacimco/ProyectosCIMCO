@@ -1,7 +1,7 @@
 // Versión Arquitectura: V25.0 - Servicio Billetera Digital Aislado de Mutaciones Multimedia (CIMCO-WALLET-SERVICE)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\walletService.js
- * Misión: Gestión de saldos, recargas, historial de transacciones y transferencias entre cuentas mediante la instancia centralizada de Axios con interceptores JWT.
+ * Misión: Gestión de saldos, consulta de historial de transacciones y transferencias entre cuentas mediante la instancia centralizada de Axios con interceptores JWT.
  */
 
 import api from '@/config/api';
@@ -38,23 +38,6 @@ export const walletService = {
             return response?.data || [];
         } catch (error) {
             console.error('🚨 [CIMCO-WALLET] Error al obtener transacciones:', error);
-            throw error;
-        }
-    },
-
-    /**
-     * Solicita una recarga de saldo mediante pasarela de pagos
-     * @param {Object} recargaPayload - { monto, metodo, referencia }
-     */
-    async solicitarRecarga(recargaPayload) {
-        if (!recargaPayload || typeof recargaPayload !== 'object' || !recargaPayload.monto || Number(recargaPayload.monto) <= 0) {
-            throw new Error('El monto de la recarga es requerido y debe ser mayor a cero.');
-        }
-        try {
-            const response = await api.post(`${WALLET_BASE}/recargar`, recargaPayload);
-            return response?.data || {};
-        } catch (error) {
-            console.error('🚨 [CIMCO-WALLET] Error al solicitar recarga:', error);
             throw error;
         }
     },

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.05 - Filtro flexible y seguro de targetId (_id / uid) con validación ObjectId
+// Versión Arquitectura: V20.06 - Sincronización consistente de rol y estado en MongoDB y Firebase Firestore
 // Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.service.js
 
 import mongoose from 'mongoose';
@@ -44,6 +44,49 @@ const getUsuarioModel = () => {
 export class UsuarioService {
 
     /**
+     * Auxiliar interno para replicar de forma consistente cambios de rol, estado, datos de perfil
+     * y disponibilidad desde MongoDB hacia la colección de 'usuarios' en Firebase Firestore.
+     */
+    async _sincronizarFirestore(docUsuario, cambios = {}) {
+        if (!docUsuario) return;
+        const uidTarget = docUsuario.uid || docUsuario._id?.toString();
+        if (!uidTarget) return;
+
+        try {
+            let db;
+            try {
+                const firebaseModule = await import('../../config/firebase.js');
+                db = firebaseModule.db || firebaseModule.default;
+            } catch (importErr) {
+                // Fallback silencioso si no existe el módulo o no está inicializado en el entorno
+            }
+
+            if (!db) return;
+
+            const payloadFirestore = {};
+            const camposReplicables = [
+                'rol', 'role', 'estado', 'estadoOperativo', 'isActive', 
+                'disponible', 'nombre', 'telefono', 'email', 'terminal_id', 'codigoDespachador'
+            ];
+
+            camposReplicables.forEach(campo => {
+                const valor = cambios[campo] !== undefined ? cambios[campo] : docUsuario[campo];
+                if (valor !== undefined) {
+                    if (campo === 'role') payloadFirestore.rol = valor;
+                    else payloadFirestore[campo] = valor;
+                }
+            });
+
+            if (Object.keys(payloadFirestore).length > 0) {
+                payloadFirestore.updatedAt = new Date().toISOString();
+                await db.collection('usuarios').doc(uidTarget).set(payloadFirestore, { merge: true });
+            }
+        } catch (error) {
+            console.error(`⚠️ [CIMCO-FIRESTORE-SYNC] Error sincronizando usuario ${uidTarget} en Firestore:`, error);
+        }
+    }
+
+    /**
      * Auxiliar interno para evaluar y actualizar la disponibilidad del usuario/conductor según su saldo resultante.
      * Regla: Saldo < 2.000 COP => estadoOperativo = 'NO_DISPONIBLE', isActive = false
      *        Saldo >= 2.000 COP => estadoOperativo = 'DISPONIBLE', isActive = true
@@ -71,11 +114,12 @@ export class UsuarioService {
             docUsuario.estado = estaHabilitado ? 'ACTIVO' : 'BLOQUEADO';
         }
 
+        let usuarioGuardado;
         if (typeof docUsuario.save === 'function') {
-            return await docUsuario.save();
+            usuarioGuardado = await docUsuario.save();
         } else {
             const Usuario = getUsuarioModel();
-            return await Usuario.findByIdAndUpdate(
+            usuarioGuardado = await Usuario.findByIdAndUpdate(
                 docUsuario._id,
                 { 
                     $set: { 
@@ -87,6 +131,16 @@ export class UsuarioService {
                 { new: true }
             );
         }
+
+        if (usuarioGuardado) {
+            await this._sincronizarFirestore(usuarioGuardado, {
+                estadoOperativo: nuevoEstadoOperativo,
+                isActive: estaHabilitado,
+                estado: usuarioGuardado.estado
+            });
+        }
+
+        return usuarioGuardado || docUsuario;
     }
 
     async obtenerDirectorioGlobal() {
@@ -154,7 +208,9 @@ export class UsuarioService {
             isActive: datos.isActive ?? estaHabilitado
         });
 
-        return await nuevoUsuario.save();
+        const usuarioCreado = await nuevoUsuario.save();
+        await this._sincronizarFirestore(usuarioCreado, datos);
+        return usuarioCreado;
     }
 
     async obtenerUsuarioPorId(targetId) {
@@ -178,11 +234,17 @@ export class UsuarioService {
             }
         }
 
-        return await Usuario.findOneAndUpdate(
+        const usuarioActualizado = await Usuario.findOneAndUpdate(
             buildTargetQuery(targetId),
             { $set: datos },
             { new: true, runValidators: true }
         );
+
+        if (usuarioActualizado) {
+            await this._sincronizarFirestore(usuarioActualizado, datos);
+        }
+
+        return usuarioActualizado;
     }
 
     async eliminarUsuario(targetId) {
@@ -197,16 +259,22 @@ export class UsuarioService {
 
     async asignarTerminalDespachador({ targetId, terminal_id, codigoDespachador }) {
         const Usuario = getUsuarioModel();
-        return await Usuario.findOneAndUpdate(
+        const cambios = { 
+            terminal_id, 
+            ...(codigoDespachador && { codigoDespachador }) 
+        };
+
+        const usuario = await Usuario.findOneAndUpdate(
             buildTargetQuery(targetId),
-            { 
-                $set: { 
-                    terminal_id, 
-                    ...(codigoDespachador && { codigoDespachador }) 
-                } 
-            },
+            { $set: cambios },
             { new: true }
         );
+
+        if (usuario) {
+            await this._sincronizarFirestore(usuario, cambios);
+        }
+
+        return usuario;
     }
 
     async obtenerSaldoDespachador(targetId) {
@@ -259,6 +327,10 @@ export class UsuarioService {
             usuario.estadoOperativo = estaHabilitado ? 'DISPONIBLE' : 'NO_DISPONIBLE';
             usuario.isActive = estaHabilitado;
             await usuario.save();
+            await this._sincronizarFirestore(usuario, {
+                estadoOperativo: usuario.estadoOperativo,
+                isActive: usuario.isActive
+            });
         } else {
             usuario = await this._sincronizarEstadoPorSaldo(usuario);
         }

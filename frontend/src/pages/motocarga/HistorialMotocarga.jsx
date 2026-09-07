@@ -1,10 +1,10 @@
-// Versión Arquitectura: V13.1 - Filtrado Estricto REST por tipoServicio=motocarga y Resiliencia NoSQL
+// Versión Arquitectura: V13.2 - Coherencia en Fallback NoSQL, Reset de Sesión Nula y Saneamiento Temporal Robustecido
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\motocarga\HistorialMotocarga.jsx
  * Misión: Renderizar la bitácora de fletes completados en la red de motocarga/logística pesada consumiendo la API REST de Express/MongoDB
  *        con fallback resiliente a Firestore y ordenamiento en memoria para mitigar ausencias de índices compuestos.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Acento Ámbar/Esmeralda).
- * Ajuste V13.1: Garantía de filtrado en endpoint REST para asegurar que `tipoServicio=motocarga` prevenga la contaminación de registros.
+ * Ajuste V13.2: Sincronización de fallback 'viajes', saneamiento de estado para sesiones inactivas y soporte omnicanal de fechas NoSQL.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -40,6 +40,7 @@ const HistorialMotocarga = () => {
     const fetchHistorial = useCallback(async () => {
         const conductorId = user?.uid || user?.id || user?._id;
         if (!conductorId) {
+            setHistorial([]); // 🛡️ Saneamiento de estado en sesión nula o inexistente
             setLoading(false);
             return;
         }
@@ -76,7 +77,8 @@ const HistorialMotocarga = () => {
 
         // 🔄 2. FALLBACK SECUNDARIO NOSQL (FIRESTORE) CON ORDENAMIENTO EN MEMORIA
         try {
-            const pathColeccion = FIRESTORE_PATHS?.rides || FIRESTORE_PATHS?.viajes || 'rides';
+            // Priorización estandarizada de colección 'viajes' para alineación directa con HomeMotocarga
+            const pathColeccion = FIRESTORE_PATHS?.viajes || FIRESTORE_PATHS?.rides || 'viajes';
             const q = query(
                 collection(db, pathColeccion),
                 where('conductorId', '==', conductorId),
@@ -96,7 +98,12 @@ const HistorialMotocarga = () => {
                     const t = new Date(val).getTime();
                     return isNaN(t) ? 0 : t;
                 };
-                return getTime(b.fechaCreacion || b.createdAt) - getTime(a.fechaCreacion || a.createdAt);
+                
+                // Extracción omnicanal de timestamps (soporte para variantes minúsculas/camelCase)
+                const valB = b.fechaCreacion || b.createdAt || b.fechacreacion;
+                const valA = a.fechaCreacion || a.createdAt || a.fechacreacion;
+                
+                return getTime(valB) - getTime(valA);
             });
 
             setHistorial(docs);
@@ -167,7 +174,7 @@ const HistorialMotocarga = () => {
                     ) : (
                         historial.map(flete => {
                             const tarifaFinal = parseFloat(flete.tarifa || flete.pago?.tarifaOfertada || flete.oferta || flete.valor || flete.precio || 0);
-                            const fechaFormat = formatFecha(flete.fechaCreacion || flete.createdAt);
+                            const fechaFormat = formatFecha(flete.fechaCreacion || flete.createdAt || flete.fechacreacion);
 
                             return (
                                 <div 

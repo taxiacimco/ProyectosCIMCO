@@ -1,4 +1,4 @@
-// Versión Arquitectura: V17.7 - Inyección Unificada de Contexto req.user y Retrocompatibilidad Subrol/AccessLevel
+// Versión Arquitectura: V17.8 - Exportación Nombrada esAdminCentralMiddleware y Retrocompatibilidad Unificada
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\middleware\auth.middleware.js
  * Misión: Securización estricta de JWT, inspección de tokens, estandarización de cabecera Bearer (soporte puerto 3000 local), 
@@ -304,9 +304,10 @@ export const esDespachador = (req, res, next) => {
 // ==================================================================
 // 📡 PUENTE DE RETROCOMPATIBILIDAD DETERMINISTA (ANTI-CRASH)
 // ==================================================================
-// Vincula la exportación histórica 'esAdmin' y 'authMiddleware' con las directrices unificadas 
+// Vincula la exportación histórica 'esAdmin', 'esAdminCentralMiddleware' y 'authMiddleware' con las directrices unificadas 
 // para subsanar descalces de importación en el ecosistema.
 export const esAdmin = esAdminCentral;
+export const esAdminCentralMiddleware = esAdminCentral;
 export const authMiddleware = verificarToken;
 
 export default verificarToken;

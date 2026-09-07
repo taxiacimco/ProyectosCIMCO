@@ -1,8 +1,9 @@
-// Versión Arquitectura: V1.3 - Soporte Dinámico y Compatibilidad para Búsqueda Flexible BSON, Firebase UID y NIT en Cooperativas
+// Versión Arquitectura: V1.4 - Protección de Creación y Aprobación de Cooperativas vía esAdminCentralMiddleware
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\cooperativas\cooperativa.routes.js
  * Misión: Definición y securización de las rutas de gestión de cooperativas.
- * Ajuste V1.3: Incorporación de compatibilidad explícita de identificadores dinámicos (:id y :uid) para consultas, actualizaciones y estados de cooperativas/empresas en entornos híbridos MongoDB / Firebase.
+ * Ajuste V1.4: Protección estricta de las operaciones de creación, aprobación y actualización mediante esAdminCentralMiddleware,
+ * asegurando la integridad de transacciones atómicas de estados y balances globales.
  */
 
 import { Router } from 'express';
@@ -14,7 +15,12 @@ import {
   actualizarCooperativa
 } from './cooperativa.controller.js';
 
-import { verificarToken, esAdminCentral } from '../../middleware/auth.middleware.js';
+import * as authMiddleware from '../../middleware/auth.middleware.js';
+
+const { verificarToken, esAdminCentral, esAdminCentralMiddleware: esAdminCentralMw } = authMiddleware;
+
+// Garantizar resolución del middleware de administración central independientemente del named export en auth.middleware
+const esAdminCentralMiddleware = esAdminCentralMw || esAdminCentral;
 
 const router = Router();
 
@@ -37,26 +43,26 @@ const verificarPayloadModificacion = (req, res, next) => {
 router.get('/', verificarToken, obtenerCooperativas);
 router.get('/:id', verificarToken, obtenerCooperativaPorId);
 router.get('/uid/:uid', verificarToken, (req, res, next) => {
-  if (req.params && req.params.uid) {
+  if (req && req.params && req.params.uid) {
     req.params.id = req.params.uid;
   }
   return obtenerCooperativaPorId(req, res, next);
 });
 
 // 2. Operaciones Administrativas (Protegidas con Token y Rol Admin Central)
-router.post('/', verificarToken, esAdminCentral, verificarPayloadModificacion, crearCooperativa);
+router.post('/', verificarToken, esAdminCentralMiddleware, verificarPayloadModificacion, crearCooperativa);
 
-router.patch('/:id/estado', verificarToken, esAdminCentral, verificarPayloadModificacion, cambiarEstadoCooperativa);
-router.patch('/uid/:uid/estado', verificarToken, esAdminCentral, verificarPayloadModificacion, (req, res, next) => {
-  if (req.params && req.params.uid) {
+router.patch('/:id/estado', verificarToken, esAdminCentralMiddleware, verificarPayloadModificacion, cambiarEstadoCooperativa);
+router.patch('/uid/:uid/estado', verificarToken, esAdminCentralMiddleware, verificarPayloadModificacion, (req, res, next) => {
+  if (req && req.params && req.params.uid) {
     req.params.id = req.params.uid;
   }
   return cambiarEstadoCooperativa(req, res, next);
 });
 
-router.put('/:id', verificarToken, esAdminCentral, verificarPayloadModificacion, actualizarCooperativa);
-router.put('/uid/:uid', verificarToken, esAdminCentral, verificarPayloadModificacion, (req, res, next) => {
-  if (req.params && req.params.uid) {
+router.put('/:id', verificarToken, esAdminCentralMiddleware, verificarPayloadModificacion, actualizarCooperativa);
+router.put('/uid/:uid', verificarToken, esAdminCentralMiddleware, verificarPayloadModificacion, (req, res, next) => {
+  if (req && req.params && req.params.uid) {
     req.params.id = req.params.uid;
   }
   return actualizarCooperativa(req, res, next);

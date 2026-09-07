@@ -1,11 +1,12 @@
-// Versión Arquitectura: V12.22 - Migración a Componente Compartido AjustesPerfil y Gobernanza CIMCO-UI V9.3
+// Versión Arquitectura: V21.49 - Refactorización de capturarOferta, ordenamiento en memoria de radar, guardia isTokenExpired y sincronización de perfil
 import React, { useState, useEffect, useRef } from 'react';
-import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
 import { useWallet } from '@/hooks/useWallet';
 import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api'; 
+import { isTokenExpired } from '@/utils/auth';
 import ModalCalificacion from '@/components/ModalCalificacion';
 import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import {
@@ -42,6 +43,39 @@ export default function HomeMotoparrillero() {
   const token = localStorage.getItem('token') || user?.token;
   const saldoEfectivo = walletData?.saldo ?? walletData?.balance ?? 0;
   const puedeOperar = saldoEfectivo >= UMBRAL_MINIMO_COP;
+
+  // 🛡️ GUARDA CENTRALIZADA DE EXPIRACIÓN DE TOKEN JWT
+  const verificarSesionToken = () => {
+    if (!token) return false;
+    try {
+      if (typeof isTokenExpired === 'function' && isTokenExpired(token)) {
+        return true;
+      }
+      // Verificación defensiva manual en caso de fallback
+      const base64Url = token.split('.')[1];
+      if (!base64Url) return false;
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+      const payload = JSON.parse(jsonPayload);
+      if (payload?.exp && Date.now() >= payload.exp * 1000) {
+        return true;
+      }
+    } catch (e) {
+      console.warn("⚠️ [CIMCO-AUTH] Fallo al validar expiración de token:", e);
+    }
+    return false;
+  };
+
+  // Monitorización de vigencia de sesión JWT
+  useEffect(() => {
+    if (token && verificarSesionToken()) {
+      console.warn("🚨 [CIMCO-AUTH] Token expirado detectado en HomeMotoparrillero.");
+      setErrorInterno("⚠️ Sesión expirada. Por favor inicie sesión nuevamente.");
+      setIsOnline(false);
+      detenerTrackingGPS();
+      if (typeof logout === 'function') logout();
+    }
+  }, [token]);
 
   // Validation: Desconectar de red si no existe ID de conductor válido
   useEffect(() => {
@@ -80,6 +114,13 @@ export default function HomeMotoparrillero() {
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
+      if (verificarSesionToken()) {
+        alert("⚠️ Su sesión ha expirado. Inicie sesión nuevamente.");
+        setIsOnline(false);
+        if (typeof logout === 'function') logout();
+        return;
+      }
+
       if (!conductorId) {
         alert("⚠️ No se identificó la sesión del conductor. Por favor inicie sesión de nuevo.");
         setIsOnline(false);
@@ -182,7 +223,7 @@ export default function HomeMotoparrillero() {
   };
 
   // ==================================================================
-  // 4. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE
+  // 4. ESCUCHA ATÓMICA DE OFERTAS EN RADAR FIRESTORE (ORDENAMIENTO EN MEMORIA)
   // ==================================================================
   useEffect(() => {
     if (!user?.uid || !isOnline) {
@@ -192,17 +233,30 @@ export default function HomeMotoparrillero() {
 
     setCargandoOfertas(true);
     const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
+    
+    // 🛡️ SIN orderBy PARA PREVENIR ERRORES DE ÍNDICES COMPUESTOS EN FIRESTORE
     const q = query(
       collection(db, pathViajes),
-      where('estado', '==', 'SOLICITADO'),
-      orderBy('fechacreacion', 'desc')
+      where('estado', '==', 'SOLICITADO')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ofertas = [];
-      snapshot.forEach((doc) => {
-        ofertas.push({ id: doc.id, ...doc.data() });
+      snapshot.forEach((docSnap) => {
+        ofertas.push({ id: docSnap.id, ...docSnap.data() });
       });
+
+      // 🧠 ORDENAMIENTO EN MEMORIA JAVASCRIPT DE FORMA DESCENDENTE
+      ofertas.sort((a, b) => {
+        const timestampA = a?.fechacreacion?.toMillis 
+          ? a.fechacreacion.toMillis() 
+          : (a?.fechacreacion ? new Date(a.fechacreacion).getTime() : 0);
+        const timestampB = b?.fechacreacion?.toMillis 
+          ? b.fechacreacion.toMillis() 
+          : (b?.fechacreacion ? new Date(b.fechacreacion).getTime() : 0);
+        return timestampB - timestampA;
+      });
+
       setOfertasDisponibles(ofertas);
       setCargandoOfertas(false);
     }, (error) => {
@@ -250,6 +304,12 @@ export default function HomeMotoparrillero() {
   // 6. ACCIONES DE GESTIÓN DE DESPACHOS CONTABLES ACID
   // ==================================================================
   const aceptarViaje = async () => {
+    if (verificarSesionToken()) {
+      alert("⚠️ Su sesión ha expirado. Por favor inicie sesión nuevamente.");
+      logout();
+      return;
+    }
+
     if (!solicitudViaje) return;
 
     if (!puedeOperar) {
@@ -277,14 +337,19 @@ export default function HomeMotoparrillero() {
       
       const respuesta = await api.post(`/viajes/aceptar`, {
         viajeId: solicitudViaje.viajeId,
-        conductorId
+        conductorId,
+        tipoServicio: 'motoparrillero'
       }, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
 
       if (respuesta?.data?.success) {
         if (socket && isSocketConnected) {
-          socket.emit('aceptar_carrera', { carreraId: solicitudViaje.viajeId, conductorId });
+          socket.emit('aceptar_carrera', { 
+            carreraId: solicitudViaje.viajeId, 
+            conductorId,
+            tipoServicio: 'motoparrillero'
+          });
         }
         setServicioActivo(respuesta.data.viaje);
         setSolicitudViaje(null);
@@ -299,6 +364,12 @@ export default function HomeMotoparrillero() {
   };
 
   const capturarOferta = async (viajeId) => {
+    if (verificarSesionToken()) {
+      alert("⚠️ Su sesión ha expirado. Por favor inicie sesión nuevamente.");
+      logout();
+      return;
+    }
+
     if (!puedeOperar) {
       const msg = "⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.";
       setErrorInterno(msg);
@@ -318,9 +389,11 @@ export default function HomeMotoparrillero() {
     }
 
     setErrorInterno('');
+    setLoading(true);
     try {
       const pathViajes = FIRESTORE_PATHS?.viajes || 'viajes';
       const viajeRef = doc(db, pathViajes, viajeId);
+      
       await runTransaction(db, async (transaction) => {
         const viajeSnap = await transaction.get(viajeRef);
         if (!viajeSnap.exists()) throw new Error("El viaje no existe en la matriz distribuidora.");
@@ -330,20 +403,35 @@ export default function HomeMotoparrillero() {
           throw new Error("Lo sentimos, este servicio ya fue capturado por otra unidad.");
         }
 
+        const conductorEmail = user?.email || localStorage.getItem('conductorEmail') || '';
+        const conductorTelefono = user?.telefonoMovil || user?.phone || '';
+
         transaction.update(viajeRef, {
           estado: 'ACEPTADO',
-          conductorId: user?.uid,
+          tipoServicio: 'motoparrillero',
+          conductorId: user?.uid || conductorId,
           conductorNombre: nombreConductor,
-          fechaAceptado: serverTimestamp()
+          conductorEmail: conductorEmail,
+          conductorTelefono: conductorTelefono,
+          fechaAceptado: serverTimestamp(),
+          fecha_aceptado: serverTimestamp(),
+          actualizadoEn: serverTimestamp()
         });
       });
 
       if (socket && isSocketConnected) {
-        socket.emit('aceptar_carrera', { carreraId: viajeId, conductorId });
+        socket.emit('aceptar_carrera', { 
+          carreraId: viajeId, 
+          conductorId: user?.uid || conductorId,
+          tipoServicio: 'motoparrillero'
+        });
       }
+      alert("✅ Oferta de parrillero capturada con éxito.");
     } catch (err) {
       console.error("🚨 [CIMCO-CAPTURE-FAIL] Bloqueo transaccional Parrillero:", err?.message);
-      alert(err?.message);
+      alert(err?.message || "Ocurrió un error al intentar capturar la oferta.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -354,7 +442,8 @@ export default function HomeMotoparrillero() {
       const viajeRef = doc(db, pathViajes, servicioActivo.id);
       await updateDoc(viajeRef, { 
         estado: nuevoEstado,
-        [`fecha_${nuevoEstado.toLowerCase()}`]: serverTimestamp()
+        [`fecha_${nuevoEstado.toLowerCase()}`]: serverTimestamp(),
+        actualizadoEn: serverTimestamp()
       });
     } catch (err) {
       console.error("🚨 [CIMCO-STATE-FAIL] Error al mutar estado:", err);
@@ -443,7 +532,7 @@ export default function HomeMotoparrillero() {
         </div>
       </header>
 
-      {/* BANNER DE ALERTA DE SALDO */}
+      {/* BANNER DE ALERTA DE SALDO O SESIÓN */}
       {(!puedeOperar || errorInterno) && !walletLoading && (
         <div className="m-4 p-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider relative z-10 animate-pulse">
           <AlertCircle size={16} strokeWidth={2.5} className="shrink-0 text-red-400" />
@@ -652,14 +741,14 @@ export default function HomeMotoparrillero() {
                             <div className="pt-1">
                               <button 
                                 onClick={() => capturarOferta(oferta.id)}
-                                disabled={!puedeOperar || bloqueadoPorComision}
+                                disabled={!puedeOperar || bloqueadoPorComision || loading}
                                 className="w-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 disabled:bg-zinc-800/40 disabled:border-white/5 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-lg uppercase tracking-wider border border-cyan-500/30 active:scale-95 transition-all"
                               >
                                 {!puedeOperar 
                                   ? 'SALDO BLOQUEADO (< $2.000)' 
                                   : bloqueadoPorComision 
                                     ? 'SALDO INSUFICIENTE PARA COMISIÓN (10%)' 
-                                    : 'CAPTURAR OFERTA'}
+                                    : loading ? 'CAPTURANDO...' : 'CAPTURAR OFERTA'}
                               </button>
                             </div>
                           </div>
@@ -674,11 +763,18 @@ export default function HomeMotoparrillero() {
         )}
       </main>
 
-      {/* 🛠️ COMPONENTE COMPARTIDO DE AJUSTE DE PERFIL / VEHÍCULO */}
+      {/* 🛠️ COMPONENTE COMPARTIDO DE AJUSTE DE PERFIL / VEHÍCULO (SINCRONIZACIÓN EN CALIENTE) */}
       {mostrarModalPerfil && (
         <AjustesPerfil 
           isOpen={mostrarModalPerfil} 
           onClose={() => setMostrarModalPerfil(false)} 
+          onUpdateSuccess={(datosActualizados) => {
+            if (datosActualizados?.nombre || datosActualizados?.nombreCompleto) {
+              const nuevoNombre = datosActualizados.nombre || datosActualizados.nombreCompleto;
+              setNombreConductor(nuevoNombre.toUpperCase());
+            }
+            setMostrarModalPerfil(false);
+          }}
         />
       )}
 
