@@ -1,11 +1,12 @@
-// Versión Arquitectura: V21.33 - Depuración de Índice Duplicado en Campo UID
+// Versión Arquitectura: V21.34 - Unificación de Interfaz de Billetera Virtual y Compatibilidad de Saldos
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Pasajero.js
  * Misión: Mapeo estricto a la colección física 'pasajeros' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva cifrado Bcrypt con guarda anti-doble hashing (isModified('password')
  * y detección de prefijo hash $2a$/$2b$), esquema de direcciones favoritas, soporte GeoJSON 2dsphere,
  * aprobación automática inmediata, normalización de variables, método puedeOperar() e índice UID disperso.
- * Ajuste V21.33: Remoción de 'index: true' en la propiedad 'uid' para desduplicar la indexación declarada implícitamente con 'unique: true'.
+ * Ajuste V21.34: Incorporación de propiedades virtuales 'billetera' y 'walletBalance' para homologar la
+ * consulta unificada de saldos multirrol.
  */
 
 import mongoose from 'mongoose';
@@ -128,6 +129,15 @@ pasajeroSchema.virtual('avatarUrl')
     .get(function () {
         return this.fotoPerfil || this.foto_perfil || null;
     });
+
+// 💳 VIRTUALES DE BILLETERA (HOMOLOGACIÓN UNIFICADA DE SALDOS MULTIRROL)
+pasajeroSchema.virtual('billetera').get(function () {
+    return { saldo: this.saldo || 0 };
+});
+
+pasajeroSchema.virtual('walletBalance').get(function () {
+    return this.saldo || 0;
+});
 
 // Índices optimizados
 pasajeroSchema.index({ "coordenadas.coordinates": "2dsphere" }, { background: true });

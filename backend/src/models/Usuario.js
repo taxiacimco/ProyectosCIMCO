@@ -1,11 +1,12 @@
-// Versión Arquitectura: V19.7 - Depuración de Índices Duplicados Mongoose en Campo UID
+// Versión Arquitectura: V19.8 - Exposición de Propiedades Virtuales para Billetera y Saldos Homologados
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Usuario.js
  * Misión: Definir la estructura unificada para la entidad de Usuarios (Admin, Despachador, Pasajero, Staff) en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva la sincronización bidireccional (rol ↔ role, saldo ↔ balance), persistencia estricta,
  * índices GeoJSON, encriptación bcrypt única en el hook pre-save controlando isModified('password') y evaluación de umbral
  * financiero de operabilidad (puedeOperar).
- * Ajuste V19.7: Depuración total de declaraciones dobles de índices en el esquema para resolver la advertencia de Mongoose.
+ * Ajuste V19.8: Incorporación de propiedades virtuales 'billetera', 'saldoWallet' y 'saldoCredito' para asegurar compatibilidad
+ * multirrol y mapeo homogéneo en la ruta /api/admin/usuarios.
  */
 
 import mongoose from 'mongoose';
@@ -139,7 +140,22 @@ const usuarioSchema = new mongoose.Schema({
     numeroInterno: String
 }, {
     timestamps: true,
-    versionKey: false
+    versionKey: false,
+    toJSON: { virtuals: true, getters: true },
+    toObject: { virtuals: true, getters: true }
+});
+
+// 💳 PROPIEDADES VIRTUALES DE BILLETERA Y SALDOS (HOMOLOGACIÓN UNIFICADA DE INTERFAZ MULTIRROL)
+usuarioSchema.virtual('billetera').get(function () {
+    return { saldo: this.saldo || 0 };
+});
+
+usuarioSchema.virtual('saldoWallet').get(function () {
+    return this.saldo || 0;
+});
+
+usuarioSchema.virtual('saldoCredito').get(function () {
+    return this.saldo || 0;
 });
 
 // Índices optimizados

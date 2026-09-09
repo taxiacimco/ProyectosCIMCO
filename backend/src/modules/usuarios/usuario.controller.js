@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.06 - Jerarquía Administrativa y Validación Anti Auto-Elevación de Permisos
+// Versión Arquitectura: V20.07 - Agregación de Saldo Unificado por Rol y Directorio de Usuarios
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
  * Misión: Controlador unificado de usuarios (Admin, Despachador, Pasajero, Staff) desacoplado mediante servicios y repositorios (SRP).
@@ -86,7 +86,7 @@ const evaluarEstadoOperativoPorSaldo = async (usuario, nuevoSaldo) => {
 // ==================================================================
 
 /**
- * 📊 Obtener directorio de usuarios con agregación de saldo $lookup a colección billeteras (Admin / CEO)
+ * 📊 Obtener directorio de usuarios con agregación de saldo unificado (Admin / CEO)
  */
 export const obtenerDirectorioUsuarios = async (req, res, next) => {
     try {
@@ -106,8 +106,35 @@ export const obtenerDirectorioUsuarios = async (req, res, next) => {
                     email: 1,
                     rol: 1,
                     estadoOperativo: 1,
+                    // Mapeo y unificación del saldo según el rol del usuario
                     saldoWallet: {
-                        $ifNull: [{ $arrayElemAt: ['$datosBilletera.saldo', 0] }, 0]
+                        $cond: {
+                            if: { 
+                                $eq: [{ $toLower: { $ifNull: ["$rol", ""] } }, "pasajero"] 
+                            },
+                            then: {
+                                $ifNull: [
+                                    "$billetera.saldo",
+                                    {
+                                        $ifNull: [
+                                            "$walletBalance",
+                                            { $ifNull: [{ $arrayElemAt: ['$datosBilletera.saldo', 0] }, 0] }
+                                        ]
+                                    }
+                                ]
+                            },
+                            else: {
+                                $ifNull: [
+                                    { $arrayElemAt: ['$datosBilletera.saldo', 0] },
+                                    {
+                                        $ifNull: [
+                                            "$saldoWallet",
+                                            { $ifNull: ["$saldoCredito", 0] }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
                     }
                 }
             }

@@ -1,12 +1,12 @@
-// Versión Arquitectura: V21.36 - Consolidador de Índice Único UID en Definición de Esquema
+// Versión Arquitectura: V21.37 - Integración de Getters Virtuales para Homologación de Billetera y Saldos Multirrol
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\Conductor.js
  * Misión: Mapeo y normalización de la colección física 'conductores' en MongoDB Atlas.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks GeoJSON, compatibilidad ES6 Modules,
  * unificación de billetera en 'saldo', índice 2dsphere, estadoAdministrativo, URLs documentales, cifrado Bcrypt anti-doble hashing,
  * método de negocio puedeOperar).
- * Ajuste V21.36: Unificación del atributo 'unique: true' directamente en la propiedad 'uid' del esquema y eliminación
- * de la declaración duplicada en ConductorSchema.index para corregir la advertencia de Mongoose.
+ * Ajuste V21.37: Adición de propiedades virtuales 'billetera', 'saldoWallet' y 'saldoCredito' para garantizar mapeo continuo
+ * de saldos en consultas de administración (/api/admin/usuarios) previniendo valores undefined en serialización.
  */
 
 import mongoose from 'mongoose';
@@ -179,6 +179,19 @@ ConductorSchema.virtual('avatarUrl')
     .get(function () {
         return this.foto_perfil || this.fotoPerfil || null;
     });
+
+// 💳 PROPIEDADES VIRTUALES DE BILLETERA Y SALDOS (HOMOLOGACIÓN UNIFICADA DE INTERFAZ MULTIRROL)
+ConductorSchema.virtual('billetera').get(function () {
+    return { saldo: this.saldo || 0 };
+});
+
+ConductorSchema.virtual('saldoWallet').get(function () {
+    return this.saldo || 0;
+});
+
+ConductorSchema.virtual('saldoCredito').get(function () {
+    return this.saldo || 0;
+});
 
 // Índices optimizados para el motor de geolocalización y bloqueos transaccionales
 ConductorSchema.index({ ubicacion: "2dsphere" });
