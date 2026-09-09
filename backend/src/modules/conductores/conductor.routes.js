@@ -1,9 +1,4 @@
-// Versión Arquitectura: V22.3 - Migración de Protección de Billeteras y Saldos a esAdminCentralMiddleware
-/**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
- * Misión: Mapeo de endpoints para gestión de estado administrativo, telemetría, métricas y recargas auditadas sin provocar CIMCO-ROUTE-MISS.
- * Ajuste V22.3: Actualización de endpoints de recarga y ajuste de saldo (/saldos/admin/recargar, /ajustar-saldo y alias administrativos) para emplear esAdminCentralMiddleware.
- */
+// Versión Arquitectura: V22.4 - Integración Quirúrgica y Protección Centralizada con esAdminCentralMiddleware
 
 import express from 'express';
 import Conductor from '../../models/Conductor.js';
@@ -29,7 +24,7 @@ import {
 } from './conductor.controller.js';
 import * as authMiddleware from '../../middleware/auth.middleware.js';
 
-// Adaptadores de compatibilidad de middlewares para evitar referencias nulas
+// Adaptadores de compatibilidad de middlewares para evitar referencias nulas y blindar la ejecución
 const autenticarJWT = authMiddleware.autenticarJWT || authMiddleware.verificarToken;
 const verificarRol = authMiddleware.verificarRol 
     ? authMiddleware.verificarRol 

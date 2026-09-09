@@ -1,11 +1,11 @@
-// Versión Arquitectura: V15.6 - Asignación de key={cuenta._reactKey} y Garantía de Deduplicación en Tarjetas de Billetera
+// Versión Arquitectura: V15.7 - Garantía de Re-Fetch Inmediato (await obtenerBovedasGlobales) tras Operación Manual de Billetera
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
  * Misión: Monitoreo global de saldos y ejecución de ajustes de capital (Abono / Débito Manual) para todos los actores:
  *         Pasajeros, Mototaxistas, Motoparrilleros, Montacargas, Despachadores y Conductores.
- * Ajuste V15.6:
- *   1. Integración de key={cuenta._reactKey} en la iteración de tarjetas de billeteras/usuarios.
- *   2. Garantía de asignación de _reactKey en el proceso de deduplicación con fallback.
+ * Ajuste V15.7:
+ *   1. Integración de re-fetch síncrono (await obtenerBovedasGlobales()) dentro del bloque exitoso de ejecutarRecarga.
+ *   2. Preservación del patrón de seguridad isMounted y limpieza de formulario.
  *   3. Mantenimiento del estándar visual CIMCO-UI V9.3 (Glassmorphism), alias absolutos y defensa anti-undefined.
  */
 
@@ -376,7 +376,9 @@ export const GestionBilleteras = () => {
                     setMontoRecarga('');
                     setCuentaSeleccionada(null);
                     setProcesandoRecarga(false);
-                    obtenerBovedasGlobales(); // Refrescar saldos inmediatamente
+
+                    // 🔄 Re-fetch para forzar la actualización inmediata de saldos en la tabla/grilla
+                    await obtenerBovedasGlobales();
                 }
             } else {
                 const mensajeError = respuesta.message || respuesta.error || 'Fallo transaccional en el servidor central API REST';

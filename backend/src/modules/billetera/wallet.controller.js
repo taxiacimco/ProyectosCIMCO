@@ -1,10 +1,10 @@
-// Versión Arquitectura: V2.3 - Transacciones Atómicas Mongoose (session.withTransaction) para recargarSaldo, debitarSaldo y gestionarSaldoManual
+// Versión Arquitectura: V2.5 - Emisión WebSockets saldo_actualizado_admin y saldo_actualizado_cliente
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\billetera\wallet.controller.js
  * Misión: Controlador integral de billetera bajo sintaxis ES Modules nativa. Provee consulta concurrente de saldos,
  *         mutaciones con transacciones atómicas ACID (session.withTransaction) para prevenir condiciones de carrera (race conditions),
  *         revaluación automática de estado operativo (umbral $2.000 COP), auditoría doble (MongoDB y Firestore)
- *         y emisión de eventos Socket.io a la sala gerencial y canales de usuario.
+ *         y emisión de eventos Socket.io (saldo_actualizado_admin y saldo_actualizado_cliente) a la sala gerencial y canales de usuario.
  */
 
 import mongoose from 'mongoose';
@@ -160,7 +160,13 @@ export const actualizarSaldo = async (req, res) => {
             const io = req.app?.get('io');
             if (io && usuarioActualizado) {
                 io.to(`usuario_${usuarioActualizado.uid}`).emit('saldo_actualizado', { saldo: nuevoSaldo });
+                io.to(`usuario_${usuarioActualizado.uid}`).emit('saldo_actualizado_cliente', { saldo: nuevoSaldo });
+                
                 io.to('sala_admins').emit('admin_saldo_usuario_actualizado', {
+                    usuarioId: usuarioActualizado.uid,
+                    nuevoSaldo
+                });
+                io.to('sala_admins').emit('saldo_actualizado_admin', {
                     usuarioId: usuarioActualizado.uid,
                     nuevoSaldo
                 });
@@ -320,16 +326,21 @@ export const recargarSaldo = async (req, res) => {
         try {
             const io = req.app?.get('io');
             if (io && resultadoTransaccion) {
-                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado', {
+                const payloadCliente = {
                     saldo: resultadoTransaccion.saldoNuevo,
                     tipoOperacion: 'RECARGA',
                     monto: montoNumerico
-                });
-
-                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', {
+                };
+                const payloadAdmin = {
                     ...resultadoTransaccion,
                     tipoOperacion: 'RECARGA'
-                });
+                };
+
+                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado', payloadCliente);
+                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado_cliente', payloadCliente);
+
+                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
+                io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
             }
         } catch (socketErr) {
             console.warn("⚠️ [SOCKET-EMIT-WARNING]: Error emitiendo socket de recarga:", socketErr?.message);
@@ -496,16 +507,21 @@ export const debitarSaldo = async (req, res) => {
         try {
             const io = req.app?.get('io');
             if (io && resultadoTransaccion) {
-                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado', {
+                const payloadCliente = {
                     saldo: resultadoTransaccion.saldoNuevo,
                     tipoOperacion: 'DEBITO',
                     monto: montoNumerico
-                });
-
-                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', {
+                };
+                const payloadAdmin = {
                     ...resultadoTransaccion,
                     tipoOperacion: 'DEBITO'
-                });
+                };
+
+                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado', payloadCliente);
+                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado_cliente', payloadCliente);
+
+                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
+                io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
             }
         } catch (socketErr) {
             console.warn("⚠️ [SOCKET-EMIT-WARNING]: Error emitiendo socket de débito:", socketErr?.message);
@@ -657,30 +673,36 @@ export const gestionarSaldoManual = async (req, res) => {
             };
         });
 
-        // Trazabilidad y Auditoría en Firestore post-transacción
+        // Trazabilidad y Auditoría Asíncrona en Firestore (sin await, capturada con .catch)
         try {
             const firestoreDb = getFirestore();
             if (firestoreDb && resultadoTransaccion) {
-                await firestoreDb.collection('transacciones').doc(resultadoTransaccion.transaccionId).set({
-                    ...resultadoTransaccion,
-                    motivo: motivo || 'Ajuste manual de saldo por administración',
-                    ejecutadoPor: adminId,
-                    rolEjecutor: adminRol,
-                    timestamp: new Date().toISOString()
-                });
+                const registrarAuditoriaFirestore = async () => {
+                    await firestoreDb.collection('transacciones').doc(resultadoTransaccion.transaccionId).set({
+                        ...resultadoTransaccion,
+                        motivo: motivo || 'Ajuste manual de saldo por administración',
+                        ejecutadoPor: adminId,
+                        rolEjecutor: adminRol,
+                        timestamp: new Date().toISOString()
+                    });
 
-                const userRef = firestoreDb.collection(resultadoTransaccion.coleccionOrigen).doc(resultadoTransaccion.usuarioId);
-                const docSnap = await userRef.get();
-                if (docSnap.exists) {
-                    const firestoreUpdate = { saldo: resultadoTransaccion.saldoNuevo };
-                    if (resultadoTransaccion.estadoOperativo) {
-                        firestoreUpdate.estadoOperativo = resultadoTransaccion.estadoOperativo;
+                    const userRef = firestoreDb.collection(resultadoTransaccion.coleccionOrigen).doc(resultadoTransaccion.usuarioId);
+                    const docSnap = await userRef.get();
+                    if (docSnap.exists) {
+                        const firestoreUpdate = { saldo: resultadoTransaccion.saldoNuevo };
+                        if (resultadoTransaccion.estadoOperativo) {
+                            firestoreUpdate.estadoOperativo = resultadoTransaccion.estadoOperativo;
+                        }
+                        await userRef.update(firestoreUpdate);
                     }
-                    await userRef.update(firestoreUpdate);
-                }
+                };
+
+                registrarAuditoriaFirestore().catch(fsError => {
+                    console.warn("⚠️ [AUDITORIA-FIRESTORE-WARNING]: Error sincronizando auditoría en Firestore:", fsError?.message);
+                });
             }
         } catch (fsError) {
-            console.warn("⚠️ [AUDITORIA-FIRESTORE-WARNING]: Error sincronizando auditoría en Firestore:", fsError?.message);
+            console.warn("⚠️ [AUDITORIA-FIRESTORE-WARNING]: Error inicializando auditoría asíncrona en Firestore:", fsError?.message);
         }
 
         // Emisión de eventos en tiempo real mediante Socket.io
@@ -689,21 +711,13 @@ export const gestionarSaldoManual = async (req, res) => {
             if (io && resultadoTransaccion) {
                 const uidTarget = resultadoTransaccion.usuarioId;
 
-                io.to(`usuario_${uidTarget}`).emit('saldo_actualizado', {
+                const payloadCliente = {
                     saldo: resultadoTransaccion.saldoNuevo,
                     tipoOperacion: tipoOperacion.toUpperCase(),
                     monto: montoNumerico
-                });
+                };
 
-                if (targetUserId && targetUserId !== uidTarget) {
-                    io.to(`usuario_${targetUserId}`).emit('saldo_actualizado', {
-                        saldo: resultadoTransaccion.saldoNuevo,
-                        tipoOperacion: tipoOperacion.toUpperCase(),
-                        monto: montoNumerico
-                    });
-                }
-
-                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', {
+                const payloadAdmin = {
                     usuarioId: uidTarget,
                     targetUserId,
                     nuevoSaldo: resultadoTransaccion.saldoNuevo,
@@ -712,7 +726,20 @@ export const gestionarSaldoManual = async (req, res) => {
                     tipoOperacion: tipoOperacion.toUpperCase(),
                     ejecutadoPor: adminId,
                     estadoOperativo: resultadoTransaccion.estadoOperativo
-                });
+                };
+
+                // Emisión a canales de usuario
+                io.to(`usuario_${uidTarget}`).emit('saldo_actualizado', payloadCliente);
+                io.to(`usuario_${uidTarget}`).emit('saldo_actualizado_cliente', payloadCliente);
+
+                if (targetUserId && targetUserId !== uidTarget) {
+                    io.to(`usuario_${targetUserId}`).emit('saldo_actualizado', payloadCliente);
+                    io.to(`usuario_${targetUserId}`).emit('saldo_actualizado_cliente', payloadCliente);
+                }
+
+                // Emisión a sala administrativa
+                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
+                io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
             }
         } catch (socketError) {
             console.warn("⚠️ [SOCKET-EMIT-WARNING]: Error emitiendo evento de saldo vía Socket.io:", socketError?.message);

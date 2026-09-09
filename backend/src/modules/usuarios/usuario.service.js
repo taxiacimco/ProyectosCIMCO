@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.06 - Sincronización consistente de rol y estado en MongoDB y Firebase Firestore
+// Versión Arquitectura: V20.07 - Sincronización mediante $lookup en directorio global
 // Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.service.js
 
 import mongoose from 'mongoose';
@@ -145,7 +145,34 @@ export class UsuarioService {
 
     async obtenerDirectorioGlobal() {
         const Usuario = getUsuarioModel();
-        const usuariosMongo = await Usuario.find().lean();
+        
+        // Uso de pipeline de agregación con $lookup para consolidar saldos desde la colección de billeteras
+        const usuariosMongo = await Usuario.aggregate([
+            {
+                $lookup: {
+                    from: 'billeteras',
+                    localField: '_id',
+                    foreignField: 'usuarioId',
+                    as: 'datosBilletera'
+                }
+            },
+            {
+                $addFields: {
+                    saldoWallet: {
+                        $ifNull: [
+                            { $arrayElemAt: ['$datosBilletera.saldo', 0] },
+                            { $ifNull: ['$saldoWallet', { $ifNull: ['$saldo', 0] }] }
+                        ]
+                    },
+                    saldo: {
+                        $ifNull: [
+                            { $arrayElemAt: ['$datosBilletera.saldo', 0] },
+                            { $ifNull: ['$saldoWallet', { $ifNull: ['$saldo', 0] }] }
+                        ]
+                    }
+                }
+            }
+        ]);
         
         const mapaUnico = new Map();
         for (const u of usuariosMongo) {

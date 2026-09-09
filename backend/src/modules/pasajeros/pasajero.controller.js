@@ -1,9 +1,4 @@
-// Versión Arquitectura: V20.05 - Transacciones Atómicas en MongoDB para Mutación de Billetera y Saldos de Pasajeros
-/**
- * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.controller.js
- * Misión: Gestión integral deduplicada de perfiles de pasajeros, direcciones favoritas, historial de trayectos, operaciones de saldo/billetera con aislamiento de transacciones atómicas de MongoDB y auditoría en Firestore.
- * Ajuste V20.05: Garantía de encapsulamiento en transacciones atómicas de MongoDB para mutaciones directas de saldo de billetera, previniendo condiciones de carrera e inconsistencias con Firestore.
- */
+// Versión Arquitectura: V20.06 - Resiliencia de Aprovisionamiento Firebase Auth y Persistencia Multibase Integrada
 
 import mongoose from 'mongoose';
 import Pasajero from '../../models/Pasajero.js';
@@ -226,44 +221,47 @@ export const registrarPasajero = async (req, res, next) => {
         // 3. Aprovisionamiento y sincronización explícita con Firebase Auth si no viene desde el cliente
         let targetUid = uid ? String(uid).trim() : undefined;
 
-        if (!targetUid && admin && admin.auth) {
-            if (emailSanitizado) {
-                try {
-                    const userRecord = await admin.auth().getUserByEmail(emailSanitizado);
-                    targetUid = userRecord.uid;
-                } catch (authErr) {
-                    if (authErr.code === 'auth/user-not-found') {
-                        try {
-                            const nuevoUsuarioAuth = await admin.auth().createUser({
-                                email: emailSanitizado,
-                                displayName: nombreFinal,
-                                phoneNumber: (telContacto && telContacto.startsWith('+')) ? telContacto : undefined,
-                                password: password || undefined,
-                                disabled: false
-                            });
-                            targetUid = nuevoUsuarioAuth.uid;
-                        } catch (createErr) {
-                            console.warn("⚠️ [FIREBASE-AUTH-CREATE-WARN] No se pudo aprovisionar usuario en Firebase Auth:", createErr.message);
+        if (!targetUid && admin) {
+            const authService = typeof admin.auth === 'function' ? admin.auth() : null;
+            if (authService) {
+                if (emailSanitizado) {
+                    try {
+                        const userRecord = await authService.getUserByEmail(emailSanitizado);
+                        targetUid = userRecord.uid;
+                    } catch (authErr) {
+                        if (authErr.code === 'auth/user-not-found') {
+                            try {
+                                const nuevoUsuarioAuth = await authService.createUser({
+                                    email: emailSanitizado,
+                                    displayName: nombreFinal,
+                                    phoneNumber: (telContacto && telContacto.startsWith('+')) ? telContacto : undefined,
+                                    password: password || undefined,
+                                    disabled: false
+                                });
+                                targetUid = nuevoUsuarioAuth.uid;
+                            } catch (createErr) {
+                                console.warn("⚠️ [FIREBASE-AUTH-CREATE-WARN] No se pudo aprovisionar usuario en Firebase Auth:", createErr.message);
+                            }
+                        } else {
+                            console.warn("⚠️ [FIREBASE-AUTH-FETCH-WARN] Error consultando Firebase Auth por email:", authErr.message);
                         }
-                    } else {
-                        console.warn("⚠️ [FIREBASE-AUTH-FETCH-WARN] Error consultando Firebase Auth por email:", authErr.message);
                     }
-                }
-            } else if (telContacto && telContacto.startsWith('+')) {
-                try {
-                    const userRecord = await admin.auth().getUserByPhoneNumber(telContacto);
-                    targetUid = userRecord.uid;
-                } catch (authErr) {
-                    if (authErr.code === 'auth/user-not-found') {
-                        try {
-                            const nuevoUsuarioAuth = await admin.auth().createUser({
-                                displayName: nombreFinal,
-                                phoneNumber: telContacto,
-                                disabled: false
-                            });
-                            targetUid = nuevoUsuarioAuth.uid;
-                        } catch (createErr) {
-                            console.warn("⚠️ [FIREBASE-AUTH-CREATE-WARN] No se pudo aprovisionar usuario en Firebase Auth por teléfono:", createErr.message);
+                } else if (telContacto && telContacto.startsWith('+')) {
+                    try {
+                        const userRecord = await authService.getUserByPhoneNumber(telContacto);
+                        targetUid = userRecord.uid;
+                    } catch (authErr) {
+                        if (authErr.code === 'auth/user-not-found') {
+                            try {
+                                const nuevoUsuarioAuth = await authService.createUser({
+                                    displayName: nombreFinal,
+                                    phoneNumber: telContacto,
+                                    disabled: false
+                                });
+                                targetUid = nuevoUsuarioAuth.uid;
+                            } catch (createErr) {
+                                console.warn("⚠️ [FIREBASE-AUTH-CREATE-WARN] No se pudo aprovisionar usuario en Firebase Auth por teléfono:", createErr.message);
+                            }
                         }
                     }
                 }
@@ -315,7 +313,9 @@ export const registrarPasajero = async (req, res, next) => {
                 payloadFirestore.coordenadas = coordenadasValidas;
             }
 
-            await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set(payloadFirestore, { merge: true });
+            if (dbFirestore) {
+                await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set(payloadFirestore, { merge: true });
+            }
         } catch (fsErr) {
             console.warn("⚠️ [CIMCO-PASAJERO-REG-FS-WARN] No se pudo replicar perfil inicial en Firestore:", fsErr.message);
         }
@@ -610,7 +610,9 @@ export const actualizarPerfilPasajero = async (req, res, next) => {
                 payloadFs.coordenadas = pasajero.coordenadas || null;
             }
 
-            await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set(payloadFs, { merge: true });
+            if (dbFirestore) {
+                await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set(payloadFs, { merge: true });
+            }
         } catch (fsErr) {
             console.warn("⚠️ [CIMCO-PASAJERO-SYNC-WARN] Error al replicar actualización en Firestore:", fsErr.message);
         }
@@ -675,9 +677,11 @@ export const agregarDireccionFavorita = async (req, res, next) => {
             const docFirestoreId = pasajero.uid || pasajero._id.toString();
             const coleccionUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
 
-            await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set({
-                direccionesFavoritas: pasajero.direccionesFavoritas || []
-            }, { merge: true });
+            if (dbFirestore) {
+                await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set({
+                    direccionesFavoritas: pasajero.direccionesFavoritas || []
+                }, { merge: true });
+            }
         } catch (fsErr) {
             console.warn("⚠️ Error replicando dirección favorita a Firestore:", fsErr.message);
         }
@@ -728,9 +732,11 @@ export const eliminarDireccionFavorita = async (req, res, next) => {
             const docFirestoreId = pasajero.uid || pasajero._id.toString();
             const coleccionUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
 
-            await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set({
-                direccionesFavoritas: pasajero.direccionesFavoritas || []
-            }, { merge: true });
+            if (dbFirestore) {
+                await dbFirestore.collection(coleccionUsuarios).doc(docFirestoreId).set({
+                    direccionesFavoritas: pasajero.direccionesFavoritas || []
+                }, { merge: true });
+            }
         } catch (fsErr) {
             console.warn("⚠️ Error al sincronizar eliminación en Firestore:", fsErr.message);
         }
@@ -915,7 +921,6 @@ export const recargarSaldoPasajero = async (req, res, next) => {
             ? new mongoose.Types.ObjectId(adminIdSanitizado)
             : null;
 
-        // Modificación V20.02: Para pasajeros $0 COP es un ajuste/acreditación válida, sin restricción de umbral mínimo operativo
         if (!targetId || isNaN(montoNum) || montoNum < 0) {
             await session.abortTransaction();
             session.endSession();
@@ -965,13 +970,15 @@ export const recargarSaldoPasajero = async (req, res, next) => {
         // Actualizar espejo Billetera en Firestore
         try {
             const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-            await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
-                id: docFirestoreId,
-                nombreUsuario: pasajero.nombre,
-                saldo: saldoNuevo,
-                balance: saldoNuevo,
-                ultimaActualizacion: new Date().toISOString()
-            }, { merge: true });
+            if (dbFirestore) {
+                await dbFirestore.collection(pathBilleteras).doc(docFirestoreId).set({
+                    id: docFirestoreId,
+                    nombreUsuario: pasajero.nombre,
+                    saldo: saldoNuevo,
+                    balance: saldoNuevo,
+                    ultimaActualizacion: new Date().toISOString()
+                }, { merge: true });
+            }
         } catch (fsWalletErr) {
             console.warn("⚠️ Error actualizando billetera de pasajero en Firestore:", fsWalletErr.message);
         }

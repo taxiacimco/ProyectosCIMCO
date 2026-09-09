@@ -1,8 +1,8 @@
-// Versión Arquitectura: V20.1 - Optimización de política CORS para soporte perimetral Vercel y Railway preflight
+// Versión Arquitectura: V20.2 - Visibilidad Perimetral de Proxy y Trazabilidad de Puerto 8080
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
  * Misión: Integración del módulo de billetera (/api/billetera) manteniendo todas las políticas de seguridad perimetral,
- * gestión robusta de CORS, manejo de sockets y resiliencia anti-crash.
+ * gestión robusta de CORS, manejo de sockets, resiliencia anti-crash y puerto estandarizado 8080.
  */
 
 import 'dotenv/config';
@@ -325,7 +325,8 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 8080;
 
 httpServer.listen(PORT, '0.0.0.0', () => {
-    logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo exitosamente en el puerto dinámico: ${PORT}`);
+    logLocal(`🚀 [CIMCO-NUCLEO] Servidor Central corriendo exitosamente en el puerto: ${PORT}`);
+    logLocal(`🔗 Proxy esperándolo en http://localhost:${PORT}`);
 });
 
 const URI = process.env.MONGODB_URI;
