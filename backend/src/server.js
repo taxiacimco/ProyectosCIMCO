@@ -1,8 +1,9 @@
-// Versión Arquitectura: V20.2 - Visibilidad Perimetral de Proxy y Trazabilidad de Puerto 8080
+// Versión Arquitectura: V20.3 - Integración de Ruta Raíz Ping Health Check para Monitoreo Perimetral UptimeRobot
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\server.js
- * Misión: Integración del módulo de billetera (/api/billetera) manteniendo todas las políticas de seguridad perimetral,
- * gestión robusta de CORS, manejo de sockets, resiliencia anti-crash y puerto estandarizado 8080.
+ * Misión: Integración del módulo de billetera (/api/billetera) y ruta raíz de verificación de estado (/),
+ * manteniendo todas las políticas de seguridad perimetral, gestión robusta de CORS, manejo de sockets,
+ * resiliencia anti-crash y puerto estandarizado 8080.
  */
 
 import 'dotenv/config';
@@ -121,6 +122,11 @@ app.use((req, res, next) => {
     const originHeader = req.headers?.origin || req.headers?.referer || 'Proxy Local / Red Directa';
     logLocal(`📡 [CIMCO-NUCLEO] ${req.method} desde ${originHeader} -> ${req.originalUrl}`);
     next();
+});
+
+// Ruta base para verificación de estado (UptimeRobot / Health Check)
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'OK', message: 'TAXIA CIMCO Backend Running' });
 });
 
 app.get('/health', (req, res) => {
