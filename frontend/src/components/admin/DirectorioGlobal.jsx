@@ -1,18 +1,19 @@
-// Versión Arquitectura: V2.8.0 - Aplicación de deduplicarEntidades y asignación de key React por _reactKey en tabla de Directorio Global
+// Versión Arquitectura: V3.0.0 - Memoización de filtrado/deduplicación con useMemo e invalidación/redirección de sesión global en 401
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\DirectorioGlobal.jsx
  * Misión: Monitoreo, filtrado, auditoría unificada, sincronización Socket.io en tiempo real y exportación centralizada a Excel (XLSX).
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajustes V2.8.0:
- *   1. Integración de `deduplicarEntidades(usuariosFiltrados)` en el renderizado de la tabla de registros.
- *   2. Asignación exclusiva de `key={u._reactKey}` en el elemento `<tr>` principal para una reconciliación React optima y segura.
- *   3. Preservación estricta de la lógica de Socket.io, AbortController, umbral $2,000 COP, exportaciones y Glassmorphism.
+ * Ajustes V3.0.0:
+ *   1. Memoización optimizada de filtrado y deduplicación mediante useMemo con dependencias [usuarios, busqueda, filtroRol] para evitar sobrecarga de CPU.
+ *   2. Propagación global de sesión ante errores 401 (Unauthorized): Limpieza de token, invalidación de AuthContext mediante authService/useAuth y redirección automática a /login.
+ *   3. Preservación atómica de la lógica previa: Socket.io, AbortController, umbral $2,000 COP, exportaciones dinámicas XLSX y Glassmorphism visual.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Loader, RefreshCw, Download, FileSpreadsheet } from 'lucide-react';
 // 🛡️ IMPORTANTE: Importación del helper de deduplicación mediante alias absoluto @
 import { deduplicarEntidades } from '@/utils/deduplicar';
+import { useAuth } from '@/hooks/useAuth';
 
 // Saneamiento de URL base para entornos locales y despliegues en Vercel
 const RAW_API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
@@ -20,22 +21,28 @@ const API_BASE_URL = RAW_API_URL.replace(/\/api\/?$/, '');
 
 // 🛡️ Helper global de deduplicación para el Frontend (Blindaje anti-undefined)
 const deduplicarUsuarios = (lista) => {
-    if (!Array.isArray(lista)) return [];
-    if (typeof deduplicarEntidades === 'function') {
-        return deduplicarEntidades(lista);
-    }
-    const mapaUnico = new Map();
-    lista.forEach((item) => {
-        if (!item) return;
-        const key = item._id || item.id || item.email || item.telefono || item.telefonoMovil;
-        if (key && !mapaUnico.has(key)) {
-            mapaUnico.set(key, item);
+    try {
+        if (!Array.isArray(lista)) return [];
+        if (typeof deduplicarEntidades === 'function') {
+            return deduplicarEntidades(lista);
         }
-    });
-    return Array.from(mapaUnico.values());
+        const mapaUnico = new Map();
+        lista.forEach((item) => {
+            if (!item) return;
+            const key = item?._id || item?.id || item?.email || item?.telefono || item?.telefonoMovil;
+            if (key && !mapaUnico.has(key)) {
+                mapaUnico.set(key, item);
+            }
+        });
+        return Array.from(mapaUnico.values());
+    } catch (err) {
+        console.error('❌ Error en deduplicarUsuarios:', err);
+        return [];
+    }
 };
 
 export const DirectorioGlobal = ({ socket }) => {
+    const auth = useAuth?.() || {};
     const [usuarios, setUsuarios] = useState([]);
     const [filtroRol, setFiltroRol] = useState('TODOS');
     const [busqueda, setBusqueda] = useState('');
@@ -58,15 +65,28 @@ export const DirectorioGlobal = ({ socket }) => {
             });
 
             // 🔒 INTERCEPCIÓN EXPLÍCITA DE TOKEN EXPIRADO / NO AUTORIZADO (401)
-            if (res.status === 401) {
-                console.warn('⚠️ Sesión expirada o token no válido (401 Unauthorized). Interceptando...');
+            if (res?.status === 401) {
+                console.warn('⚠️ Sesión expirada o token no válido (401 Unauthorized). Interceptando y redirigiendo...');
                 localStorage.removeItem('cimco_token');
-                setError('Sesión expirada o no autorizada. Por favor, vuelva a iniciar sesión.');
+                
+                if (typeof auth?.logout === 'function') {
+                    try {
+                        auth.logout();
+                    } catch (e) {
+                        console.error('❌ Error al invalidar AuthContext vía logout():', e);
+                    }
+                }
+
+                setError('Sesión expirada o no autorizada. Redirigiendo al inicio de sesión...');
                 setLoading(false);
+
+                setTimeout(() => {
+                    window.location.href = '/login';
+                }, 400);
                 return;
             }
 
-            if (res.ok) {
+            if (res?.ok) {
                 const data = await res.json();
                 // Extracción defensiva multiformato de lista de usuarios
                 const listaData = data?.usuarios || data?.data || (Array.isArray(data) ? data : []);
@@ -82,7 +102,7 @@ export const DirectorioGlobal = ({ socket }) => {
             }
         } catch (err) {
             // Manejo limpio de abortos voluntarios al desmontar componente
-            if (err.name === 'AbortError') {
+            if (err?.name === 'AbortError') {
                 console.log('🛑 Petición de directorio cancelada por desmontaje de componente.');
                 return;
             }
@@ -94,10 +114,18 @@ export const DirectorioGlobal = ({ socket }) => {
 
     useEffect(() => {
         const controller = new AbortController();
-        obtenerDirectorio(controller.signal);
+        try {
+            obtenerDirectorio(controller.signal);
+        } catch (err) {
+            console.error('❌ Error al iniciar obtención de directorio:', err);
+        }
 
         return () => {
-            controller.abort();
+            try {
+                controller.abort();
+            } catch (err) {
+                console.error('❌ Error al abortar petición controller:', err);
+            }
         };
     }, []);
 
@@ -106,107 +134,155 @@ export const DirectorioGlobal = ({ socket }) => {
         if (!socket) return;
 
         const manejarActualizacionSaldo = (payload) => {
-            if (!payload) return;
-            const { usuarioId, nuevoSaldo } = payload;
-            if (!usuarioId) return;
+            try {
+                if (!payload) return;
+                const { usuarioId, nuevoSaldo } = payload;
+                if (!usuarioId) return;
 
-            setUsuarios((prevUsuarios) =>
-                prevUsuarios.map((user) => {
-                    if (!user) return user;
-                    const esTarget = user._id === usuarioId || user.id === usuarioId || user.uid === usuarioId;
-                    return esTarget ? { ...user, saldoWallet: nuevoSaldo, saldo: nuevoSaldo } : user;
-                })
-            );
+                setUsuarios((prevUsuarios) =>
+                    prevUsuarios.map((user) => {
+                        if (!user) return user;
+                        const esTarget = user?._id === usuarioId || user?.id === usuarioId || user?.uid === usuarioId;
+                        return esTarget ? { ...user, saldoWallet: nuevoSaldo, saldo: nuevoSaldo } : user;
+                    })
+                );
+            } catch (err) {
+                console.error('❌ Error al procesar actualización de saldo vía socket:', err);
+            }
         };
 
-        socket.on('admin_saldo_usuario_actualizado', manejarActualizacionSaldo);
+        try {
+            socket.on('admin_saldo_usuario_actualizado', manejarActualizacionSaldo);
+        } catch (err) {
+            console.error('❌ Error al registrar evento socket:', err);
+        }
 
         return () => {
-            socket.off('admin_saldo_usuario_actualizado', manejarActualizacionSaldo);
+            try {
+                socket.off('admin_saldo_usuario_actualizado', manejarActualizacionSaldo);
+            } catch (err) {
+                console.error('❌ Error al remover evento socket:', err);
+            }
         };
     }, [socket]);
 
     // Helper para normalizar y mostrar el nombre de entidad
     const getNombre = (u) => u?.nombre || u?.fullName || u?.nombreCompleto || u?.nombreUsuario || u?.displayName || 'SIN REGISTRO';
 
-    // Helper para extracción defensiva del saldoWallet de la entidad
+    // Helper para extracción defensiva del saldoWallet de la entidad usando coalescencia nula
     const getSaldoWallet = (u) => {
-        const val = u?.saldoWallet ?? u?.saldo ?? u?.balance ?? u?.billetera;
-        return typeof val === 'number' ? val : (Number(val) || 0);
+        try {
+            const val = u?.billetera?.saldo ?? u?.saldoWallet ?? u?.saldo ?? u?.balance ?? u?.billetera ?? 0;
+            return typeof val === 'number' ? val : (Number(val) || 0);
+        } catch (err) {
+            console.error('❌ Error al calcular saldo wallet:', err);
+            return 0;
+        }
+    };
+
+    // Helper para obtención defensiva de marcas de tiempo o auditoría
+    const getTimestampAuditoria = (objeto) => {
+        try {
+            return objeto?.startTime || objeto?.createdAt || objeto?.fecha || Date.now();
+        } catch (err) {
+            console.error('❌ Error al obtener timestamp de auditoría:', err);
+            return Date.now();
+        }
     };
 
     // Helper para badge visual de Rol / Subrol bajo especificación CIMCO-UI V9.3
     const renderRolBadge = (u) => {
-        const rol = (u?.rolNormalizado || u?.rol || u?.role || 'usuario').toLowerCase();
-        const subrol = (u?.subrol || rol).toUpperCase();
+        try {
+            const rol = (u?.rolNormalizado || u?.rol || u?.role || 'usuario').toLowerCase();
+            const subrol = (u?.subrol || rol).toUpperCase();
 
-        if (rol === 'admin' || subrol === 'CEO') {
-            return <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold">{subrol}</span>;
+            if (rol === 'admin' || subrol === 'CEO') {
+                return <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold">{subrol}</span>;
+            }
+            if (rol === 'despachador' || subrol === 'DESPACHO') {
+                return <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[9px] font-bold">DESPACHADOR TERMINAL</span>;
+            }
+            if (rol === 'pasajero') {
+                return <span className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 rounded text-[9px] font-bold">PASAJERO CLIENTE</span>;
+            }
+            if (rol === 'conductor' || rol === 'operador') {
+                return <span className="bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-2 py-0.5 rounded text-[9px] font-bold">OPERADOR ({subrol})</span>;
+            }
+            return <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded text-[9px] font-bold">{subrol}</span>;
+        } catch (err) {
+            console.error('❌ Error al renderizar badge de rol:', err);
+            return <span className="bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 px-2 py-0.5 rounded text-[9px] font-bold">USUARIO</span>;
         }
-        if (rol === 'despachador' || subrol === 'DESPACHO') {
-            return <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[9px] font-bold">DESPACHADOR TERMINAL</span>;
-        }
-        if (rol === 'pasajero') {
-            return <span className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 rounded text-[9px] font-bold">PASAJERO CLIENTE</span>;
-        }
-        if (rol === 'conductor' || rol === 'operador') {
-            return <span className="bg-yellow-500/10 text-yellow-400 border border-yellow-500/20 px-2 py-0.5 rounded text-[9px] font-bold">OPERADOR ({subrol})</span>;
-        }
-        return <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded text-[9px] font-bold">{subrol}</span>;
     };
 
     // Helper de evaluación de estado funcional de wallet bajo regla de negocio ($2,000 COP)
     const renderEstadoWalletBadge = (u) => {
-        const rol = (u?.rolNormalizado || u?.rol || u?.role || '').toLowerCase();
-        const subrol = (u?.subrol || '').toLowerCase();
-        const saldo = getSaldoWallet(u);
+        try {
+            const rol = (u?.rolNormalizado || u?.rol || u?.role || '').toLowerCase();
+            const subrol = (u?.subrol || '').toLowerCase();
+            const saldo = getSaldoWallet(u);
 
-        // Roles operacionales aplicables a la regla de umbral de $2,000 COP
-        const esRolOperacional = [
-            'mototaxi',
-            'motoparrillero',
-            'motocarga',
-            'despachador',
-            'conductor',
-            'operador'
-        ].some(r => rol.includes(r) || subrol.includes(r));
+            // Roles operacionales aplicables a la regla de umbral de $2,000 COP
+            const esRolOperacional = [
+                'mototaxi',
+                'motoparrillero',
+                'motocarga',
+                'despachador',
+                'conductor',
+                'operador'
+            ].some(r => rol.includes(r) || subrol.includes(r));
 
-        if (esRolOperacional && saldo < 2000) {
-            return <span className="bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">BLOQUEADO POR SALDO</span>;
+            if (esRolOperacional && saldo < 2000) {
+                return <span className="bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">BLOQUEADO POR SALDO</span>;
+            }
+
+            return <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">OPERATIVO</span>;
+        } catch (err) {
+            console.error('❌ Error al renderizar estado de wallet:', err);
+            return <span className="bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">DESCONOCIDO</span>;
         }
-
-        return <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider">OPERATIVO</span>;
     };
 
-    // Filtrado en tiempo real con motor de búsqueda multicriterio
-    const usuariosFiltrados = usuarios.filter((u) => {
-        if (!u) return false;
-        const rol = (u.rolNormalizado || u.rol || u.role || '').toLowerCase();
-        const subrol = (u.subrol || '').toLowerCase();
-        
-        let coincideRol = true;
-        if (filtroRol === 'pasajero') coincideRol = rol === 'pasajero';
-        else if (filtroRol === 'despachador') coincideRol = rol === 'despachador' || subrol === 'despacho';
-        else if (filtroRol === 'conductor') coincideRol = rol === 'conductor' || rol === 'operador';
-        else if (filtroRol === 'admin') coincideRol = ['admin', 'ceo', 'secretaria', 'auxiliar'].includes(rol) || ['ceo', 'auxiliar'].includes(subrol);
+    // ⚡ MEMOIZACIÓN ATÓMICA DE FILTRADO Y DEDUPLICACIÓN DE USUARIOS
+    const usuariosFiltrados = useMemo(() => {
+        try {
+            if (!Array.isArray(usuarios)) return [];
 
-        const query = busqueda.toLowerCase().trim();
-        const nombre = getNombre(u).toLowerCase();
-        const email = (u.email || '').toLowerCase();
-        const tel = (u.telefono || u.telefonoMovil || '').toLowerCase();
-        const id = (u._id || u.id || '').toLowerCase();
+            const filtrados = usuarios.filter((u) => {
+                if (!u) return false;
+                const rol = (u?.rolNormalizado || u?.rol || u?.role || '').toLowerCase();
+                const subrol = (u?.subrol || '').toLowerCase();
+                
+                let coincideRol = true;
+                if (filtroRol === 'pasajero') coincideRol = rol === 'pasajero';
+                else if (filtroRol === 'despachador') coincideRol = rol === 'despachador' || subrol === 'despacho';
+                else if (filtroRol === 'conductor') coincideRol = rol === 'conductor' || rol === 'operador';
+                else if (filtroRol === 'admin') coincideRol = ['admin', 'ceo', 'secretaria', 'auxiliar'].includes(rol) || ['ceo', 'auxiliar'].includes(subrol);
 
-        const coincideBusqueda = nombre.includes(query) || email.includes(query) || tel.includes(query) || id.includes(query);
+                const query = (busqueda || '').toLowerCase().trim();
+                const nombre = getNombre(u).toLowerCase();
+                const email = (u?.email || '').toLowerCase();
+                const tel = (u?.telefono || u?.telefonoMovil || '').toLowerCase();
+                const id = (u?._id || u?.id || '').toLowerCase();
 
-        return coincideRol && coincideBusqueda;
-    });
+                const coincideBusqueda = nombre.includes(query) || email.includes(query) || tel.includes(query) || id.includes(query);
+
+                return coincideRol && coincideBusqueda;
+            });
+
+            return deduplicarUsuarios(filtrados);
+        } catch (err) {
+            console.error('❌ Error en useMemo al filtrar y deduplicar usuarios:', err);
+            return [];
+        }
+    }, [usuarios, busqueda, filtroRol]);
 
     // 🚀 BUNDLE SPLITTING - DYNAMIC IMPORT DE LIBRERÍA XLSX EN CLIENTE
     const exportarExcelCliente = async () => {
-        if (!usuariosFiltrados || usuariosFiltrados.length === 0) return;
-        setExportingExcel(true);
-
         try {
+            if (!usuariosFiltrados || usuariosFiltrados.length === 0) return;
+            setExportingExcel(true);
+
             // Carga diferida dinámica de la librería heavy xlsx
             const XLSX = await import('xlsx');
 
@@ -215,6 +291,7 @@ export const DirectorioGlobal = ({ socket }) => {
                 const rol = (u?.rolNormalizado || u?.rol || u?.role || '').toLowerCase();
                 const subrol = (u?.subrol || '').toLowerCase();
                 const esOperacional = ['mototaxi', 'motoparrillero', 'motocarga', 'despachador', 'conductor', 'operador'].some(r => rol.includes(r) || subrol.includes(r));
+                const startTime = getTimestampAuditoria(u);
 
                 return {
                     ID: u?._id || u?.id || 'N/A',
@@ -226,7 +303,8 @@ export const DirectorioGlobal = ({ socket }) => {
                     SaldoWallet: saldo,
                     EstadoOperativo: (esOperacional && saldo < 2000) ? 'BLOQUEADO POR SALDO' : 'OPERATIVO',
                     Empresa: u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL',
-                    OrigenDB: u?.origenColeccion || u?.origen || 'DB'
+                    OrigenDB: u?.origenColeccion || u?.origen || 'DB',
+                    FechaAuditoria: new Date(startTime).toISOString()
                 };
             });
 
@@ -267,7 +345,9 @@ export const DirectorioGlobal = ({ socket }) => {
             {/* TARJETAS DE MÉTRICAS GERENCIALES */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <button 
-                    onClick={() => setFiltroRol('TODOS')} 
+                    onClick={() => {
+                        try { setFiltroRol('TODOS'); } catch (err) { console.error('Error al cambiar filtro:', err); }
+                    }} 
                     className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
                         filtroRol === 'TODOS' ? 'bg-yellow-500/10 border-yellow-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
@@ -277,7 +357,9 @@ export const DirectorioGlobal = ({ socket }) => {
                 </button>
 
                 <button 
-                    onClick={() => setFiltroRol('pasajero')} 
+                    onClick={() => {
+                        try { setFiltroRol('pasajero'); } catch (err) { console.error('Error al cambiar filtro:', err); }
+                    }} 
                     className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
                         filtroRol === 'pasajero' ? 'bg-cyan-500/10 border-cyan-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
@@ -287,7 +369,9 @@ export const DirectorioGlobal = ({ socket }) => {
                 </button>
 
                 <button 
-                    onClick={() => setFiltroRol('despachador')} 
+                    onClick={() => {
+                        try { setFiltroRol('despachador'); } catch (err) { console.error('Error al cambiar filtro:', err); }
+                    }} 
                     className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
                         filtroRol === 'despachador' ? 'bg-amber-500/10 border-amber-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
@@ -297,7 +381,9 @@ export const DirectorioGlobal = ({ socket }) => {
                 </button>
 
                 <button 
-                    onClick={() => setFiltroRol('conductor')} 
+                    onClick={() => {
+                        try { setFiltroRol('conductor'); } catch (err) { console.error('Error al cambiar filtro:', err); }
+                    }} 
                     className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between cursor-pointer ${
                         filtroRol === 'conductor' ? 'bg-yellow-500/10 border-yellow-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
@@ -307,7 +393,9 @@ export const DirectorioGlobal = ({ socket }) => {
                 </button>
 
                 <button 
-                    onClick={() => setFiltroRol('admin')} 
+                    onClick={() => {
+                        try { setFiltroRol('admin'); } catch (err) { console.error('Error al cambiar filtro:', err); }
+                    }} 
                     className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col justify-between col-span-2 md:col-span-1 cursor-pointer ${
                         filtroRol === 'admin' ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-[#121214]/80 border-white/5 hover:border-white/20'
                     }`}
@@ -324,7 +412,13 @@ export const DirectorioGlobal = ({ socket }) => {
                     <input 
                         type="text"
                         value={busqueda}
-                        onChange={(e) => setBusqueda(e.target.value)}
+                        onChange={(e) => {
+                            try {
+                                setBusqueda(e.target.value);
+                            } catch (err) {
+                                console.error('Error al actualizar búsqueda:', err);
+                            }
+                        }}
                         placeholder="BUSCAR POR NOMBRE, TELÉFONO, EMAIL O ID..."
                         className="w-full bg-zinc-950/80 border border-white/5 rounded-xl pl-10 pr-4 py-2.5 text-xs font-bold text-white placeholder-zinc-600 focus:outline-none focus:border-yellow-500/30 transition-colors uppercase tracking-wider"
                     />
@@ -332,7 +426,13 @@ export const DirectorioGlobal = ({ socket }) => {
 
                 <div className="flex items-center gap-3 w-full md:w-auto justify-end">
                     <button 
-                        onClick={exportarExcelCliente}
+                        onClick={() => {
+                            try {
+                                exportarExcelCliente();
+                            } catch (err) {
+                                console.error('Error al solicitar exportación Excel cliente:', err);
+                            }
+                        }}
                         disabled={loading || exportingExcel || usuariosFiltrados.length === 0}
                         className="px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl text-emerald-400 hover:text-emerald-300 transition-colors text-xs font-bold flex items-center gap-2 uppercase tracking-wider disabled:opacity-50 active:scale-95 cursor-pointer"
                         title="Exportar Filtrados en Cliente con Dynamic Import XLSX"
@@ -342,7 +442,13 @@ export const DirectorioGlobal = ({ socket }) => {
                     </button>
 
                     <button 
-                        onClick={descargarExcelGlobal}
+                        onClick={() => {
+                            try {
+                                descargarExcelGlobal();
+                            } catch (err) {
+                                console.error('Error al solicitar descarga Excel global:', err);
+                            }
+                        }}
                         disabled={loading}
                         className="px-3 py-2 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 rounded-xl text-zinc-300 hover:text-white transition-colors text-xs font-bold flex items-center gap-2 uppercase tracking-wider disabled:opacity-50 active:scale-95 cursor-pointer"
                         title="Descargar Reporte Completo vía API Servidor"
@@ -353,8 +459,12 @@ export const DirectorioGlobal = ({ socket }) => {
 
                     <button 
                         onClick={() => {
-                            const controller = new AbortController();
-                            obtenerDirectorio(controller.signal);
+                            try {
+                                const controller = new AbortController();
+                                obtenerDirectorio(controller.signal);
+                            } catch (err) {
+                                console.error('Error al solicitar recarga de directorio:', err);
+                            }
                         }} 
                         disabled={loading}
                         className="p-2.5 bg-zinc-950/80 hover:bg-zinc-900 border border-white/5 rounded-xl text-zinc-400 hover:text-white transition-colors disabled:opacity-50 active:scale-95 cursor-pointer"
@@ -399,38 +509,38 @@ export const DirectorioGlobal = ({ socket }) => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5 text-xs">
-                                {deduplicarEntidades(usuariosFiltrados).map((u) => {
-                                    const nombre = getNombre(u);
-                                    const email = u?.email || 'SIN EMAIL';
-                                    const tel = u?.telefono || u?.telefonoMovil || 'N/A';
-                                    const empresa = u?.cooperativa_nombre || u?.empresa || u?.cooperativa || u?.entidad || 'SISTEMA CENTRAL';
-                                    const saldo = getSaldoWallet(u);
+                                {usuariosFiltrados.map((usr) => {
+                                    const nombre = getNombre(usr);
+                                    const email = usr?.email || 'SIN EMAIL';
+                                    const tel = usr?.telefono || usr?.telefonoMovil || 'N/A';
+                                    const empresa = usr?.cooperativa_nombre || usr?.empresa || usr?.cooperativa || usr?.entidad || 'SISTEMA CENTRAL';
+                                    const saldo = usr?.billetera?.saldo ?? usr?.saldoWallet ?? 0;
 
                                     return (
-                                        <tr key={u._reactKey} className="hover:bg-white/[0.02] transition-colors">
+                                        <tr key={usr?._reactKey || usr?._id || usr?.id} className="hover:bg-white/[0.02] transition-colors">
                                             <td className="py-3 pl-2">
                                                 <div className="font-bold text-white uppercase">{nombre}</div>
-                                                <div className="text-[9px] text-zinc-500 font-mono">ID: {u?._id || u?.id}</div>
+                                                <div className="text-[9px] text-zinc-500 font-mono">ID: {usr?._id || usr?.id}</div>
                                             </td>
                                             <td className="py-3 font-mono text-[11px]">
                                                 <div className="text-zinc-300">{tel}</div>
                                                 <div className="text-[9px] text-zinc-500">{email}</div>
                                             </td>
                                             <td className="py-3">
-                                                {renderRolBadge(u)}
+                                                {renderRolBadge(usr)}
                                             </td>
                                             <td className="py-3 font-mono text-xs font-bold text-zinc-200">
                                                 ${saldo.toLocaleString('es-CO')} <span className="text-[9px] text-zinc-500 font-normal">COP</span>
                                             </td>
                                             <td className="py-3">
-                                                {renderEstadoWalletBadge(u)}
+                                                {renderEstadoWalletBadge(usr)}
                                             </td>
                                             <td className="py-3 text-[10px] font-mono text-zinc-400 uppercase">
                                                 {empresa}
                                             </td>
                                             <td className="py-3 pr-2 text-right">
                                                 <span className="text-[8px] font-mono px-2 py-0.5 rounded bg-zinc-950 text-zinc-500 border border-white/5 uppercase">
-                                                    {u?.origenColeccion || u?.origen || 'DB'}
+                                                    {usr?.origenColeccion || usr?.origen || 'DB'}
                                                 </span>
                                             </td>
                                         </tr>

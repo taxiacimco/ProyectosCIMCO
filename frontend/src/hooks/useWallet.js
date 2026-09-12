@@ -1,22 +1,25 @@
-// Versión Arquitectura: V25.2 - Estabilización de Dependencias y Eliminación de Bucle Infinito en useWallet
+// Versión Arquitectura: V25.5 - Corrección de Importación Unificada de Hook WebSocket useSocket
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useWallet.js
  * Misión: Hook centralizado para la gobernanza del saldo de la billetera.
- * Ajustes V25.2:
- *  1. Eliminación de 'saldo' del array de dependencias de 'obtenerSaldoDesdeBackend' en useCallback para romper el bucle infinito de peticiones.
- *  2. Estabilización de la referencia a 'obtenerSaldoDesdeBackend' para evitar la recreación de listeners y ciclos redundantes en useEffect.
- *  3. Preservación estricta de las funciones canAcceptService, estaHabilitadoParaOperar, idempotencia y la integración dual REST + Firestore.
+ * Ajustes V25.5:
+ *  1. Corrección quirúrgica de la ruta de importación de useSocket hacia '@/hooks/useSocket' para solucionar Uncaught SyntaxError.
+ *  2. Preservación íntegra de la escucha reactiva de eventos WebSocket ('actualizar_saldo_pasajero', 'saldo_actualizado', 'saldo_actualizado_cliente').
+ *  3. Mantenimiento del patrón SSOT (MongoDB REST), sincronización con Firestore, idempotencia (X-Idempotency-Key) y degradación silenciosa ante errores 401/403.
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
+import { useSocket } from '@/hooks/useSocket';
 import api from '@/config/api';
 import walletService from '@/services/walletService';
 
 export const useWallet = () => {
     const { user, actualizarEstadoLocal } = useAuth();
+    const socketContext = useSocket();
+    const socket = socketContext?.socket;
     
     // Referencia mutable estable para evitar la recreación de callbacks y la destrucción cíclica de listeners
     const actualizarEstadoLocalRef = useRef(actualizarEstadoLocal);
@@ -69,6 +72,46 @@ export const useWallet = () => {
         }
         return (FIRESTORE_PATHS?.usuarios) ? FIRESTORE_PATHS.usuarios : 'wallets';
     })();
+
+    /**
+     * ⚡ Escuchador Reactivo de WebSocket para Actualización de Saldo Instantánea
+     * Evita consultas REST redundantes actualizando setSaldo directamente desde la notificación en tiempo real.
+     */
+    useEffect(() => {
+        if (!socket) return;
+
+        const handleActualizarSaldoSocket = (payload) => {
+            if (!payload) return;
+
+            const nuevoSaldoRaw = payload?.nuevoSaldo ?? payload?.saldo ?? payload?.balance ?? payload;
+            
+            if (nuevoSaldoRaw !== undefined && nuevoSaldoRaw !== null) {
+                const nuevoSaldoNumerico = Number(nuevoSaldoRaw);
+                const saldoValido = isNaN(nuevoSaldoNumerico) ? 0 : nuevoSaldoNumerico;
+                
+                console.log("⚡ [CIMCO-WALLET-SOCKET] Evento de saldo en tiempo real recibido:", saldoValido);
+                setSaldo(saldoValido);
+
+                if (typeof actualizarEstadoLocalRef.current === 'function') {
+                    try {
+                        actualizarEstadoLocalRef.current({ saldo: saldoValido, saldoWallet: saldoValido, balance: saldoValido });
+                    } catch (authErr) {
+                        console.warn("⚠️ [CIMCO-WALLET] No se pudo sincronizar estado con AuthProvider desde WebSocket:", authErr?.message);
+                    }
+                }
+            }
+        };
+
+        socket.on('actualizar_saldo_pasajero', handleActualizarSaldoSocket);
+        socket.on('saldo_actualizado', handleActualizarSaldoSocket);
+        socket.on('saldo_actualizado_cliente', handleActualizarSaldoSocket);
+
+        return () => {
+            socket.off('actualizar_saldo_pasajero', handleActualizarSaldoSocket);
+            socket.off('saldo_actualizado', handleActualizarSaldoSocket);
+            socket.off('saldo_actualizado_cliente', handleActualizarSaldoSocket);
+        };
+    }, [socket]);
 
     /**
      * 🌐 Consulta SSOT directa a la API REST consumiendo el servicio walletService
@@ -215,8 +258,8 @@ export const useWallet = () => {
         const idempotencyKey = `tx-deb-${idDocumentoUnificado}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
         try {
-            // STEP 1: Transacción primaria en MongoDB vía API REST con X-Idempotency-Key
-            const respuestaBackend = await api.post('/wallet/debit', {
+            // STEP 1: Transacción primaria en MongoDB vía API REST con X-Idempotency-Key dirigida al endpoint /billetera/debitar
+            const respuestaBackend = await api.post('/billetera/debitar', {
                 usuarioId: idDocumentoUnificado,
                 monto: montoDebito,
                 concepto: motivo,
@@ -297,7 +340,8 @@ export const useWallet = () => {
         const idempotencyKey = `tx-rec-${idDocumentoUnificado}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
         try {
-            const respuestaBackend = await api.post('/wallet/recharge', {
+            // STEP 1: Transacción primaria en MongoDB vía API REST con X-Idempotency-Key dirigida al endpoint /billetera/recargar
+            const respuestaBackend = await api.post('/billetera/recargar', {
                 usuarioId: idDocumentoUnificado,
                 monto: montoRecarga,
                 concepto: motivo,

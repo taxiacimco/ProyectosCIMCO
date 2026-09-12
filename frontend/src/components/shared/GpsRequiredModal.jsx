@@ -1,4 +1,4 @@
-// Versión Arquitectura: V16.3 - Verificación de Hardware GPS, Monitoreo de Permisos y Cero Dependencias de Red
+// Versión Arquitectura: V16.4 - Verificación de Hardware GPS, Cleanup de Event Listeners y Fallback iOS Safari
 /**
  * Ubicación: frontend/src/components/shared/GpsRequiredModal.jsx
  * Misión: Bloqueo de UI perimetral cuando el GPS está inactivo. Despierta de manera quirúrgica el prompt nativo,
@@ -24,6 +24,8 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
 
   // Monitoreo proactivo del estado del permiso de ubicación en el navegador
   useEffect(() => {
+    let permissionStatus = null;
+
     if (!isOpen) {
       if (isMounted.current) {
         setVerificando(false);
@@ -33,10 +35,19 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
     }
 
     const verificarPermisoExistente = async () => {
+      // 🍏 Fallback iOS/Safari: Desactivar verificación silenciosa proactiva en entornos WebKit
+      const isIOS = typeof navigator !== 'undefined' && (
+        /iPad|iPhone|iPod/.test(navigator?.userAgent || '') ||
+        (navigator?.platform === 'MacIntel' && navigator?.maxTouchPoints > 1)
+      );
+
+      if (isIOS) return;
+
       // Validar si el navegador soporta las APIs modernas de permisos y geolocalización
       if (navigator?.permissions && navigator?.geolocation) {
         try {
           const resultado = await navigator.permissions.query({ name: 'geolocation' });
+          permissionStatus = resultado;
           
           // Escuchar cambios en caliente por si el usuario activa/desactiva el permiso desde el candado de la URL
           resultado.onchange = () => {
@@ -66,6 +77,13 @@ const GpsRequiredModal = ({ isOpen, onRetry }) => {
     };
 
     verificarPermisoExistente();
+
+    // 🧹 Limpieza estricta de event listener en la API de permisos al desmontar o cambiar de estado
+    return () => {
+      if (permissionStatus) {
+        permissionStatus.onchange = null;
+      }
+    };
   }, [isOpen, onRetry]);
 
   if (!isOpen) return null;

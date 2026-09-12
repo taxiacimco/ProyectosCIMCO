@@ -1,17 +1,17 @@
-// Versión Arquitectura: V15.7 - Garantía de Re-Fetch Inmediato (await obtenerBovedasGlobales) tras Operación Manual de Billetera
+// Versión Arquitectura: V15.8 - Remoción de límite Firestore fallback y optimización de actualización local de saldo sin sobrecarga de red
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionBilleteras.jsx
  * Misión: Monitoreo global de saldos y ejecución de ajustes de capital (Abono / Débito Manual) para todos los actores:
  *         Pasajeros, Mototaxistas, Motoparrilleros, Montacargas, Despachadores y Conductores.
- * Ajuste V15.7:
- *   1. Integración de re-fetch síncrono (await obtenerBovedasGlobales()) dentro del bloque exitoso de ejecutarRecarga.
- *   2. Preservación del patrón de seguridad isMounted y limpieza de formulario.
- *   3. Mantenimiento del estándar visual CIMCO-UI V9.3 (Glassmorphism), alias absolutos y defensa anti-undefined.
+ * Ajuste V15.8:
+ *   1. Eliminación de limit(50) en la consulta fallback a Firestore para garantizar sincronización reactiva total en modo contingencia.
+ *   2. Optimización de tráfico HTTP mediante la actualización local del estado en memoria utilizando la respuesta de la API REST (/api/billetera/admin/operacion-manual).
+ *   3. Preservación del estándar visual CIMCO-UI V9.3 (Glassmorphism), defensa anti-undefined y deduplicación.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
-import { collection, onSnapshot, query, limit } from 'firebase/firestore';
+import { collection, onSnapshot, query } from 'firebase/firestore';
 import { 
     Wallet, Search, RefreshCw, ArrowUpRight, DollarSign, 
     AlertCircle, CheckCircle2, ShieldAlert, ServerOff, Loader, Info
@@ -225,8 +225,8 @@ export const GestionBilleteras = () => {
         );
 
         const pathBilleteras = FIRESTORE_PATHS?.wallets || 'billeteras';
-        // 🎯 Límite corregido a 50 registros
-        const qWallets = query(collection(db, pathBilleteras), limit(50));
+        // 🎯 Sincronización reactiva sin límite restrictivo para modo contingencia
+        const qWallets = query(collection(db, pathBilleteras));
 
         const unsubscribeWallets = onSnapshot(qWallets,
             (snapshot) => {
@@ -311,7 +311,7 @@ export const GestionBilleteras = () => {
         setMontoRecarga(valRaw);
     };
 
-    // 💳 PROCESAR AJUSTE MULTIRROL DE SALDO EXCLUSIVAMENTE POR API REST
+    // 💳 PROCESAR AJUSTE MULTIRROL DE SALDO EXCLUSIVAMENTE POR API REST CON ACTUALIZACIÓN LOCAL
     const ejecutarRecarga = async (e) => {
         e.preventDefault();
         if (!cuentaSeleccionada || !montoRecarga) return;
@@ -372,13 +372,57 @@ export const GestionBilleteras = () => {
                         ? `Devolución exitosa de $${montoNumerico.toLocaleString('es-CO')} COP a ${cuentaSeleccionada.nombre}`
                         : `Abono exitoso de $${montoNumerico.toLocaleString('es-CO')} COP a ${cuentaSeleccionada.nombre}`;
                     
+                    // ⚡ Extracción del nuevo saldo devuelto por la API o cálculo de fallback local
+                    const nuevoSaldoDevuelto = respuesta.nuevoSaldo !== undefined 
+                        ? respuesta.nuevoSaldo 
+                        : (respuesta.saldo !== undefined 
+                            ? respuesta.saldo 
+                            : (respuesta.billetera?.saldo !== undefined 
+                                ? respuesta.billetera.saldo 
+                                : (respuesta.data?.saldo !== undefined 
+                                    ? respuesta.data.saldo 
+                                    : (tipoOperacion === 'DEBITO' 
+                                        ? Math.max(0, saldoDisponible - montoNumerico) 
+                                        : saldoDisponible + montoNumerico))));
+
+                    const nuevoSaldoCalculado = Math.round(Number(nuevoSaldoDevuelto) || 0);
+
+                    // 🚀 Optimización de Red: Actualización local directa en cuentas
+                    setCuentas(prevCuentas => 
+                        (prevCuentas || []).map(u => {
+                            const uId = u.id || u._id || u.uid;
+                            if (uId === idTarget) {
+                                return {
+                                    ...u,
+                                    saldo: nuevoSaldoCalculado,
+                                    saldoWallet: nuevoSaldoCalculado,
+                                    billetera: {
+                                        ...(u.billetera || {}),
+                                        saldo: nuevoSaldoCalculado
+                                    }
+                                };
+                            }
+                            return u;
+                        })
+                    );
+
+                    // 🚀 Actualización local directa en mapa de billeteras
+                    setWalletsMap(prevMap => {
+                        if (!prevMap || !prevMap[idTarget]) return prevMap;
+                        return {
+                            ...prevMap,
+                            [idTarget]: {
+                                ...prevMap[idTarget],
+                                balance: nuevoSaldoCalculado,
+                                saldo: nuevoSaldoCalculado
+                            }
+                        };
+                    });
+
                     mostrarNotificacion(msgConfirmacion, 'exito');
                     setMontoRecarga('');
                     setCuentaSeleccionada(null);
                     setProcesandoRecarga(false);
-
-                    // 🔄 Re-fetch para forzar la actualización inmediata de saldos en la tabla/grilla
-                    await obtenerBovedasGlobales();
                 }
             } else {
                 const mensajeError = respuesta.message || respuesta.error || 'Fallo transaccional en el servidor central API REST';

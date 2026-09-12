@@ -1,10 +1,10 @@
-// Versión Arquitectura: V2.5 - Emisión WebSockets saldo_actualizado_admin y saldo_actualizado_cliente
+// Versión Arquitectura: V2.9 - Implementación de obtenerHistorialMovimientos y Persistencia de pasajeroId en Historial de Saldo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\billetera\wallet.controller.js
- * Misión: Controlador integral de billetera bajo sintaxis ES Modules nativa. Provee consulta concurrente de saldos,
+ * Misión: Controlador integral de billetera bajo sintaxis ES Modules nativa. Provee consulta concurrente de saldos con proyección optimizada,
  *         mutaciones con transacciones atómicas ACID (session.withTransaction) para prevenir condiciones de carrera (race conditions),
- *         revaluación automática de estado operativo (umbral $2.000 COP), auditoría doble (MongoDB y Firestore)
- *         y emisión de eventos Socket.io (saldo_actualizado_admin y saldo_actualizado_cliente) a la sala gerencial y canales de usuario.
+ *         revaluación automática de estado operativo (umbral $2.000 COP), auditoría doble (MongoDB y Firestore) con persistencia de pasajeroId,
+ *         consulta de historial de movimientos por usuario y emisión de eventos Socket.io (saldo_actualizado_admin, saldo_actualizado_cliente y actualizar_saldo_pasajero).
  */
 
 import mongoose from 'mongoose';
@@ -25,7 +25,7 @@ const calcularEstadoOperativo = (coleccionOrigen, rolUsuario, saldoNuevo, estado
 };
 
 /**
- * Obtiene el saldo actual del usuario autenticado o especificado de forma ultrarrápida mediante Promise.all.
+ * Obtiene el saldo actual del usuario autenticado o especificado de forma ultrarrápida mediante Promise.all y proyección de campos reducida.
  */
 export const obtenerSaldo = async (req, res) => {
     try {
@@ -40,11 +40,14 @@ export const obtenerSaldo = async (req, res) => {
             return res.status(503).json({ success: false, message: "Base de datos no inicializada" });
         }
 
-        // Paralelización de consultas secuenciales por UID
+        // Proyección optimizada para transferir únicamente los campos requeridos de saldo
+        const projection = { projection: { saldo: 1, 'billetera.saldo': 1, uid: 1 } };
+
+        // Paralelización de consultas secuenciales por UID con proyección de red reducida
         const [usuarioUid, pasajeroUid, conductorUid] = await Promise.all([
-            db.collection('usuarios').findOne({ uid: targetUserId }),
-            db.collection('pasajeros').findOne({ uid: targetUserId }),
-            db.collection('conductores').findOne({ uid: targetUserId })
+            db.collection('usuarios').findOne({ uid: targetUserId }, projection),
+            db.collection('pasajeros').findOne({ uid: targetUserId }, projection),
+            db.collection('conductores').findOne({ uid: targetUserId }, projection)
         ]);
 
         let usuario = usuarioUid || pasajeroUid || conductorUid;
@@ -55,9 +58,9 @@ export const obtenerSaldo = async (req, res) => {
                 if (mongoose.Types.ObjectId.isValid(targetUserId)) {
                     const objectId = new mongoose.Types.ObjectId(targetUserId);
                     const [usuarioId, pasajeroId, conductorId] = await Promise.all([
-                        db.collection('usuarios').findOne({ _id: objectId }),
-                        db.collection('pasajeros').findOne({ _id: objectId }),
-                        db.collection('conductores').findOne({ _id: objectId })
+                        db.collection('usuarios').findOne({ _id: objectId }, projection),
+                        db.collection('pasajeros').findOne({ _id: objectId }, projection),
+                        db.collection('conductores').findOne({ _id: objectId }, projection)
                     ]);
                     usuario = usuarioId || pasajeroId || conductorId;
                 }
@@ -81,6 +84,34 @@ export const obtenerSaldo = async (req, res) => {
     } catch (error) {
         console.error("🚨 [WALLET-CONTROLLER-ERROR]:", error);
         return res.status(500).json({ success: false, error: error?.message || "Error interno del servidor al consultar saldo." });
+    }
+};
+
+/**
+ * Consulta el historial de movimientos financieros del usuario autenticado (pasajero/conductor/usuario).
+ */
+export const obtenerHistorialMovimientos = async (req, res) => {
+    try {
+        const uid = req.user?.uid || req.user?.id;
+        
+        if (!uid) {
+            return res.status(400).json({ success: false, message: "ID de usuario autenticado no proporcionado." });
+        }
+
+        const db = mongoose.connection.db;
+        if (!db) {
+            return res.status(503).json({ success: false, message: "Base de datos no inicializada" });
+        }
+
+        const historial = await db.collection('historialsaldos')
+            .find({ $or: [{ pasajeroId: uid }, { usuarioId: uid }, { entidadId: uid }, { conductorId: uid }] })
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        return res.status(200).json({ success: true, data: historial || [] });
+    } catch (error) {
+        console.error("🚨 [OBTENER-HISTORIAL-ERROR]:", error);
+        return res.status(500).json({ success: false, message: error?.message || "Error al consultar historial de movimientos." });
     }
 };
 
@@ -161,6 +192,7 @@ export const actualizarSaldo = async (req, res) => {
             if (io && usuarioActualizado) {
                 io.to(`usuario_${usuarioActualizado.uid}`).emit('saldo_actualizado', { saldo: nuevoSaldo });
                 io.to(`usuario_${usuarioActualizado.uid}`).emit('saldo_actualizado_cliente', { saldo: nuevoSaldo });
+                io.to(`usuario_${usuarioActualizado.uid}`).emit('actualizar_saldo_pasajero', { saldo: nuevoSaldo });
                 
                 io.to('sala_admins').emit('admin_saldo_usuario_actualizado', {
                     usuarioId: usuarioActualizado.uid,
@@ -190,7 +222,7 @@ export const actualizarSaldo = async (req, res) => {
 
 /**
  * Recarga de saldo con garantía ACID estricta mediante Mongoose session.withTransaction.
- * Evita condiciones de carrera en acreditaciones concurrentes.
+ * Evita condiciones de carrera en acreditaciones concurrentes y persiste la propiedad 'pasajeroId'.
  */
 export const recargarSaldo = async (req, res) => {
     const session = await mongoose.startSession();
@@ -266,9 +298,15 @@ export const recargarSaldo = async (req, res) => {
             );
 
             const transaccionId = new mongoose.Types.ObjectId();
+            const targetUid = targetDoc.uid || targetDoc._id.toString();
+
             const registroHistorial = {
                 _id: transaccionId,
-                usuarioId: targetDoc.uid || targetDoc._id.toString(),
+                usuarioId: targetUid,
+                pasajeroId: targetUid,
+                entidadId: targetUid,
+                conductorId: coleccionOrigen === 'conductores' ? targetUid : null,
+                tipoEntidad: coleccionOrigen === 'conductores' ? 'Conductor' : 'Usuario',
                 targetMongoId: targetDoc._id,
                 coleccionOrigen,
                 tipoOperacion: 'RECARGA',
@@ -284,11 +322,12 @@ export const recargarSaldo = async (req, res) => {
                 createdAt: new Date()
             };
 
-            await db.collection('HistorialSaldo').insertOne(registroHistorial, { session });
+            await db.collection('historialsaldos').insertOne(registroHistorial, { session });
 
             resultadoTransaccion = {
                 transaccionId: transaccionId.toString(),
-                usuarioId: targetDoc.uid || targetDoc._id.toString(),
+                usuarioId: targetUid,
+                pasajeroId: targetUid,
                 coleccionOrigen,
                 saldoAnterior,
                 saldoNuevo,
@@ -338,6 +377,7 @@ export const recargarSaldo = async (req, res) => {
 
                 io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado', payloadCliente);
                 io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado_cliente', payloadCliente);
+                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('actualizar_saldo_pasajero', payloadCliente);
 
                 io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
                 io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
@@ -365,7 +405,7 @@ export const recargarSaldo = async (req, res) => {
 
 /**
  * Débito de saldo con garantía ACID estricta mediante Mongoose session.withTransaction.
- * Bloquea saldos negativos y previene race conditions en cobros o comisiones simultáneas.
+ * Bloquea saldos negativos, previene race conditions en cobros y persiste la propiedad 'pasajeroId'.
  */
 export const debitarSaldo = async (req, res) => {
     const session = await mongoose.startSession();
@@ -448,9 +488,15 @@ export const debitarSaldo = async (req, res) => {
             );
 
             const transaccionId = new mongoose.Types.ObjectId();
+            const targetUid = targetDoc.uid || targetDoc._id.toString();
+
             const registroHistorial = {
                 _id: transaccionId,
-                usuarioId: targetDoc.uid || targetDoc._id.toString(),
+                usuarioId: targetUid,
+                pasajeroId: targetUid,
+                entidadId: targetUid,
+                conductorId: coleccionOrigen === 'conductores' ? targetUid : null,
+                tipoEntidad: coleccionOrigen === 'conductores' ? 'Conductor' : 'Usuario',
                 targetMongoId: targetDoc._id,
                 coleccionOrigen,
                 tipoOperacion: 'DEBITO',
@@ -465,11 +511,12 @@ export const debitarSaldo = async (req, res) => {
                 createdAt: new Date()
             };
 
-            await db.collection('HistorialSaldo').insertOne(registroHistorial, { session });
+            await db.collection('historialsaldos').insertOne(registroHistorial, { session });
 
             resultadoTransaccion = {
                 transaccionId: transaccionId.toString(),
-                usuarioId: targetDoc.uid || targetDoc._id.toString(),
+                usuarioId: targetUid,
+                pasajeroId: targetUid,
                 coleccionOrigen,
                 saldoAnterior,
                 saldoNuevo,
@@ -519,6 +566,7 @@ export const debitarSaldo = async (req, res) => {
 
                 io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado', payloadCliente);
                 io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado_cliente', payloadCliente);
+                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('actualizar_saldo_pasajero', payloadCliente);
 
                 io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
                 io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
@@ -546,7 +594,7 @@ export const debitarSaldo = async (req, res) => {
 
 /**
  * Endpoint de nivel Admin/CEO para recargas o débitos manuales sobre Pasajeros, Conductores y Despachadores.
- * Utiliza session.withTransaction() para asegurar consistencia ACID atómica.
+ * Utiliza session.withTransaction() para asegurar consistencia ACID atómica y persiste la propiedad 'pasajeroId'.
  */
 export const gestionarSaldoManual = async (req, res) => {
     const session = await mongoose.startSession();
@@ -642,9 +690,15 @@ export const gestionarSaldoManual = async (req, res) => {
             );
 
             const transaccionId = new mongoose.Types.ObjectId();
+            const targetUid = targetDoc.uid || targetDoc._id.toString();
+
             const registroHistorial = {
                 _id: transaccionId,
-                usuarioId: targetDoc.uid || targetDoc._id.toString(),
+                usuarioId: targetUid,
+                pasajeroId: targetUid,
+                entidadId: targetUid,
+                conductorId: coleccionOrigen === 'conductores' ? targetUid : null,
+                tipoEntidad: coleccionOrigen === 'conductores' ? 'Conductor' : 'Usuario',
                 targetMongoId: targetDoc._id,
                 coleccionOrigen,
                 tipoOperacion: tipoOperacion.toUpperCase(),
@@ -659,11 +713,12 @@ export const gestionarSaldoManual = async (req, res) => {
                 createdAt: new Date()
             };
 
-            await db.collection('HistorialSaldo').insertOne(registroHistorial, { session });
+            await db.collection('historialsaldos').insertOne(registroHistorial, { session });
 
             resultadoTransaccion = {
                 transaccionId: transaccionId.toString(),
-                usuarioId: targetDoc.uid || targetDoc._id.toString(),
+                usuarioId: targetUid,
+                pasajeroId: targetUid,
                 coleccionOrigen,
                 saldoAnterior,
                 saldoNuevo,
@@ -731,10 +786,12 @@ export const gestionarSaldoManual = async (req, res) => {
                 // Emisión a canales de usuario
                 io.to(`usuario_${uidTarget}`).emit('saldo_actualizado', payloadCliente);
                 io.to(`usuario_${uidTarget}`).emit('saldo_actualizado_cliente', payloadCliente);
+                io.to(`usuario_${uidTarget}`).emit('actualizar_saldo_pasajero', payloadCliente);
 
                 if (targetUserId && targetUserId !== uidTarget) {
                     io.to(`usuario_${targetUserId}`).emit('saldo_actualizado', payloadCliente);
                     io.to(`usuario_${targetUserId}`).emit('saldo_actualizado_cliente', payloadCliente);
+                    io.to(`usuario_${targetUserId}`).emit('actualizar_saldo_pasajero', payloadCliente);
                 }
 
                 // Emisión a sala administrativa
@@ -747,8 +804,17 @@ export const gestionarSaldoManual = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: `Operación de ${tipoOperacion.toUpperCase()} ejecutada con éxito bajo garantía ACID.`,
-            data: resultadoTransaccion
+            message: 'Operación realizada con éxito',
+            data: {
+                nuevoSaldo: resultadoTransaccion?.saldoNuevo ?? 0,
+                usuarioId: resultadoTransaccion?.usuarioId || targetUserId,
+                transaccion: {
+                    id: resultadoTransaccion?.transaccionId || null,
+                    monto: resultadoTransaccion?.monto ?? 0,
+                    tipo: resultadoTransaccion?.tipoOperacion || tipoOperacion,
+                    fecha: new Date().toISOString()
+                }
+            }
         });
 
     } catch (error) {
@@ -764,6 +830,7 @@ export const gestionarSaldoManual = async (req, res) => {
 
 export default {
     obtenerSaldo,
+    obtenerHistorialMovimientos,
     actualizarSaldo,
     recargarSaldo,
     debitarSaldo,

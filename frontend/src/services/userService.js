@@ -1,12 +1,74 @@
-// Versión Arquitectura: V24.2 - Servicio Centralizado de Gestión de Usuarios Híbrido FormData/JSON
+// Versión Arquitectura: V24.3 - Sanitización y Exposición Directa de Saldo en Perfiles de Usuario
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\userService.js
- * Misión: Abstracción CRUD para la administración de usuarios, conductores, despachadores y operadores.
+ * Misión: Abstracción CRUD para la administración de usuarios, conductores, despachadores y operadores con sanitización de saldo en primer nivel.
  */
 
 import api from '@/config/api';
 
 const USUARIOS_BASE = '/usuarios';
+
+/**
+ * Normaliza y garantiza que el campo 'saldo' esté expuesto en el primer nivel del objeto de perfil
+ * para conductores, pasajeros y usuarios en general.
+ */
+const sanitizarPerfilUsuario = (item) => {
+    if (!item || typeof item !== 'object') return item;
+
+    if (Array.isArray(item)) {
+        return item.map(sanitizarPerfilUsuario);
+    }
+
+    const saldoEncontrado = item.saldo ?? item.saldoWallet ?? item.balance ?? item.billetera?.saldo ?? 0;
+    const saldoNumerico = Number(saldoEncontrado);
+    const saldoValido = isNaN(saldoNumerico) ? 0 : saldoNumerico;
+
+    return {
+        ...item,
+        saldo: saldoValido,
+        saldoWallet: item.saldoWallet ?? saldoValido,
+        balance: item.balance ?? saldoValido
+    };
+};
+
+/**
+ * Mapea las respuestas de la API para aplicar la sanitización de saldo a cualquier estructura de respuesta
+ * (objetos simples, colecciones o respuestas envolventes).
+ */
+const sanitizarRespuestaUsuario = (data) => {
+    if (!data || typeof data !== 'object') return data || {};
+
+    if (Array.isArray(data)) {
+        return data.map(sanitizarPerfilUsuario);
+    }
+
+    if (data.usuario && typeof data.usuario === 'object') {
+        data.usuario = sanitizarPerfilUsuario(data.usuario);
+    }
+    if (data.conductor && typeof data.conductor === 'object') {
+        data.conductor = sanitizarPerfilUsuario(data.conductor);
+    }
+    if (data.pasajero && typeof data.pasajero === 'object') {
+        data.pasajero = sanitizarPerfilUsuario(data.pasajero);
+    }
+    if (data.user && typeof data.user === 'object') {
+        data.user = sanitizarPerfilUsuario(data.user);
+    }
+    if (Array.isArray(data.conductores)) {
+        data.conductores = data.conductores.map(sanitizarPerfilUsuario);
+    }
+    if (Array.isArray(data.pasajeros)) {
+        data.pasajeros = data.pasajeros.map(sanitizarPerfilUsuario);
+    }
+    if (Array.isArray(data.usuarios)) {
+        data.usuarios = data.usuarios.map(sanitizarPerfilUsuario);
+    }
+    if (Array.isArray(data.data)) {
+        data.data = data.data.map(sanitizarPerfilUsuario);
+    }
+
+    return sanitizarPerfilUsuario(data);
+};
 
 export const userService = {
     /**
@@ -18,7 +80,7 @@ export const userService = {
         const config = { params: params || {} };
         if (signal) config.signal = signal;
         const response = await api.get(USUARIOS_BASE, config);
-        return response?.data || [];
+        return sanitizarRespuestaUsuario(response?.data || []);
     },
 
     /**
@@ -31,7 +93,7 @@ export const userService = {
         const config = {};
         if (signal) config.signal = signal;
         const response = await api.get(`${USUARIOS_BASE}/${id.trim()}`, config);
-        return response?.data || null;
+        return sanitizarRespuestaUsuario(response?.data || null);
     },
 
     /**
@@ -48,7 +110,7 @@ export const userService = {
         const config = isFormData ? { headers: { 'Content-Type': undefined } } : {};
 
         const response = await api.post(USUARIOS_BASE, userData, config);
-        return response?.data || {};
+        return sanitizarRespuestaUsuario(response?.data || {});
     },
 
     /**
@@ -110,7 +172,7 @@ export const userService = {
         } : {};
 
         const response = await api.put(`${USUARIOS_BASE}/${id.trim()}`, payloadToSend, config);
-        return response?.data || {};
+        return sanitizarRespuestaUsuario(response?.data || {});
     },
 
     /**
@@ -131,7 +193,7 @@ export const userService = {
         const config = {};
         if (signal) config.signal = signal;
         const response = await api.get(`${USUARIOS_BASE}/conductores`, config);
-        return response?.data || [];
+        return sanitizarRespuestaUsuario(response?.data || []);
     }
 };
 

@@ -1,11 +1,12 @@
-// Versión Arquitectura: V13.0 - Integración REST API Express con Fallback Resiliente NoSQL Anti-Índice
+// Versión Arquitectura: V13.0 - Sincronización de Captura 401 con Purga de Sesión Defensiva y Fallback Resiliente NoSQL
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HistorialViajes.jsx
  * Misión: Renderizar el historial operativo del pasajero consumiendo la API REST de Express/MongoDB
- *        con fallback resiliente a Firestore y mitigación automática de índices NoSQL faltantes.
+ *        con fallback resiliente a Firestore, mitigación automática de índices NoSQL faltantes y
+ *        blindaje de sesión con captura explícita de error 401.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
- * Ajuste V13.0: Degradación fluida desde API REST Express a Firestore, eliminando bloqueos por ausencia
- *               de índices compuestos mediante ordenamiento seguro en memoria.
+ * Ajuste V13.0: Captura explícita de respuestas HTTP 401/No autorizado con purga de sesión defensiva
+ *               sincronizada con los módulos de conductor, manteniendo degradación fluida a Firestore.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -18,7 +19,7 @@ import { Calendar, MapPin, Loader, AlertTriangle, CheckCircle, Wallet, QrCode, B
 import { formatFechaColombia } from '@/utils/dateFormatter';
 
 const HistorialViajes = () => {
-    const { user } = useAuth();
+    const { user, logout } = useAuth();
     const [viajes, setViajes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -73,7 +74,34 @@ const HistorialViajes = () => {
             }
             throw new Error("Respuesta REST API sin conjunto de datos válido.");
         } catch (restErr) {
-            console.warn("⚠️ [CIMCO-HISTORIAL-REST] Fallo en API REST Express, ejecutando fallback a Firestore NoSQL:", restErr?.message || restErr);
+            console.warn("⚠️ [CIMCO-HISTORIAL-REST] Fallo en API REST Express, evaluando diagnóstico de error:", restErr?.message || restErr);
+
+            // Captura explícita de HTTP 401 / Expiración de Token con Purga de Sesión Defensiva
+            const status = restErr?.response?.status;
+            const errorMessage = String(restErr?.message || '').toLowerCase();
+            const responseMessage = String(restErr?.response?.data?.message || '').toLowerCase();
+
+            const isUnauthorized = 
+                status === 401 || 
+                status === 403 || 
+                errorMessage.includes('401') || 
+                errorMessage.includes('unauthorized') || 
+                errorMessage.includes('token') ||
+                responseMessage.includes('token') ||
+                responseMessage.includes('unauthorized') ||
+                responseMessage.includes('expirad');
+
+            if (isUnauthorized) {
+                console.error("❌ [CIMCO-HISTORIAL-AUTH] Intercepción de error 401/No Autorizado. Iniciando purga de sesión.");
+                setError("Sesión expirada o no autorizada. Cerrando sesión por seguridad...");
+                setLoading(false);
+                if (typeof logout === 'function') {
+                    setTimeout(() => {
+                        logout();
+                    }, 1500);
+                }
+                return; // Cancelar ejecución para prevenir fallback con token corrupto
+            }
         }
 
         // 🔄 2. FALLBACK SECUNDARIO: CONSULTA A FIRESTORE (Con inmunización de índice compuesto)
@@ -126,7 +154,7 @@ const HistorialViajes = () => {
         } finally {
             setLoading(false);
         }
-    }, [user?.uid, user?.id, user?._id]);
+    }, [user?.uid, user?.id, user?._id, logout]);
 
     useEffect(() => {
         cargarHistorial();

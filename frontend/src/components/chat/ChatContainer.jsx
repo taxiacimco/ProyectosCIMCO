@@ -1,4 +1,4 @@
-// Versión Arquitectura: V16.2 - Migración y Vinculación Centralizada Socket.IO (useSocket V16.2) y Persistencia Dual
+// Versión Arquitectura: V16.3 - Emisión leave_room Socket.IO, Sincronización Exclusiva Firestore y Keys Robustas
 import React, { useState, useEffect, useRef } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'firebase/firestore';
@@ -48,39 +48,23 @@ const ChatContainer = ({ tripId }) => {
   const [isSending, setIsSending] = useState(false); // 🛡️ Control de Concurrencia Móvil
   const scrollRef = useRef();
 
-  // 🚀 Acciones 1 y 2: Suscripción a salas y eventos de chat bidireccional mediante instancia unificada `useSocket`
+  // 🚀 Gestión de Sala en Socket.IO: Unión y Emisión de Salida (`leave_room`) al desmontar o cambiar de canal
   useEffect(() => {
     if (!socket || !tripId) return;
 
-    // Conectarse a la sala específica del viaje
     if (isConnected) {
       socket.emit('join_room', { room: tripId, user: user?.uid });
     }
 
-    // Oyente para recepcionar mensajes en tiempo real vía Socket.io
-    const handleReceiveMessage = (incomingMsg) => {
-      if (!incomingMsg) return;
-      
-      setMessages((prevMessages) => {
-        // Blindaje Anti-Duplicados: Comprobar presencia por id o contenido exacto + timestamp
-        const existe = prevMessages.some(m => 
-          (m.id && incomingMsg.id && m.id === incomingMsg.id) ||
-          (m.text === incomingMsg.text && m.senderId === incomingMsg.senderId && Math.abs(new Date(m.createdAt) - new Date(incomingMsg.createdAt)) < 1000)
-        );
-        if (existe) return prevMessages;
-        return [...prevMessages, incomingMsg];
-      });
-    };
-
-    socket.on('receive_message', handleReceiveMessage);
-
-    // 🚀 Acción 3: Limpieza Segura - Desregistrar únicamente el oyente específico sin desconectar el transporte de red
+    // 🚀 Limpieza Segura: Emitir `leave_room` para prevenir colisiones de mensajes al cambiar de viaje
     return () => {
-      socket.off('receive_message', handleReceiveMessage);
+      if (socket) {
+        socket.emit('leave_room', { room: tripId, user: user?.uid });
+      }
     };
   }, [socket, isConnected, tripId, user?.uid]);
 
-  // 🚀 Sincronización del Canal de Mensajería con Compensación de Latencia (Firestore Reactive Sync)
+  // 🚀 Sincronización Reactiva Exclusiva de Firestore (Fuente Única de Verdad Anti-Parpadeo)
   useEffect(() => {
     if (!user?.uid || !tripId) return;
     
@@ -137,12 +121,12 @@ const ChatContainer = ({ tripId }) => {
         createdAt: new Date().toISOString()
       };
 
-      // 1. Emisión bidireccional vía Socket.IO unificado
+      // 1. Emisión bidireccional vía Socket.IO unificado (notificación instantánea)
       if (socket && isConnected) {
         socket.emit('send_message', payloadMensaje);
       }
 
-      // 2. Persistencia duradera en Firestore
+      // 2. Persistencia duradera en Firestore (dispara actualización reactiva única vía onSnapshot)
       await addDoc(collection(db, `${FIRESTORE_PATHS.chats}/${tripId}/messages`), {
         text: textoLimpio,
         senderId: user.uid,
@@ -165,12 +149,12 @@ const ChatContainer = ({ tripId }) => {
       </div>
 
       <div className="flex-grow overflow-y-auto p-4 space-y-3 scrollbar-none">
-        {messages.map((msg) => {
+        {messages.map((msg, index) => {
           const isMe = msg.senderId === user?.uid;
           const horaFormatted = formatFechaSegura(msg.createdAt);
 
           return (
-            <div key={msg.id || `${msg.senderId}-${msg.createdAt}`} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+            <div key={msg.id || `${msg.senderId}-${index}`} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs transition-all ${
                 isMe 
                   ? 'bg-amber-500/20 text-amber-200 border border-amber-500/30 rounded-tr-none' 

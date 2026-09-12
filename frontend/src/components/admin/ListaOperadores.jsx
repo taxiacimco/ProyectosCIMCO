@@ -1,15 +1,16 @@
-// Versión Arquitectura: V16.2 - Asignación de Clave Única React por _reactKey y Deduplicación Estricta de Operadores
+// Versión Arquitectura: V16.3 - Optimización de Deduplicación en Memoria y Saneamiento Estructural UI
 /**
  * Ubicación: frontend\src\components\admin\ListaOperadores.jsx
  * Misión: Renderizar la malla virtualizada de operadores recuperando registros desde la API central 
  *         con fallback de lectura reactiva a Firestore.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
- * Ajuste V16.2:
- *   1. Integración de `deduplicarEntidades` para garantizar el decorado de `_reactKey` en la lista filtrada.
- *   2. Uso directo de `key={c._reactKey}` en la iteración virtualizada del componente para optimizar reconciliación React.
+ * Ajuste V16.3:
+ *   1. Eliminación de evaluaciones redundantes de deduplicación mediante la memoización con `useMemo`.
+ *   2. Reestructuración limpia y completa de la malla virtualizada y del modal de moderación con causa razonada.
+ *   3. Preservación estricta de la regla de negocio de saldo mínimo ($2.000 COP) y blindaje anti-undefined.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { Shield, ShieldAlert, UserCheck, UserX, Search, Loader, Database, CheckCircle, Hourglass, X, AlertTriangle } from 'lucide-react';
@@ -90,11 +91,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                     
                     if (isMounted.current) {
                         const normalizados = listaMongo.map(u => normalizarEntidadUsuario(u._id || u.id, u));
-                        
-                        // 🛡️ FILTRO ANTI-DUPLICADOS
-                        const listaLimpia = deduplicarEntidades(normalizados);
-
-                        setUsuariosLocal(listaLimpia);
+                        setUsuariosLocal(normalizados);
                         setLoading(false);
                         setErrorFirestore(null);
                         return; // Carga exitosa desde MongoDB
@@ -116,10 +113,8 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
                     const lista = snapshot.docs.map(docSnap => 
                         normalizarEntidadUsuario(docSnap.id, docSnap.data())
                     );
-                    
-                    const listaLimpia = deduplicarEntidades(lista);
 
-                    setUsuariosLocal(listaLimpia);
+                    setUsuariosLocal(lista);
                     setLoading(false);
                     setErrorFirestore(null);
                 }, 
@@ -143,8 +138,11 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         };
     }, [conductoresProp]);
 
-    const listaBruta = conductoresProp || usuariosLocal;
-    const listaMapeada = deduplicarEntidades(listaBruta);
+    // ⚡ MEMOIZACIÓN ATÓMICA DE DEDUPLICACIÓN: Evita recrear arreglos en cada fotograma
+    const listaDeduplicada = useMemo(() => {
+        const fuenteOriginal = conductoresProp || usuariosLocal;
+        return deduplicarEntidades(fuenteOriginal);
+    }, [conductoresProp, usuariosLocal]);
 
     const obtenerNombreMostrar = (u) => {
         const nombreDirecto = u?.nombre || u?.nombreCompleto || u?.displayName;
@@ -157,20 +155,25 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
         return `OPERADOR ${(u?.rol || u?.role || '').toUpperCase() || 'REGISTRADO'}`;
     };
 
-    const usuariosFiltrados = deduplicarEntidades(listaMapeada.filter(u => {
+    // ⚡ MEMOIZACIÓN DEL FILTRADO: Consume únicamente la lista deduplicada previa
+    const usuariosFiltrados = useMemo(() => {
         const queryNormalize = busqueda.toLowerCase().trim();
-        const nombre = obtenerNombreMostrar(u).toLowerCase();
-        const email = (u?.email || '').toLowerCase();
-        const rol = (u?.rol || u?.role || u?.subrol || '').toLowerCase();
-        const id = (u?.id || u?._id || '').toLowerCase();
-        const telefono = (u?.telefono || u?.telefonoMovil || '').toLowerCase();
+        if (!queryNormalize) return listaDeduplicada;
 
-        return nombre.includes(queryNormalize) || 
-               email.includes(queryNormalize) || 
-               rol.includes(queryNormalize) ||
-               id.includes(queryNormalize) ||
-               telefono.includes(queryNormalize);
-    }));
+        return listaDeduplicada.filter(u => {
+            const nombre = obtenerNombreMostrar(u).toLowerCase();
+            const email = (u?.email || '').toLowerCase();
+            const rol = (u?.rol || u?.role || u?.subrol || '').toLowerCase();
+            const id = (u?.id || u?._id || '').toLowerCase();
+            const telefono = (u?.telefono || u?.telefonoMovil || '').toLowerCase();
+
+            return nombre.includes(queryNormalize) || 
+                   email.includes(queryNormalize) || 
+                   rol.includes(queryNormalize) ||
+                   id.includes(queryNormalize) ||
+                   telefono.includes(queryNormalize);
+        });
+    }, [listaDeduplicada, busqueda]);
 
     // 🛡️ Virtualizador de Renderizado para Mallas Extensas
     const rowVirtualizer = useVirtualizer({
@@ -371,7 +374,7 @@ export const ListaOperadores = ({ conductores: conductoresProp, onAprobarConduct
 
                                             return (
                                                 <div
-                                                    key={c._reactKey || keyEstable}
+                                                    key={keyEstable}
                                                     data-index={virtualRow.index}
                                                     ref={rowVirtualizer.measureElement}
                                                     style={{

@@ -1,18 +1,19 @@
-// Versión Arquitectura: V19.8 - Deduplicación de Conductores e Inyección de _reactKey en Marker
+// Versión Arquitectura: V19.9 - Optimización de Consulta Firestore, Destrucción Segura Leaflet y Memoización de Filtrado
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
  * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled, prevención 
  *         de colisiones de contenedor en React 18 / React-Leaflet, recalibración de tiles (invalidateSize),
- *         uso de capa base pública OpenStreetMap (OSM), evaluación de saldo operativo para marcadores
- *         y deduplicación de conductores con inyección de _reactKey en Marker.
+ *         uso de capa base pública OpenStreetMap (OSM), evaluación de saldo operativo para marcadores,
+ *         optimización de consultas Firestore por estado activo, destrucción segura de mapa en desmonte
+ *         y memoización del pipeline de deduplicación/filtrado.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { useTelemetryThrottle } from '@/hooks/useTelemetryThrottle';
 import { Search, Signal, Activity, AlertCircle, Radio } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
@@ -59,7 +60,7 @@ const createCustomClusterIcon = (cluster) => {
     });
 };
 
-// 🛡️ Capturador de Referencia del Mapa sin interferir en el desmontaje nativo de React-Leaflet
+// 🛡️ Capturador de Referencia del Mapa con desvinculación limpia para evitar fugas y colisiones de contenedor
 const MapReferenceBinder = ({ onMapReady }) => {
     const map = useMap();
 
@@ -68,11 +69,17 @@ const MapReferenceBinder = ({ onMapReady }) => {
             onMapReady(map);
         }
         const timer = setTimeout(() => {
-            if (map) {
+            if (map && map._container) {
                 map.invalidateSize();
             }
         }, 200);
-        return () => clearTimeout(timer);
+
+        return () => {
+            clearTimeout(timer);
+            if (onMapReady) {
+                onMapReady(null);
+            }
+        };
     }, [map, onMapReady]);
 
     return null;
@@ -93,11 +100,20 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         actualizarCoordenadasRef.current = actualizarCoordenadas;
     }, [actualizarCoordenadas]);
 
+    // 🛡️ DESTRUCCIÓN SEGURA DE INSTANCIA LEAFLET: Evita "Map container is already initialized" en alternancia rápida de pestañas
     useEffect(() => {
         isMounted.current = true;
         return () => {
             isMounted.current = false;
-            mapInstanceRef.current = null;
+            if (mapInstanceRef.current) {
+                try {
+                    mapInstanceRef.current.off();
+                    mapInstanceRef.current.remove();
+                } catch (err) {
+                    // Ignorar si el contenedor ya fue purgado por el DOM
+                }
+                mapInstanceRef.current = null;
+            }
         };
     }, []);
 
@@ -105,7 +121,7 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
     useEffect(() => {
         if (mapInstanceRef.current) {
             const timer = setTimeout(() => {
-                if (mapInstanceRef.current) {
+                if (mapInstanceRef.current && mapInstanceRef.current._container) {
                     mapInstanceRef.current.invalidateSize();
                 }
             }, 200);
@@ -113,11 +129,16 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         }
     }, [activeTab]);
 
-    // Sincronización Firestore en Tiempo Real
+    // ⚡ SINCRONIZACIÓN OPTIMIZADA FIRESTORE: Restringe lecturas a unidades activas para mitigar sobrecostos
     useEffect(() => {
         setLoading(true);
         const pathUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
-        const q = query(collection(db, pathUsuarios));
+        
+        // Consulta filtrada por estado activo para escala eficiente
+        const q = query(
+            collection(db, pathUsuarios),
+            where('isActive', '==', true)
+        );
 
         const unsubscribe = onSnapshot(q, 
             (snapshot) => {
@@ -163,22 +184,26 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         return () => unsubscribe();
     }, [cooperativaFiltro]);
 
-    const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
-
-    const filtrados = listaMarcadoresSuaves.filter(m => {
+    // ⚡ MEMOIZACIÓN DE FILTRADO Y DEDUPLICACIÓN: Previene recálculos intensivos en la CPU por cada renderizado
+    const conductoresDeduplicados = useMemo(() => {
+        const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
         const queryTerm = busqueda.toLowerCase().trim();
-        const nombre = (m?.nombre || '').toLowerCase();
-        const id = (m?.id || '').toLowerCase();
-        const rol = (m?.rol || '').toLowerCase();
-        const placa = (m?.placa || '').toLowerCase();
-        const numInterno = (m?.numeroInterno || '').toLowerCase();
-        return nombre.includes(queryTerm) || id.includes(queryTerm) || rol.includes(queryTerm) || placa.includes(queryTerm) || numInterno.includes(queryTerm);
-    });
 
-    // 🛡️ DEDUPLICACIÓN ATÓMICA E INYECCIÓN DE METADATOS DE IDENTIDAD
-    const conductoresDeduplicados = typeof deduplicarEntidades === 'function' 
-        ? deduplicarEntidades(filtrados)
-        : filtrados;
+        const filtrados = queryTerm 
+            ? listaMarcadoresSuaves.filter(m => {
+                const nombre = (m?.nombre || '').toLowerCase();
+                const id = (m?.id || '').toLowerCase();
+                const rol = (m?.rol || '').toLowerCase();
+                const placa = (m?.placa || '').toLowerCase();
+                const numInterno = (m?.numeroInterno || '').toLowerCase();
+                return nombre.includes(queryTerm) || id.includes(queryTerm) || rol.includes(queryTerm) || placa.includes(queryTerm) || numInterno.includes(queryTerm);
+            })
+            : listaMarcadoresSuaves;
+
+        return typeof deduplicarEntidades === 'function' 
+            ? deduplicarEntidades(filtrados)
+            : filtrados;
+    }, [vehiculosSuaves, busqueda, cooperativaFiltro]);
 
     const usarCanvas = conductoresDeduplicados.length > 50;
 

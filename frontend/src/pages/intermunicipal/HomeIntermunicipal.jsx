@@ -1,11 +1,11 @@
-// Versión Arquitectura: V20.3 - Integración Compartida de AjustesPerfil con Callback onUpdateSuccess
+// Versión Arquitectura: V20.4 - Refactorización de Complejidad Ciclomática y Sustitución de Alerts por Toasts Asíncronos
 /**
  * Ubicación: frontend\src\pages\intermunicipal\HomeIntermunicipal.jsx
  * Misión: Consola operativa del Conductor Intermunicipal conectada a la central de despachos.
- * Ajuste V20.3: Sustitución del modal JSX local por el componente compartido @/components/shared/AjustesPerfil y sincronización reactiva de contexto.
+ * Ajuste V20.4: Descomposición modular de subcomponentes para reducir la complejidad ciclomática y migración total de alert() a sistema Toast asíncrono.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
@@ -15,7 +15,10 @@ import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { Bus, MapPin, CheckCircle, AlertTriangle, XCircle, Bell, User, Phone, FileText, Building2, Send, DollarSign, Flag } from 'lucide-react';
+import { 
+    Bus, MapPin, CheckCircle, AlertTriangle, XCircle, Bell, 
+    User, Send, Flag, Info, Check 
+} from 'lucide-react';
 
 // Corrección de Iconos Leaflet para despliegue intermunicipal
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -23,7 +26,36 @@ import iconShadow from 'leaflet/dist/images/marker-shadow.png';
 
 const DefaultIcon = L.icon({ iconUrl: icon, shadowUrl: iconShadow, iconSize: [25, 41], iconAnchor: [12, 41] });
 
-// Componente para centrado dinámico del mapa
+// ==================================================================
+// SUBCOMPONENTES MODULARES (REDUCCIÓN DE COMPLEJIDAD CICLOMÁTICA)
+// ==================================================================
+
+/** Componente Toast de Notificación Asíncrona */
+const ToastNotification = ({ toast, onClose }) => {
+    if (!toast?.visible) return null;
+    const isSuccess = toast.type === 'success';
+    const isError = toast.type === 'error';
+
+    return (
+        <div className="fixed bottom-6 right-6 z-[10000] max-w-md animate-in slide-in-from-bottom-5 duration-300">
+            <div className={`backdrop-blur-xl bg-[#121214]/90 border p-4 rounded-2xl shadow-2xl flex items-center gap-3 ${
+                isSuccess ? 'border-emerald-500/40 text-emerald-400' :
+                isError ? 'border-red-500/40 text-red-400' :
+                'border-yellow-500/40 text-yellow-400'
+            }`}>
+                <div className="p-2 rounded-xl bg-white/5 shrink-0">
+                    {isSuccess ? <Check size={18} /> : isError ? <AlertTriangle size={18} /> : <Info size={18} />}
+                </div>
+                <p className="text-xs font-mono uppercase tracking-wider font-bold text-zinc-200 flex-1">{toast.message}</p>
+                <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors cursor-pointer">
+                    <XCircle size={16} />
+                </button>
+            </div>
+        </div>
+    );
+};
+
+/** Centrado dinámico del Mapa Leaflet */
 const AutoCenter = ({ position }) => {
     const map = useMap();
     useEffect(() => { 
@@ -34,11 +66,221 @@ const AutoCenter = ({ position }) => {
     return null;
 };
 
+/** Encabezado Superior de Identidad y Parámetros Operativos */
+const HeaderOperativo = ({ nombreConductor, datosPerfil, onOpenPerfil }) => (
+    <div className="w-full bg-[#121214]/90 border-b border-white/5 sticky top-0 z-[50] backdrop-blur-md px-6 py-3 flex justify-between items-center flex-wrap gap-2">
+        <div onClick={onOpenPerfil} className="flex items-center gap-3 cursor-pointer group">
+            <div className="w-8 h-8 rounded-xl bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 group-hover:bg-yellow-500/20 transition-all">
+                <User size={15} />
+            </div>
+            <div>
+                <h2 className="text-xs font-black text-white tracking-wider uppercase flex items-center gap-1.5">
+                    {nombreConductor}
+                    <span className="text-[10px] text-yellow-500/70 font-normal underline lowercase group-hover:text-yellow-400">(editar)</span>
+                </h2>
+                <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-0.5">Control de Conductor y Vehículo</p>
+            </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap text-[9px] uppercase tracking-wider font-bold">
+            <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
+                Empresa: <span className="text-yellow-400 font-black">{datosPerfil?.empresa || 'N/A'}</span>
+            </div>
+            <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
+                Terminal: <span className="text-yellow-400 font-black">{datosPerfil?.terminal || 'N/A'}</span>
+            </div>
+            <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
+                Interno: <span className="text-yellow-400 font-black">{datosPerfil?.numeroInterno || 'N/A'}</span>
+            </div>
+        </div>
+    </div>
+);
+
+/** Panel del Visor de Mapa con Indicador de GPS */
+const VisorMapa = ({ posicionActual, gpsActivo }) => (
+    <div className="h-72 w-full relative z-0 border-b border-white/5">
+        <MapContainer center={posicionActual} zoom={13} className="h-full w-full">
+            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <AutoCenter position={posicionActual} />
+            <Marker position={posicionActual} icon={DefaultIcon} />
+        </MapContainer>
+        
+        <div className="absolute top-4 right-4 z-[1000] backdrop-blur-md bg-[#121214]/80 px-4 py-1.5 rounded-xl border border-white/5 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 shadow-xl">
+            <div className={`w-2 h-2 rounded-full ${gpsActivo ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+            {gpsActivo ? 'Rastreo Satelital Activo' : 'Señal GPS Perdida'}
+        </div>
+    </div>
+);
+
+/** Tarjeta y Formulario de Pujas / Ofertas */
+const NotificacionServicioCard = ({ 
+    notificacionUI, 
+    onClose, 
+    montoOfertaInput, 
+    setMontoOfertaInput, 
+    enviandoOferta, 
+    onEnviarOferta, 
+    onConfirmarDirecto 
+}) => {
+    if (!notificacionUI) return null;
+
+    return (
+        <div className="fixed top-24 left-4 right-4 md:left-auto md:right-6 md:w-[420px] backdrop-blur-xl bg-[#121214]/95 border-2 border-yellow-500/30 rounded-2xl p-5 shadow-[0_10px_40px_rgba(234,179,8,0.15)] z-[9999] animate-in slide-in-from-top-4 duration-300">
+            <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-3">
+                <div className="flex items-center gap-2 text-yellow-400 font-black text-xs uppercase tracking-widest">
+                    <Bell size={14} className="animate-bounce" />
+                    <span>¡Nuevo Servicio Disponible!</span>
+                </div>
+                <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors cursor-pointer">
+                    <XCircle size={16} />
+                </button>
+            </div>
+            
+            <div className="space-y-1.5 text-xs uppercase text-zinc-300">
+                <p><strong className="text-zinc-500">Origen:</strong> {notificacionUI.origen}</p>
+                <p><strong className="text-zinc-500">Destino:</strong> {notificacionUI.destino}</p>
+                <p className="pt-0.5"><strong className="text-zinc-500">Tarifa Sugerida:</strong> <span className="text-emerald-400 font-black">{notificacionUI.tarifa}</span></p>
+            </div>
+
+            <form onSubmit={onEnviarOferta} className="mt-4 pt-3 border-t border-white/5 space-y-3">
+                <div>
+                    <label className="block text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
+                        Propuesta de Tarifas / Contraoferta (COP)
+                    </label>
+                    <div className="relative flex items-center">
+                        <span className="absolute left-3 text-emerald-400 font-black text-xs">$</span>
+                        <input 
+                            type="number"
+                            required
+                            min="1000"
+                            step="500"
+                            value={montoOfertaInput}
+                            onChange={(e) => setMontoOfertaInput(e.target.value)}
+                            placeholder="Ej. 25000"
+                            className="w-full bg-zinc-950 border border-white/10 rounded-xl pl-7 pr-3 py-2 text-xs font-mono text-emerald-400 font-bold focus:outline-none focus:border-yellow-500/50 transition-all"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex gap-2">
+                    <button
+                        type="submit"
+                        disabled={enviandoOferta || !montoOfertaInput || Number(montoOfertaInput) <= 0}
+                        className="flex-1 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 text-black font-black uppercase text-[10px] tracking-wider py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                        <Send size={12} />
+                        {enviandoOferta ? "Transmitiendo..." : "Enviar Oferta"}
+                    </button>
+                    {notificacionUI.viajeId && (
+                        <button
+                            type="button"
+                            onClick={() => onConfirmarDirecto(notificacionUI.viajeId)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] tracking-wider px-3 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
+                            title="Aceptar viaje tarifa directa"
+                        >
+                            <CheckCircle size={12} />
+                            Aceptar
+                        </button>
+                    )}
+                </div>
+            </form>
+
+            <p className="text-[9px] text-zinc-500 mt-3 font-sans lowercase">Sincronizado de forma atómica con la central de despachos.</p>
+        </div>
+    );
+};
+
+/** Tarjeta Individual de Viaje Asignado */
+const TarjetaViaje = ({ viaje, onConfirmar, onFinalizar }) => {
+    const tarifaCalculada = Number(viaje.tarifa || viaje.valorPasaje || 0);
+    const estadoNormalizado = String(viaje.estado || '').toUpperCase();
+    const esEnRuta = estadoNormalizado === 'EN_RUTA';
+
+    return (
+        <div className="backdrop-blur-md bg-[#121214]/70 border border-white/5 p-6 rounded-2xl shadow-2xl hover:border-white/10 transition-all duration-300">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 justify-between items-start mb-6 border-b border-white/5 pb-4">
+                <div>
+                    <div className="flex items-center gap-2 mb-1">
+                        <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-black">Ruta y Destino Autorizado</p>
+                        <span className={`text-[8px] font-black px-2 py-0.5 rounded-md uppercase border ${
+                            esEnRuta ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
+                        }`}>
+                            {esEnRuta ? 'En Ruta' : 'Asignado en Dársena'}
+                        </span>
+                    </div>
+                    <p className="text-sm font-black text-white flex items-center gap-2">
+                        <MapPin size={15} className="text-yellow-500 shrink-0" /> {viaje.origen ? `${viaje.origen} ➔ ` : ''}{viaje.destino || 'N/A'}
+                    </p>
+                    <p className="text-[9px] text-zinc-400 font-sans mt-1">ID Contable: {viaje.id}</p>
+                </div>
+                <div className="sm:text-right">
+                    <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-black mb-1">Liquidación de Tarifa</p>
+                    <p className="text-base font-black text-emerald-400">${tarifaCalculada.toLocaleString('es-CO')} COP</p>
+                </div>
+            </div>
+
+            {!esEnRuta ? (
+                <button 
+                    onClick={() => onConfirmar(viaje.id)}
+                    className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase text-[11px] tracking-widest py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(234,179,8,0.15)] flex items-center justify-center gap-2 active:scale-[0.98] border border-yellow-300 cursor-pointer"
+                >
+                    <CheckCircle size={15} /> Confirmar Salida de Terminal (En Ruta)
+                </button>
+            ) : (
+                <button 
+                    onClick={() => onFinalizar(viaje.id)}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[11px] tracking-widest py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] flex items-center justify-center gap-2 active:scale-[0.98] border border-emerald-400 cursor-pointer"
+                >
+                    <Flag size={15} /> Finalizar Servicio Intermunicipal
+                </button>
+            )}
+        </div>
+    );
+};
+
+/** Lista de Viajes Operativos */
+const ListaViajes = ({ loading, viajesAsignados, onConfirmar, onFinalizar }) => {
+    if (loading) {
+        return (
+            <div className="backdrop-blur-md bg-[#121214]/40 p-8 text-center border border-white/5 rounded-2xl flex flex-col items-center gap-2">
+                <div className="w-5 h-5 border-2 border-yellow-500/20 border-t-yellow-500 rounded-full animate-spin" />
+                <p className="text-[10px] uppercase text-zinc-500 font-bold tracking-widest">Leyendo Dársenas...</p>
+            </div>
+        );
+    }
+
+    if (viajesAsignados.length === 0) {
+        return (
+            <div className="backdrop-blur-md bg-[#121214]/20 p-10 text-center border border-dashed border-white/5 rounded-2xl shadow-inner">
+                <AlertTriangle size={24} className="text-zinc-600 mx-auto mb-2" />
+                <p className="text-xs uppercase text-zinc-500 tracking-widest font-bold">Esperando Despacho Central</p>
+                <p className="text-[9px] text-zinc-600 max-w-sm mx-auto mt-1 uppercase font-sans">Mantén la aplicación abierta. El despachador de terminal te asignará la ruta directamente a la unidad.</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+            {viajesAsignados.map((viaje) => (
+                <TarjetaViaje 
+                    key={viaje.id} 
+                    viaje={viaje} 
+                    onConfirmar={onConfirmar} 
+                    onFinalizar={onFinalizar} 
+                />
+            ))}
+        </div>
+    );
+};
+
+// ==================================================================
+// COMPONENTE PRINCIPAL
+// ==================================================================
+
 export default function HomeIntermunicipal() {
     // 🛡️ Guardas de Seguridad y Contextos Centralizados
     const authContext = useAuth ? useAuth() : {};
     const user = authContext?.user || null;
-    const token = authContext?.token || localStorage.getItem('token') || user?.token || "";
     
     // 📡 Consumo Resiliente del Socket Centralizado (Canal de Empresa y Pujas)
     const socketContext = useSocket ? useSocket() : {};
@@ -69,19 +311,21 @@ export default function HomeIntermunicipal() {
     const [posicionActual, setPosicionActual] = useState([9.3244, -73.3321]);
     const [gpsActivo, setGpsActivo] = useState(false);
 
-    // 🔔 ESTADOS PARA NOTIFICACIONES FLUIDAS Y PUJAS / CONTRAOFERTAS
+    // 🔔 ESTADOS PARA NOTIFICACIONES FLUIDAS, PUJAS Y TOASTS
     const [notificacionUI, setNotificacionUI] = useState(null);
     const [montoOfertaInput, setMontoOfertaInput] = useState("");
     const [enviandoOferta, setEnviandoOferta] = useState(false);
+    const [toast, setToast] = useState({ visible: false, message: '', type: 'info' });
+
+    // Helper centralizado para notificaciones Toast asíncronas
+    const showToast = useCallback((message, type = 'info') => {
+        setToast({ visible: true, message, type });
+        setTimeout(() => setToast((prev) => ({ ...prev, visible: false })), 4000);
+    }, []);
 
     // 🛡️ REFERENCIAS MUTABLES Anti-Bucle y Throttling de Socket Telemetría
-    const viajesAsignadosRef = useRef(viajesAsignados);
-    useEffect(() => {
-        viajesAsignadosRef.current = viajesAsignados;
-    }, [viajesAsignados]);
-
     const ultimaActualizacionGpsRef = useRef(0);
-    const ENFRIAMIENTO_SOCKET_GPS_MS = 5000; // Throttling controlled de 5s para emisión de sockets
+    const ENFRIAMIENTO_SOCKET_GPS_MS = 5000;
 
     // Auto-completar el monto con el valor sugerido cuando se dispara una notificación nueva
     useEffect(() => {
@@ -143,6 +387,7 @@ export default function HomeIntermunicipal() {
             if (datosActualizados.nombre) {
                 setNombreConductor(datosActualizados.nombre.toUpperCase());
             }
+            showToast("Perfil actualizado correctamente.", "success");
         }
     };
 
@@ -152,7 +397,6 @@ export default function HomeIntermunicipal() {
     useEffect(() => {
         if (!socket) return;
 
-        // Suscripción a salas intermunicipales sin forzar reconexiones del cliente
         if (isConnected) {
             socket.emit('unirse_sala', 'intermunicipal');
             if (idConductor) {
@@ -161,8 +405,6 @@ export default function HomeIntermunicipal() {
         }
 
         const handleNuevoViaje = (data) => {
-            console.log("🔔 Despacho/Servicio capturado:", data);
-
             const payloadData = data?.payload || data?.viaje || data?.solicitud || data;
             if (!payloadData) return;
 
@@ -173,24 +415,14 @@ export default function HomeIntermunicipal() {
             const miEmpresaId = String(user?.empresaId || user?.empresa_id || datosPerfil.empresaId || "").trim();
             const miEmpresaNombre = String(datosPerfil.empresa || user?.empresa || user?.cooperativa || "").trim().toUpperCase();
 
-            // Si la solicitud incluye identificadores de empresa, verificar que coincidan
             const coincideId = targetEmpresaId && miEmpresaId && targetEmpresaId === miEmpresaId;
             const coincideNombre = targetEmpresaNombre && miEmpresaNombre && targetEmpresaNombre === miEmpresaNombre;
 
-            // Si la solicitud especifica una empresa y NO coincide ni por ID ni por Nombre, descartar la alerta
             if ((targetEmpresaId || targetEmpresaNombre) && !coincideId && !coincideNombre) {
-                console.warn("⛔ [SOLICITUD DESCARTADA] Pertenece a otra cooperativa o flota:", {
-                    solicitudEmpresaId: targetEmpresaId,
-                    solicitudEmpresa: targetEmpresaNombre,
-                    conductorEmpresaId: miEmpresaId,
-                    conductorEmpresa: miEmpresaNombre
-                });
                 return;
             }
 
             const targetConductorId = payloadData?.conductorId || payloadData?.conductor;
-
-            // Filtrar si la solicitud va dirigida explícitamente a otro conductor determinado
             if (targetConductorId && String(targetConductorId) !== String(idConductor) && String(targetConductorId) !== String(user?.uid)) {
                 return;
             }
@@ -229,7 +461,7 @@ export default function HomeIntermunicipal() {
         if (e && e.preventDefault) e.preventDefault();
         
         if (!notificacionUI || !montoOfertaInput || Number(montoOfertaInput) <= 0) {
-            alert("Por favor ingrese un valor de contraoferta válido.");
+            showToast("Por favor ingrese un valor de contraoferta válido.", "error");
             return;
         }
 
@@ -256,7 +488,6 @@ export default function HomeIntermunicipal() {
         };
 
         try {
-            // Invocar método del contexto de sockets si existe
             if (typeof enviarOfertaSocket === 'function') {
                 enviarOfertaSocket(payloadOferta);
             } else if (socket && isConnected) {
@@ -264,19 +495,19 @@ export default function HomeIntermunicipal() {
                 socket.emit('oferta_servicio', payloadOferta);
             }
 
-            alert(`✅ Contraoferta de $${montoNumerico.toLocaleString('es-CO')} COP transmitida a la central.`);
+            showToast(`Contraoferta de $${montoNumerico.toLocaleString('es-CO')} COP transmitida a la central.`, "success");
             setNotificacionUI(null);
             setMontoOfertaInput("");
         } catch (err) {
             console.error("🚨 Error al transmitir la propuesta de tarifa:", err);
-            alert("No se pudo enviar la propuesta. Compruebe la conexión.");
+            showToast("No se pudo enviar la propuesta. Compruebe la conexión.", "error");
         } finally {
             setEnviandoOferta(false);
         }
     };
 
     // ==================================================================
-    // 5. MOTOR DE RASTREO SATELITAL (SOCKET TELEMETRÍA EXCLUSIVO - CERO WRITES EN FIRESTORE)
+    // 5. MOTOR DE RASTREO SATELITAL (SOCKET TELEMETRÍA EXCLUSIVO)
     // ==================================================================
     useEffect(() => {
         if (!idConductor) return;
@@ -294,9 +525,8 @@ export default function HomeIntermunicipal() {
                     return;
                 }
                 
-                ultimaActualizacionGpsRef.current = ahora;
+                ultimaActualizacionGpsRef.current = me = ahora;
 
-                // Transmisión WebSocket en tiempo real hacia la central de despachos
                 if (socket && isConnected) {
                     socket.emit('actualizar_radar_gps', {
                         conductorId: idConductor,
@@ -317,7 +547,7 @@ export default function HomeIntermunicipal() {
     }, [idConductor, socket, isConnected]);
 
     // ==================================================================
-    // 6. SUSCRIPCIÓN REACTIVA A VIAJES ASIGNADOS EN RAMPA DE SALIDA Y EN RUTA
+    // 6. SUSCRIPCIÓN REACTIVA A VIAJES ASIGNADOS EN RAMPA Y EN RUTA
     // ==================================================================
     useEffect(() => {
         if (!user?.uid && !idConductor) return;
@@ -341,7 +571,7 @@ export default function HomeIntermunicipal() {
     }, [user?.uid, idConductor]);
 
     // ==================================================================
-    // 7. CONFIRMACIÓN DE SALIDA DE TERMINAL / EN RUTA Y FINALIZACIÓN DE CICLO
+    // 7. CONFIRMACIÓN DE SALIDA DE TERMINAL / EN RUTA Y FINALIZACIÓN
     // ==================================================================
     const cambiarEstadoViaje = async (idViaje, nuevoEstado) => {
         if (!idViaje || !nuevoEstado) return;
@@ -367,9 +597,10 @@ export default function HomeIntermunicipal() {
             }
 
             setNotificacionUI(null);
+            showToast(`Estado del viaje actualizado a ${nuevoEstado}.`, "success");
         } catch (err) {
             console.error(`🚨 Error al cambiar estado a ${nuevoEstado}:`, err);
-            alert(`No se pudo actualizar el estado del viaje a ${nuevoEstado}.`);
+            showToast(`No se pudo actualizar el estado del viaje a ${nuevoEstado}.`, "error");
         }
     };
 
@@ -379,117 +610,29 @@ export default function HomeIntermunicipal() {
     return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 font-mono antialiased relative selection:bg-yellow-500/20 selection:text-yellow-400">
             
-            {/* 🔝 ENCABEZADO SUPERIOR DE CONTROL DE IDENTIDAD Y PARÁMETROS OPERATIVOS */}
-            <div className="w-full bg-[#121214]/90 border-b border-white/5 sticky top-0 z-[50] backdrop-blur-md px-6 py-3 flex justify-between items-center flex-wrap gap-2">
-                <div 
-                    onClick={() => setMostrarModalPerfil(true)}
-                    className="flex items-center gap-3 cursor-pointer group"
-                >
-                    <div className="w-8 h-8 rounded-xl bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center text-yellow-400 group-hover:bg-yellow-500/20 transition-all">
-                        <User size={15} />
-                    </div>
-                    <div>
-                        <h2 className="text-xs font-black text-white tracking-wider uppercase flex items-center gap-1.5">
-                            {nombreConductor}
-                            <span className="text-[10px] text-yellow-500/70 font-normal underline lowercase group-hover:text-yellow-400">(editar)</span>
-                        </h2>
-                        <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-0.5">Control de Conductor y Vehículo</p>
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-2 flex-wrap text-[9px] uppercase tracking-wider font-bold">
-                    <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
-                        Empresa: <span className="text-yellow-400 font-black">{datosPerfil.empresa || 'N/A'}</span>
-                    </div>
-                    <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
-                        Terminal: <span className="text-yellow-400 font-black">{datosPerfil.terminal || 'N/A'}</span>
-                    </div>
-                    <div className="bg-zinc-900/60 border border-white/5 px-2.5 py-1 rounded-lg text-zinc-400">
-                        Interno: <span className="text-yellow-400 font-black">{datosPerfil.numeroInterno || 'N/A'}</span>
-                    </div>
-                </div>
-            </div>
+            {/* 🔝 ENCABEZADO SUPERIOR */}
+            <HeaderOperativo 
+                nombreConductor={nombreConductor}
+                datosPerfil={datosPerfil}
+                onOpenPerfil={() => setMostrarModalPerfil(true)}
+            />
 
             {/* 🚨 TOAST NOTIFICACIÓN DE NUEVO SERVICIO / DESPACHO CON CONTRAOFERTA */}
-            {notificacionUI && (
-                <div className="fixed top-24 left-4 right-4 md:left-auto md:right-6 md:w-[420px] backdrop-blur-xl bg-[#121214]/95 border-2 border-yellow-500/30 rounded-2xl p-5 shadow-[0_10px_40px_rgba(234,179,8,0.15)] z-[9999] animate-in slide-in-from-top-4 duration-300">
-                    <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-3">
-                        <div className="flex items-center gap-2 text-yellow-400 font-black text-xs uppercase tracking-widest">
-                            <Bell size={14} className="animate-bounce" />
-                            <span>¡Nuevo Servicio Disponible!</span>
-                        </div>
-                        <button onClick={() => setNotificacionUI(null)} className="text-zinc-500 hover:text-white transition-colors cursor-pointer">
-                            <XCircle size={16} />
-                        </button>
-                    </div>
-                    
-                    <div className="space-y-1.5 text-xs uppercase text-zinc-300">
-                        <p><strong className="text-zinc-500">Origen:</strong> {notificacionUI.origen}</p>
-                        <p><strong className="text-zinc-500">Destino:</strong> {notificacionUI.destino}</p>
-                        <p className="pt-0.5"><strong className="text-zinc-500">Tarifa Sugerida:</strong> <span className="text-emerald-400 font-black">{notificacionUI.tarifa}</span></p>
-                    </div>
-
-                    {/* 💵 CAJA DE CONTRAOFERTA Y ACCIONES DE PUJA */}
-                    <form onSubmit={handleEnviarOferta} className="mt-4 pt-3 border-t border-white/5 space-y-3">
-                        <div>
-                            <label className="block text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1">
-                                Propuesta de Tarifas / Contraoferta (COP)
-                            </label>
-                            <div className="relative flex items-center">
-                                <span className="absolute left-3 text-emerald-400 font-black text-xs">$</span>
-                                <input 
-                                    type="number"
-                                    required
-                                    min="1000"
-                                    step="500"
-                                    value={montoOfertaInput}
-                                    onChange={(e) => setMontoOfertaInput(e.target.value)}
-                                    placeholder="Ej. 25000"
-                                    className="w-full bg-zinc-950 border border-white/10 rounded-xl pl-7 pr-3 py-2 text-xs font-mono text-emerald-400 font-bold focus:outline-none focus:border-yellow-500/50 transition-all"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex gap-2">
-                            <button
-                                type="submit"
-                                disabled={enviandoOferta || !montoOfertaInput || Number(montoOfertaInput) <= 0}
-                                className="flex-1 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 text-black font-black uppercase text-[10px] tracking-wider py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                            >
-                                <Send size={12} />
-                                {enviandoOferta ? "Transmitiendo..." : "Enviar Oferta"}
-                            </button>
-                            {notificacionUI.viajeId && (
-                                <button
-                                    type="button"
-                                    onClick={() => confirmarViaje(notificacionUI.viajeId)}
-                                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[10px] tracking-wider px-3 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                    title="Aceptar viaje tarifa directa"
-                                >
-                                    <CheckCircle size={12} />
-                                    Aceptar
-                                </button>
-                            )}
-                        </div>
-                    </form>
-
-                    <p className="text-[9px] text-zinc-500 mt-3 font-sans lowercase">Sincronizado de forma atómica con la central de despachos.</p>
-                </div>
-            )}
+            <NotificacionServicioCard 
+                notificacionUI={notificacionUI}
+                onClose={() => setNotificacionUI(null)}
+                montoOfertaInput={montoOfertaInput}
+                setMontoOfertaInput={setMontoOfertaInput}
+                enviandoOferta={enviandoOferta}
+                onEnviarOferta={handleEnviarOferta}
+                onConfirmarDirecto={confirmarViaje}
+            />
 
             {/* 🗺️ PANEL DE CONTROL VISUAL - VISOR MAPA */}
-            <div className="h-72 w-full relative z-0 border-b border-white/5">
-                <MapContainer center={posicionActual} zoom={13} className="h-full w-full">
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                    <AutoCenter position={posicionActual} />
-                    <Marker position={posicionActual} icon={DefaultIcon} />
-                </MapContainer>
-                
-                <div className="absolute top-4 right-4 z-[1000] backdrop-blur-md bg-[#121214]/80 px-4 py-1.5 rounded-xl border border-white/5 text-[9px] font-black uppercase tracking-widest flex items-center gap-2 shadow-xl">
-                    <div className={`w-2 h-2 rounded-full ${gpsActivo ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-                    {gpsActivo ? 'Rastreo Satelital Activo' : 'Señal GPS Perdida'}
-                </div>
-            </div>
+            <VisorMapa 
+                posicionActual={posicionActual}
+                gpsActivo={gpsActivo}
+            />
 
             {/* 📦 CUERPO DE OPERACIONES INTERMUNICIPALES */}
             <div className="max-w-4xl mx-auto p-6">
@@ -500,70 +643,15 @@ export default function HomeIntermunicipal() {
                     <span>Consola de Flota Intermunicipal</span>
                 </h1>
 
-                <div className="space-y-4">
-                    {loading ? (
-                        <div className="backdrop-blur-md bg-[#121214]/40 p-8 text-center border border-white/5 rounded-2xl flex flex-col items-center gap-2">
-                            <div className="w-5 h-5 border-2 border-yellow-500/20 border-t-yellow-500 rounded-full animate-spin" />
-                            <p className="text-[10px] uppercase text-zinc-500 font-bold tracking-widest">Leyendo Dársenas...</p>
-                        </div>
-                    ) : viajesAsignados.length === 0 ? (
-                        <div className="backdrop-blur-md bg-[#121214]/20 p-10 text-center border border-dashed border-white/5 rounded-2xl shadow-inner">
-                            <AlertTriangle size={24} className="text-zinc-600 mx-auto mb-2" />
-                            <p className="text-xs uppercase text-zinc-500 tracking-widest font-bold">Esperando Despacho Central</p>
-                            <p className="text-[9px] text-zinc-600 max-w-sm mx-auto mt-1 uppercase font-sans">Mantén la aplicación abierta. El despachador de terminal te asignará la ruta directamente a la unidad.</p>
-                        </div>
-                    ) : (
-                        viajesAsignados.map(viaje => {
-                            const tarifaCalculada = Number(viaje.tarifa || viaje.valorPasaje || 0);
-                            const estadoNormalizado = String(viaje.estado || '').toUpperCase();
-                            const esEnRuta = estadoNormalizado === 'EN_RUTA';
-
-                            return (
-                                <div key={viaje.id} className="backdrop-blur-md bg-[#121214]/70 border border-white/5 p-6 rounded-2xl shadow-2xl hover:border-white/10 transition-all duration-300">
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 justify-between items-start mb-6 border-b border-white/5 pb-4">
-                                        <div>
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-black">Ruta y Destino Autorizado</p>
-                                                <span className={`text-[8px] font-black px-2 py-0.5 rounded-md uppercase border ${
-                                                    esEnRuta ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30'
-                                                }`}>
-                                                    {esEnRuta ? 'En Ruta' : 'Asignado en Dársena'}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm font-black text-white flex items-center gap-2">
-                                                <MapPin size={15} className="text-yellow-500 shrink-0" /> {viaje.origen ? `${viaje.origen} ➔ ` : ''}{viaje.destino || 'N/A'}
-                                            </p>
-                                            <p className="text-[9px] text-zinc-400 font-sans mt-1">ID Contable: {viaje.id}</p>
-                                        </div>
-                                        <div className="sm:text-right">
-                                            <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-black mb-1">Liquidación de Tarifa</p>
-                                            <p className="text-base font-black text-emerald-400">${tarifaCalculada.toLocaleString('es-CO')} COP</p>
-                                        </div>
-                                    </div>
-
-                                    {!esEnRuta ? (
-                                        <button 
-                                            onClick={() => confirmarViaje(viaje.id)}
-                                            className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black uppercase text-[11px] tracking-widest py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(234,179,8,0.15)] flex items-center justify-center gap-2 active:scale-[0.98] border border-yellow-300 cursor-pointer"
-                                        >
-                                            <CheckCircle size={15} /> Confirmar Salida de Terminal (En Ruta)
-                                        </button>
-                                    ) : (
-                                        <button 
-                                            onClick={() => finalizarViaje(viaje.id)}
-                                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase text-[11px] tracking-widest py-4 rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] flex items-center justify-center gap-2 active:scale-[0.98] border border-emerald-400 cursor-pointer"
-                                        >
-                                            <Flag size={15} /> Finalizar Servicio Intermunicipal
-                                        </button>
-                                    )}
-                                </div>
-                            );
-                        })
-                    )}
-                </div>
+                <ListaViajes 
+                    loading={loading}
+                    viajesAsignados={viajesAsignados}
+                    onConfirmar={confirmarViaje}
+                    onFinalizar={finalizarViaje}
+                />
             </div>
 
-            {/* 🛠️ MODAL DE EDICIÓN FLUIDO - DATOS COMPAÑÍA Y VEHÍCULO (COMPONENTE COMPARTIDO) */}
+            {/* 🛠️ MODAL DE EDICIÓN FLUIDO (COMPONENTE COMPARTIDO) */}
             {mostrarModalPerfil && (
                 <AjustesPerfil
                     isOpen={mostrarModalPerfil}
@@ -572,6 +660,12 @@ export default function HomeIntermunicipal() {
                     onUpdateSuccess={handleUpdateSuccess}
                 />
             )}
+
+            {/* 🔔 SISTEMA DE TOASTS FLOTANTES */}
+            <ToastNotification 
+                toast={toast}
+                onClose={() => setToast((prev) => ({ ...prev, visible: false }))}
+            />
         </div>
     );
 }

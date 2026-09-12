@@ -1,8 +1,9 @@
-// Versión Arquitectura: V12.0 - Rediseño Modular de Billetera con Recarga Directa Admin/CEO
+// Versión Arquitectura: V13.0 - Integración de Historial de Movimientos de Billetera (TransactionHistory)
 /**
  * Ubicación: frontend/src/components/pasajero/BilleteraPasajeroModal.jsx
- * Misión: Panel de Billetera Digital CIMCO con gestión de saldo en tiempo real 
- *         y canal exclusivo de comunicación directa vía WhatsApp con la Central / Admin.
+ * Misión: Panel de Billetera Digital CIMCO con gestión de saldo en tiempo real, 
+ *         canal exclusivo de recarga vía WhatsApp con Central / Admin y trazabilidad 
+ *         en tiempo real mediante el componente TransactionHistory.
  */
 
 import React, { useState } from 'react';
@@ -13,8 +14,10 @@ import {
   CheckCircle2, 
   Copy, 
   ArrowUpRight, 
-  ShieldCheck 
+  ShieldCheck,
+  History 
 } from 'lucide-react';
+import TransactionHistory from '@/components/wallet/TransactionHistory';
 
 export default function BilleteraPasajeroModal({ 
   isOpen, 
@@ -154,6 +157,15 @@ export default function BilleteraPasajeroModal({
               <ArrowUpRight className="w-5 h-5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
             </button>
 
+          </div>
+
+          {/* Historial de Movimientos de Billetera */}
+          <div className="pt-4 border-t border-white/10 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-300">
+              <History className="w-4 h-4 text-amber-400" />
+              <span>Historial de Movimientos</span>
+            </div>
+            <TransactionHistory targetUid={usuario?.uid} />
           </div>
 
         </div>

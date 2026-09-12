@@ -1,8 +1,8 @@
-// Versión Arquitectura: V16.2 - Saneamiento de Ruta REST e Importación Homologada de useSocket
+// Versión Arquitectura: V16.3 - Encapsulamiento de Listener NoSQL en Capa de Servicios y Blindaje Anti-Undefined
 /**
  * Ubicación: frontend\src\pages\despachador\HistorialDespachador.jsx
  * Misión: Renderizar la bitácora de arqueos y manifiestos de salida del despachador en tiempo real.
- * Ajuste V16.2: Corrección de la ruta de importación de useSocket hacia @/hooks/useSocket para eliminar error en Vite build.
+ * Ajuste V16.3: Encapsulamiento del listener reactivo NoSQL en capa de servicios y blindaje anti-undefined en manipulaciones de cadena.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -15,10 +15,49 @@ import { formatFechaColombia } from '@/utils/dateFormatter';
 import api from '@/config/api';
 import { useSocket } from '@/hooks/useSocket';
 
+/**
+ * 🛡️ CAPA DE SERVICIO DESPACHO - ENCAPSULAMIENTO NOSQL Y CONSULTAS REACTIVAS
+ */
+export const despachoService = {
+    /**
+     * Suscribe un listener reactivo en Firestore para consultar los viajes del despachador.
+     */
+    suscribirHistorialNoSQL: (uidDespachador, onData, onError) => {
+        if (!uidDespachador) return () => {};
+
+        const pathColeccion = FIRESTORE_PATHS?.viajesIntermunicipales || 'viajes_intermunicipales';
+
+        try {
+            const q = query(
+                collection(db, pathColeccion),
+                where('dispatcherUid', '==', uidDespachador),
+                orderBy('createdAt', 'desc')
+            );
+
+            return onSnapshot(q, onData, onError);
+        } catch (err) {
+            if (typeof onError === 'function') {
+                onError(err);
+            }
+            return () => {};
+        }
+    }
+};
+
+/**
+ * Helper atómico para manipulación segura de cadenas de texto (Anti-Undefined Shield)
+ */
+const safeSubstring = (val, start = 0, end) => {
+    if (val === null || val === undefined) return '';
+    return String(val).substring(start, end);
+};
+
 const HistorialDespachador = () => {
-    const authContext = useAuth();
+    const authContext = useAuth ? useAuth() : {};
     const user = authContext?.user || null;
-    const { socket } = useSocket();
+    
+    const socketContext = useSocket ? useSocket() : {};
+    const socket = socketContext?.socket || null;
 
     const [historial, setHistorial] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -27,7 +66,24 @@ const HistorialDespachador = () => {
 
     // 🛡️ Normalizador atómico para unificar estructuras heterogéneas entre MongoDB y Firestore
     const normalizarDespacho = useCallback((doc) => {
-        const id = doc?._id || doc?.id || `DESP-${Math.random().toString(36).substring(2, 9)}`;
+        if (!doc || typeof doc !== 'object') {
+            return {
+                id: 'DESP-DESCONOCIDO',
+                _id: 'DESP-DESCONOCIDO',
+                destino: "Destino No Especificado",
+                origen: "Origen No Especificado",
+                tarifa: 0,
+                driverPlaca: 'N/A',
+                driverUid: 'Directo',
+                conductorNombre: '',
+                createdAt: new Date().toISOString(),
+                estado: 'completado',
+                raw: {}
+            };
+        }
+
+        const randomHash = safeSubstring(Math.random().toString(36), 2, 9);
+        const id = doc?._id || doc?.id || `DESP-${randomHash}`;
         
         // Extracción resiliente de valor de pasaje / tarifa
         const tarifaRaw = doc?.valorPasaje ?? doc?.tarifa ?? doc?.precio ?? 0;
@@ -84,41 +140,42 @@ const HistorialDespachador = () => {
         }
     }, [user, normalizarDespacho]);
 
-    // 📡 Listener de Respaldo en Firestore si Express falla
+    // 📡 Listener de Respaldo en Firestore encapsulado en la capa de servicio
     const suscribirFirestore = useCallback(() => {
         const uidDespachador = user?.uid || user?._id || user?.id;
         if (!uidDespachador) return () => {};
 
-        const pathColeccion = FIRESTORE_PATHS?.viajesIntermunicipales || 'viajes_intermunicipales';
+        const onData = (snapshot) => {
+            if (!snapshot || !Array.isArray(snapshot.docs)) {
+                setHistorial([]);
+                setOrigenDatos('Firestore');
+                setErrorIndex(null);
+                setLoading(false);
+                return;
+            }
+            const listaDespachos = snapshot.docs.map(docSnap => normalizarDespacho({ id: docSnap.id, ...docSnap.data() }));
+            setHistorial(listaDespachos);
+            setOrigenDatos('Firestore');
+            setErrorIndex(null);
+            setLoading(false);
+        };
+
+        const onError = (error) => {
+            console.error("⚠️ [CIMCO-ARCH-ERR] Fallo de consulta reactiva NoSQL:", error);
+            const msg = error?.message || "Error en bus de sincronización";
+            if (msg.includes("https://console.firebase.google.com")) {
+                setErrorIndex(msg);
+            } else {
+                setErrorIndex(`Error en bus de sincronización: ${msg}`);
+            }
+            setLoading(false);
+        };
 
         try {
-            const q = query(
-                collection(db, pathColeccion),
-                where('dispatcherUid', '==', uidDespachador),
-                orderBy('createdAt', 'desc')
-            );
-
-            return onSnapshot(q, 
-                (snapshot) => {
-                    const listaDespachos = snapshot.docs.map(doc => normalizarDespacho({ id: doc.id, ...doc.data() }));
-                    setHistorial(listaDespachos);
-                    setOrigenDatos('Firestore');
-                    setErrorIndex(null);
-                    setLoading(false);
-                }, 
-                (error) => {
-                    console.error("⚠️ [CIMCO-ARCH-ERR] Fallo de consulta reactiva NoSQL:", error);
-                    if (error.message && error.message.includes("https://console.firebase.google.com")) {
-                        setErrorIndex(error.message);
-                    } else {
-                        setErrorIndex(`Error en bus de sincronización: ${error.message}`);
-                    }
-                    setLoading(false);
-                }
-            );
+            return despachoService.suscribirHistorialNoSQL(uidDespachador, onData, onError);
         } catch (err) {
             console.error("⚠️ [CIMCO-ARCH-CRASH] Fallo crítico al inicializar listener Firestore:", err);
-            setErrorIndex(err.message);
+            setErrorIndex(err?.message || "Error crítico de inicialización");
             setLoading(false);
             return () => {};
         }
@@ -164,7 +221,7 @@ const HistorialDespachador = () => {
         const handleNuevoViaje = (nuevoViaje) => {
             console.log("⚡ [CIMCO-SOCKET] Nuevo despacho detectado en tiempo real:", nuevoViaje);
             const viajeNormalizado = normalizarDespacho(nuevoViaje);
-            setHistorial((prev) => [viajeNormalizado, ...prev.filter(v => v.id !== viajeNormalizado.id)]);
+            setHistorial((prev) => [viajeNormalizado, ...(prev || []).filter(v => v?.id !== viajeNormalizado.id)]);
         };
 
         socket.on('viaje_creado', handleNuevoViaje);
@@ -235,13 +292,13 @@ const HistorialDespachador = () => {
                     </button>
                     <div className="backdrop-blur-md bg-zinc-950/50 border border-white/5 px-3 py-1.5 rounded-xl text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2">
                         <span className={`w-1.5 h-1.5 rounded-full ${origenDatos === 'MongoDB' ? 'bg-emerald-400' : 'bg-orange-400'}`} />
-                        {origenDatos}: {historial.length} Unidades
+                        {origenDatos}: {historial?.length || 0} Unidades
                     </div>
                 </div>
             </header>
 
             <div className="flex-1 space-y-4 overflow-y-auto pr-1 custom-scrollbar">
-                {historial.length === 0 ? (
+                {!historial || historial.length === 0 ? (
                     <div className="backdrop-blur-md bg-[#161619]/40 border border-white/5 rounded-3xl p-12 text-center border-dashed flex flex-col items-center justify-center gap-2">
                         <p className="text-xs text-zinc-500 font-mono uppercase tracking-widest">No se registran despachos históricos de tu autoría en la central.</p>
                     </div>
@@ -252,16 +309,20 @@ const HistorialDespachador = () => {
                                 <div className="flex flex-col gap-1">
                                     <div className="flex items-center gap-2">
                                         <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse"></span>
-                                        <span className="text-xs font-black text-white tracking-wider font-mono">MANIFIESTO #{String(despacho.id).substring(0, 8).toUpperCase()}</span>
+                                        <span className="text-xs font-black text-white tracking-wider font-mono">
+                                            MANIFIESTO #{safeSubstring(despacho?.id, 0, 8).toUpperCase()}
+                                        </span>
                                     </div>
                                     <div className="flex items-center gap-1 text-[9px] text-zinc-500 font-bold uppercase tracking-wider font-mono">
                                         <Clock size={10} className="opacity-60" />
-                                        <span>{formatFechaColombia(despacho.createdAt)}</span>
+                                        <span>{formatFechaColombia(despacho?.createdAt)}</span>
                                     </div>
                                 </div>
                                 <div className="text-right">
                                     <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-mono font-bold block">Valor Ruta</span>
-                                    <p className="text-xs font-black text-emerald-400 font-mono">${despacho.tarifa.toLocaleString()} COP</p>
+                                    <p className="text-xs font-black text-emerald-400 font-mono">
+                                        ${(despacho?.tarifa || 0).toLocaleString()} COP
+                                    </p>
                                 </div>
                             </div>
                             
@@ -270,7 +331,7 @@ const HistorialDespachador = () => {
                                     <MapPin size={14} className="text-orange-400 shrink-0" />
                                     <div className="min-w-0">
                                         <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-widest">Destino Operativo</p>
-                                        <p className="truncate text-[11px] font-semibold mt-0.5 text-zinc-200">{safeFormatDireccion(despacho.destino)}</p>
+                                        <p className="truncate text-[11px] font-semibold mt-0.5 text-zinc-200">{safeFormatDireccion(despacho?.destino)}</p>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2.5 text-xs text-zinc-300 bg-zinc-950/30 border border-white/5 p-3 rounded-xl">
@@ -278,9 +339,9 @@ const HistorialDespachador = () => {
                                     <div className="min-w-0 w-full font-mono">
                                         <p className="text-[8px] text-zinc-500 uppercase tracking-widest">Unidad Asignada</p>
                                         <p className="truncate text-[10px] uppercase tracking-wide mt-0.5 text-zinc-400">
-                                            PLACA: <span className="text-white font-bold">{despacho.driverPlaca}</span>
-                                            {despacho.conductorNombre && <span className="text-zinc-300 font-normal"> ({despacho.conductorNombre})</span>}
-                                            {" — ID: "}<span className="text-orange-400">{String(despacho.driverUid).substring(0, 6)}</span>
+                                            PLACA: <span className="text-white font-bold">{despacho?.driverPlaca || 'N/A'}</span>
+                                            {despacho?.conductorNombre && <span className="text-zinc-300 font-normal"> ({despacho.conductorNombre})</span>}
+                                            {" — ID: "}<span className="text-orange-400">{safeSubstring(despacho?.driverUid, 0, 6)}</span>
                                         </p>
                                     </div>
                                 </div>

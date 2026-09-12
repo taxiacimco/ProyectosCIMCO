@@ -1,10 +1,10 @@
-// Versión Arquitectura: V19.3 - Deduplicación de Transacciones e Inyección de _reactKey
+// Versión Arquitectura: V19.4 - Filtrado de Fechas Local, Limpieza de Fechas y Paginación Segura
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\TablaTransacciones.jsx
  * Misión: Renderizar el historial de auditoría financiera con diseño Glassmorphism CIMCO-UI V9.3,
- *         soportando paginación por servidor, mapeo/parseo ampliado de tipos de movimiento 
- *         (CEO, Comisiones de Carrera/Fija, Pagos Servicio Pasajero), filtros avanzados por Tipo y Rol,
- *         deduplicación con deduplicarEntidades() e inyección de _reactKey en cada fila.
+ *         soportando paginación por servidor y local, mapeo/parseo ampliado de tipos de movimiento,
+ *         filtros avanzados (Tipo, Rol, Rango de Fechas en Servidor y Local Fallback),
+ *         limpieza explícita de fechas, validación de rangos de paginación y deduplicación con _reactKey.
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -23,7 +23,7 @@ import {
     UserCheck,
     Coins,
     Receipt,
-    ShieldAlert
+    XCircle
 } from 'lucide-react';
 import { formatFechaColombia } from '@/utils/dateFormatter';
 import { resolverFechaSegura } from '@/utils/dateUtils';
@@ -198,8 +198,12 @@ const TablaTransacciones = ({
 
     const esModoServidor = typeof onParamsChange === 'function';
 
+    // 🛡️ FILTRADO EN MEMORIA (INCLUYE COMPARACIÓN DE FECHAS CON resolverFechaSegura)
     const transaccionesFiltradas = useMemo(() => {
         if (esModoServidor) return dataset;
+
+        const startMs = startDate ? new Date(`${startDate}T00:00:00`).getTime() : null;
+        const endMs = endDate ? new Date(`${endDate}T23:59:59.999`).getTime() : null;
 
         return dataset.filter(tx => {
             const query = debouncedSearch.toLowerCase().trim();
@@ -213,18 +217,38 @@ const TablaTransacciones = ({
             const matchTipo = tipoFiltro === 'TODOS' || tipo === tipoFiltro;
             const matchRol = rolFiltro === 'TODOS' || rol === rolFiltro;
 
-            return matchQuery && matchTipo && matchRol;
+            let matchFecha = true;
+            if (startMs || endMs) {
+                const fechaObj = resolverFechaSegura(tx?.fecha || tx?.createdAt || tx?.timestamp);
+                if (fechaObj && !isNaN(fechaObj.getTime())) {
+                    const txMs = fechaObj.getTime();
+                    if (startMs && txMs < startMs) matchFecha = false;
+                    if (endMs && txMs > endMs) matchFecha = false;
+                } else {
+                    matchFecha = false;
+                }
+            }
+
+            return matchQuery && matchTipo && matchRol && matchFecha;
         });
-    }, [dataset, debouncedSearch, tipoFiltro, rolFiltro, esModoServidor]);
+    }, [dataset, debouncedSearch, tipoFiltro, rolFiltro, startDate, endDate, esModoServidor]);
 
     const totalRegistros = esModoServidor ? (totalRegistrosProp || dataset.length) : transaccionesFiltradas.length;
     const totalPaginas = Math.max(1, Math.ceil(totalRegistros / limit));
 
+    // 🛡️ VALIDACIÓN Y AJUSTE AUTÓNOMO DE RANGOS DE PAGINACIÓN
+    useEffect(() => {
+        if (page > totalPaginas && totalPaginas > 0) {
+            setPage(totalPaginas);
+        }
+    }, [page, totalPaginas]);
+
     const transaccionesPaginadas = useMemo(() => {
         if (esModoServidor) return transaccionesFiltradas;
-        const inicio = (page - 1) * limit;
+        const paginaEfectiva = Math.min(Math.max(1, page), totalPaginas);
+        const inicio = (paginaEfectiva - 1) * limit;
         return transaccionesFiltradas.slice(inicio, inicio + limit);
-    }, [transaccionesFiltradas, page, limit, esModoServidor]);
+    }, [transaccionesFiltradas, page, limit, totalPaginas, esModoServidor]);
 
     // 🛡️ DEDUPLICACIÓN ATÓMICA E INYECCIÓN DE _reactKey EN CADA ENTIDAD
     const transaccionesDeduplicadas = useMemo(() => {
@@ -237,6 +261,12 @@ const TablaTransacciones = ({
         if (nuevaPagina >= 1 && nuevaPagina <= totalPaginas) {
             setPage(nuevaPagina);
         }
+    };
+
+    const handleLimpiarFechas = () => {
+        setStartDate('');
+        setEndDate('');
+        setPage(1);
     };
 
     return (
@@ -309,22 +339,32 @@ const TablaTransacciones = ({
                         <UserCheck className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" size={12} />
                     </div>
 
-                    {/* FILTROS DE FECHAS */}
+                    {/* FILTROS DE FECHAS Y BOTÓN DE LIMPIEZA */}
                     <div className="flex items-center gap-1 bg-[#0c0c0e] border border-white/5 rounded-xl px-2 py-1">
                         <Calendar className="text-zinc-500 shrink-0" size={12} />
                         <input 
                             type="date"
                             value={startDate}
                             onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
-                            className="bg-transparent text-[9px] font-bold text-zinc-300 focus:outline-none uppercase"
+                            className="bg-transparent text-[9px] font-bold text-zinc-300 focus:outline-none uppercase cursor-pointer"
                         />
                         <span className="text-zinc-600 text-[9px]">-</span>
                         <input 
                             type="date"
                             value={endDate}
                             onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
-                            className="bg-transparent text-[9px] font-bold text-zinc-300 focus:outline-none uppercase"
+                            className="bg-transparent text-[9px] font-bold text-zinc-300 focus:outline-none uppercase cursor-pointer"
                         />
+                        {(startDate || endDate) && (
+                            <button
+                                type="button"
+                                onClick={handleLimpiarFechas}
+                                title="Limpiar rango de fechas"
+                                className="ml-1 text-zinc-400 hover:text-rose-400 transition-colors p-0.5 rounded-md focus:outline-none"
+                            >
+                                <XCircle size={12} />
+                            </button>
+                        )}
                     </div>
 
                     <div className="text-[9px] font-bold text-zinc-400 bg-zinc-950/60 border border-white/5 px-2.5 py-1.5 rounded-xl uppercase tracking-wider shrink-0 flex items-center gap-1.5">

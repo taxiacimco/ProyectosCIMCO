@@ -1,10 +1,31 @@
-// Versión Arquitectura: V24.3 - Servicio Centralizado de Autenticación con Manejo de FormData y Mapeo Amigable
+// Versión Arquitectura: V24.4 - Persistencia de Propiedad UID en Respuestas de Autenticación (CIMCO-AUTH-SERVICE)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\authService.js
- * Misión: Gestor central de peticiones de inicio de sesión, registro, actualización de perfil, verificación de token y cierre de sesión.
+ * Misión: Gestor central de peticiones de inicio de sesión, registro, actualización de perfil, verificación de token y cierre de sesión con garantía de normalización de propiedad 'uid'.
  */
 
 import api, { AUTH_ENDPOINTS } from '@/config/api';
+
+/**
+ * Normaliza la presencia persistente de la propiedad 'uid' en las respuestas de autenticación
+ * para asegurar que los interceptores HTTP y servicios cliente dispongan de ella.
+ */
+const normalizarUidEnRespuesta = (data) => {
+    if (!data || typeof data !== 'object') return data || {};
+    
+    const targetObj = data.user || data.usuario || data.conductor || data.pasajero || data;
+    const uidEncontrado = data.uid || targetObj?.uid || targetObj?._id || targetObj?.id || data._id || data.id;
+
+    if (uidEncontrado) {
+        data.uid = uidEncontrado;
+        if (data.user && typeof data.user === 'object') data.user.uid = data.user.uid || uidEncontrado;
+        if (data.usuario && typeof data.usuario === 'object') data.usuario.uid = data.usuario.uid || uidEncontrado;
+        if (data.conductor && typeof data.conductor === 'object') data.conductor.uid = data.conductor.uid || uidEncontrado;
+        if (data.pasajero && typeof data.pasajero === 'object') data.pasajero.uid = data.pasajero.uid || uidEncontrado;
+    }
+
+    return data;
+};
 
 export const authService = {
     /**
@@ -16,7 +37,7 @@ export const authService = {
             throw new Error('Las credenciales de acceso son obligatorias.');
         }
         const response = await api.post(AUTH_ENDPOINTS.login, credentials);
-        return response?.data || {};
+        return normalizarUidEnRespuesta(response?.data || {});
     },
 
     /**
@@ -30,7 +51,7 @@ export const authService = {
         const isFormData = typeof FormData !== 'undefined' && userData instanceof FormData;
         const config = isFormData ? { headers: { 'Content-Type': undefined } } : {};
         const response = await api.post(AUTH_ENDPOINTS.register, userData, config);
-        return response?.data || {};
+        return normalizarUidEnRespuesta(response?.data || {});
     },
 
     /**
@@ -92,7 +113,7 @@ export const authService = {
         } : {};
 
         const response = await api.put(endpoint, payloadToSend, config);
-        return response?.data || {};
+        return normalizarUidEnRespuesta(response?.data || {});
     },
 
     /**
@@ -100,7 +121,7 @@ export const authService = {
      */
     async verifySession() {
         const response = await api.get(AUTH_ENDPOINTS.verificar);
-        return response?.data || {};
+        return normalizarUidEnRespuesta(response?.data || {});
     },
 
     /**
@@ -108,7 +129,7 @@ export const authService = {
      */
     async getProfile() {
         const response = await api.get(AUTH_ENDPOINTS.me);
-        return response?.data || {};
+        return normalizarUidEnRespuesta(response?.data || {});
     },
 
     /**

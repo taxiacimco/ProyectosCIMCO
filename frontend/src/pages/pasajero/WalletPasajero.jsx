@@ -1,12 +1,14 @@
-// Versión Arquitectura: V12.4 - Depuración de Controles Duplicados y Mapeo Estándar de Props en BilleteraPasajeroModal
+// Versión Arquitectura: V13.0 - Integración Hook Reactivo useWallet y Sincronización Automática de Saldo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\WalletPasajero.jsx
- * Misión: Proveer al pasajero una interfaz optimizada para consultar saldo y gestionar recargas vía WhatsApp Central.
+ * Misión: Proveer al pasajero una interfaz optimizada para consultar saldo y gestionar recargas vía WhatsApp Central
+ *         con blindaje de sesión y actualización reactiva en tiempo real vía useWallet (escucha de eventos actualizar_saldo_pasajero).
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Identidad Amarilla).
  */
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useWallet } from '@/hooks/useWallet';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { Wallet, Activity, CreditCard, AlertCircle, PlusCircle } from 'lucide-react';
@@ -14,10 +16,24 @@ import TransactionHistory from '@/components/wallet/TransactionHistory';
 import BilleteraPasajeroModal from '@/components/pasajero/BilleteraPasajeroModal';
 
 const WalletPasajero = () => {
-    const { user } = useAuth();
+    const { user, logout } = useAuth();
+    const walletContext = useWallet();
+
+    // Extracción defensiva del saldo provisto por el hook useWallet (escucha de eventos Sockets y WebSockets de actualización)
+    const saldoHook = typeof walletContext?.saldo === 'number' 
+        ? walletContext.saldo 
+        : (typeof walletContext?.balance === 'number' ? walletContext.balance : null);
+
     const [balance, setBalance] = useState(0);
     const [errorReactor, setErrorReactor] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+
+    // Sincronización reactiva desde useWallet ante evento 'actualizar_saldo_pasajero'
+    useEffect(() => {
+        if (typeof saldoHook === 'number' && !isNaN(saldoHook)) {
+            setBalance(saldoHook);
+        }
+    }, [saldoHook]);
 
     useEffect(() => {
         const uid = user?.uid || user?.id;
@@ -28,25 +44,59 @@ const WalletPasajero = () => {
         // Conexión unificada a la colección de finanzas consumiendo FIRESTORE_PATHS global con fallbacks
         const pathColeccion = FIRESTORE_PATHS?.wallets || FIRESTORE_PATHS?.billeteras || 'wallets';
         
-        const unsubscribe = onSnapshot(doc(db, pathColeccion, uid), (docRef) => {
-            if (docRef.exists()) {
-                const data = docRef.data() || {};
-                // Guardas anti-undefined y casteo numérico seguro
-                const saldoCalculado = Number(data?.balance ?? data?.saldo ?? 0);
-                setBalance(isNaN(saldoCalculado) ? 0 : saldoCalculado);
-            } else {
-                setBalance(0);
+        const unsubscribe = onSnapshot(
+            doc(db, pathColeccion, uid), 
+            (docRef) => {
+                if (docRef.exists()) {
+                    const data = docRef.data() || {};
+                    // Guardas anti-undefined y casteo numérico seguro
+                    const saldoCalculado = Number(data?.balance ?? data?.saldo ?? 0);
+                    const saldoValido = isNaN(saldoCalculado) ? 0 : saldoCalculado;
+
+                    // Dar prioridad a saldoHook si ya está activo y sincronizado, de lo contrario fallback al Snapshot
+                    setBalance(typeof saldoHook === 'number' && !isNaN(saldoHook) ? saldoHook : saldoValido);
+                } else {
+                    if (typeof saldoHook !== 'number' || isNaN(saldoHook)) {
+                        setBalance(0);
+                    }
+                }
+                setErrorReactor(null);
+            }, 
+            (error) => {
+                console.error("❌ [BILLETERA-REACTOR-ERROR] Fallo transaccional o rechazo de credenciales:", error);
+                
+                const errorCode = error?.code || '';
+                const errorMessage = String(error?.message || '').toLowerCase();
+                
+                // Detección de expiración de token, usuario inexistente o permisos denegados
+                const isSessionExpired = 
+                    errorCode === 'permission-denied' || 
+                    errorCode === 'unauthenticated' ||
+                    errorMessage.includes('token') ||
+                    errorMessage.includes('expired') ||
+                    errorMessage.includes('unauthorized') ||
+                    errorMessage.includes('user-not-found');
+
+                if (isSessionExpired) {
+                    setErrorReactor("Sesión inválida o expirada. Cerrando sesión por seguridad...");
+                    if (typeof logout === 'function') {
+                        setTimeout(() => {
+                            logout();
+                        }, 1500);
+                    }
+                } else {
+                    setErrorReactor("Fallo de comunicación en tiempo real con la bóveda de fondos.");
+                }
             }
-            setErrorReactor(null);
-        }, (error) => {
-            console.error("❌ [BILLETERA-REACTOR-ERROR] Fallo transaccional de fondo:", error);
-            setErrorReactor("Fallo de comunicación en tiempo real con la bóveda de fondos.");
-        });
+        );
         
         return () => unsubscribe();
-    }, [user?.uid, user?.id]);
+    }, [user?.uid, user?.id, logout, saldoHook]);
 
     const uidUsuario = user?.uid || user?.id;
+
+    // Consolidación de saldo efectivo con prioridad al hook reactivo `useWallet`
+    const saldoEfectivo = typeof saldoHook === 'number' && !isNaN(saldoHook) ? saldoHook : balance;
 
     // Handlers para gestión de estado del modal
     const handleOpenModal = () => {
@@ -85,7 +135,7 @@ const WalletPasajero = () => {
                         </div>
 
                         {errorReactor && (
-                            <div className="mb-4 bg-red-500/10 border border-red-500/20 rounded-xl p-2.5 flex items-center gap-2 text-red-400 text-[9px] font-bold uppercase tracking-wider">
+                            <div className="mb-4 bg-red-500/10 border border-red-500/20 rounded-xl p-2.5 flex items-center gap-2 text-red-400 text-[9px] font-bold uppercase tracking-wider animate-pulse">
                                 <AlertCircle size={14} className="shrink-0" />
                                 <span>{errorReactor}</span>
                             </div>
@@ -94,7 +144,7 @@ const WalletPasajero = () => {
                         <div className="py-2">
                             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Fondos Disponibles</p>
                             <h2 className="text-4xl md:text-5xl font-black text-white mb-6 tracking-tight mt-1">
-                                ${Number(balance || 0).toLocaleString()} <span className="text-lg text-zinc-500 font-normal">COP</span>
+                                ${Number(saldoEfectivo || 0).toLocaleString()} <span className="text-lg text-zinc-500 font-normal">COP</span>
                             </h2>
                         </div>
                     </div>
@@ -104,7 +154,7 @@ const WalletPasajero = () => {
                         <button
                             type="button"
                             onClick={handleOpenModal}
-                            className="w-full py-3.5 px-4 bg-yellow-500 hover:bg-yellow-400 text-black font-black text-xs uppercase tracking-wider rounded-2xl transition-all shadow-[0_0_20px_rgba(234,179,8,0.2)] active:scale-95 flex items-center justify-center gap-2"
+                            className="w-full py-3.5 px-4 bg-yellow-500 hover:bg-yellow-400 text-black font-black text-xs uppercase tracking-wider rounded-2xl transition-all shadow-[0_0_20px_rgba(234,179,8,0.2)] active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
                         >
                             <PlusCircle size={16} />
                             <span>Recargar Billetera</span>
@@ -131,7 +181,7 @@ const WalletPasajero = () => {
                 <BilleteraPasajeroModal
                     isOpen={isModalOpen}
                     onClose={handleCloseModal}
-                    saldo={balance}
+                    saldo={saldoEfectivo}
                     usuario={user}
                 />
             )}

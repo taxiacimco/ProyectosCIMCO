@@ -1,9 +1,10 @@
-// Versión Arquitectura: V21.54 - Integración de Estado isWalletOpen y Botón Gatillo en Sidebar
+// Versión Arquitectura: V21.55 - Delegación de Escucha WebSockets a useWallet y Refresco Reactivo de Saldo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\pasajero\HomePasajero.jsx
  * Misión: Interfaz táctica de transporte para pasajeros con visibilidad de mapa optimizada (OpenStreetMap),
- *         integración atómica de telemetría, sockets, billetera smart, selector dinámico de flota (4 modalidades + Cooperativas < 5km),
- *         monitoreo de hardware GPS, entrada de dirección manual (origenManual) con fix de GPS bloqueado y recalibración,
+ *         integración atómica de telemetría, sockets, billetera smart reactiva mediante delegación de WebSockets a useWallet,
+ *         selector dinámico de flota (4 modalidades + Cooperativas < 5km), monitoreo de hardware GPS,
+ *         entrada de dirección manual (origenManual) con fix de GPS bloqueado y recalibración,
  *         subasta dinámica de ofertas en tiempo real vía WebSockets/Firestore, actualización de perfil unificada mediante AjustesPerfil,
  *         disparador y modal interactivo de BilleteraPasajeroModal con control de estado isWalletOpen, y paleta CIMCO-UI V9.3.
  */
@@ -128,11 +129,11 @@ export default function HomePasajero() {
   // 🔌 Canal de Telemetría Sockets Centralizado mediante Hook Unificado
   const { socket, isConnected } = useSocket();
 
-  // 💳 Integración del Hook Unificado de Billetera
+  // 💳 Integración del Hook Unificado de Billetera (Delegación de WebSockets y Estado Reactivo)
   const walletContext = useWallet();
   const saldoHook = typeof walletContext?.saldo === 'number' 
     ? walletContext.saldo 
-    : (typeof walletContext?.balance === 'number' ? walletContext.balance : 0);
+    : (typeof walletContext?.balance === 'number' ? walletContext.balance : null);
   const recargarSaldoHook = walletContext?.recargarSaldo || walletContext?.recargar;
 
   // 🛡️ Integración Hook Perimetral de Monitoreo GPS y Guardas Anti-Undefined
@@ -177,9 +178,9 @@ export default function HomePasajero() {
     foto_perfil: null
   });
 
-  // Consolidación atómica de saldo
-  const saldoEfectivo = typeof saldoHook === 'number' && saldoHook > 0 
-    ? saldoHook 
+  // Consolidación atómica de saldo con preferencia reactiva a useWallet (incluyendo 0)
+  const saldoEfectivo = typeof saldoHook === 'number'
+    ? saldoHook
     : (typeof perfilFirestore.saldoBilletera === 'number' ? perfilFirestore.saldoBilletera : 0);
 
   const [montoRecargaSimulada, setMontoRecargaSimulada] = useState('20000');
@@ -1339,11 +1340,21 @@ export default function HomePasajero() {
           onSuccess={(nuevoSaldo) => {
             if (nuevoSaldo !== undefined && !isNaN(Number(nuevoSaldo))) {
               setPerfilFirestore((prev) => ({ ...prev, saldoBilletera: Number(nuevoSaldo) }));
+              if (typeof walletContext?.actualizarSaldo === 'function') {
+                walletContext.actualizarSaldo(Number(nuevoSaldo));
+              } else if (typeof walletContext?.setSaldo === 'function') {
+                walletContext.setSaldo(Number(nuevoSaldo));
+              }
             }
           }}
           onRecargaCompletada={(nuevoSaldo) => {
             if (nuevoSaldo !== undefined && !isNaN(Number(nuevoSaldo))) {
               setPerfilFirestore((prev) => ({ ...prev, saldoBilletera: Number(nuevoSaldo) }));
+              if (typeof walletContext?.actualizarSaldo === 'function') {
+                walletContext.actualizarSaldo(Number(nuevoSaldo));
+              } else if (typeof walletContext?.setSaldo === 'function') {
+                walletContext.setSaldo(Number(nuevoSaldo));
+              }
             }
           }}
         />

@@ -1,11 +1,10 @@
-// Versión Arquitectura: V22.01 - Transmisión de Telemetría GPS, Control de Estados y Filtrado por Umbral de Saldo en Tiempo Real
+// Versión Arquitectura: V22.02 - Emisor Dedicado de Actualización de Saldo Pasajero y Control de Telemetría GPS en Tiempo Real
 
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\sockets\socket.manager.js
  * Misión: Administrar el ciclo de vida de las conexiones, salas automáticas de aislamiento (empresa/usuario),
- *          telemetría GPS y flujo completo de subasta/despacho en tiempo real, garantizando la resolución dinámica
- *          de orígenes CORS (HTTP/HTTPS) y transporte dual (websocket y polling), omitiendo la emisión de
- *          servicios disponibles a conductores cuyo saldo en la base de datos sea menor a 2.000 COP.
+ *          telemetría GPS, flujo de subasta/despacho en tiempo real y transmisión dedicada de actualización
+ *          de saldo a pasajeros, garantizando la resolución dinámica de orígenes CORS (HTTP/HTTPS) y transporte dual.
  */
 
 import mongoose from 'mongoose';
@@ -142,6 +141,49 @@ export const emitirSesionExpirada = (socket, reason = 'nodo_inexistente') => {
     }
 };
 
+/**
+ * Función emisora dedicada para el evento actualizar_saldo_pasajero.
+ * Transmite la actualización de saldo en tiempo real hacia la sala privada del pasajero
+ * o hacia la sala general 'sala_pasajeros'.
+ * @param {Object} io - Instancia de Socket.IO Server.
+ * @param {string|null} pasajeroId - ID/UID del pasajero objetivo. Si es nulo, emite a la sala general de pasajeros.
+ * @param {Object|number} datosSaldo - Payload de saldo o valor numérico del saldo actualizado.
+ */
+export const emitirActualizacionSaldoPasajero = (io, pasajeroId = null, datosSaldo = {}) => {
+    try {
+        if (!io) {
+            console.error('⚠️ [SOCKET-MGR-ERROR] Instancia io no válida para emitirActualizacionSaldoPasajero.');
+            return false;
+        }
+
+        const payload = (typeof datosSaldo === 'object' && datosSaldo !== null)
+            ? {
+                saldo: datosSaldo.saldo ?? datosSaldo.nuevoSaldo ?? 0,
+                pasajeroId: pasajeroId || datosSaldo.pasajeroId || datosSaldo.usuarioId || null,
+                timestamp: datosSaldo.timestamp || new Date().toISOString(),
+                ...datosSaldo
+            }
+            : {
+                saldo: Number(datosSaldo) || 0,
+                pasajeroId,
+                timestamp: new Date().toISOString()
+            };
+
+        if (pasajeroId) {
+            const salaPrivada = `user_${pasajeroId}`;
+            io.to(pasajeroId).to(salaPrivada).emit('actualizar_saldo_pasajero', payload);
+            logSocket(`💰 Evento 'actualizar_saldo_pasajero' emitido a salas [${pasajeroId}] y [${salaPrivada}] | Saldo: $${payload.saldo}`);
+        } else {
+            io.to('sala_pasajeros').emit('actualizar_saldo_pasajero', payload);
+            logSocket(`💰 Evento 'actualizar_saldo_pasajero' emitido a [sala_pasajeros] | Saldo: $${payload.saldo}`);
+        }
+        return true;
+    } catch (err) {
+        console.error(`[SOCKET-MGR-ERROR] Fallo al emitir 'actualizar_saldo_pasajero':`, err?.message || err);
+        return false;
+    }
+};
+
 export const inicializarSockets = (io) => {
     if (!io) {
         console.error('⚠️ [SOCKET-MGR-FATAL] Instancia io no proporcionada para la inicialización.');
@@ -235,6 +277,23 @@ export const inicializarSockets = (io) => {
                 logSocket(`Evento 'registrar_socket' procesado con éxito para UID: ${uId} | Empresa: ${eId || 'N/A'}`);
             } catch (err) {
                 console.error(`[SOCKET-MGR-ERROR] Error en registrar_socket para ${socket.id}:`, err?.message || err);
+            }
+        });
+
+        // ==================================================
+        // 1.2. EMISOR / ESCUCHADOR DEDICADO: ACTUALIZAR SALDO PASAJERO
+        // ==================================================
+        socket.on('actualizar_saldo_pasajero', (payload = {}) => {
+            try {
+                if (!socket.usuarioId) {
+                    emitirSesionExpirada(socket, 'nodo_inexistente');
+                    return;
+                }
+
+                const targetPasajeroId = payload.pasajeroId || payload.usuarioId || socket.usuarioId;
+                emitirActualizacionSaldoPasajero(io, targetPasajeroId, payload);
+            } catch (err) {
+                console.error(`[SOCKET-MGR-ERROR] Error procesando evento 'actualizar_saldo_pasajero':`, err?.message || err);
             }
         });
 

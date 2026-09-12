@@ -1,4 +1,4 @@
-// Versión Arquitectura: V1.5 - Deduplicación de entidades y key basada en _reactKey
+// Versión Arquitectura: V1.6 - Unificación VITE_API_BASE_URL, estandarización cimco_token y reset de formulario en modal
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\GestionAdmins.jsx
  * Misión: Permitir al CEO la creación, asignación de permisos y revocación de administradores/oficinas asegurando el nivel mínimo de acceso para recargas manuales.
@@ -31,6 +31,15 @@ const deduplicarEntidades = (lista = []) => {
     }, []);
 };
 
+const INITIAL_FORM_STATE = {
+    nombre: '',
+    email: '',
+    password: '',
+    role: 'admin', // 'admin', 'oficina', 'ceo'
+    access_level: 8,
+    cooperativaId: ''
+};
+
 const GestionAdmins = () => {
     const { user } = useAuth();
     const [administradores, setAdministradores] = useState([]);
@@ -42,18 +51,18 @@ const GestionAdmins = () => {
     const [mensaje, setMensaje] = useState({ tipo: '', texto: '' });
 
     // Formulario de creación de Admin/Oficina con garantía de nivel mínimo 8 para recargas en GestionBilleteras
-    const [formData, setFormData] = useState({
-        nombre: '',
-        email: '',
-        password: '',
-        role: 'admin', // 'admin', 'oficina', 'ceo'
-        access_level: 8,
-        cooperativaId: ''
-    });
+    const [formData, setFormData] = useState(INITIAL_FORM_STATE);
 
-    // Helper para recuperar token JWT REST con guardas de seguridad
+    // Función unificada para cerrar el modal y reiniciar el estado del formulario
+    const cerrarModal = () => {
+        setModalAbierto(false);
+        setFormData(INITIAL_FORM_STATE);
+        setMensaje({ tipo: '', texto: '' });
+    };
+
+    // Helper para recuperar token JWT REST estandarizado con 'cimco_token' y guardas de seguridad
     const getAuthToken = async () => {
-        let token = user?.token || localStorage.getItem('token') || localStorage.getItem('cimco_token');
+        let token = user?.token || localStorage.getItem('cimco_token');
         if (!token && auth?.currentUser) {
             try {
                 token = await auth.currentUser.getIdToken();
@@ -64,9 +73,9 @@ const GestionAdmins = () => {
         return token || '';
     };
 
-    // Helper para normalizar la URL Base de la API
+    // Helper para normalizar la URL Base de la API consumiendo VITE_API_BASE_URL
     const getCleanApiUrl = () => {
-        const rawBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+        const rawBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'http://localhost:3000';
         return rawBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
     };
 
@@ -179,9 +188,7 @@ const GestionAdmins = () => {
                 setMensaje({ tipo: 'exito', texto: `Credencial creada exitosamente para ${nombreLimpio}` });
                 await cargarAdministradores();
                 setTimeout(() => {
-                    setModalAbierto(false);
-                    setFormData({ nombre: '', email: '', password: '', role: 'admin', access_level: 8, cooperativaId: '' });
-                    setMensaje({ tipo: '', texto: '' });
+                    cerrarModal();
                 }, 1500);
             } else {
                 setMensaje({ 
@@ -263,14 +270,14 @@ const GestionAdmins = () => {
                 <div className="flex items-center gap-3">
                     <button 
                         onClick={() => cargarAdministradores()}
-                        className="p-3 bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-xl text-zinc-300 hover:text-white transition-colors"
+                        className="p-3 bg-[#121214]/80 border border-white/5 hover:border-amber-500/30 rounded-xl text-zinc-300 hover:text-white transition-colors cursor-pointer"
                         title="Recargar credenciales"
                     >
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-amber-400' : ''}`} />
                     </button>
                     <button
                         onClick={() => { setMensaje({ tipo: '', texto: '' }); setModalAbierto(true); }}
-                        className="px-5 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-500/10 transition-all flex items-center gap-2"
+                        className="px-5 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-amber-500/10 transition-all flex items-center gap-2 cursor-pointer"
                     >
                         <UserPlus className="w-4 h-4 stroke-[3]" />
                         Nueva Credencial
@@ -287,7 +294,7 @@ const GestionAdmins = () => {
                         placeholder="Buscar por Nombre o Correo..."
                         value={busqueda}
                         onChange={(e) => setBusqueda(e.target.value)}
-                        className="w-full bg-[#121214]/80 border border-white/5 rounded-xl py-3 pl-11 pr-4 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-all"
+                        className="w-full bg-[#121214]/80 border border-white/5 rounded-xl py-3 pl-11 pr-4 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-all uppercase tracking-wider"
                     />
                 </div>
                 <div className="text-[10px] uppercase tracking-wider text-zinc-400 bg-[#121214]/80 border border-white/5 px-4 py-2.5 rounded-xl">
@@ -335,7 +342,7 @@ const GestionAdmins = () => {
                                             onClick={() => handleRevocarCredencial(targetId)}
                                             disabled={isRevocando}
                                             title="Revocar Credencial"
-                                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all disabled:opacity-50"
+                                            className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/20 transition-all disabled:opacity-50 cursor-pointer"
                                         >
                                             {isRevocando ? (
                                                 <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
@@ -369,9 +376,16 @@ const GestionAdmins = () => {
                 </div>
             )}
 
-            {/* MODAL DE CREACIÓN */}
+            {/* MODAL DE CREACIÓN CON LIMPIEZA DE FORMULARIO EN BACKDROP Y CANCELAR */}
             {modalAbierto && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                <div 
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget && !guardando) {
+                            cerrarModal();
+                        }
+                    }}
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+                >
                     <div className="bg-[#121214] border border-white/10 rounded-3xl w-full max-w-md p-6 shadow-2xl relative">
                         <h3 className="text-sm font-black text-white uppercase tracking-wider mb-4 flex items-center gap-2">
                             <KeyRound className="w-4 h-4 text-amber-400" /> Emitir Credencial Corporativa
@@ -385,7 +399,7 @@ const GestionAdmins = () => {
                                     <AlertCircle className="w-4 h-4 shrink-0" />
                                     <span>{mensaje.texto}</span>
                                 </div>
-                                <button onClick={() => setMensaje({ tipo: '', texto: '' })} className="text-[10px] font-bold underline">Cerrar</button>
+                                <button onClick={() => setMensaje({ tipo: '', texto: '' })} className="text-[10px] font-bold underline cursor-pointer">Cerrar</button>
                             </div>
                         )}
 
@@ -398,7 +412,7 @@ const GestionAdmins = () => {
                                     value={formData.nombre}
                                     onChange={(e) => setFormData({...formData, nombre: e.target.value})}
                                     disabled={guardando}
-                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-50"
+                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-50 uppercase tracking-wider"
                                     required
                                 />
                             </div>
@@ -411,7 +425,7 @@ const GestionAdmins = () => {
                                     value={formData.email}
                                     onChange={(e) => setFormData({...formData, email: e.target.value})}
                                     disabled={guardando}
-                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-50"
+                                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-50 tracking-wider"
                                     required
                                 />
                             </div>
@@ -436,7 +450,7 @@ const GestionAdmins = () => {
                                         value={formData.role}
                                         onChange={(e) => setFormData({...formData, role: e.target.value})}
                                         disabled={guardando}
-                                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-50"
+                                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-50 uppercase"
                                     >
                                         <option value="oficina">Oficina / Despacho</option>
                                         <option value="admin">Administrador Gerencial</option>
@@ -463,16 +477,16 @@ const GestionAdmins = () => {
                             <div className="flex justify-end gap-3 pt-4 border-t border-zinc-800">
                                 <button
                                     type="button"
-                                    onClick={() => setModalAbierto(false)}
+                                    onClick={cerrarModal}
                                     disabled={guardando}
-                                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs uppercase rounded-xl transition-colors disabled:opacity-50"
+                                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs uppercase rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
                                 >
                                     Cancelar
                                 </button>
                                 <button
                                     type="submit"
                                     disabled={guardando}
-                                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase rounded-xl flex items-center gap-2 transition-all disabled:opacity-50"
+                                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs uppercase rounded-xl flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
                                 >
                                     {guardando && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                                     {guardando ? 'Emitiendo...' : 'Emitir Credencial'}

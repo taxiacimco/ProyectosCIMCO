@@ -1,13 +1,13 @@
-// Versión Arquitectura: V21.1 - Inyección de esAdminCentralMiddleware en Rutas Administrativas de Billetera (/recargas-manuales, /ajustes-caja, /reversiones, /conciliaciones)
+// Versión Arquitectura: V21.4 - Exposición del Endpoint de Historial de Movimientos de Billetera (CIMCO-WALLET-ROUTES)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\billetera\wallet.routes.js
  * Misión: Exponer las rutas de gestión de billetera bajo Clean Architecture, asegurando la compatibilidad
  * estricta del middleware de autenticación (verificarToken / authMiddleware) y previniendo errores de decodificación,
- * inyectando esAdminCentralMiddleware en todas las rutas administrativas de manejo de fondos.
+ * registrando explícitamente los endpoints de saldo, historial, recargar y debitar saldo protegidos por autenticación.
  */
 
 import { Router } from 'express';
-import { obtenerSaldo, gestionarSaldoManual } from './wallet.controller.js';
+import { obtenerSaldo, obtenerHistorialMovimientos, gestionarSaldoManual, recargarSaldo, debitarSaldo } from './wallet.controller.js';
 import * as walletController from './wallet.controller.js';
 import authMiddlewareModule from '../../middleware/auth.middleware.js';
 
@@ -61,8 +61,13 @@ const resolverHandler = (handlerNombre, fallbackHandler) => (req, res, next) => 
     });
 };
 
-// 🛡️ RUTA PROTEGIDA DE CONSULTA DE SALDO CON BLINDAJE DE TOKEN
+// 🛡️ RUTAS PROTEGIDAS DE CONSULTA E HISTORIAL DE BILLETERA
 router.get('/saldo', requiereAutenticacion, obtenerSaldo);
+router.get('/historial', requiereAutenticacion, resolverHandler('obtenerHistorialMovimientos', obtenerHistorialMovimientos));
+
+// 🛡️ RUTAS PROTEGIDAS DE OPERACIONES EN BILLETERA (RECARGA Y DÉBITO)
+router.post('/recargar', requiereAutenticacion, resolverHandler('recargarSaldo', recargarSaldo));
+router.post('/debitar', requiereAutenticacion, resolverHandler('debitarSaldo', debitarSaldo));
 
 // 🛡️ RUTAS PROTEGIDAS ADMIN/CEO: GESTIÓN DE SALDOS Y FONDOS GLOBALES
 router.post('/admin/operacion-manual', requiereAutenticacion, esAdminCentralMiddleware, gestionarSaldoManual);

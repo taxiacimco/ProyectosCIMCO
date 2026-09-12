@@ -1,10 +1,10 @@
-// Versión Arquitectura: V21.49 - Unificación de actualización de perfil de mototaxi con AjustesPerfil compartido mediante callback onUpdateSuccess
+// Versión Arquitectura: V21.50 - Captura explícita de errores 401 en REST y Sockets con logout defensivo, apagado GPS y purga de sesión
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\mototaxi\HomeMototaxi.jsx
  * Misión: Dashboard táctico para conductores de Mototaxi con telemetría GPS en tiempo real,
  *          paleta de colores adaptativa (Ámbar Standby / Azul Suave Activo), integración fluida
- *          con AjustesPerfil (vía prop onUpdateSuccess), validación local rigurosa de expiración JWT (Anti-401) con padding seguro,
- *          captura explícita de error HTTP 401 por nodo de identidad extinto con logout defensivo,
+ *          con AjustesPerfil (vía prop onUpdateSuccess), captura explícita de estado HTTP/Socket 401
+ *          con ejecutor de logout defensivo (limpieza localStorage, desinstalación GPS watch, desconexión WebSocket y redirección a login),
  *          sincronización dinámica de remoción de ofertas en radar (viaje_removido_radar / HTTP 409),
  *          resiliencia ante redes inestables (timeouts, reintentos e indicador de conectividad de red),
  *          manejo reactivo de estado Offline en UI mediante event listeners 'online'/'offline',
@@ -247,6 +247,36 @@ export default function HomeMototaxi() {
     }
   }, [isConnected]);
 
+  // 🛡️ HANDLER DE LOGOUT DEFENSIVO PARA ERRORES 401 / SESIÓN EXTINTA
+  const ejecutarLogoutDefensivo = useCallback(async () => {
+    logger.warn("🚨 [CIMCO-AUTH-DEFENSE] Capturado estado 401 / Token expirado. Ejecutando protocolo de logout defensivo.");
+    
+    // 1. Apagar receptores GPS
+    if (geoWatchRef.current !== null) {
+      navigator.geolocation.clearWatch(geoWatchRef.current);
+      geoWatchRef.current = null;
+      logger.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS desinstalado de forma defensiva.");
+    }
+
+    // 2. Desconectar canal WebSocket
+    desconectarEcosistema();
+
+    // 3. Limpiar almacenamiento local por completo
+    localStorage.clear();
+    sessionStorage.clear();
+
+    // 4. Invocación de logout context y redirección a autenticación
+    try {
+      if (typeof logout === 'function') {
+        await logout();
+      }
+    } catch (err) {
+      logger.error("🚨 [CIMCO-AUTH-DEFENSE] Error al invocar logout de contexto:", err);
+    } finally {
+      window.location.replace('/login');
+    }
+  }, [desconectarEcosistema, logout]);
+
   // Estabilización de Telemetría GPS con Limpieza Estricta de Hooks
   useEffect(() => {
     let watchId = null;
@@ -311,7 +341,7 @@ export default function HomeMototaxi() {
   }, [isOnline, user?.uid]);
 
   // ==================================================================
-  // 3. GOBERNANZA DEL CANAL WEBSOCKET CENTRALIZADO (LIMPIEZA ATÓMICA)
+  // 3. GOBERNANZA DEL CANAL WEBSOCKET CENTRALIZADO (LIMPIEZA ATÓMICA Y DEFENSE 401)
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
@@ -364,6 +394,18 @@ export default function HomeMototaxi() {
       // Re-registrar si el socket se reconecta
       socket.on('connect', registrarYUnirSalas);
 
+      // 🛡️ Listener de Excepciones / Rechazos de Autenticación 401 en WebSocket
+      const handleSocketAuthError = (err) => {
+        const status = err?.status || err?.statusCode || err?.data?.status;
+        const msg = String(err?.message || err?.error || err || '').toLowerCase();
+
+        if (status === 401 || msg.includes('401') || msg.includes('unauthorized') || msg.includes('jwt expired') || msg.includes('token invalid')) {
+          logger.error("🚨 [CIMCO-SOCKET-401] Evento de no-autorización capturado en canal Socket:", err);
+          alert("🔒 Sesión Expirada: Su token de seguridad ha caducado. Inicie sesión nuevamente.");
+          ejecutarLogoutDefensivo();
+        }
+      };
+
       // Handler unificado de recepción de servicios con desfragmentación de payloads y VALIDACIÓN LOCAL JWT
       const handleNuevaSolicitud = (data) => {
         logger.log("🔥 [CIMCO-RADAR] ¡Alerta de viaje entrante capturada!", data);
@@ -372,11 +414,9 @@ export default function HomeMototaxi() {
         // 🛡️ VALIDACIÓN LOCAL DE VIGENCIA JWT ANTES DE RENDERIZAR
         const activeToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
         if (isTokenExpired(activeToken)) {
-          logger.warn("⚠️ [CIMCO-AUTH-GUARD] JWT expirado detectado al recibir nuevo_viaje_disponible. Desconectando red.");
-          setIsOnline(false);
+          logger.warn("⚠️ [CIMCO-AUTH-GUARD] JWT expirado detectado al recibir nuevo_viaje_disponible. Ejecutando logout defensivo.");
           alert("🔒 Sesión Expirada: Su token de seguridad ha caducado. Inicie sesión nuevamente para recibir solicitudes.");
-          desconectarEcosistema();
-          logout();
+          ejecutarLogoutDefensivo();
           return;
         }
 
@@ -410,7 +450,10 @@ export default function HomeMototaxi() {
         });
       };
 
-      // 🚨 Escuchar todos los posibles nombres de eventos emitidos por el servidor de despacho
+      // 🚨 Escuchar todos los posibles nombres de eventos emitidos por el servidor de despacho y errores
+      socket.on('connect_error', handleSocketAuthError);
+      socket.on('error', handleSocketAuthError);
+      socket.on('exception', handleSocketAuthError);
       socket.on('viaje_difundido', handleNuevaSolicitud);
       socket.on('solicitud_servicio', handleNuevaSolicitud);
       socket.on('nuevo_viaje', handleNuevaSolicitud);
@@ -428,6 +471,9 @@ export default function HomeMototaxi() {
       return () => {
         if (socket) {
           socket.off('connect', registrarYUnirSalas);
+          socket.off('connect_error', handleSocketAuthError);
+          socket.off('error', handleSocketAuthError);
+          socket.off('exception', handleSocketAuthError);
           socket.off('viaje_difundido', handleNuevaSolicitud);
           socket.off('solicitud_servicio', handleNuevaSolicitud);
           socket.off('nuevo_viaje', handleNuevaSolicitud);
@@ -447,8 +493,7 @@ export default function HomeMototaxi() {
     isConnected, 
     user?.email,
     user?.token,
-    desconectarEcosistema,
-    logout
+    ejecutarLogoutDefensivo
   ]);
 
   // Limpieza defensiva al desmontar de forma definitiva la vista
@@ -515,7 +560,7 @@ export default function HomeMototaxi() {
   };
 
   // ==================================================================
-  // 4. PATRÓN HÍBRIDO RESILIENTE PARA HISTORIALES URBANOS
+  // 4. PATRÓN HÍBRIDO RESILIENTE PARA HISTORIALES URBANOS (CON CATCH 401)
   // ==================================================================
   const fetchHistorial = useCallback(async () => {
     const conductorIdTarget = user?.uid || user?.id || user?._id || conductorId;
@@ -535,6 +580,12 @@ export default function HomeMototaxi() {
         return;
       }
     } catch (err) {
+      if (err?.response && err.response.status === 401) {
+        logger.error("🚨 [CIMCO-REST-401] Token inválido o expirado al consultar historial. Ejecutando logout defensivo.");
+        alert("⚠️ Tu cuenta requiere reautenticación o el usuario no existe en el servidor. Inicia sesión nuevamente.");
+        await ejecutarLogoutDefensivo();
+        return;
+      }
       logger.warn("⚠️ Fallo en API REST, ejecutando respaldo Firestore:", err);
     }
 
@@ -561,7 +612,7 @@ export default function HomeMototaxi() {
     } finally {
       setCargandoHistorial(false);
     }
-  }, [user, conductorId]);
+  }, [user, conductorId, ejecutarLogoutDefensivo]);
 
   useEffect(() => {
     if (activeTab === 'historial') {
@@ -662,15 +713,10 @@ export default function HomeMototaxi() {
     // 🛡️ VALIDACIÓN PREVIA DEL JWT EN LA ACCIÓN "ACEPTAR VIAJE"
     const currentToken = localStorage.getItem('token') || localStorage.getItem('cimco_token') || user?.token;
     if (isTokenExpired(currentToken)) {
-      logger.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de aceptación con JWT expirado. Abortando POST y cerrando sesión.");
+      logger.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de aceptación con JWT expirado. Ejecutando logout defensivo.");
       alert("⚠️ Tu cuenta requiere reautenticación o el usuario no existe en el servidor. Inicia sesión nuevamente.");
       setSolicitudViaje(null);
-      desconectarEcosistema();
-      if (typeof logout === 'function') {
-        await logout();
-      } else {
-        window.location.href = '/login';
-      }
+      await ejecutarLogoutDefensivo();
       return;
     }
     
@@ -705,12 +751,7 @@ export default function HomeMototaxi() {
       // 🛡️ Captura explícita de error 401 por nodo de identidad extinto / sesión inválida
       if (error.response && error.response.status === 401) {
         alert("⚠️ Tu cuenta requiere reautenticación o el usuario no existe en el servidor. Inicia sesión nuevamente.");
-        desconectarEcosistema();
-        if (typeof logout === 'function') {
-          await logout();
-        } else {
-          window.location.href = '/login';
-        }
+        await ejecutarLogoutDefensivo();
         return;
       }
 
@@ -749,9 +790,7 @@ export default function HomeMototaxi() {
     if (isTokenExpired(currentToken)) {
       logger.warn("⚠️ [CIMCO-AUTH-GUARD] Intento de captura con JWT expirado. Abortando transacción.");
       alert("🔒 Sesión Expirada: Su token de acceso ha caducado. Por favor reautentíquese.");
-      desconectarEcosistema();
-      await logout();
-      window.location.replace('/');
+      await ejecutarLogoutDefensivo();
       return;
     }
 
@@ -810,18 +849,7 @@ export default function HomeMototaxi() {
 
   const handleCerrarSesion = async () => {
     if (window.confirm("¿Desea cerrar sesión y salir de la consola de operaciones?")) {
-      try {
-        desconectarEcosistema();
-        if (typeof logout === 'function') {
-          await logout();
-        }
-        window.location.replace('/');
-      } catch (error) {
-        logger.error("🚨 [CIMCO-LOGOUT-FAIL] Error crítico al desconectar nodo de autenticación:", error);
-        localStorage.clear();
-        sessionStorage.clear();
-        window.location.replace('/');
-      }
+      await ejecutarLogoutDefensivo();
     }
   };
 

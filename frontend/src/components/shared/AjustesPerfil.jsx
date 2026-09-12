@@ -1,4 +1,4 @@
-// Versión Arquitectura: V16.5 - Módulo Unificado de Gestión de Perfil Multi-Rol Optimizado (Memory & Timer Safety)
+// Versión Arquitectura: V16.6 - Validación de Contraseña, Reseteo de Input de Archivo y Fallback de Cierre
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -72,12 +72,13 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
     setTelefono(valorLimpio);
   };
 
-  // Previsualización y validación de peso de imagen con liberación de memoria (Ajuste 1)
+  // Previsualización y validación de peso de imagen con reseteo de input para re-selección
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
         setMensajeStatus({ tipo: 'error', texto: 'La imagen supera el límite permitido de 5MB.' });
+        e.target.value = ''; // Reseteo explícito del valor para permitir re-seleccionar el mismo archivo corregido
         return;
       }
 
@@ -95,6 +96,7 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
     }
   };
 
+  // Manejador centralizado de cierre con fallback seguro
   const handleBackNavigation = () => {
     if (closeTimerRef.current) {
       clearTimeout(closeTimerRef.current);
@@ -116,9 +118,20 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
     const nombreSanitizado = nombre.trim();
     const telefonoLimpio = telefono.trim();
     const correoSanitizado = correo.trim();
+    const claveTrimmed = clave.trim();
 
     if (!nombreSanitizado) {
       setMensajeStatus({ tipo: 'error', texto: 'El nombre completo es obligatorio.' });
+      setLoading(false);
+      return;
+    }
+
+    // Validación estricta de longitud mínima de clave antes de invocar la API
+    if (claveTrimmed !== '' && claveTrimmed.length < 6) {
+      setMensajeStatus({ 
+        tipo: 'error', 
+        texto: 'La nueva clave debe tener una longitud mínima de 6 caracteres.' 
+      });
       setLoading(false);
       return;
     }
@@ -137,7 +150,7 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
     try {
       const formData = new FormData();
       
-      // Mapeo redundante con compatibilidad total para controladores (pasajero.controller.js y auth.controller.js)
+      // Mapeo redundante con compatibilidad total para controladores
       formData.append('nombre', nombreSanitizado);
       formData.append('fullName', nombreSanitizado);
       
@@ -149,9 +162,9 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
       
       formData.append('rol', rolUsuario);
       
-      if (clave.trim() !== '') {
-        formData.append('clave', clave);
-        formData.append('password', clave);
+      if (claveTrimmed !== '') {
+        formData.append('clave', claveTrimmed);
+        formData.append('password', claveTrimmed);
       }
 
       if (esVehicular) {
@@ -164,14 +177,13 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
         formData.append('empresa', cooperativa.trim());
         formData.append('terminal_sede', cooperativa.trim());
       } else {
-        // Asignación genérica para pasajeros u otros roles
         if (cooperativa.trim() !== '') {
           formData.append('cooperativa', cooperativa.trim());
           formData.append('empresa', cooperativa.trim());
         }
       }
 
-      // Inyección del archivo binario con ambas llaves conocidas por upload.service.js / Multer
+      // Inyección del archivo binario con ambas llaves conocidas por Multer
       if (fotoPerfil) {
         formData.append('fotoPerfil', fotoPerfil);
         formData.append('foto_perfil', fotoPerfil);
@@ -180,7 +192,6 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
       // Determinar la ruta correspondiente según la arquitectura del backend
       const endpoint = rolUsuario === 'pasajero' ? '/pasajeros/perfil' : '/auth/update-profile';
 
-      // Petición delegando la autorización al interceptor global de Axios (Ajuste 3)
       const response = await api.put(endpoint, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
@@ -200,13 +211,11 @@ export default function AjustesPerfil({ isOpen, onClose, onBack, onUpdateSuccess
       setMensajeStatus({ tipo: 'exito', texto: 'Perfil actualizado correctamente.' });
       setClave('');
 
-      // Programar auto-cierre rastreable con ref para evitar memory leaks (Ajuste 2)
-      if (isOpen !== undefined && typeof onClose === 'function') {
-        if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = setTimeout(() => {
-          onClose();
-        }, 1000);
-      }
+      // Programar auto-cierre con fallback garantizado vía handleBackNavigation
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = setTimeout(() => {
+        handleBackNavigation();
+      }, 1000);
 
     } catch (error) {
       console.error('❌ Error actualizando perfil unificado:', error);

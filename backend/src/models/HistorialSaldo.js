@@ -1,12 +1,12 @@
-// Versión Arquitectura: V3.1 - Indexación Compuesta para Auditoría y Reportes Cronológicos Multientidad
+// Versión Arquitectura: V3.2 - Incorporación de Campo 'pasajeroId', Sincronización Automática Polimórfica e Índice Compuesto para Consultas de Pasajeros
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\models\HistorialSaldo.js
  * Misión: Persistir cada movimiento financiero y auditoría contable ejecutada en el sistema,
- * extendiendo el soporte relacional a Conductores y Usuarios (Despachadores/Pasajeros).
+ * extendiendo el soporte relacional a Conductores, Pasajeros y Usuarios generales.
  * Integridad: Fusión Atómica. Preserva todo el ecosistema previo (Hooks de guardas anti-NaN/undefined,
  * compatibilidad de campos heredados conductorId/entidadId, refPath dinámico y registro explícito de modelos).
- * Ajuste V3.1: Incorporación de índices compuestos { entidadId: 1, createdAt: -1 } y { conductorId: 1, createdAt: -1 }
- * para acelerar reportes financieros, trazabilidad de extractos y consultas de auditoría de saldo.
+ * Ajuste V3.2: Incorporación del campo 'pasajeroId', sincronización bidireccional en hook pre('save')
+ * e índice compuesto { pasajeroId: 1, createdAt: -1 } para optimizar consultas de historial financiero de pasajeros.
  */
 
 import mongoose from 'mongoose';
@@ -29,8 +29,13 @@ const HistorialSaldoSchema = new mongoose.Schema({
         default: 'Conductor',
         required: true
     },
-    // 🚀 CAMPO HEREDADO (COMPATIBILIDAD): Mantiene retrocompatibilidad con controladores existentes
+    // 🚀 CAMPO HEREDADO (COMPATIBILIDAD CONDUCTOR): Mantiene retrocompatibilidad con controladores existentes
     conductorId: {
+        type: mongoose.Schema.Types.Mixed,
+        required: false
+    },
+    // 🚀 CAMPO ESPECÍFICO / HEREDADO (COMPATIBILIDAD PASAJERO): Facilita consultas directas de historial para pasajeros
+    pasajeroId: {
         type: mongoose.Schema.Types.Mixed,
         required: false
     },
@@ -68,18 +73,26 @@ const HistorialSaldoSchema = new mongoose.Schema({
     timestamps: true // Trazabilidad temporal automática (createdAt, updatedAt)
 });
 
-// 🚀 ÍNDICES COMPUESTOS: Optimización de consultas de auditoría, kardex y reportes cronológicos por entidad/conductor
+// 🚀 ÍNDICES COMPUESTOS: Optimización de consultas de auditoría, kardex y reportes cronológicos por entidad/conductor/pasajero
 HistorialSaldoSchema.index({ entidadId: 1, createdAt: -1 });
 HistorialSaldoSchema.index({ conductorId: 1, createdAt: -1 });
+HistorialSaldoSchema.index({ pasajeroId: 1, createdAt: -1 });
 
 // 🛡️ GUARDA DE SEGURIDAD Y SINCRONIZACIÓN POLIMÓRFICA (Anti-Undefined / Multi-Modelo)
 HistorialSaldoSchema.pre('save', function(next) {
-    // Sincronización automática de campos entre la entidad genérica y conductorId para prevenir regresiones
+    // Sincronización automática de campos entre la entidad genérica y conductorId/pasajeroId para prevenir regresiones
     if (this.entidadId && !this.conductorId && this.tipoEntidad === 'Conductor') {
         this.conductorId = this.entidadId;
     } else if (this.conductorId && !this.entidadId) {
         this.entidadId = this.conductorId;
         this.tipoEntidad = 'Conductor';
+    }
+
+    if (this.entidadId && !this.pasajeroId && this.tipoEntidad === 'Usuario') {
+        this.pasajeroId = this.entidadId;
+    } else if (this.pasajeroId && !this.entidadId) {
+        this.entidadId = this.pasajeroId;
+        this.tipoEntidad = 'Usuario';
     }
 
     // Sanitización numérica estricta contra corruptores de datos o valores vacíos

@@ -1,10 +1,11 @@
-// Versión Arquitectura: V24.3 - Servicio Centralizado de Gestión de Viajes Desacoplado de Perfil (CIMCO-VIAJE-SERVICE)
+// Versión Arquitectura: V24.4 - Cobro Transaccional de Comisiones con Identificador Unificado (UID)
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\services\viajeService.js
- * Misión: Control centralizado de solicitudes, despachos, asignaciones, cambios de estado y carreras.
+ * Misión: Control centralizado de solicitudes, despachos, asignaciones, cambios de estado y carreras, integrado con walletService para el débito de comisiones por UID.
  */
 
 import api, { VIAJES_ENDPOINTS } from '@/config/api';
+import walletService from '@/services/walletService';
 
 export const viajeService = {
     /**
@@ -32,17 +33,51 @@ export const viajeService = {
     },
 
     /**
-     * Marca un viaje en curso como finalizado
+     * Marca un viaje en curso como finalizado y ejecuta opcionalmente el cobro de comisión
+     * transaccional reutilizando walletService con el identificador unificado (uid).
      * @param {string} viajeId 
-     * @param {Object} detalles - Métrica final, costo, método de pago
+     * @param {Object} detalles - Métrica final, costo, método de pago, comisiones e identificadores
      */
     async completar(viajeId, detalles = {}) {
         if (!viajeId || typeof viajeId !== 'string') {
             throw new Error('El ID del viaje es obligatorio.');
         }
         const safeDetalles = (detalles && typeof detalles === 'object') ? detalles : {};
-        const response = await api.post(VIAJES_ENDPOINTS.completar, { viajeId: viajeId.trim(), ...safeDetalles });
-        return response?.data || {};
+        
+        // Extracción e identificación unificada de usuario/conductor (uid)
+        const conductorUid = safeDetalles.conductorUid || safeDetalles.conductorId || safeDetalles.uid || safeDetalles.usuarioId;
+        const montoComision = Number(safeDetalles.comision || safeDetalles.montoComision || safeDetalles.montoDebito || 0);
+
+        // Payload enriquecido con identificador unificado
+        const payload = {
+            viajeId: viajeId.trim(),
+            ...safeDetalles,
+            ...(conductorUid ? { conductorUid, uid: conductorUid } : {})
+        };
+
+        const response = await api.post(VIAJES_ENDPOINTS.completar, payload);
+        const respuestaData = response?.data || {};
+
+        // Si se requiere cobro explícito de comisión desde el cliente y existe UID válido,
+        // se re-utilizan los métodos transaccionales de walletService.
+        if (montoComision > 0 && conductorUid && (safeDetalles.debitarComisionDirecta || safeDetalles.procesarComision)) {
+            try {
+                const fnDebitar = walletService.debitar || walletService.procesarDebitoTransaccional || walletService.procesarDebito;
+                if (typeof fnDebitar === 'function') {
+                    await fnDebitar.call(walletService, {
+                        uid: conductorUid,
+                        usuarioId: conductorUid,
+                        monto: montoComision,
+                        concepto: safeDetalles.conceptoComision || `COMISION_CARRERA_${viajeId.trim()}`,
+                        viajeId: viajeId.trim()
+                    });
+                }
+            } catch (walletErr) {
+                console.warn('⚠️ [VIAJE-SERVICE] Error al procesar comisión transaccional vía walletService:', walletErr?.message || walletErr);
+            }
+        }
+
+        return respuestaData;
     },
 
     /**

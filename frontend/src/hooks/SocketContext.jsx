@@ -1,10 +1,10 @@
-// Versión Arquitectura: V21.42 - Corrección de Bucle Infinito y Blindaje Anti-Re-render en SocketContext
+// Versión Arquitectura: V21.43 - Inserción del Evento actualizar_saldo_pasajero y Exposición Directa del Socket
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\SocketContext.jsx
  * Misión: Proveedor de Contexto Reactivo centralizado y unificado para la gestión de sockets en tiempo real.
  *         Mantiene sincronización de identidad (userId, rol, empresaId), estado reactivo de ofertas,
  *         captura global de expiración de token y wrappers de operaciones logísticas (crearSolicitud, enviarOferta, aceptarOferta).
- * Ajuste V21.42: Blindaje anti-re-render infinito mediante ref de identidad (lastConnectedUid) y sincronización defensiva.
+ * Ajuste V21.43: Incorporación de listener para 'actualizar_saldo_pasajero' y verificación de exposición directa del objeto socket.
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
@@ -178,6 +178,11 @@ export const SocketProvider = ({ children }) => {
             setOfertas([]);
         }
 
+        function onActualizarSaldoPasajero(saldoData) {
+            if (!saldoData) return;
+            console.log('💰 [CIMCO-SOCKET] Evento de actualización de saldo recibido:', saldoData);
+        }
+
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
         socket.on('connect_error', onConnectError);
@@ -189,6 +194,9 @@ export const SocketProvider = ({ children }) => {
         socket.on('oferta_recibida', onNuevaOferta);
         socket.on('oferta_actualizada', onOfertaActualizada);
         socket.on('limpiar_ofertas', onLimpiarOfertas);
+        socket.on('actualizar_saldo_pasajero', onActualizarSaldoPasajero);
+        socket.on('saldo_actualizado', onActualizarSaldoPasajero);
+        socket.on('saldo_actualizado_cliente', onActualizarSaldoPasajero);
 
         return () => {
             socket.off('connect', onConnect);
@@ -202,6 +210,9 @@ export const SocketProvider = ({ children }) => {
             socket.off('oferta_recibida', onNuevaOferta);
             socket.off('oferta_actualizada', onOfertaActualizada);
             socket.off('limpiar_ofertas', onLimpiarOfertas);
+            socket.off('actualizar_saldo_pasajero', onActualizarSaldoPasajero);
+            socket.off('saldo_actualizado', onActualizarSaldoPasajero);
+            socket.off('saldo_actualizado_cliente', onActualizarSaldoPasajero);
         };
     }, [userId, userRole, empresaId, logout, emitirRegistroSocket]);
 

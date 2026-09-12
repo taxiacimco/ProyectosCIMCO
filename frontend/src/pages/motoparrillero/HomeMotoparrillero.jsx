@@ -1,5 +1,5 @@
-// Versión Arquitectura: V21.49 - Refactorización de capturarOferta, ordenamiento en memoria de radar, guardia isTokenExpired y sincronización de perfil
-import React, { useState, useEffect, useRef } from 'react';
+// Versión Arquitectura: V21.50 - Integración Atómica Motoparrillero con Logout Defensivo 401, Validación JWT y Control de Red
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
 import { useAuth } from '@/hooks/useAuth';
@@ -11,7 +11,7 @@ import ModalCalificacion from '@/components/ModalCalificacion';
 import AjustesPerfil from '@/components/shared/AjustesPerfil';
 import {
   MapPin, Navigation, Wallet, TrendingUp, AlertCircle, 
-  CircleDollarSign, Signal, LogOut, Loader, UserSquare2
+  CircleDollarSign, Signal, LogOut, Loader, UserSquare2, Wifi, WifiOff
 } from 'lucide-react';
 
 const UMBRAL_MINIMO_COP = 2000;
@@ -26,6 +26,9 @@ export default function HomeMotoparrillero() {
   const [nombreConductor, setNombreConductor] = useState(nombreInicialFallback); 
 
   const [isOnline, setIsOnline] = useState(false);
+  const [isNetworkOnline, setIsNetworkOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
   const [loading, setLoading] = useState(false);
   const [mostrarModalPerfil, setMostrarModalPerfil] = useState(false);
   const [solicitudViaje, setSolicitudViaje] = useState(null); 
@@ -39,21 +42,81 @@ export default function HomeMotoparrillero() {
 
   const geoWatchRef = useRef(null);
 
-  const conductorId = user?.uid || user?.id || localStorage.getItem('conductorId'); 
-  const token = localStorage.getItem('token') || user?.token;
+  const conductorId = user?.uid || user?.id || (typeof localStorage !== 'undefined' ? localStorage.getItem('conductorId') : null); 
+  const token = (typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null) || user?.token;
   const saldoEfectivo = walletData?.saldo ?? walletData?.balance ?? 0;
   const puedeOperar = saldoEfectivo >= UMBRAL_MINIMO_COP;
 
+  // 🌐 MONITOREO DEL ESTADO DE LA RED (ONLINE/OFFLINE)
+  useEffect(() => {
+    const handleOnline = () => setIsNetworkOnline(true);
+    const handleOffline = () => setIsNetworkOnline(false);
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      }
+    };
+  }, []);
+
+  // 🛰️ DETENCIÓN DE RASTREO GPS
+  const detenerTrackingGPS = useCallback(() => {
+    if (geoWatchRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.clearWatch(geoWatchRef.current);
+      geoWatchRef.current = null;
+      console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
+    }
+  }, []);
+
+  // 🛡️ DESVINCULACIÓN ATÓMICA DE SESIÓN POR 401 O EXPIRACIÓN (LOGOUT DEFENSIVO)
+  const ejecutarLogoutDefensivo = useCallback(() => {
+    console.warn("🚨 [CIMCO-AUTH-401] Ejecutando logout defensivo atómico: Invalidando suscripciones y memoria local.");
+    
+    // 1. Apagar receptores GPS
+    detenerTrackingGPS();
+    
+    // 2. Notificar al canal Socket y desconectar nodo
+    if (socket && conductorId) {
+      try {
+        socket.emit('desactivar_conductor', { conductorId, tipoServicio: 'motoparrillero' });
+      } catch (e) {
+        console.error(" Error al emitir desactivar_conductor:", e);
+      }
+    }
+
+    // 3. Purgar caché y almacenamiento local
+    if (typeof localStorage !== 'undefined') localStorage.clear();
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
+
+    // 4. Cierre de sesión de auth provider y reinicio a login
+    if (typeof logout === 'function') {
+      try {
+        logout();
+      } catch (e) {
+        console.error(" Error al invocar logout del contexto:", e);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.replace('/login');
+    }
+  }, [socket, conductorId, logout, detenerTrackingGPS]);
+
   // 🛡️ GUARDA CENTRALIZADA DE EXPIRACIÓN DE TOKEN JWT
-  const verificarSesionToken = () => {
-    if (!token) return false;
+  const verificarSesionToken = useCallback(() => {
+    if (!token) return true;
     try {
       if (typeof isTokenExpired === 'function' && isTokenExpired(token)) {
         return true;
       }
-      // Verificación defensiva manual en caso de fallback
       const base64Url = token.split('.')[1];
-      if (!base64Url) return false;
+      if (!base64Url) return true;
       const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
       const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
       const payload = JSON.parse(jsonPayload);
@@ -64,20 +127,48 @@ export default function HomeMotoparrillero() {
       console.warn("⚠️ [CIMCO-AUTH] Fallo al validar expiración de token:", e);
     }
     return false;
-  };
+  }, [token]);
 
-  // Monitorización de vigencia de sesión JWT
+  // Monitorización continua de vigencia de sesión JWT
   useEffect(() => {
     if (token && verificarSesionToken()) {
       console.warn("🚨 [CIMCO-AUTH] Token expirado detectado en HomeMotoparrillero.");
       setErrorInterno("⚠️ Sesión expirada. Por favor inicie sesión nuevamente.");
       setIsOnline(false);
-      detenerTrackingGPS();
-      if (typeof logout === 'function') logout();
+      ejecutarLogoutDefensivo();
     }
-  }, [token]);
+  }, [token, verificarSesionToken, ejecutarLogoutDefensivo]);
 
-  // Validation: Desconectar de red si no existe ID de conductor válido
+  // ⚡ CONSULTA Y VALIDACIÓN ATÓMICA DE SALDO BILLETERA CON CAPTURA DE STATUS 401
+  useEffect(() => {
+    if (!token || !conductorId) return;
+
+    let isMounted = true;
+    const verificarSaldoBilletera = async () => {
+      try {
+        await api.get('/billetera/saldo', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (error) {
+        if (!isMounted) return;
+        const statusCode = error?.response?.status || error?.status;
+        if (statusCode === 401) {
+          console.error("🚨 [CIMCO-401-DETECTED] Código 401 Unauthorized devuelto por /api/billetera/saldo.");
+          ejecutarLogoutDefensivo();
+        }
+      }
+    };
+
+    verificarSaldoBilletera();
+    const intervalId = setInterval(verificarSaldoBilletera, 30000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+    };
+  }, [token, conductorId, ejecutarLogoutDefensivo]);
+
+  // Desconectar de red si no existe ID de conductor válido
   useEffect(() => {
     if (!conductorId) {
       setIsOnline(false);
@@ -110,14 +201,58 @@ export default function HomeMotoparrillero() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 2. GOBERNANZA DEL CANAL WEBSOCKET E INYECCIÓN 'motoparrillero'
+  // 3. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
+  // ==================================================================
+  const iniciarTrackingGPS = useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      console.error("❌ [GPS-ERROR] Geolocalización no soportada.");
+      alert("⚠️ La geolocalización no está soportada en este dispositivo/navegador.");
+      return;
+    }
+
+    console.log("🛰️ [CIMCO-TELEMETRIA] Encendiendo receptor GPS Parrillero...");
+    geoWatchRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        if (!position || !position.coords) return;
+        const { latitude, longitude } = position.coords;
+        setCoordenadas({ lat: latitude, lng: longitude });
+
+        if (socket && isSocketConnected) {
+          socket.emit('actualizar_radar_gps', {
+            conductorId,
+            tipoServicio: 'motoparrillero',
+            lat: latitude,
+            lng: longitude
+          });
+          console.log(`🎯 [RADAR-PARRILLERO] Coordenadas emitidas: [${longitude}, ${latitude}]`);
+        }
+      },
+      (error) => {
+        console.error(`❌ [GPS-TRACKING-ERR] Código: ${error?.code} | ${error?.message}`);
+        if (error?.code === error?.PERMISSION_DENIED) {
+          alert("⚠️ Permiso de GPS denegado. Para recibir servicios, habilite la ubicación en su navegador/dispositivo.");
+          setIsOnline(false);
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }, [socket, isSocketConnected, conductorId]);
+
+  // ==================================================================
+  // 2. GOBERNANZA DEL CANAL WEBSOCKET Y SUSCRIPCIÓN A SALA 'motoparrillero'
   // ==================================================================
   useEffect(() => {
     if (isOnline) {
+      if (!isNetworkOnline) {
+        alert("⚠️ No hay conexión a Internet. Verifique su red antes de conectarse.");
+        setIsOnline(false);
+        return;
+      }
+
       if (verificarSesionToken()) {
         alert("⚠️ Su sesión ha expirado. Inicie sesión nuevamente.");
         setIsOnline(false);
-        if (typeof logout === 'function') logout();
+        ejecutarLogoutDefensivo();
         return;
       }
 
@@ -136,11 +271,13 @@ export default function HomeMotoparrillero() {
       }
 
       if (socket) {
-        console.log(`📡 [CIMCO-SOCKET] Registrando conductor parrillero en hook unificado`);
+        console.log(`📡 [CIMCO-SOCKET] Suscribiendo conductor parrillero a sala motoparrillero`);
+        
+        socket.emit('unirse_sala', 'motoparrillero');
         socket.emit('registrar_conductor', { 
           conductorId, 
           tipoServicio: 'motoparrillero',
-          email: user?.email || localStorage.getItem('conductorEmail') || ''
+          email: user?.email || (typeof localStorage !== 'undefined' ? localStorage.getItem('conductorEmail') : '') || ''
         });
 
         const handleNuevaSolicitud = (data) => {
@@ -158,67 +295,22 @@ export default function HomeMotoparrillero() {
           socket.off('nueva_solicitud_viaje', handleNuevaSolicitud);
           detenerTrackingGPS();
           if (conductorId) {
-            socket.emit('desactivar_conductor', { conductorId });
+            socket.emit('desactivar_conductor', { conductorId, tipoServicio: 'motoparrillero' });
           }
         };
       }
     } else {
       detenerTrackingGPS();
       if (socket && conductorId) {
-        socket.emit('desactivar_conductor', { conductorId });
+        socket.emit('desactivar_conductor', { conductorId, tipoServicio: 'motoparrillero' });
       }
     }
-  }, [isOnline, conductorId, token, socket, puedeOperar]);
-
-  // ==================================================================
-  // 3. TRANSMISIÓN DE TELEMETRÍA (CIMCO-RADAR 2DSPHERE)
-  // ==================================================================
-  const iniciarTrackingGPS = () => {
-    if (!navigator.geolocation) {
-      console.error("❌ [GPS-ERROR] Geolocalización no soportada.");
-      alert("⚠️ La geolocalización no está soportada en este dispositivo/navegador.");
-      return;
-    }
-
-    console.log("🛰️ [CIMCO-TELEMETRIA] Encendiendo receptor GPS Parrillero...");
-    geoWatchRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        if (!position || !position.coords) return;
-        const { latitude, longitude } = position.coords;
-        setCoordenadas({ lat: latitude, lng: longitude });
-
-        if (socket && isSocketConnected) {
-          socket.emit('actualizar_radar_gps', {
-            conductorId,
-            lat: latitude,
-            lng: longitude
-          });
-          console.log(`🎯 [RADAR-PARRILLERO] Coordenadas emitidas: [${longitude}, ${latitude}]`);
-        }
-      },
-      (error) => {
-        console.error(`❌ [GPS-TRACKING-ERR] Código: ${error?.code} | ${error?.message}`);
-        if (error?.code === error?.PERMISSION_DENIED) {
-          alert("⚠️ Permiso de GPS denegado. Para recibir servicios, habilite la ubicación en su navegador/dispositivo.");
-          setIsOnline(false);
-        }
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
-  };
-
-  const detenerTrackingGPS = () => {
-    if (geoWatchRef.current !== null) {
-      navigator.geolocation.clearWatch(geoWatchRef.current);
-      geoWatchRef.current = null;
-      console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS apagado de forma segura.");
-    }
-  };
+  }, [isOnline, isNetworkOnline, conductorId, token, socket, puedeOperar, verificarSesionToken, ejecutarLogoutDefensivo, iniciarTrackingGPS, detenerTrackingGPS, servicioActivo, solicitudViaje, user?.email]);
 
   const desconectarEcosistema = () => {
     detenerTrackingGPS();
     if (socket && conductorId) {
-      socket.emit('desactivar_conductor', { conductorId });
+      socket.emit('desactivar_conductor', { conductorId, tipoServicio: 'motoparrillero' });
     }
   };
 
@@ -243,7 +335,10 @@ export default function HomeMotoparrillero() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ofertas = [];
       snapshot.forEach((docSnap) => {
-        ofertas.push({ id: docSnap.id, ...docSnap.data() });
+        const data = docSnap.data();
+        if (!data.tipoServicio || data.tipoServicio === 'motoparrillero' || data.categoria === 'PARRILLERO') {
+          ofertas.push({ id: docSnap.id, ...data });
+        }
       });
 
       // 🧠 ORDENAMIENTO EN MEMORIA JAVASCRIPT DE FORMA DESCENDENTE
@@ -298,15 +393,16 @@ export default function HomeMotoparrillero() {
     });
 
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [user?.uid, servicioActivo]);
 
   // ==================================================================
   // 6. ACCIONES DE GESTIÓN DE DESPACHOS CONTABLES ACID
   // ==================================================================
   const aceptarViaje = async () => {
+    // 🛡️ VALIDACIÓN JWT PREVIA A RECLAMOS
     if (verificarSesionToken()) {
-      alert("⚠️ Su sesión ha expirado. Por favor inicie sesión nuevamente.");
-      logout();
+      alert("⚠️ Su sesión ha expirado o es inválida. Por favor inicie sesión nuevamente.");
+      ejecutarLogoutDefensivo();
       return;
     }
 
@@ -355,6 +451,10 @@ export default function HomeMotoparrillero() {
         setSolicitudViaje(null);
       }
     } catch (error) {
+      if (error?.response?.status === 401) {
+        ejecutarLogoutDefensivo();
+        return;
+      }
       console.error("🚨 [DESPACHO-ERR] Error al reclamar solicitud parrillero:", error?.response?.data?.message || error?.message);
       alert(error?.response?.data?.message || "La solicitud caducó o fue tomada por otra unidad.");
       setSolicitudViaje(null);
@@ -364,9 +464,10 @@ export default function HomeMotoparrillero() {
   };
 
   const capturarOferta = async (viajeId) => {
+    // 🛡️ VALIDACIÓN JWT PREVIA A RECLAMOS
     if (verificarSesionToken()) {
-      alert("⚠️ Su sesión ha expirado. Por favor inicie sesión nuevamente.");
-      logout();
+      alert("⚠️ Su sesión ha expirado o es inválida. Por favor inicie sesión nuevamente.");
+      ejecutarLogoutDefensivo();
       return;
     }
 
@@ -403,7 +504,7 @@ export default function HomeMotoparrillero() {
           throw new Error("Lo sentimos, este servicio ya fue capturado por otra unidad.");
         }
 
-        const conductorEmail = user?.email || localStorage.getItem('conductorEmail') || '';
+        const conductorEmail = user?.email || (typeof localStorage !== 'undefined' ? localStorage.getItem('conductorEmail') : '') || '';
         const conductorTelefono = user?.telefonoMovil || user?.phone || '';
 
         transaction.update(viajeRef, {
@@ -456,19 +557,16 @@ export default function HomeMotoparrillero() {
 
   const handleCerrarSesion = async () => {
     if (window.confirm("¿Desea cerrar sesión y salir de la consola de operaciones Parrillero?")) {
-      try {
-        desconectarEcosistema();
-        await logout();
-        window.location.replace('/');
-      } catch (error) {
-        console.error("🚨 [CIMCO-LOGOUT-FAIL] Error crítico al desconectar nodo:", error);
-        localStorage.clear();
-        window.location.replace('/');
-      }
+      desconectarEcosistema();
+      ejecutarLogoutDefensivo();
     }
   };
 
   const toggleEstadoOperativo = () => {
+    if (!isNetworkOnline) {
+      alert("⚠️ Sin conexión a la red. Conéctese a Internet para operar.");
+      return;
+    }
     if (!isOnline && !puedeOperar) {
       const msg = "⚠️ Saldo insuficiente (< $2.000 COP). Realiza una recarga con el Administrador para operar.";
       setErrorInterno(msg);
@@ -497,16 +595,25 @@ export default function HomeMotoparrillero() {
               {nombreConductor} <span className="text-[9px] text-cyan-400 underline lowercase font-normal">(editar)</span>
             </h1>
             <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
-              <Signal size={10} className={isOnline && isSocketConnected ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
-              {isOnline && isSocketConnected ? 'CONECTADO A RED PARRILLERO' : 'NODO DESCONECTADO'}
+              <Signal size={10} className={isOnline && isSocketConnected && isNetworkOnline ? "text-emerald-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
+              {isOnline && isSocketConnected && isNetworkOnline ? 'CONECTADO A RED PARRILLERO' : 'NODO DESCONECTADO'}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0 ml-2">
+          {/* Indicador de Red Online/Offline */}
+          <div className="flex items-center gap-1 px-2 py-1 bg-zinc-800/60 border border-white/5 rounded-lg" title={isNetworkOnline ? "Red Online" : "Sin Conexión"}>
+            {isNetworkOnline ? (
+              <Wifi size={12} className="text-emerald-400" />
+            ) : (
+              <WifiOff size={12} className="text-red-400 animate-pulse" />
+            )}
+          </div>
+
           <button
             onClick={toggleEstadoOperativo}
-            disabled={!isOnline && !puedeOperar}
+            disabled={(!isOnline && !puedeOperar) || !isNetworkOnline}
             className={`px-3 py-1.5 rounded-lg font-black text-[10px] uppercase tracking-wider border transition-all duration-150 active:scale-95 ${
               isOnline 
                 ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black' 
@@ -532,7 +639,14 @@ export default function HomeMotoparrillero() {
         </div>
       </header>
 
-      {/* BANNER DE ALERTA DE SALDO O SESIÓN */}
+      {/* BANNER DE ALERTA DE RED, SALDO O SESIÓN */}
+      {!isNetworkOnline && (
+        <div className="m-4 p-3 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider relative z-10 animate-pulse">
+          <WifiOff size={16} strokeWidth={2.5} className="shrink-0 text-amber-400" />
+          <span>⚠️ Conexión a Internet interrumpida. Reconectando red...</span>
+        </div>
+      )}
+
       {(!puedeOperar || errorInterno) && !walletLoading && (
         <div className="m-4 p-3 bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider relative z-10 animate-pulse">
           <AlertCircle size={16} strokeWidth={2.5} className="shrink-0 text-red-400" />
@@ -678,7 +792,7 @@ export default function HomeMotoparrillero() {
                       </button>
                       <button
                         onClick={aceptarViaje}
-                        disabled={loading || !puedeOperar}
+                        disabled={loading || !puedeOperar || !isNetworkOnline}
                         className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 py-2 rounded-lg font-black text-xs uppercase tracking-widest border border-amber-500/30 active:scale-95 transition-all disabled:opacity-50"
                       >
                         {loading ? 'ASIGNANDO...' : '¡ACEPTAR!'}
@@ -741,14 +855,16 @@ export default function HomeMotoparrillero() {
                             <div className="pt-1">
                               <button 
                                 onClick={() => capturarOferta(oferta.id)}
-                                disabled={!puedeOperar || bloqueadoPorComision || loading}
+                                disabled={!puedeOperar || bloqueadoPorComision || loading || !isNetworkOnline}
                                 className="w-full bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30 disabled:bg-zinc-800/40 disabled:border-white/5 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-lg uppercase tracking-wider border border-cyan-500/30 active:scale-95 transition-all"
                               >
-                                {!puedeOperar 
-                                  ? 'SALDO BLOQUEADO (< $2.000)' 
-                                  : bloqueadoPorComision 
-                                    ? 'SALDO INSUFICIENTE PARA COMISIÓN (10%)' 
-                                    : loading ? 'CAPTURANDO...' : 'CAPTURAR OFERTA'}
+                                {!isNetworkOnline
+                                  ? 'SIN CONEXIÓN DE RED'
+                                  : !puedeOperar 
+                                    ? 'SALDO BLOQUEADO (< $2.000)' 
+                                    : bloqueadoPorComision 
+                                      ? 'SALDO INSUFICIENTE PARA COMISIÓN (10%)' 
+                                      : loading ? 'CAPTURANDO...' : 'CAPTURAR OFERTA'}
                               </button>
                             </div>
                           </div>

@@ -1,4 +1,4 @@
-// Versión Arquitectura: V21.49 - Instanciación de sala WebSocket unirse_sala_motocarga, saneamiento de consultas por tipoServicio y estandarización iconográfica CIMCO-UI V9.3
+// Versión Arquitectura: V21.50 - Alineación de eventos WebSocket (nuevo_servicio_motocarga), validación de reglas financieras de motocarga y purga defensiva 401
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { doc, onSnapshot, collection, query, where, updateDoc, serverTimestamp, runTransaction, orderBy, getDocs } from 'firebase/firestore';
 import { db, FIRESTORE_PATHS } from '@/config/firebase'; 
@@ -13,6 +13,8 @@ import {
   MapPin, Navigation, Wallet, Clock, TrendingUp, AlertCircle, 
   CircleDollarSign, Signal, LogOut, Package, Truck, Loader, UserSquare2
 } from 'lucide-react';
+
+const MIN_SALDO_MOTOCARGA = 2000;
 
 export default function HomeMotocarga() {
   // 🛡️ ESTADOS DEL OPERADOR Y LOGÍSTICA DEL SISTEMA
@@ -52,12 +54,75 @@ export default function HomeMotocarga() {
   const token = localStorage.getItem('token') || user?.token;
   const saldoVivo = walletData?.saldo || walletData?.balance || 0;
 
-  // 🛡️ GUARDA DE SEGURIDAD PARA OPERADOR DESCONECTADO SIN IDENTIFICADOR
+  // 🚨 PROTOCOLO DE LIMPIEZA DE EMERGENCIA ANTE ERROR DE AUTORIZACIÓN (401)
+  const ejecucionLimpiezaEmergencia401 = useCallback(() => {
+    console.warn("🚨 [CIMCO-EMERGENCY-401] Interceptado error 401 Unauthorized. Ejecutando purga global de sesión y recursos.");
+    
+    // 1. Detener rastreo y emisión GPS
+    if (geoWatchRef.current !== null) {
+      navigator.geolocation.clearWatch(geoWatchRef.current);
+      geoWatchRef.current = null;
+      console.log("🛰️ [CIMCO-GPS] Emisión de coordenadas GPS cancelada por desautorización.");
+    }
+
+    // 2. Liberar canal WebSocket y oyentes de eventos
+    if (socket) {
+      try {
+        socket.off('nuevo_servicio_motocarga');
+        socket.off('nueva_solicitud_viaje');
+        socket.emit('desactivar_conductor', { conductorId });
+        if (typeof socket.disconnect === 'function') {
+          socket.disconnect();
+        }
+        console.log("📡 [CIMCO-SOCKET] Suscripciones e hilos de sockets purgados.");
+      } catch (e) {
+        console.error("🚨 Error al liberar socket durante purga 401:", e);
+      }
+    }
+
+    // 3. Forzar detención de estado en línea y limpiar almacenamiento local
+    setIsOnline(false);
+    if (typeof localStorage !== 'undefined') localStorage.clear();
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
+
+    // 4. Salida de sesión y redirección a login
+    if (typeof logout === 'function') {
+      try {
+        logout();
+      } catch (e) {
+        console.error("🚨 Error al solicitar logout en contexto de autenticación:", e);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.location.replace('/');
+    }
+  }, [socket, conductorId, logout]);
+
+  // 🛡️ GUARDA DE SEGURIDAD PARA OPERADOR DESCONECTADO SIN IDENTIFICADOR O TOKEN
   useEffect(() => {
     if (!conductorId) {
       setIsOnline(false);
     }
   }, [conductorId]);
+
+  // ⚡ INTERCEPTOR DE ERRORES DE CONEXIÓN EN WEBSOCKETS (401)
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleConnectError = (err) => {
+      const status = err?.data?.status || err?.status;
+      const mensaje = String(err?.message || "").toLowerCase();
+      if (status === 401 || mensaje.includes('401') || mensaje.includes('unauthorized') || mensaje.includes('jwt expired')) {
+        ejecucionLimpiezaEmergencia401();
+      }
+    };
+
+    socket.on('connect_error', handleConnectError);
+    return () => {
+      socket.off('connect_error', handleConnectError);
+    };
+  }, [socket, ejecucionLimpiezaEmergencia401]);
 
   // ==================================================================
   // PATRÓN HÍBRIDO: HISTORIAL CON FALLBACK FIRESTORE
@@ -80,6 +145,11 @@ export default function HomeMotocarga() {
         return;
       }
     } catch (err) {
+      const status = err?.response?.status || err?.status;
+      if (status === 401) {
+        ejecucionLimpiezaEmergencia401();
+        return;
+      }
       console.warn("⚠️ Fallo en API REST, ejecutando respaldo Firestore:", err);
     }
 
@@ -102,7 +172,7 @@ export default function HomeMotocarga() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, ejecucionLimpiezaEmergencia401]);
 
   // ==================================================================
   // 1. ESCUCHA REACTIVA DE IDENTIDAD EN FIRESTORE
@@ -121,7 +191,7 @@ export default function HomeMotocarga() {
           setNombreConductor(nombreCompleto.toUpperCase());
         }
 
-        // Sincronizar datos locales para el perfil si es necesario
+        // Sincronizar datos locales para el perfil
         setDatosPerfil({
           nombre: nombreCompleto || '',
           telefono: data?.telefonoMovil || data?.telefono || '',
@@ -138,7 +208,7 @@ export default function HomeMotocarga() {
   }, [user?.uid]);
 
   // ==================================================================
-  // 2. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA (MOTOCARGA)
+  // 2. GOBERNANZA DEL CANAL WEBSOCKET Y TELEMETRÍA (MOTOCARGA V21.50)
   // ==================================================================
   const iniciarTrackingGPS = useCallback(() => {
     if (!navigator.geolocation) {
@@ -156,6 +226,7 @@ export default function HomeMotocarga() {
         if (socket && (socket.connected || isConnected)) {
           socket.emit('actualizar_radar_gps', {
             conductorId,
+            tipoServicio: 'motocarga',
             lat: latitude,
             lng: longitude
           });
@@ -165,7 +236,7 @@ export default function HomeMotocarga() {
       (error) => {
         console.error(`❌ [GPS-TRACKING-ERR] Código: ${error?.code} | ${error?.message}`);
         if (error?.code === error?.PERMISSION_DENIED) {
-          alert("⚠️ Permiso de GPS denegado. Para recibir servicios, habilite la ubicación en su navegador/dispositivo.");
+          alert("⚠️ Permiso de GPS denegado. Para recibir servicios de motocarga, habilite la ubicación en su navegador/dispositivo.");
           setIsOnline(false);
         }
       },
@@ -180,8 +251,8 @@ export default function HomeMotocarga() {
       console.log("🛰️ [CIMCO-TELEMETRIA] Receptor GPS de carga apagado.");
     }
     if (socket) {
-      socket.emit('desactivar_conductor', { conductorId });
-      console.log("📡 [CIMCO-SOCKET] Conductor desactivado en la red centralizada.");
+      socket.emit('desactivar_conductor', { conductorId, tipoServicio: 'motocarga' });
+      console.log("📡 [CIMCO-SOCKET] Conductor de motocarga desactivado en la red centralizada.");
     }
   }, [socket, conductorId]);
 
@@ -192,14 +263,15 @@ export default function HomeMotocarga() {
         return;
       }
 
-      if (Number(saldoVivo) < 2000) {
-        alert("⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $2.000 COP para activarse en la red de carga.");
+      // Validación financiera de reglas de motocarga
+      if (Number(saldoVivo) < MIN_SALDO_MOTOCARGA) {
+        alert(`⚠️ FONDO INSUFICIENTE: Su cuenta TAXIA CIMCO requiere un saldo mínimo de $${MIN_SALDO_MOTOCARGA.toLocaleString('es-CO')} COP para activarse en la red de motocarga.`);
         setIsOnline(false);
         return;
       }
 
       if (socket) {
-        console.log(`📡 [CIMCO-CARGA-SOCKET] Sincronizando con socket centralizado...`);
+        console.log(`📡 [CIMCO-CARGA-SOCKET] Sincronizando con socket centralizado de motocarga...`);
         
         socket.emit('registrar_conductor', { 
           conductorId, 
@@ -209,18 +281,22 @@ export default function HomeMotocarga() {
 
         socket.emit('unirse_sala_motocarga', { conductorId });
 
-        const handleNuevaSolicitud = (data) => {
-          console.log("🔥 [CIMCO-RADAR-CARGA] Flete detectado en el perímetro de asignación!", data);
-          if (!servicioActivo && !solicitudViaje) {
+        const handleNuevaSolicitudMotocarga = (data) => {
+          console.log("🔥 [CIMCO-RADAR-MOTOCARGA] Flete de motocarga detectado en el perímetro de asignación!", data);
+          // Garantizar que la solicitud corresponda a motocarga
+          if ((!data?.tipoServicio || data?.tipoServicio === 'motocarga') && !servicioActivo && !solicitudViaje) {
             setSolicitudViaje(data);
           }
         };
 
-        socket.on('nueva_solicitud_viaje', handleNuevaSolicitud);
+        // Escucha de eventos estandarizados V21.50 para motocarga
+        socket.on('nuevo_servicio_motocarga', handleNuevaSolicitudMotocarga);
+        socket.on('nueva_solicitud_viaje', handleNuevaSolicitudMotocarga);
         iniciarTrackingGPS();
 
         return () => {
-          socket.off('nueva_solicitud_viaje', handleNuevaSolicitud);
+          socket.off('nuevo_servicio_motocarga', handleNuevaSolicitudMotocarga);
+          socket.off('nueva_solicitud_viaje', handleNuevaSolicitudMotocarga);
           desconectarEcosistema();
         };
       }
@@ -230,7 +306,7 @@ export default function HomeMotocarga() {
   }, [isOnline, conductorId, socket, iniciarTrackingGPS, desconectarEcosistema, user?.email, saldoVivo, servicioActivo, solicitudViaje]);
 
   // ==================================================================
-  // 3. ESCUCHA ATÓMICA DE FLETES EN RADAR FIRESTORE
+  // 3. ESCUCHA ATÓMICA DE FLETES EN RADAR FIRESTORE (MOTOCARGA)
   // ==================================================================
   useEffect(() => {
     if (!user?.uid || !isOnline) {
@@ -255,7 +331,7 @@ export default function HomeMotocarga() {
       setOfertasDisponibles(ofertas);
       setCargandoOfertas(false);
     }, (error) => {
-      console.error("🚨 [CIMCO-RADAR-ERROR] Error en el feed de fletes:", error);
+      console.error("🚨 [CIMCO-RADAR-ERROR] Error en el feed de fletes de motocarga:", error);
       setCargandoOfertas(false);
     });
 
@@ -297,22 +373,23 @@ export default function HomeMotocarga() {
   }, [user?.uid, servicioActivo]);
 
   // ==================================================================
-  // 5. ACCIONES DE GESTIÓN LOGÍSTICA CON DEPURACIÓN CONTABLE
+  // 5. ACCIONES DE GESTIÓN LOGÍSTICA CON REGLAS FINANCIERAS
   // ==================================================================
   const aceptarViaje = async () => {
     if (!solicitudViaje) return;
-    if (Number(saldoVivo) < 2000) {
-      alert("⚠️ FONDO INSUFICIENTE: Saldo mínimo de $2.000 COP requerido para procesar despachos.");
+    if (Number(saldoVivo) < MIN_SALDO_MOTOCARGA) {
+      alert(`⚠️ FONDO INSUFICIENTE: Saldo mínimo de $${MIN_SALDO_MOTOCARGA.toLocaleString('es-CO')} COP requerido para procesar despachos de motocarga.`);
       setSolicitudViaje(null);
       return;
     }
     setLoading(true);
     try {
-      console.log(`⚡ [ACID-DESPACHO-CARGA] Reclamando Flete ID: ${solicitudViaje.viajeId}`);
+      console.log(`⚡ [ACID-DESPACHO-CARGA] Reclamando Flete ID: ${solicitudViaje.viajeId || solicitudViaje.id}`);
       
       const respuesta = await api.post(`/viajes/aceptar`, {
-        viajeId: solicitudViaje.viajeId,
-        conductorId
+        viajeId: solicitudViaje.viajeId || solicitudViaje.id,
+        conductorId,
+        tipoServicio: 'motocarga'
       }, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
@@ -320,9 +397,14 @@ export default function HomeMotocarga() {
       if (respuesta?.data?.success) {
         setServicioActivo(respuesta.data.viaje);
         setSolicitudViaje(null);
-        console.log("✅ [ACID-DESPACHO] Flete adjudicado de forma segura.");
+        console.log("✅ [ACID-DESPACHO] Flete de motocarga adjudicado de forma segura.");
       }
     } catch (error) {
+      const status = error?.response?.status || error?.status;
+      if (status === 401) {
+        ejecucionLimpiezaEmergencia401();
+        return;
+      }
       console.error("🚨 [DESPACHO-ERR] No se pudo capturar el flete perimetral:", error?.response?.data?.message || error?.message);
       alert(error?.response?.data?.message || "La orden de carga expiró o fue tomada por otra unidad.");
       setSolicitudViaje(null);
@@ -332,8 +414,8 @@ export default function HomeMotocarga() {
   };
 
   const capturarOferta = async (viajeId) => {
-    if (Number(saldoVivo) < 2000) {
-      alert("⚠️ FONDO INSUFICIENTE: Saldo mínimo de $2.000 COP requerido para capturar fletes.");
+    if (Number(saldoVivo) < MIN_SALDO_MOTOCARGA) {
+      alert(`⚠️ FONDO INSUFICIENTE: Saldo mínimo de $${MIN_SALDO_MOTOCARGA.toLocaleString('es-CO')} COP requerido para capturar fletes de motocarga.`);
       return;
     }
 
@@ -353,6 +435,7 @@ export default function HomeMotocarga() {
           estado: 'ACEPTADO',
           conductorId: user?.uid,
           conductorNombre: nombreConductor,
+          tipoServicio: 'motocarga',
           fechaAceptado: serverTimestamp()
         });
       });
@@ -410,7 +493,7 @@ export default function HomeMotocarga() {
             </h1>
             <p className="text-[9px] text-zinc-400 font-bold tracking-widest uppercase flex items-center gap-1 mt-1">
               <Signal size={10} className={isOnline && isConnected ? "text-amber-400 animate-pulse" : "text-zinc-600"} strokeWidth={3} /> 
-              {isOnline && isConnected ? 'MALLA CARGA ACTIVA' : 'NODO DESCONECTADO'}
+              {isOnline && isConnected ? 'MALLA MOTOCARGA ACTIVA' : 'NODO DESCONECTADO'}
             </p>
           </div>
         </div>
@@ -442,10 +525,10 @@ export default function HomeMotocarga() {
       </header>
 
       {/* BLOQUEO POR SALDO INSOLVENTE */}
-      {Number(saldoVivo) < 2000 && !walletLoading && (
+      {Number(saldoVivo) < MIN_SALDO_MOTOCARGA && !walletLoading && (
         <div className="m-4 p-3 bg-red-500/20 backdrop-blur-md text-red-200 border border-red-500/30 rounded-lg flex items-center gap-2.5 font-black text-[10px] uppercase tracking-wider relative z-10 animate-pulse">
           <AlertCircle size={16} strokeWidth={2.5} className="shrink-0" />
-          <span>Radar Inactivo: Recargar saldo para fletes ($2.000 COP mín)</span>
+          <span>Radar Inactivo: Recargar saldo para fletes (${MIN_SALDO_MOTOCARGA.toLocaleString('es-CO')} COP mín)</span>
         </div>
       )}
 
@@ -546,7 +629,7 @@ export default function HomeMotocarga() {
               </div>
             ) : (
               <>
-                {/* CASO 2: CARD FLOTANTE DE ENTRADA WEBSOCKET EN VIVO */}
+                {/* CASO 2: CARD FLOTANTE DE ENTRADA WEBSOCKET EN VIVO (EVENTOS MOTOCARGA) */}
                 {solicitudViaje && (
                   <div className="w-full bg-zinc-900/80 backdrop-blur-xl border border-amber-400/50 p-5 rounded-xl shadow-2xl shadow-amber-500/10 space-y-4 mb-6 animate-pulse">
                     <div className="flex justify-between items-start border-b border-white/10 pb-3">
@@ -581,7 +664,7 @@ export default function HomeMotocarga() {
                       </button>
                       <button
                         onClick={aceptarViaje}
-                        disabled={loading}
+                        disabled={loading || Number(saldoVivo) < MIN_SALDO_MOTOCARGA}
                         className="bg-amber-400/90 hover:bg-amber-400 text-black py-2 rounded-lg font-black text-xs uppercase tracking-widest border border-white/10 transition-all disabled:opacity-50 shadow-lg shadow-amber-400/20"
                       >
                         {loading ? 'ASIGNANDO...' : 'TOMAR FLETE'}
@@ -639,10 +722,10 @@ export default function HomeMotocarga() {
                           <div className="pt-1">
                             <button 
                               onClick={() => capturarOferta(oferta.id)}
-                              disabled={Number(saldoVivo) < 2000}
+                              disabled={Number(saldoVivo) < MIN_SALDO_MOTOCARGA}
                               className="w-full bg-amber-400/90 text-black disabled:bg-zinc-800/50 disabled:border-white/5 disabled:text-zinc-600 font-black text-[10px] py-2.5 px-4 rounded-lg uppercase tracking-wider border border-white/10 transition-all"
                             >
-                              {Number(saldoVivo) < 2000 ? 'SALDO BLOQUEADO' : 'CAPTURAR FLETE'}
+                              {Number(saldoVivo) < MIN_SALDO_MOTOCARGA ? 'SALDO BLOQUEADO' : 'CAPTURAR FLETE'}
                             </button>
                           </div>
                         </div>

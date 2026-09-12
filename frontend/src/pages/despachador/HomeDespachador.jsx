@@ -1,18 +1,20 @@
-// Versión Arquitectura: V19.8 - Deduplicación Atómica e Inyección de _reactKey en Listas de Central
+// Versión Arquitectura: V20.0 - Desacoplamiento de Metadatos de Despacho hacia viajeService y Simplificación de Payload
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones con identidad completa, calcomanía QR de autogestión,
  * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
- * Ajuste V19.8: Envoltorio de deduplicación atómica deduplicarEntidades() para ofertasFiltradas y conductores, e inyección de _reactKey en keys de React.
+ * Ajuste V20.0: Simplificación de metadatos redundantes en el payload del despacho y desacoplamiento de la persistencia REST
+ * hacia viajeService.js.
  */
 
-import React, { useEffect, useState, Suspense } from "react";
+import React, { useEffect, useState, Suspense, useCallback } from "react";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
 import { db, FIRESTORE_PATHS } from "@/config/firebase"; 
 import { useAuth } from "@/hooks/useAuth";
 import { useSocket } from "@/hooks/useSocket"; 
 import { useWallet } from "@/hooks/useWallet";
 import api, { VIAJES_ENDPOINTS } from "@/config/api"; 
+import viajeService from "@/services/viajeService";
 import { 
   Shield, Users, MapPin, AlertCircle, RefreshCw, Send, CheckCircle, Bus, Tag, 
   QrCode, Download, Map, Settings, Wallet, Building2, User, Phone, FileText, 
@@ -54,8 +56,45 @@ export default function HomeDespachador() {
   const authContext = useAuth ? useAuth() : {};
   const user = authContext?.user || null;
   const setUser = authContext?.setUser || null;
+  const logout = authContext?.logout || null;
   const token = authContext?.token || localStorage.getItem("token") || user?.token || "";
   
+  // 🚨 PROTOCOLO DE PURGADO DE SEGURIDAD ANTE DENEGACIÓN 401 (UNAUTHORIZED)
+  const ejecutarLimpiezaYSesion401 = useCallback(() => {
+    console.warn("🚨 [CIMCO-401-UNAUTHORIZED] Acceso denegado o token expirado. Purgando credenciales locales y redirigiendo a autenticación MongoDB.");
+    if (typeof localStorage !== 'undefined') localStorage.clear();
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
+    if (logout && typeof logout === "function") {
+      try {
+        logout();
+      } catch (e) {
+        console.error("🚨 Error al ejecutar logout context:", e);
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.location.replace('/');
+    }
+  }, [logout]);
+
+  // ⚡ INTERCEPTOR DE RESPUESTAS HTTP (AXIOS) PARA DENEGACIONES 401 GLOBAL
+  useEffect(() => {
+    const interceptorId = api.interceptors.response.use(
+      (response) => response,
+      (error) => {
+        const status = error?.response?.status || error?.status;
+        const msg = String(error?.message || '').toLowerCase();
+        if (status === 401 || msg.includes('401') || msg.includes('unauthorized') || msg.includes('jwt expired')) {
+          ejecutarLimpiezaYSesion401();
+        }
+        return Promise.reject(error);
+      }
+    );
+
+    return () => {
+      api.interceptors.response.eject(interceptorId);
+    };
+  }, [ejecutarLimpiezaYSesion401]);
+
   // 📡 Consumo Resiliente del Socket Centralizado (Canal de Empresa y Pujas)
   const socketContext = useSocket ? useSocket() : {};
   const socket = socketContext?.socket || null;
@@ -164,10 +203,13 @@ export default function HomeDespachador() {
       }
     }, (err) => {
       console.error("🚨 [CIMCO-DESPACHADOR-IDENTITY-ERR] Error al sincronizar perfil:", err);
+      if (err?.code === 'permission-denied') {
+        ejecutarLimpiezaYSesion401();
+      }
     });
 
     return () => unsubscribe();
-  }, [user, idOperadorLogistico]);
+  }, [user, idOperadorLogistico, ejecutarLimpiezaYSesion401]);
 
   // 📡 STREAM EN TIEMPO REAL: Conductores Homologados a la misma Cooperativa
   useEffect(() => {
@@ -209,15 +251,19 @@ export default function HomeDespachador() {
       },
       (err) => {
         console.error("🚨 [CIMCO-DESPACHADOR-STREAM] Error al sincronizar red de conductores:", err);
+        if (err?.code === 'permission-denied') {
+          ejecutarLimpiezaYSesion401();
+          return;
+        }
         setErrorConductores("Error de red satelital al recuperar la malla de conductores.");
         setLoadingConductores(false);
       }
     );
 
     return () => unsubscribe();
-  }, [cooperativaDespachador]);
+  }, [cooperativaDespachador, ejecutarLimpiezaYSesion401]);
 
-  // 🚀 DISPARADOR TRANSACCIONAL: Registro centralizado e inyección del viaje en el pool logístico con payload de identidad completo
+  // 🚀 DISPARADOR TRANSACCIONAL: Registro centralizado e inyección del viaje en el pool logístico con payload simplificado desacoplado
   const handleRegistrarYDistribuirViaje = async (conductorSeleccionado) => {
     if (saldoInsuficiente) {
       setMensajeError(`Operación bloqueada. Billetera por debajo del umbral mínimo ($${UMBRAL_MINIMO_SALDO.toLocaleString('es-CO')} COP). Recargue saldo.`);
@@ -233,20 +279,18 @@ export default function HomeDespachador() {
     setMensajeExito("");
     setMensajeError("");
 
-    // 🛡️ Payload estandardizado inyectando el objeto de identidad completo
+    const conductorId = conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "";
+
+    // 🛡️ Payload simplificado de despacho sin redundancias de metadatos desacoplados hacia viajeService
     const payloadInyeccion = {
-      conductorId: conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "",
-      conductor: conductorSeleccionado?.id || conductorSeleccionado?._id || conductorSeleccionado?.uid || "",
+      conductorId: String(conductorId),
       despachadorId: String(idOperadorLogistico || ""),
-      despachador: String(idOperadorLogistico || ""),
       empresaId: String(empresaId || ""),
       cooperativa: String(cooperativaDespachador || ""),
-      empresa: String(cooperativaDespachador || ""),
       terminal: String(terminalDespachador || ""),
       origen: origen.trim().toUpperCase(),
       destino: destino.trim().toUpperCase(),
       valorPasaje: Number(valorPasaje),
-      tarifa: Number(valorPasaje),
       tipoViaje: "intermunicipal",
       creadoManualmente: true,
       estado: "asignado"
@@ -264,9 +308,18 @@ export default function HomeDespachador() {
         socket.emit("crear_solicitud", payloadInyeccion);
       }
 
-      // 2. Persistencia REST de respaldo
-      const endpoint = VIAJES_ENDPOINTS?.crear || "/api/viajes/crear";
-      const response = await api.post(endpoint, payloadInyeccion, axiosConfig);
+      // 2. Persistencia REST desacoplada mediante servicio centralizado viajeService
+      let response;
+      if (viajeService && typeof viajeService.crearViaje === 'function') {
+        response = await viajeService.crearViaje(payloadInyeccion, axiosConfig);
+      } else if (viajeService && typeof viajeService.crearDespacho === 'function') {
+        response = await viajeService.crearDespacho(payloadInyeccion, axiosConfig);
+      } else if (viajeService && typeof viajeService.crear === 'function') {
+        response = await viajeService.crear(payloadInyeccion, axiosConfig);
+      } else {
+        const endpoint = VIAJES_ENDPOINTS?.crear || "/api/viajes/crear";
+        response = await api.post(endpoint, payloadInyeccion, axiosConfig);
+      }
 
       if (response?.data?.success || response?.data?.viaje || response?.status === 200 || response?.status === 201) {
         const viajeCreado = response?.data?.viaje || response?.data?.data || response?.data;
@@ -303,6 +356,10 @@ export default function HomeDespachador() {
       }
     } catch (err) {
       console.error("🚨 [CIMCO-DESPACHADOR-MUTATION] Fallo crítico en POST /viajes:", err);
+      if (err?.response?.status === 401 || err?.status === 401) {
+        ejecutarLimpiezaYSesion401();
+        return;
+      }
       setMensajeError(err?.response?.data?.message || "Error físico de conexión con el Core de despacho.");
     } finally {
       setLoadingAccion(false);

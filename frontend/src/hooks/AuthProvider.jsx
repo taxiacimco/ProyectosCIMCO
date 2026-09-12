@@ -1,4 +1,4 @@
-// Versión Arquitectura: V24.2 - Normalización Atómica de Subrol y Preservación de AccessLevel Numérico
+// Versión Arquitectura: V24.3 - Preservación de Sincronización Local de Saldo y Consistencia de Sesión
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\AuthProvider.jsx
  * Misión: Proveedor de Estado Global de Autenticación para TAXIA CIMCO con soporte para auto-cleanup, refresco de tokens, sanitización de entrada y consumo centralizado de authService.

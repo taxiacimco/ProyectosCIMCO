@@ -1,10 +1,10 @@
-// Versión Arquitectura: V13.2 - Coherencia en Fallback NoSQL, Reset de Sesión Nula y Saneamiento Temporal Robustecido
+// Versión Arquitectura: V13.1 - Aislamiento Estricto por tipoServicio motocarga y Filtro de Bitácoras de Carga
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\pages\motocarga\HistorialMotocarga.jsx
  * Misión: Renderizar la bitácora de fletes completados en la red de motocarga/logística pesada consumiendo la API REST de Express/MongoDB
  *        con fallback resiliente a Firestore y ordenamiento en memoria para mitigar ausencias de índices compuestos.
  * Estilo: CIMCO-UI V9.3 Dark Mode Premium Glassmorphism (Acento Ámbar/Esmeralda).
- * Ajuste V13.2: Sincronización de fallback 'viajes', saneamiento de estado para sesiones inactivas y soporte omnicanal de fechas NoSQL.
+ * Ajuste V13.1: Aislamiento completo de bitácoras forzando la cláusula tipoServicio == 'motocarga' tanto en API REST como en queries NoSQL.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -48,7 +48,7 @@ const HistorialMotocarga = () => {
         setLoading(true);
         setError(null);
 
-        // 📡 1. INTENTO DE CONSULTA EN API REST DE MONGODB CORE CON PARÁMETROS FILTRADOS ESTRICTAMENTE
+        // 📡 1. INTENTO DE CONSULTA EN API REST DE MONGODB CORE CON PARÁMETROS FILTRADOS ESTRICTAMENTE POR TIPO DE SERVICIO 'MOTOCARGA'
         try {
             const rawEndpoint = VIAJES_ENDPOINTS?.historial || '/viajes/historial';
             const cleanEndpoint = rawEndpoint.replace(/^\/api/, '');
@@ -60,14 +60,12 @@ const HistorialMotocarga = () => {
                 }
             });
 
-            const viajesRest = res?.data?.viajes || (Array.isArray(res?.data) ? res.data : null);
+            const viajesRaw = res?.data?.viajes || (Array.isArray(res?.data) ? res.data : null);
 
-            if (res?.data?.success && Array.isArray(res?.data?.viajes)) {
-                setHistorial(res.data.viajes);
-                setLoading(false);
-                return;
-            } else if (Array.isArray(viajesRest)) {
-                setHistorial(viajesRest);
+            if (Array.isArray(viajesRaw)) {
+                // 🛡️ Filtro atómico secundario para garantizar aislamiento total de fletes de motocarga
+                const viajesFiltrados = viajesRaw.filter(v => (v?.tipoServicio || 'motocarga') === 'motocarga');
+                setHistorial(viajesFiltrados);
                 setLoading(false);
                 return;
             }
@@ -75,9 +73,8 @@ const HistorialMotocarga = () => {
             console.warn("⚠️ [CIMCO-MOTOCARGA-REST] Fallo en API REST Express, ejecutando respaldo Firestore:", err?.message || err);
         }
 
-        // 🔄 2. FALLBACK SECUNDARIO NOSQL (FIRESTORE) CON ORDENAMIENTO EN MEMORIA
+        // 🔄 2. FALLBACK SECUNDARIO NOSQL (FIRESTORE) CON CLÁUSULA ESTRICTA tipoServicio == 'motocarga'
         try {
-            // Priorización estandarizada de colección 'viajes' para alineación directa con HomeMotocarga
             const pathColeccion = FIRESTORE_PATHS?.viajes || FIRESTORE_PATHS?.rides || 'viajes';
             const q = query(
                 collection(db, pathColeccion),
@@ -87,7 +84,9 @@ const HistorialMotocarga = () => {
             );
 
             const snapshot = await getDocs(q);
-            const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const docs = snapshot.docs
+                .map(doc => ({ id: doc.id, ...doc.data() }))
+                .filter(flete => flete?.tipoServicio === 'motocarga');
 
             // Ordenamiento en memoria para evitar fallos por índices compuestos no provistos en la consola de Firebase
             docs.sort((a, b) => {
@@ -99,7 +98,6 @@ const HistorialMotocarga = () => {
                     return isNaN(t) ? 0 : t;
                 };
                 
-                // Extracción omnicanal de timestamps (soporte para variantes minúsculas/camelCase)
                 const valB = b.fechaCreacion || b.createdAt || b.fechacreacion;
                 const valA = a.fechaCreacion || a.createdAt || a.fechacreacion;
                 
