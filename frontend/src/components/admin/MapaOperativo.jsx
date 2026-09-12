@@ -1,15 +1,14 @@
-// Versión Arquitectura: V19.9 - Optimización de Consulta Firestore, Destrucción Segura Leaflet y Memoización de Filtrado
+// Versión Arquitectura: V20.0 - Limpieza Síncrona DOM Leaflet, Subcomponente MapResizer y Clave Única MapContainer
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
  * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled, prevención 
- *         de colisiones de contenedor en React 18 / React-Leaflet, recalibración de tiles (invalidateSize),
- *         uso de capa base pública OpenStreetMap (OSM), evaluación de saldo operativo para marcadores,
- *         optimización de consultas Firestore por estado activo, destrucción segura de mapa en desmonte
- *         y memoización del pipeline de deduplicación/filtrado.
+ *         de colisiones de contenedor en React 18 / React-Leaflet, recalibración de tiles mediante
+ *         el subcomponente MapResizer, desacoplamiento de destrucción manual de Leaflet,
+ *         limpieza síncrona de _leaflet_id en DOM y clave única dinámica por pestaña/coordenadas.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
@@ -33,7 +32,7 @@ const createCustomIcon = (rol, saldo = 0) => {
     
     // Inhabilitación visual si el saldo es menor a $2000
     if (typeof saldo === 'number' && saldo < 2000) {
-        color = '#ef4444'; // Color rojo/gris de inhabilitado por saldo insuficiente
+        color = '#ef4444'; // Color rojo de inhabilitado por saldo insuficiente
     }
 
     const svgHtml = `
@@ -60,17 +59,24 @@ const createCustomClusterIcon = (cluster) => {
     });
 };
 
-// 🛡️ Capturador de Referencia del Mapa con desvinculación limpia para evitar fugas y colisiones de contenedor
-const MapReferenceBinder = ({ onMapReady }) => {
+// ⚡ SUBCOMPONENTE DE RECALIBRACIÓN INTEGRADA: Controla invalidateSize() directamente sobre el hook useMap
+const MapResizer = ({ activeTab, onMapReady }) => {
     const map = useMap();
 
     useEffect(() => {
+        if (!map) return;
+
         if (onMapReady) {
             onMapReady(map);
         }
+
         const timer = setTimeout(() => {
-            if (map && map._container) {
-                map.invalidateSize();
+            try {
+                if (map && map._container) {
+                    map.invalidateSize();
+                }
+            } catch (err) {
+                // Previene excepciones si el viewport ya no está disponible
             }
         }, 200);
 
@@ -80,7 +86,7 @@ const MapReferenceBinder = ({ onMapReady }) => {
                 onMapReady(null);
             }
         };
-    }, [map, onMapReady]);
+    }, [map, activeTab, onMapReady]);
 
     return null;
 };
@@ -89,8 +95,10 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
     const [busqueda, setBusqueda] = useState('');
     const [loading, setLoading] = useState(true);
     const [errorServicio, setErrorServicio] = useState(null);
+    
     const isMounted = useRef(true);
     const mapInstanceRef = useRef(null);
+    const mapWrapperRef = useRef(null);
 
     // 🔥 Amortiguador Térmico (Throttled GPS Telemetry)
     const [vehiculosSuaves, actualizarCoordenadas] = useTelemetryThrottle(2000);
@@ -100,41 +108,47 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         actualizarCoordenadasRef.current = actualizarCoordenadas;
     }, [actualizarCoordenadas]);
 
-    // 🛡️ DESTRUCCIÓN SEGURA DE INSTANCIA LEAFLET: Evita "Map container is already initialized" en alternancia rápida de pestañas
+    // 🛡️ PASO 1 Y 2: CONTROL DE CICLO DE VIDA Y LIMPIEZA SÍNCRONA DE _leaflet_id EN DOM
     useEffect(() => {
         isMounted.current = true;
+
         return () => {
             isMounted.current = false;
-            if (mapInstanceRef.current) {
-                try {
-                    mapInstanceRef.current.off();
-                    mapInstanceRef.current.remove();
-                } catch (err) {
-                    // Ignorar si el contenedor ya fue purgado por el DOM
+            mapInstanceRef.current = null;
+
+            // Limpieza síncrona del wrapper HTML para prevenir re-utilización errónea de contenedor Leaflet
+            if (mapWrapperRef.current) {
+                if (mapWrapperRef.current._leaflet_id) {
+                    delete mapWrapperRef.current._leaflet_id;
                 }
-                mapInstanceRef.current = null;
+                const internalContainers = mapWrapperRef.current.querySelectorAll('.leaflet-container');
+                internalContainers.forEach((el) => {
+                    if (el && el._leaflet_id) {
+                        delete el._leaflet_id;
+                    }
+                });
             }
         };
     }, []);
 
-    // 🚀 RECALIBRACIÓN TÁCTICA DEL LIENZO: Asegura el ajuste correcto de mosaicos al conmutar pestaña o redimensionar
-    useEffect(() => {
-        if (mapInstanceRef.current) {
-            const timer = setTimeout(() => {
-                if (mapInstanceRef.current && mapInstanceRef.current._container) {
-                    mapInstanceRef.current.invalidateSize();
-                }
-            }, 200);
-            return () => clearTimeout(timer);
-        }
-    }, [activeTab]);
+    // 🎯 PASO 4: CLAVE ÚNICA DINÁMICA PARA FORZAR RE-CREACIÓN LIMPIA DEL MAPCONTAINER
+    const containerKey = useMemo(() => {
+        const centerLat = Array.isArray(coordenadasCentro) && coordenadasCentro[0] ? coordenadasCentro[0] : 9.715;
+        const centerLng = Array.isArray(coordenadasCentro) && coordenadasCentro[1] ? coordenadasCentro[1] : -73.34;
+        const tabKey = activeTab || 'default-tab';
+        const coopKey = cooperativaFiltro || 'todas-coop';
+        return `map-container-${tabKey}-${coopKey}-${centerLat}-${centerLng}`;
+    }, [activeTab, cooperativaFiltro, coordenadasCentro]);
 
-    // ⚡ SINCRONIZACIÓN OPTIMIZADA FIRESTORE: Restringe lecturas a unidades activas para mitigar sobrecostos
+    const handleMapReady = useCallback((mapInstance) => {
+        mapInstanceRef.current = mapInstance;
+    }, []);
+
+    // ⚡ SINCRONIZACIÓN OPTIMIZADA FIRESTORE: Restringe lecturas a unidades activas
     useEffect(() => {
         setLoading(true);
         const pathUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
         
-        // Consulta filtrada por estado activo para escala eficiente
         const q = query(
             collection(db, pathUsuarios),
             where('isActive', '==', true)
@@ -184,7 +198,7 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         return () => unsubscribe();
     }, [cooperativaFiltro]);
 
-    // ⚡ MEMOIZACIÓN DE FILTRADO Y DEDUPLICACIÓN: Previene recálculos intensivos en la CPU por cada renderizado
+    // ⚡ MEMOIZACIÓN DE FILTRADO Y DEDUPLICACIÓN
     const conductoresDeduplicados = useMemo(() => {
         const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
         const queryTerm = busqueda.toLowerCase().trim();
@@ -206,6 +220,7 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
     }, [vehiculosSuaves, busqueda, cooperativaFiltro]);
 
     const usarCanvas = conductoresDeduplicados.length > 50;
+    const centroValidado = Array.isArray(coordenadasCentro) && coordenadasCentro.length === 2 ? coordenadasCentro : [9.715, -73.34];
 
     return (
         <div className="w-full flex flex-col gap-4 font-mono antialiased text-zinc-100">
@@ -235,7 +250,10 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
             </div>
 
             {/* MÁSCARA Y MAPA DE INTERFAZ */}
-            <div className="w-full h-[400px] rounded-3xl overflow-hidden border border-white/5 shadow-2xl relative bg-zinc-950 z-10">
+            <div 
+                ref={mapWrapperRef}
+                className="w-full h-[400px] rounded-3xl overflow-hidden border border-white/5 shadow-2xl relative bg-zinc-950 z-10"
+            >
                 {errorServicio && (
                     <div className="absolute top-4 left-4 right-4 z-[1000] backdrop-blur-md bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl flex items-center gap-2.5">
                         <AlertCircle className="text-rose-400 shrink-0" size={16} />
@@ -244,13 +262,15 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                 )}
 
                 <MapContainer 
-                    center={coordenadasCentro} 
+                    key={containerKey}
+                    center={centroValidado} 
                     zoom={zoom} 
                     zoomControl={false}
                     preferCanvas={usarCanvas}
                     className="w-full h-full"
                 >
-                    <MapReferenceBinder onMapReady={(map) => { mapInstanceRef.current = map; }} />
+                    {/* PASO 3: SUBCOMPONENTE DE RECALIBRACIÓN INTEGRADA */}
+                    <MapResizer activeTab={activeTab} onMapReady={handleMapReady} />
 
                     <TileLayer
                         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
