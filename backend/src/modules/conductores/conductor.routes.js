@@ -1,4 +1,10 @@
-// Versión Arquitectura: V22.4 - Integración Quirúrgica y Protección Centralizada con esAdminCentralMiddleware
+// Versión Arquitectura: V22.5 - Sanitización y Preservación de Identificadores (_id / uid) en Payload y Parámetros de Rutas
+/**
+ * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.routes.js
+ * Misión: Exposición y protección de rutas para perfil, estados operativos, telemetría radar, recargas y administración de conductores.
+ * Ajuste V22.5: Inclusión de middleware de sanitización y preservación estricta de identificadores (_id, uid, id, conductorId)
+ * en req.body, req.params y req.query para asegurar el emparejamiento unívoco entre colecciones y controladores.
+ */
 
 import express from 'express';
 import Conductor from '../../models/Conductor.js';
@@ -33,6 +39,42 @@ const esAdmin = authMiddleware.esAdmin || verificarRol('admin');
 const esAdminCentralMiddleware = authMiddleware.esAdminCentralMiddleware || authMiddleware.esAdmin || verificarRol('admin');
 
 const router = express.Router();
+
+/**
+ * 🛡️ Middleware de Sanitización y Preservación de Identificadores (_id, uid, id, conductorId, usuarioId)
+ * Garantiza que los identificadores de MongoDB, Firebase Auth y Conductor se mantengan intactos,
+ * limpios de espacios en blanco y sin transformaciones destructivas que afecten el emparejamiento entre colecciones.
+ */
+const sanitizarIdentificadoresPayload = (req, res, next) => {
+    const sanitizarColeccion = (obj) => {
+        if (!obj || typeof obj !== 'object') return;
+        const camposTarget = ['_id', 'uid', 'id', 'conductorId', 'usuarioId', 'targetId', 'despachadorId', 'pasajeroId'];
+
+        camposTarget.forEach((campo) => {
+            if (obj[campo] !== undefined && obj[campo] !== null) {
+                if (typeof obj[campo] === 'string') {
+                    const valorLimpio = obj[campo].trim();
+                    if (valorLimpio.length > 0) {
+                        obj[campo] = valorLimpio;
+                    }
+                }
+            }
+        });
+    };
+
+    try {
+        if (req.params) sanitizarColeccion(req.params);
+        if (req.body) sanitizarColeccion(req.body);
+        if (req.query) sanitizarColeccion(req.query);
+    } catch (err) {
+        console.error('⚠️ [CONDUCTOR-ROUTES-SANITY] Error al sanitizar identificadores de la petición:', err);
+    }
+
+    next();
+};
+
+// Inyección del middleware de sanitización a nivel global del enrutador
+router.use(sanitizarIdentificadoresPayload);
 
 // ==================================================================
 // 🛡️ MIDDLEWARE: SANITIZACIÓN DE PARÁMETROS RADIALES
@@ -162,7 +204,7 @@ router.put('/bypass-stress-saldo', verificarBypassDesarrollo, async (req, res) =
         if (!actualizado) {
             return res.status(404).json({ success: false, message: "Conductor no localizado en Atlas." });
         }
-        
+
         return res.status(200).json({ success: true, data: actualizado });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });

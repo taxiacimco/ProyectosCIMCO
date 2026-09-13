@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.06 - Resiliencia de Aprovisionamiento Firebase Auth y Persistencia Multibase Integrada
+// Versión Arquitectura: V20.07 - Sincronización Doble Atómica de Saldo Pasajero-Usuario y Conciliación Cruzada SSOT
 
 import mongoose from 'mongoose';
 import Pasajero from '../../models/Pasajero.js';
@@ -788,7 +788,7 @@ export const obtenerHistorialViajesPasajero = async (req, res, next) => {
 // ==================================================================
 
 /**
- * 💰 Consultar saldo opcional del pasajero con timeout estricto de 3000ms y fallback resiliente $0 COP
+ * 💰 Consultar saldo del pasajero con lectura cruzada de conciliación entre Pasajero y Usuario (SSOT) y timeout estricto de 3000ms
  */
 export const obtenerSaldoPasajero = async (req, res, next) => {
     try {
@@ -797,17 +797,19 @@ export const obtenerSaldoPasajero = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "⚠️ Identificador de pasajero ausente." });
         }
 
-        const pasajero = await Pasajero.findOne({
+        const filterQuery = {
             $or: [
                 { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
                 { uid: targetId }
             ]
-        })
-        .select('saldo nombre email')
-        .maxTimeMS(3000)
-        .lean();
+        };
 
-        if (!pasajero) {
+        const [pasajero, usuario] = await Promise.all([
+            Pasajero.findOne(filterQuery).select('saldo nombre email uid').maxTimeMS(3000).lean(),
+            Usuario.findOne(filterQuery).select('saldo uid').maxTimeMS(3000).lean()
+        ]);
+
+        if (!pasajero && !usuario) {
             return res.status(200).json({
                 success: true,
                 saldo: 0,
@@ -816,12 +818,25 @@ export const obtenerSaldoPasajero = async (req, res, next) => {
             });
         }
 
-        const saldoNumerico = Number(pasajero.saldo ?? 0);
+        const saldoPasajero = Number(pasajero?.saldo ?? 0);
+        const saldoUsuario = usuario ? Number(usuario?.saldo ?? 0) : null;
+
+        let saldoConsolidado = isNaN(saldoPasajero) ? 0 : saldoPasajero;
+
+        // Validación cruzada y conciliación de saldo entre Pasajero y Usuario en caso de inconsistencia previa
+        if (usuario && !isNaN(saldoUsuario) && saldoPasajero !== saldoUsuario) {
+            saldoConsolidado = Math.max(saldoPasajero, saldoUsuario);
+
+            await Promise.all([
+                Pasajero.updateOne(filterQuery, { $set: { saldo: saldoConsolidado } }),
+                Usuario.updateOne(filterQuery, { $set: { saldo: saldoConsolidado } })
+            ]).catch(err => console.warn("⚠️ [CONCILIACION-SALDO-WARN] Error conciliando saldos entre colecciones:", err.message));
+        }
 
         return res.status(200).json({
             success: true,
-            saldo: isNaN(saldoNumerico) ? 0 : saldoNumerico,
-            data: pasajero
+            saldo: saldoConsolidado,
+            data: pasajero || usuario
         });
     } catch (error) {
         console.warn("⚠️ [CIMCO-PASAJERO-SALDO] Error o latencia en DB Mongoose (maxTimeMS 3000ms alcanzado). Fallback activo $0 COP:", error?.message);
@@ -901,7 +916,7 @@ export const validarPagoBilleteraPasajero = async (req, res, next) => {
 };
 
 /**
- * 💳 Recargar/Acreditar saldo a Pasajero libremente por Admin/CEO con sesión de Transacción Atómica de MongoDB
+ * 💳 Recargar/Acreditar saldo a Pasajero con transacción atómica Mongoose y mutación simultánea sobre Usuario
  */
 export const recargarSaldoPasajero = async (req, res, next) => {
     const session = await mongoose.startSession();
@@ -927,13 +942,15 @@ export const recargarSaldoPasajero = async (req, res, next) => {
             return res.status(400).json({ success: false, message: "Parámetros de recarga/acreditación de saldo inválidos." });
         }
 
+        const filterQuery = {
+            $or: [
+                { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
+                { uid: targetId }
+            ]
+        };
+
         const pasajero = await Pasajero.findOneAndUpdate(
-            {
-                $or: [
-                    { _id: mongoose.Types.ObjectId.isValid(targetId) ? targetId : null },
-                    { uid: targetId }
-                ]
-            },
+            filterQuery,
             { $inc: { saldo: montoNum } },
             { new: false, session } // Devuelve el estado anterior dentro de la transacción atómica
         );
@@ -944,10 +961,17 @@ export const recargarSaldoPasajero = async (req, res, next) => {
             return res.status(404).json({ success: false, message: "Pasajero no localizado." });
         }
 
+        // Mutación simultánea requerida sobre la colección Usuario en la misma sesión de transacción
+        await Usuario.updateOne(
+            filterQuery,
+            { $inc: { saldo: montoNum } },
+            { session }
+        );
+
         const saldoAnterior = Number(pasajero.saldo || 0);
         const saldoNuevo = saldoAnterior + montoNum;
 
-        // ✅ Historial en MongoDB con mapeo semántico limpio (usuario / pasajero) y ObjectId/String sanitizado dentro de la transacción
+        // Historial en MongoDB con mapeo semántico limpio (usuario / pasajero) y ObjectId/String sanitizado dentro de la transacción
         const nuevoHistorial = new HistorialSaldo({
             usuario: pasajero._id,
             pasajero: pasajero._id,

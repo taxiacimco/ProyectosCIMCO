@@ -1,8 +1,8 @@
-// Versión Arquitectura: V20.05 - Blindaje Estricto con JWT (verificarToken) en Endpoints de Modificación (PUT/PATCH/POST/DELETE) de Pasajeros
+// Versión Arquitectura: V20.06 - Sanitización y Preservación de Identificadores (_id / uid) en Payload y Parámetros de Rutas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\pasajeros\pasajero.routes.js
  * Misión: Exposición de endpoints para perfil, direcciones favoritas, historial, registro y billetera virtual de pasajeros con protección integral JWT para mutaciones.
- * Ajuste V20.05: Garantía y blindaje de protección con middleware JWT (verificarToken) en todos los endpoints de modificación (PUT, PATCH, POST, DELETE) de datos de pasajero.
+ * Ajuste V20.06: Implementación de middleware de sanitización y preservación estricta de identificadores (_id, uid, id, usuarioId) en req.body, req.params y req.query para garantizar la consistencia en el emparejamiento entre colecciones.
  */
 
 import { Router } from 'express';
@@ -22,6 +22,42 @@ import {
 import { verificarToken, esAdmin } from '../../middleware/auth.middleware.js';
 
 const router = Router();
+
+/**
+ * 🛡️ Middleware de Sanitización y Preservación de Identificadores (_id, uid, id, pasajeroId, usuarioId)
+ * Garantiza que los identificadores de MongoDB y Firebase Auth se mantengan intactos, limpios de espacios
+ * en blanco y sin transformaciones destructivas que rompan el cruce relacional en controladores.
+ */
+const sanitizarIdentificadoresPayload = (req, res, next) => {
+    const sanitizarColeccion = (obj) => {
+        if (!obj || typeof obj !== 'object') return;
+        const camposTarget = ['_id', 'uid', 'id', 'pasajeroId', 'usuarioId', 'targetId', 'direccionId'];
+        
+        camposTarget.forEach((campo) => {
+            if (obj[campo] !== undefined && obj[campo] !== null) {
+                if (typeof obj[campo] === 'string') {
+                    const valorLimpio = obj[campo].trim();
+                    if (valorLimpio.length > 0) {
+                        obj[campo] = valorLimpio;
+                    }
+                }
+            }
+        });
+    };
+
+    try {
+        if (req.params) sanitizarColeccion(req.params);
+        if (req.body) sanitizarColeccion(req.body);
+        if (req.query) sanitizarColeccion(req.query);
+    } catch (err) {
+        console.error('⚠️ [PASAJERO-ROUTES-SANITY] Error al sanitizar identificadores de la petición:', err);
+    }
+
+    next();
+};
+
+// Aplicación global del middleware de sanitización de identificadores para todas las rutas del módulo
+router.use(sanitizarIdentificadoresPayload);
 
 // 📷 CONFIGURACIÓN DE MULTER (Manejo de archivos multimedia binarios)
 const upload = multer({

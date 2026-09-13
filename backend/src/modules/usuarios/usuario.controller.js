@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.07 - Agregación de Saldo Unificado por Rol y Directorio de Usuarios
+// Versión Arquitectura: V20.08 - Simplificación de directorio de usuarios con lectura directa de saldos sincronizados
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.controller.js
  * Misión: Controlador unificado de usuarios (Admin, Despachador, Pasajero, Staff) desacoplado mediante servicios y repositorios (SRP).
@@ -86,66 +86,32 @@ const evaluarEstadoOperativoPorSaldo = async (usuario, nuevoSaldo) => {
 // ==================================================================
 
 /**
- * 📊 Obtener directorio de usuarios con agregación de saldo unificado (Admin / CEO)
+ * 📊 Obtener directorio de usuarios con proyección directa de saldos sincronizados (Admin / CEO)
+ * Elimina la tubería $lookup duplicada a billeteras para consumir saldoWallet/saldo directamente del esquema.
  */
 export const obtenerDirectorioUsuarios = async (req, res, next) => {
     try {
-        const usuarios = await Usuario.aggregate([
-            {
-                $lookup: {
-                    from: 'billeteras',
-                    localField: '_id',
-                    foreignField: 'usuarioId',
-                    as: 'datosBilletera'
-                }
-            },
-            {
-                $project: {
-                    nombre: 1,
-                    telefono: 1,
-                    email: 1,
-                    rol: 1,
-                    estadoOperativo: 1,
-                    // Mapeo y unificación del saldo según el rol del usuario
-                    saldoWallet: {
-                        $cond: {
-                            if: { 
-                                $eq: [{ $toLower: { $ifNull: ["$rol", ""] } }, "pasajero"] 
-                            },
-                            then: {
-                                $ifNull: [
-                                    "$billetera.saldo",
-                                    {
-                                        $ifNull: [
-                                            "$walletBalance",
-                                            { $ifNull: [{ $arrayElemAt: ['$datosBilletera.saldo', 0] }, 0] }
-                                        ]
-                                    }
-                                ]
-                            },
-                            else: {
-                                $ifNull: [
-                                    { $arrayElemAt: ['$datosBilletera.saldo', 0] },
-                                    {
-                                        $ifNull: [
-                                            "$saldoWallet",
-                                            { $ifNull: ["$saldoCredito", 0] }
-                                        ]
-                                    }
-                                ]
-                            }
-                        }
-                    }
-                }
-            }
-        ]);
+        const usuarios = await Usuario.find(
+            {},
+            'nombre telefono email rol estadoOperativo saldoWallet saldo'
+        ).lean();
+
+        const usuariosFormateados = (usuarios || []).map(u => ({
+            _id: u._id,
+            nombre: u.nombre,
+            telefono: u.telefono,
+            email: u.email,
+            rol: u.rol,
+            estadoOperativo: u.estadoOperativo,
+            saldoWallet: u.saldoWallet ?? u.saldo ?? 0
+        }));
 
         return res.status(200).json({
             success: true,
             status: 'OK',
-            total: usuarios ? usuarios.length : 0,
-            data: usuarios,
-            usuarios: usuarios
+            total: usuariosFormateados.length,
+            data: usuariosFormateados,
+            usuarios: usuariosFormateados
         });
     } catch (error) {
         console.error("❌ Error en obtenerDirectorioUsuarios:", error);

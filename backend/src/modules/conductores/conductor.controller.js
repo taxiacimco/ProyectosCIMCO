@@ -1,8 +1,8 @@
-// Versión Arquitectura: V22.2 - Estandarización de Sesiones Atómicas Mongoose con session.withTransaction() y Guarda de Umbral ($2.000 COP)
+// Versión Arquitectura: V22.3 - Extensión de session.withTransaction() para Sincronización Atómica de Saldo y EstadoOperativo en Usuario
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\conductores\conductor.controller.js
  * Misión: Gestión unificada de operarios, prevención de duplicados, aprobación administrativa, recargas atómicas con transactions avanzadas (session.withTransaction), métricas de capital circulante y transición automática de estadoOperativo según el umbral de saldo ($2.000 COP).
- * Ajuste V22.2: Estandarización del patrón de transacciones Mongoose en recargarSaldoAdmin y descontarComisionViaje utilizando session.withTransaction() para garantizar el aborto automático y reintentos atómicos ante fallos concurrentes en BD.
+ * Ajuste V22.3: Extensión de session.withTransaction() en recargarSaldoAdmin y descontarComisionViaje para incluir la actualización simultánea y atómica de saldo y estadoOperativo dentro del documento correspondiente en Usuario, preservando la réplica a Firestore e HistorialSaldo.
  */
 
 import mongoose from 'mongoose';
@@ -557,6 +557,25 @@ export const recargarSaldoAdmin = async (req, res, next) => {
             delete conductor.saldoWallet;
             await conductor.save({ session });
 
+            // 🔄 Extensión Atómica: Actualización simultánea en Usuario dentro de la misma transacción session
+            const usuarioCondiciones = [];
+            if (mongoose.Types.ObjectId.isValid(targetId)) usuarioCondiciones.push({ _id: targetId });
+            if (targetId) usuarioCondiciones.push({ uid: targetId }, { conductorId: targetId });
+            if (conductor.uid) usuarioCondiciones.push({ uid: conductor.uid });
+            if (conductor.email) usuarioCondiciones.push({ email: conductor.email });
+            if (conductor._id) usuarioCondiciones.push({ _id: conductor._id });
+
+            await Usuario.updateOne(
+                { $or: usuarioCondiciones },
+                {
+                    $set: {
+                        saldo: nuevoSaldo,
+                        estadoOperativo: nuevoEstadoOperativo
+                    }
+                },
+                { session }
+            );
+
             const nuevoHistorial = new HistorialSaldo({
                 conductor: conductor._id,
                 tipo: 'recarga',
@@ -690,6 +709,22 @@ export const ajustarSaldo = async (req, res, next) => {
             { new: true }
         );
 
+        // Actualización sincrónica paralela en Usuario para mantener paridad
+        const usuarioCondiciones = [];
+        if (conductorExistente._id) usuarioCondiciones.push({ _id: conductorExistente._id });
+        if (conductorExistente.uid) usuarioCondiciones.push({ uid: conductorExistente.uid });
+        if (conductorExistente.email) usuarioCondiciones.push({ email: conductorExistente.email });
+
+        await Usuario.updateOne(
+            { $or: usuarioCondiciones },
+            {
+                $set: {
+                    saldo: nuevoSaldo,
+                    estadoOperativo: nuevoEstadoOperativo
+                }
+            }
+        );
+
         const docFirestoreId = conductor.uid || conductor._id.toString();
 
         try {
@@ -778,6 +813,25 @@ export const descontarComisionViaje = async (req, res, next) => {
             conductor.estadoOperativo = nuevoEstadoOperativo;
             delete conductor.saldoWallet;
             await conductor.save({ session });
+
+            // 🔄 Extensión Atómica: Actualización simultánea en Usuario dentro de la misma transacción session
+            const usuarioCondiciones = [];
+            if (mongoose.Types.ObjectId.isValid(conductorId)) usuarioCondiciones.push({ _id: conductorId });
+            if (conductorId) usuarioCondiciones.push({ uid: conductorId }, { conductorId: conductorId });
+            if (conductor.uid) usuarioCondiciones.push({ uid: conductor.uid });
+            if (conductor.email) usuarioCondiciones.push({ email: conductor.email });
+            if (conductor._id) usuarioCondiciones.push({ _id: conductor._id });
+
+            await Usuario.updateOne(
+                { $or: usuarioCondiciones },
+                {
+                    $set: {
+                        saldo: nuevoSaldo,
+                        estadoOperativo: nuevoEstadoOperativo
+                    }
+                },
+                { session }
+            );
 
             const historialDescuento = new HistorialSaldo({
                 conductor: conductor._id,

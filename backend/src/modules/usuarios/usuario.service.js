@@ -1,4 +1,4 @@
-// Versión Arquitectura: V20.07 - Sincronización mediante $lookup en directorio global
+// Versión Arquitectura: V20.08 - Refactorización de directorio global mediante consulta directa Usuario.find().lean()
 // Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.service.js
 
 import mongoose from 'mongoose';
@@ -146,33 +146,8 @@ export class UsuarioService {
     async obtenerDirectorioGlobal() {
         const Usuario = getUsuarioModel();
         
-        // Uso de pipeline de agregación con $lookup para consolidar saldos desde la colección de billeteras
-        const usuariosMongo = await Usuario.aggregate([
-            {
-                $lookup: {
-                    from: 'billeteras',
-                    localField: '_id',
-                    foreignField: 'usuarioId',
-                    as: 'datosBilletera'
-                }
-            },
-            {
-                $addFields: {
-                    saldoWallet: {
-                        $ifNull: [
-                            { $arrayElemAt: ['$datosBilletera.saldo', 0] },
-                            { $ifNull: ['$saldoWallet', { $ifNull: ['$saldo', 0] }] }
-                        ]
-                    },
-                    saldo: {
-                        $ifNull: [
-                            { $arrayElemAt: ['$datosBilletera.saldo', 0] },
-                            { $ifNull: ['$saldoWallet', { $ifNull: ['$saldo', 0] }] }
-                        ]
-                    }
-                }
-            }
-        ]);
+        // Consulta directa a la colección de usuarios optimizada para reducir latencia sin $lookup redundante
+        const usuariosMongo = await Usuario.find().lean();
         
         const mapaUnico = new Map();
         for (const u of usuariosMongo) {

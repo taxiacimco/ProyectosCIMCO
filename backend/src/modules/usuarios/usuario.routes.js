@@ -1,9 +1,11 @@
-// Versión Arquitectura: V19.5 - Protección de Mutación de Roles, Estado y Permisos con esAdminCentralMiddleware
+// Versión Arquitectura: V19.6 - Sanitización y Preservación de Identificadores (_id / uid) en Payload y Parámetros de Rutas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\usuarios\usuario.routes.js
  * Misión: Exponer alias explícitos para el endpoint de ajuste de saldo (`/:id/saldo`), endpoints unificados de billetera y
  *         proteger estrictamente las mutaciones de roles, activación/desactivación de cuentas y elevación de permisos (access_level)
  *         mediante el middleware centralizado `esAdminCentralMiddleware`.
+ * Ajuste V19.6: Inclusión de middleware de sanitización y preservación estricta de identificadores (_id, uid, id, usuarioId, targetId, despachadorId)
+ * en req.body, req.params y req.query para asegurar el emparejamiento unívoco entre colecciones y controladores del módulo de usuarios.
  */
 
 import { Router } from 'express';
@@ -23,6 +25,42 @@ import {
 import { verificarToken, esAdmin, esAdminCentralMiddleware } from '../../middleware/auth.middleware.js';
 
 const router = Router();
+
+/**
+ * 🛡️ Middleware de Sanitización y Preservación de Identificadores (_id, uid, id, usuarioId, targetId, despachadorId)
+ * Garantiza que los identificadores de MongoDB, Firebase Auth y Usuarios se mantengan intactos,
+ * limpios de espacios en blanco y sin transformaciones destructivas que afecten el emparejamiento entre colecciones.
+ */
+const sanitizarIdentificadoresPayload = (req, res, next) => {
+    const sanitizarColeccion = (obj) => {
+        if (!obj || typeof obj !== 'object') return;
+        const camposTarget = ['_id', 'uid', 'id', 'usuarioId', 'targetId', 'despachadorId', 'conductorId', 'pasajeroId', 'terminal_id'];
+
+        camposTarget.forEach((campo) => {
+            if (obj[campo] !== undefined && obj[campo] !== null) {
+                if (typeof obj[campo] === 'string') {
+                    const valorLimpio = obj[campo].trim();
+                    if (valorLimpio.length > 0) {
+                        obj[campo] = valorLimpio;
+                    }
+                }
+            }
+        });
+    };
+
+    try {
+        if (req.params) sanitizarColeccion(req.params);
+        if (req.body) sanitizarColeccion(req.body);
+        if (req.query) sanitizarColeccion(req.query);
+    } catch (err) {
+        console.error('⚠️ [USUARIO-ROUTES-SANITY] Error al sanitizar identificadores de la petición:', err);
+    }
+
+    next();
+};
+
+// Inyección del middleware de sanitización a nivel global del enrutador de usuarios
+router.use(sanitizarIdentificadoresPayload);
 
 // ==================================================================
 // 1. DIRECTORIO GLOBAL UNIFICADO (Ruta prioritaria de alto rendimiento)

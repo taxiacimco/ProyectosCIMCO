@@ -1,9 +1,11 @@
-// Versión Arquitectura: V21.4 - Exposición del Endpoint de Historial de Movimientos de Billetera (CIMCO-WALLET-ROUTES)
+// Versión Arquitectura: V21.5 - Sanitización y Preservación de Identificadores (_id / uid) en Payload y Parámetros de Rutas
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\billetera\wallet.routes.js
  * Misión: Exponer las rutas de gestión de billetera bajo Clean Architecture, asegurando la compatibilidad
  * estricta del middleware de autenticación (verificarToken / authMiddleware) y previniendo errores de decodificación,
  * registrando explícitamente los endpoints de saldo, historial, recargar y debitar saldo protegidos por autenticación.
+ * Ajuste V21.5: Inclusión de middleware de sanitización y preservación estricta de identificadores (_id, uid, id, usuarioId, targetId)
+ * en req.body, req.params y req.query para asegurar el emparejamiento unívoco entre colecciones y servicios de billetera.
  */
 
 import { Router } from 'express';
@@ -37,6 +39,42 @@ if (!authMiddleware || typeof authMiddleware !== 'function') {
 }
 
 const router = Router();
+
+/**
+ * 🛡️ Middleware de Sanitización y Preservación de Identificadores (_id, uid, id, usuarioId, targetId)
+ * Garantiza que los identificadores de MongoDB, Firebase Auth y Billetera se mantengan intactos,
+ * limpios de espacios en blanco y sin transformaciones destructivas que afecten el emparejamiento entre colecciones.
+ */
+const sanitizarIdentificadoresPayload = (req, res, next) => {
+    const sanitizarColeccion = (obj) => {
+        if (!obj || typeof obj !== 'object') return;
+        const camposTarget = ['_id', 'uid', 'id', 'usuarioId', 'targetId', 'conductorId', 'pasajeroId', 'despachadorId', 'transaccionId', 'billeteraId'];
+
+        camposTarget.forEach((campo) => {
+            if (obj[campo] !== undefined && obj[campo] !== null) {
+                if (typeof obj[campo] === 'string') {
+                    const valorLimpio = obj[campo].trim();
+                    if (valorLimpio.length > 0) {
+                        obj[campo] = valorLimpio;
+                    }
+                }
+            }
+        });
+    };
+
+    try {
+        if (req.params) sanitizarColeccion(req.params);
+        if (req.body) sanitizarColeccion(req.body);
+        if (req.query) sanitizarColeccion(req.query);
+    } catch (err) {
+        console.error('⚠️ [WALLET-ROUTES-SANITY] Error al sanitizar identificadores de la petición:', err);
+    }
+
+    next();
+};
+
+// Inyección del middleware de sanitización a nivel global de router
+router.use(sanitizarIdentificadoresPayload);
 
 // Middleware protector wrapper para garantizar ejecución segura de autenticación
 const requiereAutenticacion = (req, res, next) => {

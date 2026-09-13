@@ -1,10 +1,11 @@
-// Versión Arquitectura: V2.9 - Implementación de obtenerHistorialMovimientos y Persistencia de pasajeroId en Historial de Saldo
+// Versión Arquitectura: V3.0 - Eliminación de break, actualización en cascada en usuarios y emisión broadcast multidominio Socket.io
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\backend\src\modules\billetera\wallet.controller.js
  * Misión: Controlador integral de billetera bajo sintaxis ES Modules nativa. Provee consulta concurrente de saldos con proyección optimizada,
  *         mutaciones con transacciones atómicas ACID (session.withTransaction) para prevenir condiciones de carrera (race conditions),
- *         revaluación automática de estado operativo (umbral $2.000 COP), auditoría doble (MongoDB y Firestore) con persistencia de pasajeroId,
- *         consulta de historial de movimientos por usuario y emisión de eventos Socket.io (saldo_actualizado_admin, saldo_actualizado_cliente y actualizar_saldo_pasajero).
+ *         actualización en cascada sobre la colección usuarios, revaluación automática de estado operativo (umbral $2.000 COP),
+ *         auditoría doble (MongoDB y Firestore) con persistencia de pasajeroId, consulta de historial de movimientos por usuario
+ *         y emisión de eventos Socket.io a todas las salas del usuario (saldo_actualizado, saldo_actualizado_cliente, actualizar_saldo_pasajero, saldo_actualizado_admin).
  */
 
 import mongoose from 'mongoose';
@@ -22,6 +23,34 @@ const calcularEstadoOperativo = (coleccionOrigen, rolUsuario, saldoNuevo, estado
         return saldoNuevo >= 2000 ? 'DISPONIBLE' : 'BLOQUEADO_SALDO';
     }
     return estadoActual || null;
+};
+
+/**
+ * Helper interno para transmitir el saldo actualizado a todas las salas Socket.io asociadas al usuario.
+ */
+const emitirSaldoSocket = (io, uid, payloadCliente, payloadAdmin = null) => {
+    if (!io || !uid) return;
+
+    const salasUsuario = Array.from(new Set([
+        `usuario_${uid}`,
+        `pasajero_${uid}`,
+        `conductor_${uid}`,
+        `despachador_${uid}`,
+        `cliente_${uid}`,
+        `billetera_${uid}`,
+        String(uid)
+    ]));
+
+    salasUsuario.forEach((sala) => {
+        io.to(sala).emit('saldo_actualizado', payloadCliente);
+        io.to(sala).emit('saldo_actualizado_cliente', payloadCliente);
+        io.to(sala).emit('actualizar_saldo_pasajero', payloadCliente);
+    });
+
+    if (payloadAdmin) {
+        io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
+        io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
+    }
 };
 
 /**
@@ -170,12 +199,26 @@ export const actualizarSaldo = async (req, res) => {
                         { session }
                     );
 
+                    const targetUid = targetDoc.uid || targetDoc._id.toString();
+
+                    // Actualización en cascada sobre la colección usuarios
+                    if (['pasajeros', 'conductores', 'despachadores'].includes(colName)) {
+                        const userCascadeFilter = mongoose.Types.ObjectId.isValid(targetUid)
+                            ? { $or: [{ uid: targetUid }, { _id: new mongoose.Types.ObjectId(targetUid) }] }
+                            : { uid: targetUid };
+
+                        await db.collection('usuarios').updateMany(
+                            userCascadeFilter,
+                            { $set: updateFields },
+                            { session }
+                        );
+                    }
+
                     usuarioActualizado = {
-                        uid: targetDoc.uid || targetDoc._id.toString(),
+                        uid: targetUid,
                         coleccion: colName,
                         nuevoEstado
                     };
-                    break;
                 }
             }
 
@@ -186,22 +229,15 @@ export const actualizarSaldo = async (req, res) => {
             }
         });
 
-        // Emisión en tiempo real a través de Socket.io post-transacción
+        // Emisión en tiempo real a través de Socket.io post-transacción a todas las salas del usuario
         try {
             const io = req.app?.get('io');
             if (io && usuarioActualizado) {
-                io.to(`usuario_${usuarioActualizado.uid}`).emit('saldo_actualizado', { saldo: nuevoSaldo });
-                io.to(`usuario_${usuarioActualizado.uid}`).emit('saldo_actualizado_cliente', { saldo: nuevoSaldo });
-                io.to(`usuario_${usuarioActualizado.uid}`).emit('actualizar_saldo_pasajero', { saldo: nuevoSaldo });
-                
-                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', {
-                    usuarioId: usuarioActualizado.uid,
-                    nuevoSaldo
-                });
-                io.to('sala_admins').emit('saldo_actualizado_admin', {
-                    usuarioId: usuarioActualizado.uid,
-                    nuevoSaldo
-                });
+                const uid = usuarioActualizado.uid;
+                const payloadCliente = { saldo: nuevoSaldo, nuevoSaldo, usuarioId: uid };
+                const payloadAdmin = { usuarioId: uid, nuevoSaldo };
+
+                emitirSaldoSocket(io, uid, payloadCliente, payloadAdmin);
             }
         } catch (socketErr) {
             console.warn("⚠️ [SOCKET-EMIT-WARNING]: No se pudo emitir evento de saldo:", socketErr?.message);
@@ -258,44 +294,67 @@ export const recargarSaldo = async (req, res) => {
                 : { uid: targetUserId };
 
             const colecciones = ['conductores', 'despachadores', 'pasajeros', 'usuarios'];
-            let targetDoc = null;
-            let coleccionOrigen = '';
+            let targetDocFound = null;
+            let coleccionOrigenFound = '';
 
             for (const colName of colecciones) {
                 const doc = await db.collection(colName).findOne(queryFilter, { session });
                 if (doc) {
-                    targetDoc = doc;
-                    coleccionOrigen = colName;
-                    break;
+                    if (!targetDocFound) {
+                        targetDocFound = doc;
+                        coleccionOrigenFound = colName;
+                    }
+
+                    const saldoAnterior = doc.saldo ?? doc.billetera?.saldo ?? 0;
+                    const saldoNuevo = saldoAnterior + montoNumerico;
+                    const rolUsuario = doc.rol || doc.tipoUsuario || colName;
+                    const nuevoEstadoOperativo = calcularEstadoOperativo(colName, rolUsuario, saldoNuevo, doc.estadoOperativo);
+
+                    const updateFields = {
+                        saldo: saldoNuevo,
+                        'billetera.saldo': saldoNuevo,
+                        updatedAt: new Date()
+                    };
+
+                    if (nuevoEstadoOperativo) {
+                        updateFields.estadoOperativo = nuevoEstadoOperativo;
+                    }
+
+                    await db.collection(colName).updateOne(
+                        { _id: doc._id },
+                        { $set: updateFields },
+                        { session }
+                    );
+
+                    const targetUid = doc.uid || doc._id.toString();
+
+                    // Actualización en cascada sobre la colección usuarios si aplica
+                    if (['pasajeros', 'conductores', 'despachadores'].includes(colName)) {
+                        const userCascadeFilter = mongoose.Types.ObjectId.isValid(targetUid)
+                            ? { $or: [{ uid: targetUid }, { _id: new mongoose.Types.ObjectId(targetUid) }] }
+                            : { uid: targetUid };
+
+                        await db.collection('usuarios').updateMany(
+                            userCascadeFilter,
+                            { $set: updateFields },
+                            { session }
+                        );
+                    }
                 }
             }
 
-            if (!targetDoc) {
+            if (!targetDocFound) {
                 const err = new Error("Usuario objetivo no encontrado en ninguna colección del sistema.");
                 err.statusCode = 404;
                 throw err;
             }
 
+            const targetDoc = targetDocFound;
+            const coleccionOrigen = coleccionOrigenFound;
             const saldoAnterior = targetDoc.saldo ?? targetDoc.billetera?.saldo ?? 0;
             const saldoNuevo = saldoAnterior + montoNumerico;
             const rolUsuario = targetDoc.rol || targetDoc.tipoUsuario || coleccionOrigen;
             const nuevoEstadoOperativo = calcularEstadoOperativo(coleccionOrigen, rolUsuario, saldoNuevo, targetDoc.estadoOperativo);
-
-            const updateFields = {
-                saldo: saldoNuevo,
-                'billetera.saldo': saldoNuevo,
-                updatedAt: new Date()
-            };
-
-            if (nuevoEstadoOperativo) {
-                updateFields.estadoOperativo = nuevoEstadoOperativo;
-            }
-
-            await db.collection(coleccionOrigen).updateOne(
-                { _id: targetDoc._id },
-                { $set: updateFields },
-                { session }
-            );
 
             const transaccionId = new mongoose.Types.ObjectId();
             const targetUid = targetDoc.uid || targetDoc._id.toString();
@@ -361,26 +420,24 @@ export const recargarSaldo = async (req, res) => {
             console.warn("⚠️ [AUDITORIA-FIRESTORE-WARNING]: Error sincronizando auditoría en Firestore:", fsError?.message);
         }
 
-        // Emisión de eventos Socket.io
+        // Emisión de eventos Socket.io a todas las salas asociadas
         try {
             const io = req.app?.get('io');
             if (io && resultadoTransaccion) {
+                const uid = resultadoTransaccion.usuarioId;
                 const payloadCliente = {
                     saldo: resultadoTransaccion.saldoNuevo,
+                    nuevoSaldo: resultadoTransaccion.saldoNuevo,
                     tipoOperacion: 'RECARGA',
-                    monto: montoNumerico
+                    monto: montoNumerico,
+                    usuarioId: uid
                 };
                 const payloadAdmin = {
                     ...resultadoTransaccion,
                     tipoOperacion: 'RECARGA'
                 };
 
-                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado', payloadCliente);
-                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado_cliente', payloadCliente);
-                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('actualizar_saldo_pasajero', payloadCliente);
-
-                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
-                io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
+                emitirSaldoSocket(io, uid, payloadCliente, payloadAdmin);
             }
         } catch (socketErr) {
             console.warn("⚠️ [SOCKET-EMIT-WARNING]: Error emitiendo socket de recarga:", socketErr?.message);
@@ -440,52 +497,75 @@ export const debitarSaldo = async (req, res) => {
                 : { uid: targetUserId };
 
             const colecciones = ['conductores', 'despachadores', 'pasajeros', 'usuarios'];
-            let targetDoc = null;
-            let coleccionOrigen = '';
+            let targetDocFound = null;
+            let coleccionOrigenFound = '';
 
             for (const colName of colecciones) {
                 const doc = await db.collection(colName).findOne(queryFilter, { session });
                 if (doc) {
-                    targetDoc = doc;
-                    coleccionOrigen = colName;
-                    break;
+                    if (!targetDocFound) {
+                        targetDocFound = doc;
+                        coleccionOrigenFound = colName;
+                    }
+
+                    const saldoAnterior = doc.saldo ?? doc.billetera?.saldo ?? 0;
+                    const saldoNuevo = saldoAnterior - montoNumerico;
+
+                    // Bloqueo de saldo negativo dentro de la transacción
+                    if (saldoNuevo < 0) {
+                        const err = new Error(`Fondos insuficientes para realizar el débito. Saldo disponible: $${saldoAnterior} COP. Intenta debitar: $${montoNumerico} COP.`);
+                        err.statusCode = 400;
+                        throw err;
+                    }
+
+                    const rolUsuario = doc.rol || doc.tipoUsuario || colName;
+                    const nuevoEstadoOperativo = calcularEstadoOperativo(colName, rolUsuario, saldoNuevo, doc.estadoOperativo);
+
+                    const updateFields = {
+                        saldo: saldoNuevo,
+                        'billetera.saldo': saldoNuevo,
+                        updatedAt: new Date()
+                    };
+
+                    if (nuevoEstadoOperativo) {
+                        updateFields.estadoOperativo = nuevoEstadoOperativo;
+                    }
+
+                    await db.collection(colName).updateOne(
+                        { _id: doc._id },
+                        { $set: updateFields },
+                        { session }
+                    );
+
+                    const targetUid = doc.uid || doc._id.toString();
+
+                    // Actualización en cascada sobre la colección usuarios
+                    if (['pasajeros', 'conductores', 'despachadores'].includes(colName)) {
+                        const userCascadeFilter = mongoose.Types.ObjectId.isValid(targetUid)
+                            ? { $or: [{ uid: targetUid }, { _id: new mongoose.Types.ObjectId(targetUid) }] }
+                            : { uid: targetUid };
+
+                        await db.collection('usuarios').updateMany(
+                            userCascadeFilter,
+                            { $set: updateFields },
+                            { session }
+                        );
+                    }
                 }
             }
 
-            if (!targetDoc) {
+            if (!targetDocFound) {
                 const err = new Error("Usuario objetivo no encontrado en ninguna colección del sistema.");
                 err.statusCode = 404;
                 throw err;
             }
 
+            const targetDoc = targetDocFound;
+            const coleccionOrigen = coleccionOrigenFound;
             const saldoAnterior = targetDoc.saldo ?? targetDoc.billetera?.saldo ?? 0;
             const saldoNuevo = saldoAnterior - montoNumerico;
-
-            // Bloqueo de saldo negativo dentro de la transacción
-            if (saldoNuevo < 0) {
-                const err = new Error(`Fondos insuficientes para realizar el débito. Saldo disponible: $${saldoAnterior} COP. Intenta debitar: $${montoNumerico} COP.`);
-                err.statusCode = 400;
-                throw err;
-            }
-
             const rolUsuario = targetDoc.rol || targetDoc.tipoUsuario || coleccionOrigen;
             const nuevoEstadoOperativo = calcularEstadoOperativo(coleccionOrigen, rolUsuario, saldoNuevo, targetDoc.estadoOperativo);
-
-            const updateFields = {
-                saldo: saldoNuevo,
-                'billetera.saldo': saldoNuevo,
-                updatedAt: new Date()
-            };
-
-            if (nuevoEstadoOperativo) {
-                updateFields.estadoOperativo = nuevoEstadoOperativo;
-            }
-
-            await db.collection(coleccionOrigen).updateOne(
-                { _id: targetDoc._id },
-                { $set: updateFields },
-                { session }
-            );
 
             const transaccionId = new mongoose.Types.ObjectId();
             const targetUid = targetDoc.uid || targetDoc._id.toString();
@@ -550,26 +630,24 @@ export const debitarSaldo = async (req, res) => {
             console.warn("⚠️ [AUDITORIA-FIRESTORE-WARNING]: Error sincronizando auditoría en Firestore:", fsError?.message);
         }
 
-        // Emisión de eventos Socket.io
+        // Emisión de eventos Socket.io a todas las salas asociadas
         try {
             const io = req.app?.get('io');
             if (io && resultadoTransaccion) {
+                const uid = resultadoTransaccion.usuarioId;
                 const payloadCliente = {
                     saldo: resultadoTransaccion.saldoNuevo,
+                    nuevoSaldo: resultadoTransaccion.saldoNuevo,
                     tipoOperacion: 'DEBITO',
-                    monto: montoNumerico
+                    monto: montoNumerico,
+                    usuarioId: uid
                 };
                 const payloadAdmin = {
                     ...resultadoTransaccion,
                     tipoOperacion: 'DEBITO'
                 };
 
-                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado', payloadCliente);
-                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('saldo_actualizado_cliente', payloadCliente);
-                io.to(`usuario_${resultadoTransaccion.usuarioId}`).emit('actualizar_saldo_pasajero', payloadCliente);
-
-                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
-                io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
+                emitirSaldoSocket(io, uid, payloadCliente, payloadAdmin);
             }
         } catch (socketErr) {
             console.warn("⚠️ [SOCKET-EMIT-WARNING]: Error emitiendo socket de débito:", socketErr?.message);
@@ -641,53 +719,78 @@ export const gestionarSaldoManual = async (req, res) => {
                 : { uid: targetUserId };
 
             const colecciones = ['conductores', 'despachadores', 'pasajeros', 'usuarios'];
-            let targetDoc = null;
-            let coleccionOrigen = '';
+            let targetDocFound = null;
+            let coleccionOrigenFound = '';
 
             for (const colName of colecciones) {
                 const doc = await db.collection(colName).findOne(queryFilter, { session });
                 if (doc) {
-                    targetDoc = doc;
-                    coleccionOrigen = colName;
-                    break;
+                    if (!targetDocFound) {
+                        targetDocFound = doc;
+                        coleccionOrigenFound = colName;
+                    }
+
+                    const saldoAnterior = doc.saldo ?? doc.billetera?.saldo ?? 0;
+                    const esRecarga = tipoOperacion.toUpperCase() === 'RECARGA';
+                    const ajusteMonto = esRecarga ? montoNumerico : -montoNumerico;
+                    const saldoNuevo = saldoAnterior + ajusteMonto;
+
+                    if (saldoNuevo < 0) {
+                        const err = new Error(`Fondos insuficientes para débito. Saldo actual: $${saldoAnterior} COP. Intenta debitar: $${montoNumerico} COP.`);
+                        err.statusCode = 400;
+                        throw err;
+                    }
+
+                    const rolUsuario = doc.rol || doc.tipoUsuario || colName;
+                    const nuevoEstadoOperativo = calcularEstadoOperativo(colName, rolUsuario, saldoNuevo, doc.estadoOperativo);
+
+                    const updateFields = {
+                        saldo: saldoNuevo,
+                        'billetera.saldo': saldoNuevo,
+                        updatedAt: new Date()
+                    };
+
+                    if (nuevoEstadoOperativo) {
+                        updateFields.estadoOperativo = nuevoEstadoOperativo;
+                    }
+
+                    await db.collection(colName).updateOne(
+                        { _id: doc._id },
+                        { $set: updateFields },
+                        { session }
+                    );
+
+                    const targetUid = doc.uid || doc._id.toString();
+
+                    // Actualización en cascada sobre la colección usuarios
+                    if (['pasajeros', 'conductores', 'despachadores'].includes(colName)) {
+                        const userCascadeFilter = mongoose.Types.ObjectId.isValid(targetUid)
+                            ? { $or: [{ uid: targetUid }, { _id: new mongoose.Types.ObjectId(targetUid) }] }
+                            : { uid: targetUid };
+
+                        await db.collection('usuarios').updateMany(
+                            userCascadeFilter,
+                            { $set: updateFields },
+                            { session }
+                        );
+                    }
                 }
             }
 
-            if (!targetDoc) {
+            if (!targetDocFound) {
                 const err = new Error("Usuario objetivo no encontrado en ninguna colección del sistema.");
                 err.statusCode = 404;
                 throw err;
             }
 
+            const targetDoc = targetDocFound;
+            const coleccionOrigen = coleccionOrigenFound;
             const saldoAnterior = targetDoc.saldo ?? targetDoc.billetera?.saldo ?? 0;
             const esRecarga = tipoOperacion.toUpperCase() === 'RECARGA';
             const ajusteMonto = esRecarga ? montoNumerico : -montoNumerico;
             const saldoNuevo = saldoAnterior + ajusteMonto;
-
-            if (saldoNuevo < 0) {
-                const err = new Error(`Fondos insuficientes para débito. Saldo actual: $${saldoAnterior} COP. Intenta debitar: $${montoNumerico} COP.`);
-                err.statusCode = 400;
-                throw err;
-            }
-
             const rolUsuario = targetDoc.rol || targetDoc.tipoUsuario || coleccionOrigen;
             const nuevoEstadoOperativo = calcularEstadoOperativo(coleccionOrigen, rolUsuario, saldoNuevo, targetDoc.estadoOperativo);
-
-            const updateFields = {
-                saldo: saldoNuevo,
-                'billetera.saldo': saldoNuevo,
-                updatedAt: new Date()
-            };
-
-            if (nuevoEstadoOperativo) {
-                updateFields.estadoOperativo = nuevoEstadoOperativo;
-            }
-
-            await db.collection(coleccionOrigen).updateOne(
-                { _id: targetDoc._id },
-                { $set: updateFields },
-                { session }
-            );
 
             const transaccionId = new mongoose.Types.ObjectId();
             const targetUid = targetDoc.uid || targetDoc._id.toString();
@@ -728,7 +831,7 @@ export const gestionarSaldoManual = async (req, res) => {
             };
         });
 
-        // Trazabilidad y Auditoría Asíncrona en Firestore (sin await, capturada con .catch)
+        // Trazabilidad y Auditoría Asíncrona en Firestore
         try {
             const firestoreDb = getFirestore();
             if (firestoreDb && resultadoTransaccion) {
@@ -760,7 +863,7 @@ export const gestionarSaldoManual = async (req, res) => {
             console.warn("⚠️ [AUDITORIA-FIRESTORE-WARNING]: Error inicializando auditoría asíncrona en Firestore:", fsError?.message);
         }
 
-        // Emisión de eventos en tiempo real mediante Socket.io
+        // Emisión de eventos en tiempo real mediante Socket.io a todas las salas de usuario
         try {
             const io = req.app?.get('io');
             if (io && resultadoTransaccion) {
@@ -768,8 +871,10 @@ export const gestionarSaldoManual = async (req, res) => {
 
                 const payloadCliente = {
                     saldo: resultadoTransaccion.saldoNuevo,
+                    nuevoSaldo: resultadoTransaccion.saldoNuevo,
                     tipoOperacion: tipoOperacion.toUpperCase(),
-                    monto: montoNumerico
+                    monto: montoNumerico,
+                    usuarioId: uidTarget
                 };
 
                 const payloadAdmin = {
@@ -783,20 +888,10 @@ export const gestionarSaldoManual = async (req, res) => {
                     estadoOperativo: resultadoTransaccion.estadoOperativo
                 };
 
-                // Emisión a canales de usuario
-                io.to(`usuario_${uidTarget}`).emit('saldo_actualizado', payloadCliente);
-                io.to(`usuario_${uidTarget}`).emit('saldo_actualizado_cliente', payloadCliente);
-                io.to(`usuario_${uidTarget}`).emit('actualizar_saldo_pasajero', payloadCliente);
-
-                if (targetUserId && targetUserId !== uidTarget) {
-                    io.to(`usuario_${targetUserId}`).emit('saldo_actualizado', payloadCliente);
-                    io.to(`usuario_${targetUserId}`).emit('saldo_actualizado_cliente', payloadCliente);
-                    io.to(`usuario_${targetUserId}`).emit('actualizar_saldo_pasajero', payloadCliente);
-                }
-
-                // Emisión a sala administrativa
-                io.to('sala_admins').emit('admin_saldo_usuario_actualizado', payloadAdmin);
-                io.to('sala_admins').emit('saldo_actualizado_admin', payloadAdmin);
+                const uidsParaEmitir = Array.from(new Set([uidTarget, targetUserId].filter(Boolean)));
+                uidsParaEmitir.forEach((uid) => {
+                    emitirSaldoSocket(io, uid, payloadCliente, payloadAdmin);
+                });
             }
         } catch (socketError) {
             console.warn("⚠️ [SOCKET-EMIT-WARNING]: Error emitiendo evento de saldo vía Socket.io:", socketError?.message);
