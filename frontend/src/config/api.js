@@ -1,4 +1,4 @@
-// Versión Arquitectura: V25.0 - Consumo Dinámico de VITE_API_URL, Interceptor JWT Blindado y Sincronización Dual de Sesión (token / cimco_token)
+// Versión Arquitectura: V25.1 - Consumo Dinámico de VITE_API_URL, Interceptor JWT Blindado, Sincronización Dual y Timeout Extendido a 60s
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\config\api.js
  * Misión: Centralización de Axios, consumo de VITE_API_URL, inyección de cabeceras anti-caché, interceptores JWT multi-capa, gestión de FormData, sincronización dual de claves de sesión (token / cimco_token) y manejo global de errores HTTP.
@@ -33,7 +33,7 @@ export const API_FUNCTIONS_URL = import.meta.env?.PROD
 
 export const api = axios.create({
     baseURL: API_CORE_URL || `http://${HOST_IP}:3000/api`,
-    timeout: 10000,
+    timeout: 60000, // Ajustado a 60s para tolerancia a cold starts en servidores Cloud
     headers: {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
