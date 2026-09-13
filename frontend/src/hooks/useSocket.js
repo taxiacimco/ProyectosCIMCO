@@ -1,8 +1,8 @@
-// Versión Arquitectura: V19.1 - Hook Consolidado de Consumo del Contexto de Sockets
+// Versión Arquitectura: V19.2 - Exposición de connectionStatus e Integración de Estado Reactivo de Sockets
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useSocket.js
  * Misión: Exponer el canal unificado y reactivo del contexto de sockets de TAXIA CIMCO.
- *         Garantiza la disponibilidad de la instancia Socket, estado de conexión (isConnected),
+ *         Garantiza la disponibilidad de la instancia Socket, estado de conexión (isConnected, connectionStatus),
  *         estado reactivo de ofertas y wrappers de operaciones logísticas (crearSolicitud, enviarOferta, aceptarOferta).
  */
 
@@ -16,7 +16,15 @@ export const useSocket = () => {
         throw new Error('🚨 [CIMCO-CONTEXT-ERR] useSocket debe ser utilizado estrictamente dentro de un SocketProvider.');
     }
 
-    return context;
+    // Blindaje anti-undefined y normalización de estados de conexión para consumo en UI
+    const isConnected = Boolean(context.isConnected);
+    const connectionStatus = context.connectionStatus || (isConnected ? 'CONNECTED' : 'DISCONNECTED');
+
+    return {
+        ...context,
+        isConnected,
+        connectionStatus
+    };
 };
 
 export default useSocket;

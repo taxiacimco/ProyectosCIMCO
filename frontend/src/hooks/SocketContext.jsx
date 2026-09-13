@@ -1,10 +1,9 @@
-// Versión Arquitectura: V21.43 - Inserción del Evento actualizar_saldo_pasajero y Exposición Directa del Socket
+// Versión Arquitectura: V22.0 - Resiliencia Adaptativa contra Cold Starts de Render y Fusión de Canal de Despacho
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\SocketContext.jsx
- * Misión: Proveedor de Contexto Reactivo centralizado y unificado para la gestión de sockets en tiempo real.
- *         Mantiene sincronización de identidad (userId, rol, empresaId), estado reactivo de ofertas,
- *         captura global de expiración de token y wrappers de operaciones logísticas (crearSolicitud, enviarOferta, aceptarOferta).
- * Ajuste V21.43: Incorporación de listener para 'actualizar_saldo_pasajero' y verificación de exposición directa del objeto socket.
+ * Misión: Proveedor de Contexto Reactivo centralizado para la gestión de sockets en tiempo real.
+ * Integración V22.0: Fusión atómica de la resiliencia adaptativa contra Cold Starts de Render (V21.0)
+ *                   con la lógica de operaciones logísticas, eventos de balance y dispatching (V21.43).
  */
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
@@ -16,6 +15,9 @@ export const SocketContext = createContext(null);
 export const SocketProvider = ({ children }) => {
     const { user, logout } = useAuth();
     const [isConnected, setIsConnected] = useState(socket?.connected || false);
+    const [connectionStatus, setConnectionStatus] = useState(
+        socket?.connected ? 'CONNECTED' : 'DISCONNECTED'
+    );
     const [ofertas, setOfertas] = useState([]);
     const lastConnectedUid = useRef(null);
 
@@ -39,6 +41,16 @@ export const SocketProvider = ({ children }) => {
 
     useEffect(() => {
         if (!socket) return;
+
+        // Configuración adaptativa de reconexión para tolerar Cold Starts de Render
+        if (socket.io) {
+            socket.io.opts = socket.io.opts || {};
+            socket.io.opts.reconnection = true;
+            socket.io.opts.reconnectionAttempts = Infinity;
+            socket.io.opts.reconnectionDelay = 1000;
+            socket.io.opts.reconnectionDelayMax = 10000;
+            socket.io.opts.timeout = 20000;
+        }
 
         if (userId) {
             const tokenSeguro = localStorage.getItem('cimco_token') || localStorage.getItem('token') || '';
@@ -77,8 +89,10 @@ export const SocketProvider = ({ children }) => {
             };
 
             if (!socket.connected) {
+                setConnectionStatus('CONNECTING');
                 socket.connect();
             } else {
+                setConnectionStatus('CONNECTED');
                 emitirRegistroSocket();
             }
         } else {
@@ -87,11 +101,14 @@ export const SocketProvider = ({ children }) => {
                 socket.disconnect();
             }
             lastConnectedUid.current = null;
+            setConnectionStatus('DISCONNECTED');
+            setIsConnected(false);
             setOfertas([]);
         }
 
         function onConnect() {
             setIsConnected(true);
+            setConnectionStatus('CONNECTED');
             console.log(`🟢 [CIMCO-SOCKET] Conectado con éxito al Core Central de Despacho. ID Canal: ${socket.id}`);
             
             if (userId) {
@@ -101,11 +118,18 @@ export const SocketProvider = ({ children }) => {
 
         function onDisconnect(reason) {
             setIsConnected(false);
+            setConnectionStatus('DISCONNECTED');
             console.log(`🔴 [CIMCO-SOCKET] Canal perimetral desconectado. Motivo: ${reason}`);
         }
 
         function onConnectError(err) {
+            setConnectionStatus('RECONNECTING');
             console.error("❌ [CIMCO-SOCKET] Falló el apretón de manos (Handshake):", err?.message || err);
+        }
+
+        function onReconnectAttempt(attemptNumber) {
+            setConnectionStatus('RECONNECTING');
+            console.log(`🔄 [CIMCO-SOCKET] Intento de reconexión adaptativa #${attemptNumber}...`);
         }
 
         function onAuthExpired(data) {
@@ -186,6 +210,9 @@ export const SocketProvider = ({ children }) => {
         socket.on('connect', onConnect);
         socket.on('disconnect', onDisconnect);
         socket.on('connect_error', onConnectError);
+        if (socket.io) {
+            socket.io.on('reconnect_attempt', onReconnectAttempt);
+        }
         socket.on('auth_expired', onAuthExpired);
         socket.on('viaje_difundido', onSolicitudViajeDisponible);
         socket.on('solicitud_servicio', onSolicitudViajeDisponible);
@@ -202,6 +229,9 @@ export const SocketProvider = ({ children }) => {
             socket.off('connect', onConnect);
             socket.off('disconnect', onDisconnect);
             socket.off('connect_error', onConnectError);
+            if (socket.io) {
+                socket.io.off('reconnect_attempt', onReconnectAttempt);
+            }
             socket.off('auth_expired', onAuthExpired);
             socket.off('viaje_difundido', onSolicitudViajeDisponible);
             socket.off('solicitud_servicio', onSolicitudViajeDisponible);
@@ -280,6 +310,7 @@ export const SocketProvider = ({ children }) => {
             value={{ 
                 socket, 
                 isConnected, 
+                connectionStatus,
                 ofertas, 
                 setOfertas, 
                 crearSolicitud, 

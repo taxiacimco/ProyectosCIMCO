@@ -1,19 +1,18 @@
-// Versión Arquitectura: V20.0 - Limpieza Síncrona DOM Leaflet, Subcomponente MapResizer y Clave Única MapContainer
+// Versión Arquitectura: V20.6 - Consumo de connectionStatus para Telemetría de Socket en Cold Start
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\components\admin\MapaOperativo.jsx
- * Misión: Renderizado táctico de mapa interactivo con clustering, telemetría throttled, prevención 
- *         de colisiones de contenedor en React 18 / React-Leaflet, recalibración de tiles mediante
- *         el subcomponente MapResizer, desacoplamiento de destrucción manual de Leaflet,
- *         limpieza síncrona de _leaflet_id en DOM y clave única dinámica por pestaña/coordenadas.
+ * Misión: Renderizado táctico de mapa interactivo con clustering, monitoreo de estado de socket (connectionStatus)
+ *         durante cold start y limpieza garantizada de instancias de Leaflet al desmontar en React 18/Vite.
  * UI Standard: CIMCO-UI V9.3 Pure Glassmorphism.
  */
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import { db, FIRESTORE_PATHS } from '@/config/firebase';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { useTelemetryThrottle } from '@/hooks/useTelemetryThrottle';
+import { useSocket } from '@/hooks/useSocket';
 import { Search, Signal, Activity, AlertCircle, Radio } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -30,9 +29,8 @@ L.Icon.Default.mergeOptions({
 const createCustomIcon = (rol, saldo = 0) => {
     let color = rol === 'mototaxi' || rol === 'conductor' || rol === 'intermunicipal' ? '#f97316' : '#eab308';
     
-    // Inhabilitación visual si el saldo es menor a $2000
     if (typeof saldo === 'number' && saldo < 2000) {
-        color = '#ef4444'; // Color rojo de inhabilitado por saldo insuficiente
+        color = '#ef4444';
     }
 
     const svgHtml = `
@@ -59,34 +57,25 @@ const createCustomClusterIcon = (cluster) => {
     });
 };
 
-// ⚡ SUBCOMPONENTE DE RECALIBRACIÓN INTEGRADA: Controla invalidateSize() directamente sobre el hook useMap
-const MapResizer = ({ activeTab, onMapReady }) => {
+// ⚡ CONTROLADOR INTERNO DE TAMAÑO Y RECENTRADO
+const MapController = ({ center, zoom }) => {
     const map = useMap();
 
     useEffect(() => {
         if (!map) return;
-
-        if (onMapReady) {
-            onMapReady(map);
-        }
-
         const timer = setTimeout(() => {
             try {
-                if (map && map._container) {
-                    map.invalidateSize();
+                map.invalidateSize();
+                if (Array.isArray(center) && center.length === 2 && center[0] && center[1]) {
+                    map.setView(center, zoom || map.getZoom());
                 }
-            } catch (err) {
-                // Previene excepciones si el viewport ya no está disponible
+            } catch (e) {
+                // Silencia re-layouts si el componente se desmontó rápidamente
             }
         }, 200);
 
-        return () => {
-            clearTimeout(timer);
-            if (onMapReady) {
-                onMapReady(null);
-            }
-        };
-    }, [map, activeTab, onMapReady]);
+        return () => clearTimeout(timer);
+    }, [map, center, zoom]);
 
     return null;
 };
@@ -95,12 +84,17 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
     const [busqueda, setBusqueda] = useState('');
     const [loading, setLoading] = useState(true);
     const [errorServicio, setErrorServicio] = useState(null);
-    
-    const isMounted = useRef(true);
-    const mapInstanceRef = useRef(null);
-    const mapWrapperRef = useRef(null);
 
-    // 🔥 Amortiguador Térmico (Throttled GPS Telemetry)
+    // ⚡ ESTADO DE SOCKET Y CONEXIÓN EN TIEMPO REAL
+    const socketContext = useSocket();
+    const isConnected = Boolean(socketContext?.isConnected);
+    const connectionStatus = socketContext?.connectionStatus || (isConnected ? 'CONNECTED' : 'DISCONNECTED');
+
+    const isMounted = useRef(true);
+    // 🛡️ Identificador único por ciclo de vida para aislar completamente el nodo DOM de Leaflet
+    const mapUniqueId = useRef(`leaflet-map-${Math.random().toString(36).substring(2, 9)}`).current;
+
+    // 🔥 Telemetría Throttled
     const [vehiculosSuaves, actualizarCoordenadas] = useTelemetryThrottle(2000);
     const actualizarCoordenadasRef = useRef(actualizarCoordenadas);
 
@@ -108,43 +102,16 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         actualizarCoordenadasRef.current = actualizarCoordenadas;
     }, [actualizarCoordenadas]);
 
-    // 🛡️ PASO 1 Y 2: CONTROL DE CICLO DE VIDA Y LIMPIEZA SÍNCRONA DE _leaflet_id EN DOM
+    // 🛡️ CONTROL DE CICLO DE VIDA
     useEffect(() => {
         isMounted.current = true;
 
         return () => {
             isMounted.current = false;
-            mapInstanceRef.current = null;
-
-            // Limpieza síncrona del wrapper HTML para prevenir re-utilización errónea de contenedor Leaflet
-            if (mapWrapperRef.current) {
-                if (mapWrapperRef.current._leaflet_id) {
-                    delete mapWrapperRef.current._leaflet_id;
-                }
-                const internalContainers = mapWrapperRef.current.querySelectorAll('.leaflet-container');
-                internalContainers.forEach((el) => {
-                    if (el && el._leaflet_id) {
-                        delete el._leaflet_id;
-                    }
-                });
-            }
         };
     }, []);
 
-    // 🎯 PASO 4: CLAVE ÚNICA DINÁMICA PARA FORZAR RE-CREACIÓN LIMPIA DEL MAPCONTAINER
-    const containerKey = useMemo(() => {
-        const centerLat = Array.isArray(coordenadasCentro) && coordenadasCentro[0] ? coordenadasCentro[0] : 9.715;
-        const centerLng = Array.isArray(coordenadasCentro) && coordenadasCentro[1] ? coordenadasCentro[1] : -73.34;
-        const tabKey = activeTab || 'default-tab';
-        const coopKey = cooperativaFiltro || 'todas-coop';
-        return `map-container-${tabKey}-${coopKey}-${centerLat}-${centerLng}`;
-    }, [activeTab, cooperativaFiltro, coordenadasCentro]);
-
-    const handleMapReady = useCallback((mapInstance) => {
-        mapInstanceRef.current = mapInstance;
-    }, []);
-
-    // ⚡ SINCRONIZACIÓN OPTIMIZADA FIRESTORE: Restringe lecturas a unidades activas
+    // ⚡ SINCRONIZACIÓN FIRESTORE
     useEffect(() => {
         setLoading(true);
         const pathUsuarios = FIRESTORE_PATHS?.users || 'usuarios';
@@ -198,9 +165,9 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         return () => unsubscribe();
     }, [cooperativaFiltro]);
 
-    // ⚡ MEMOIZACIÓN DE FILTRADO Y DEDUPLICACIÓN
+    // ⚡ FILTRADO Y DEDUPLICACIÓN
     const conductoresDeduplicados = useMemo(() => {
-        const listaMarcadoresSuaves = Object.values(vehiculosSuaves);
+        const listaMarcadoresSuaves = Object.values(vehiculosSuaves || {});
         const queryTerm = busqueda.toLowerCase().trim();
 
         const filtrados = queryTerm 
@@ -217,7 +184,7 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
         return typeof deduplicarEntidades === 'function' 
             ? deduplicarEntidades(filtrados)
             : filtrados;
-    }, [vehiculosSuaves, busqueda, cooperativaFiltro]);
+    }, [vehiculosSuaves, busqueda]);
 
     const usarCanvas = conductoresDeduplicados.length > 50;
     const centroValidado = Array.isArray(coordenadasCentro) && coordenadasCentro.length === 2 ? coordenadasCentro : [9.715, -73.34];
@@ -236,9 +203,15 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                         className="w-full bg-[#0c0c0e] border border-white/5 rounded-xl pl-10 pr-4 py-2.5 text-[11px] font-bold text-white placeholder-zinc-600 focus:outline-none focus:border-orange-500/30 transition-colors uppercase tracking-wider"
                     />
                 </div>
-                <div className="flex gap-4 items-center shrink-0">
+                <div className="flex gap-3 items-center shrink-0 flex-wrap md:flex-nowrap">
+                    {/* INDICADOR DE ESTADO SOCKET REALTIME / COLD START */}
                     <span className="text-[10px] bg-zinc-950/60 border border-white/5 px-3 py-1.5 rounded-lg text-zinc-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
-                        <Signal className="text-orange-400 animate-pulse" size={12} />
+                        <Signal className={isConnected ? 'text-emerald-400 animate-pulse' : 'text-amber-400'} size={12} />
+                        Socket: <span className={isConnected ? 'text-emerald-400 font-black' : 'text-amber-400 font-black'}>{connectionStatus}</span>
+                    </span>
+
+                    <span className="text-[10px] bg-zinc-950/60 border border-white/5 px-3 py-1.5 rounded-lg text-zinc-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
+                        <Radio className="text-orange-400 animate-pulse" size={12} />
                         Malla Activa: <span className="text-orange-400">{conductoresDeduplicados.length}</span> Unidades en Mapa
                         {usarCanvas && (
                             <span className="ml-1 text-[8px] bg-orange-500/20 text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded font-black">
@@ -250,10 +223,7 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
             </div>
 
             {/* MÁSCARA Y MAPA DE INTERFAZ */}
-            <div 
-                ref={mapWrapperRef}
-                className="w-full h-[400px] rounded-3xl overflow-hidden border border-white/5 shadow-2xl relative bg-zinc-950 z-10"
-            >
+            <div className="w-full h-[400px] rounded-3xl overflow-hidden border border-white/5 shadow-2xl relative bg-zinc-950 z-10">
                 {errorServicio && (
                     <div className="absolute top-4 left-4 right-4 z-[1000] backdrop-blur-md bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl flex items-center gap-2.5">
                         <AlertCircle className="text-rose-400 shrink-0" size={16} />
@@ -262,15 +232,14 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                 )}
 
                 <MapContainer 
-                    key={containerKey}
+                    key={mapUniqueId}
                     center={centroValidado} 
                     zoom={zoom} 
                     zoomControl={false}
                     preferCanvas={usarCanvas}
                     className="w-full h-full"
                 >
-                    {/* PASO 3: SUBCOMPONENTE DE RECALIBRACIÓN INTEGRADA */}
-                    <MapResizer activeTab={activeTab} onMapReady={handleMapReady} />
+                    <MapController center={centroValidado} zoom={zoom} />
 
                     <TileLayer
                         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -358,6 +327,9 @@ const MapaOperativo = ({ cooperativaFiltro = null, coordenadasCentro = [9.715, -
                     <div className="absolute inset-0 z-[500] backdrop-blur-md bg-[#121214]/60 flex flex-col items-center justify-center gap-2">
                         <Activity className="text-orange-500 animate-spin" size={24} />
                         <span className="tracking-widest uppercase text-[8px] text-zinc-400 font-black">Sincronizando coordenadas satelitales...</span>
+                        <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-wider">
+                            Canal Socket: <span className={isConnected ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>{connectionStatus}</span>
+                        </span>
                     </div>
                 )}
 

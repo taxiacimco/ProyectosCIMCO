@@ -1,7 +1,8 @@
-// Versión Arquitectura: V24.1 - Integración Quirúrgica con Servicios Centralizados (userService, viajeService)
+// Versión Arquitectura: V24.2 - Vinculación de connectionStatus para Pausa y Reanudación de Métricas en Vivo
 /**
  * Ubicación: C:\Users\Carlos Fuentes\ProyectosCIMCO\frontend\src\hooks\useAdminMonitor.js
- * Misión: Abstraer suscripciones en tiempo real a los nodos críticos de Firestore con tolerancia a fallos por falta de índices e integración centralizada a userService y viajeService.
+ * Misión: Abstraer suscripciones en tiempo real a los nodos críticos de Firestore con tolerancia a fallos por falta de índices,
+ *         integración centralizada a userService/viajeService y pausado/reanudación reactiva de métricas según connectionStatus del socket.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -10,6 +11,7 @@ import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestor
 import { deduplicarEntidades } from '@/utils/deduplicar';
 import userService from '@/services/userService';
 import viajeService from '@/services/viajeService';
+import { useSocket } from '@/hooks/useSocket';
 
 export const useAdminMonitor = () => {
     const [conductores, setConductores] = useState([]);
@@ -17,6 +19,12 @@ export const useAdminMonitor = () => {
     const [transacciones, setTransacciones] = useState([]); // ⚡ NODO: Stream financiero unificado
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    // ⚡ VINCULACIÓN CON SOCKET DE TELEMETRÍA REALTIME
+    const socketContext = useSocket();
+    const isConnected = Boolean(socketContext?.isConnected);
+    const connectionStatus = socketContext?.connectionStatus || (isConnected ? 'CONNECTED' : 'DISCONNECTED');
+    const isLive = isConnected || connectionStatus === 'CONNECTED';
 
     /**
      * 🌐 Consulta SSOT de Respaldo/Sincronización Inicial desde Servicios Centralizados
@@ -61,6 +69,13 @@ export const useAdminMonitor = () => {
 
             // Ejecución preventiva de carga de respaldo desde la API Centralizada
             cargarDatosServiciosCentrales();
+
+            // ⏸️ PAUSAR/REANUDAR SUSCRIPCIONES EN TIEMPO REAL SEGÚN CONNECTIONSTATUS
+            if (!isLive) {
+                console.warn(`⏸️ [CIMCO-MONITOR] Socket no está en estado CONNECTED (Estado actual: ${connectionStatus}). Métricas en vivo pausadas.`);
+                setLoading(false);
+                return () => {};
+            }
 
             // 1. 🛡️ Suscripción a Conductores (Flota completa activa con filtrado de deduplicación)
             const pathConductores = FIRESTORE_PATHS.conductores || 'conductores';
@@ -182,7 +197,7 @@ export const useAdminMonitor = () => {
             if (typeof unsubViajes === 'function') unsubViajes();
             if (typeof unsubTrans === 'function') unsubTrans();
         };
-    }, [cargarDatosServiciosCentrales]);
+    }, [cargarDatosServiciosCentrales, isLive, connectionStatus]);
 
     return { 
         conductores, 
@@ -190,6 +205,8 @@ export const useAdminMonitor = () => {
         transacciones, 
         loading, 
         error,
+        connectionStatus,
+        isLive,
         refetchMetricas: cargarDatosServiciosCentrales
     };
 };
