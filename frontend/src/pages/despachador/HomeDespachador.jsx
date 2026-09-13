@@ -1,15 +1,14 @@
-// Versión Arquitectura: V20.0 - Desacoplamiento de Metadatos de Despacho hacia viajeService y Simplificación de Payload
+// Versión Arquitectura: V20.1 - Importación estática de Firebase con alias absoluto
 /**
  * Ubicación: frontend\src\pages\despachador\HomeDespachador.jsx
  * Misión: Registro manual de solicitudes, inyección de asignaciones con identidad completa, calcomanía QR de autogestión,
  * monitoreo de saldo operativo, radar satelital en tiempo real y tabla de pujas/ofertas activas en tiempo real.
- * Ajuste V20.0: Simplificación de metadatos redundantes en el payload del despacho y desacoplamiento de la persistencia REST
- * hacia viajeService.js.
+ * Ajuste V20.1: Reemplazo de importación dinámica por importación estática de Firebase en la parte superior.
  */
 
 import React, { useEffect, useState, Suspense, useCallback } from "react";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
-import { db, FIRESTORE_PATHS } from "@/config/firebase"; 
+import { auth, db, FIRESTORE_PATHS } from "@/config/firebase"; 
 import { useAuth } from "@/hooks/useAuth";
 import { useSocket } from "@/hooks/useSocket"; 
 import { useWallet } from "@/hooks/useWallet";
@@ -24,7 +23,7 @@ import { formatHoraColombia } from "@/utils/dateFormatter";
 import { QRCodeSVG } from "qrcode.react"; 
 
 // 🗺️ CARGA PEREZOSA DEL RADAR GPS OPERATIVO Y COMPONENTE DE AJUSTES DE PERFIL
-const MapaOperativo = React.lazy(() => import("@/config/firebase").then(() => import("@/components/admin/MapaOperativo")));
+const MapaOperativo = React.lazy(() => import("@/components/admin/MapaOperativo"));
 import AjustesPerfil from "@/components/shared/AjustesPerfil";
 
 // 💳 CONSTANTE DE NEGOCIO: UMBRAL MÍNIMO OPERATIVO DE BILLETERA DE DESPACHADOR
